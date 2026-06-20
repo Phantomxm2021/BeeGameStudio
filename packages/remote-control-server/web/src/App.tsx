@@ -10,15 +10,8 @@ import { useTokens } from './hooks/useTokens';
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const SessionDetail = lazy(() => import('./pages/SessionDetail').then(m => ({ default: m.SessionDetail })));
 const Models = lazy(() => import('./pages/Models').then(m => ({ default: m.Models })));
-const NewGame = lazy(() => import('./pages/NewGame').then(m => ({ default: m.NewGame })));
-const RunDetail = lazy(() => import('./pages/RunDetail').then(m => ({ default: m.RunDetail })));
 
-type AppRoute =
-  | { kind: 'dashboard' }
-  | { kind: 'models' }
-  | { kind: 'new-game' }
-  | { kind: 'run'; runId: string }
-  | { kind: 'session'; sessionId: string };
+type AppRoute = { kind: 'dashboard' } | { kind: 'models' } | { kind: 'session'; sessionId: string };
 
 export default function App() {
   const [route, setRoute] = useState<AppRoute>({ kind: 'dashboard' });
@@ -98,17 +91,6 @@ export default function App() {
       return;
     }
 
-    if (path === '/code/new-game') {
-      setRoute({ kind: 'new-game' });
-      return;
-    }
-
-    const runMatch = path.match(/^\/code\/runs\/([^/]+)/);
-    if (runMatch && runMatch[1]) {
-      setRoute({ kind: 'run', runId: runMatch[1] });
-      return;
-    }
-
     // Path-based routing: /code/session_xxx → session detail
     const match = path.match(/^\/code\/([^/]+)/);
     if (match && match[1]) {
@@ -141,30 +123,8 @@ export default function App() {
     setAcpDirect(null);
   }, []);
 
-  const navigateToNewGame = useCallback(() => {
-    window.history.pushState(null, '', '/code/new-game');
-    setRoute({ kind: 'new-game' });
-    setAcpDirect(null);
-  }, []);
-
-  const navigateToRun = useCallback((runId: string) => {
-    window.history.pushState(null, '', `/code/runs/${runId}`);
-    setRoute({ kind: 'run', runId });
-    setAcpDirect(null);
-  }, []);
-
   const sessionTitle =
-    route.kind === 'session'
-      ? route.sessionId
-      : route.kind === 'models'
-        ? 'Models'
-        : route.kind === 'new-game'
-          ? 'New Game'
-          : route.kind === 'run'
-            ? route.runId
-            : acpDirect
-              ? 'ACP'
-              : undefined;
+    route.kind === 'session' ? route.sessionId : route.kind === 'models' ? 'Models' : acpDirect ? 'ACP' : undefined;
 
   return (
     <ThemeProvider defaultTheme="system">
@@ -186,21 +146,9 @@ export default function App() {
             <div className="flex-1 overflow-y-auto">
               <Models />
             </div>
-          ) : route.kind === 'new-game' ? (
-            <div className="flex-1 overflow-y-auto">
-              <NewGame onRunCreated={navigateToRun} onNavigateModels={navigateToModels} />
-            </div>
-          ) : route.kind === 'run' ? (
-            <div className="flex-1 overflow-y-auto">
-              <RunDetail key={route.runId} runId={route.runId} />
-            </div>
           ) : (
             <div className="flex-1 overflow-y-auto">
-              <Dashboard
-                onNavigateSession={navigateToSession}
-                onNavigateModels={navigateToModels}
-                onNavigateNewGame={navigateToNewGame}
-              />
+              <Dashboard onNavigateSession={navigateToSession} onNavigateModels={navigateToModels} />
             </div>
           )}
         </Suspense>

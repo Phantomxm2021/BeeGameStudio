@@ -8,10 +8,9 @@ import { NewSessionDialog } from '../components/NewSessionDialog';
 interface DashboardProps {
   onNavigateSession: (sessionId: string) => void;
   onNavigateModels: () => void;
-  onNavigateNewGame: () => void;
 }
 
-export function Dashboard({ onNavigateSession, onNavigateModels, onNavigateNewGame }: DashboardProps) {
+export function Dashboard({ onNavigateSession, onNavigateModels }: DashboardProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -64,12 +63,6 @@ export function Dashboard({ onNavigateSession, onNavigateModels, onNavigateNewGa
           <h2 className="font-display text-lg font-semibold text-text-primary">Sessions</h2>
           <div className="flex items-center gap-2">
             <button
-              onClick={onNavigateNewGame}
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-light"
-            >
-              New Game
-            </button>
-            <button
               onClick={onNavigateModels}
               className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
             >
@@ -77,7 +70,7 @@ export function Dashboard({ onNavigateSession, onNavigateModels, onNavigateNewGa
             </button>
             <button
               onClick={() => setDialogOpen(true)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-light"
             >
               + New Session
             </button>
