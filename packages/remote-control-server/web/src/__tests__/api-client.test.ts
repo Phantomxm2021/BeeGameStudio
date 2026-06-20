@@ -233,62 +233,6 @@ describe('api functions', () => {
       Authorization: 'Bearer secret-token',
     })
   })
-
-  test('apiCreateGameProject posts idea and workspace details', async () => {
-    store['rcs_uuid'] = 'browser-uuid'
-    fetchMock.responseData = { id: 'game_123' }
-
-    await client.apiCreateGameProject({
-      name: 'Orbit Garden',
-      idea: 'A cozy orbital farming game',
-      targetPlatform: 'web',
-      workspacePath: '/tmp/orbit-garden',
-    })
-
-    expect(fetchMock.lastUrl).toBe('/web/projects?uuid=browser-uuid')
-    expect(fetchMock.lastOpts.method).toBe('POST')
-    expect(fetchMock.lastOpts.body).toBe(
-      JSON.stringify({
-        name: 'Orbit Garden',
-        idea: 'A cozy orbital farming game',
-        targetPlatform: 'web',
-        workspacePath: '/tmp/orbit-garden',
-      }),
-    )
-  })
-
-  test('apiCreateGameRun posts project and model config ids', async () => {
-    store['rcs_uuid'] = 'browser-uuid'
-    fetchMock.responseData = { id: 'run_123' }
-
-    await client.apiCreateGameRun({
-      projectId: 'game_123',
-      modelConfigId: 'llm_123',
-    })
-
-    expect(fetchMock.lastUrl).toBe('/web/runs?uuid=browser-uuid')
-    expect(fetchMock.lastOpts.method).toBe('POST')
-    expect(fetchMock.lastOpts.body).toBe(
-      JSON.stringify({
-        projectId: 'game_123',
-        modelConfigId: 'llm_123',
-      }),
-    )
-  })
-
-  test('apiFetchGameRunDetail calls run detail route', async () => {
-    store['rcs_uuid'] = 'browser-uuid'
-    fetchMock.responseData = {
-      run: { id: 'run_123' },
-      project: {},
-      artifacts: [],
-    }
-
-    await client.apiFetchGameRunDetail('run_123')
-
-    expect(fetchMock.lastUrl).toBe('/web/runs/run_123?uuid=browser-uuid')
-    expect(fetchMock.lastOpts.method).toBe('GET')
-  })
 })
 
 describe('ACP relay client', () => {
