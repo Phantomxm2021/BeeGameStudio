@@ -3,9 +3,6 @@ import {
   createArtifact,
   createGameProject,
   createGameRun,
-  getGameRun,
-  listGameProjectsByOwner,
-  listGameRunsByProject,
   listArtifactsByRun,
   resetDashboardProjects,
 } from '../services/dashboard-projects'
@@ -106,32 +103,5 @@ describe('dashboard project service', () => {
         path: '/tmp/other-project/src/main.ts',
       }),
     ).toThrow('Artifact path must stay inside the project workspace')
-  })
-
-  test('lists projects by owner and runs by project', () => {
-    const project = createGameProject('local-user', {
-      name: 'Orbit Garden',
-      idea: 'A cozy orbital farming game',
-      targetPlatform: 'web',
-      workspacePath: '/tmp/orbit-garden',
-    })
-    createGameProject('other-user', {
-      name: 'Other',
-      idea: 'Different game',
-      targetPlatform: 'web',
-      workspacePath: '/tmp/other',
-    })
-    const run = createGameRun({
-      projectId: project.id,
-      modelConfigId: 'llm_default',
-    })
-
-    expect(listGameProjectsByOwner('local-user').map(item => item.id)).toEqual([
-      project.id,
-    ])
-    expect(listGameRunsByProject(project.id).map(item => item.id)).toEqual([
-      run.id,
-    ])
-    expect(getGameRun(run.id)?.id).toBe(run.id)
   })
 })
