@@ -30,6 +30,7 @@
     "claude-code-best": "dist/cli-node.js"
   },
   "workspaces": [
+    "apps/*",
     "packages/*",
     "packages/@ant/*",
     "packages/@anthropic-ai/*"

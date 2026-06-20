@@ -29,6 +29,16 @@
       ],
       "@claude-code-best/workflow-engine": [
         "./packages/workflow-engine/src/index.ts"
+      ],
+      "@claude-code-best/agent-workflow/*": ["./packages/agent-workflow/src/*"],
+      "@claude-code-best/agent-workflow": [
+        "./packages/agent-workflow/src/index.ts"
+      ],
+      "@claude-code-best/agent-workflow-server/*": [
+        "./packages/agent-workflow-server/src/*"
+      ],
+      "@claude-code-best/agent-workflow-server": [
+        "./packages/agent-workflow-server/src/index.ts"
       ]
     }
   },
