@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { resetDashboardProjects } from './services/dashboard-projects'
 import { resetModelConfigs } from './services/model-config'
 
 // ---------- Types ----------
@@ -443,5 +444,6 @@ export function storeReset() {
   workItems.clear()
   sessionWorkers.clear()
   sessionOwners.clear()
+  resetDashboardProjects()
   resetModelConfigs()
 }
