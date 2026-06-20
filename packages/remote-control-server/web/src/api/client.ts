@@ -6,49 +6,6 @@ import type {
 } from '../types'
 import { generateMessageUuid } from '../lib/utils'
 
-export type ModelProviderKind =
-  | 'anthropic-compatible'
-  | 'openai-compatible'
-  | 'gemini'
-  | 'grok'
-
-export interface ModelTierMap {
-  fast?: string
-  balanced?: string
-  strong?: string
-}
-
-export interface ModelConfig {
-  id: string
-  ownerId: string
-  name: string
-  provider: ModelProviderKind
-  baseUrl?: string
-  apiKeyPreview: string
-  models: ModelTierMap
-  isDefault: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ModelConfigInput {
-  name: string
-  provider: ModelProviderKind
-  baseUrl?: string
-  apiKey: string
-  models: ModelTierMap
-  isDefault?: boolean
-}
-
-export interface ModelConfigUpdate {
-  name?: string
-  provider?: ModelProviderKind
-  baseUrl?: string
-  apiKey?: string
-  models?: ModelTierMap
-  isDefault?: boolean
-}
-
 const BASE = ''
 
 export function getUuid(): string {
@@ -142,27 +99,4 @@ export function apiCreateSession(body: {
   environment_id?: string
 }) {
   return api<Session>('POST', '/web/sessions', body)
-}
-
-export function apiFetchModelConfigs() {
-  return api<ModelConfig[]>('GET', '/web/model-configs')
-}
-
-export function apiCreateModelConfig(body: ModelConfigInput) {
-  return api<ModelConfig>('POST', '/web/model-configs', body)
-}
-
-export function apiUpdateModelConfig(id: string, body: ModelConfigUpdate) {
-  return api<ModelConfig>('PATCH', `/web/model-configs/${id}`, body)
-}
-
-export function apiDeleteModelConfig(id: string) {
-  return api<{ ok: true }>('DELETE', `/web/model-configs/${id}`)
-}
-
-export function apiTestModelConfig(id: string) {
-  return api<
-    | { ok: true; provider: ModelProviderKind; model: string }
-    | { ok: false; error: { type: string; message: string } }
-  >('POST', `/web/model-configs/${id}/test`)
 }
