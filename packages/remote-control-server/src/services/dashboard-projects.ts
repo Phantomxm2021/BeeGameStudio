@@ -165,6 +165,26 @@ export function createGameRun(input: CreateGameRunInput): GameRun {
   return run
 }
 
+export function listGameProjectsByOwner(ownerId: string): GameProject[] {
+  return [...projects.values()]
+    .filter(project => project.ownerId === ownerId)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+}
+
+export function getGameProject(id: string): GameProject | undefined {
+  return projects.get(id)
+}
+
+export function listGameRunsByProject(projectId: string): GameRun[] {
+  return [...runs.values()]
+    .filter(run => run.projectId === projectId)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+}
+
+export function getGameRun(id: string): GameRun | undefined {
+  return runs.get(id)
+}
+
 export function createArtifact(input: CreateArtifactInput): Artifact {
   const project = projects.get(input.projectId)
   if (!project) throw new Error('Project not found')
