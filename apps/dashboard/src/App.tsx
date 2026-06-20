@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createModelConfig,
+  deleteModelConfig,
   createProject,
   createRun,
   fetchModels,
   fetchProjects,
   fetchRunDetail,
   fetchWorkers,
+  updateModelConfig,
   type Artifact,
+  type ModelConfigInput,
   type ModelConfig,
   type Project,
   type Run,
@@ -35,11 +38,21 @@ export function App() {
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
   const [form, setForm] = useState({
     name: '',
     idea: '',
     targetRuntime: 'custom-runtime',
     workspacePath: '',
+    modelConfigId: '',
+  });
+  const [modelForm, setModelForm] = useState<ModelConfigInput>({
+    name: '',
+    provider: 'openai-compatible',
+    baseUrl: '',
+    apiKey: '',
+    models: { balanced: '' },
+    isDefault: true,
   });
 
   const selectedProject = useMemo(
@@ -59,6 +72,11 @@ export function App() {
       setProjects(nextProjects);
       setWorkers(nextWorkers);
       setSelectedProjectId(current => current ?? nextProjects[0]?.id ?? null);
+      setForm(current => ({
+        ...current,
+        modelConfigId:
+          current.modelConfigId || nextModels.find(model => model.isDefault)?.id || nextModels[0]?.id || '',
+      }));
     } catch (err) {
       setError(toErrorMessage(err));
     }
@@ -73,28 +91,103 @@ export function App() {
       setError('Project name, idea, and workspace are required.');
       return;
     }
+    if (!form.modelConfigId) {
+      setError('Create or select an LLM model config before starting a workflow.');
+      return;
+    }
 
     setCreating(true);
     setError(null);
     try {
-      const model = models[0] ?? (await createModelConfig());
       const project = await createProject({
         name: form.name.trim(),
         idea: form.idea.trim(),
         targetRuntime: form.targetRuntime.trim() || 'custom-runtime',
         workspacePath: form.workspacePath.trim(),
       });
-      const run = await createRun(project.id, model.id);
+      const run = await createRun(project.id, form.modelConfigId);
       const detail = await fetchRunDetail(run.id);
-      setModels(await fetchModels());
       setProjects(await fetchProjects());
       setSelectedProjectId(project.id);
       setRunDetail(detail);
-      setForm({ name: '', idea: '', targetRuntime: 'custom-runtime', workspacePath: '' });
+      setForm(current => ({
+        name: '',
+        idea: '',
+        targetRuntime: 'custom-runtime',
+        workspacePath: '',
+        modelConfigId: current.modelConfigId,
+      }));
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSaveModel = async () => {
+    if (!modelForm.name.trim() || !modelForm.apiKey.trim() || !modelForm.models.balanced?.trim()) {
+      setError('Model name, API key, and balanced model are required.');
+      return;
+    }
+
+    setSavingModel(true);
+    setError(null);
+    try {
+      const saved = await createModelConfig({
+        name: modelForm.name.trim(),
+        provider: modelForm.provider,
+        ...(modelForm.baseUrl?.trim() ? { baseUrl: modelForm.baseUrl.trim() } : {}),
+        apiKey: modelForm.apiKey.trim(),
+        models: {
+          ...(modelForm.models.fast?.trim() ? { fast: modelForm.models.fast.trim() } : {}),
+          balanced: modelForm.models.balanced.trim(),
+          ...(modelForm.models.strong?.trim() ? { strong: modelForm.models.strong.trim() } : {}),
+        },
+        isDefault: modelForm.isDefault,
+      });
+      setModels(await fetchModels());
+      setForm(current => ({ ...current, modelConfigId: saved.id }));
+      setModelForm({
+        name: '',
+        provider: 'openai-compatible',
+        baseUrl: '',
+        apiKey: '',
+        models: { balanced: '' },
+        isDefault: true,
+      });
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setSavingModel(false);
+    }
+  };
+
+  const handleSetDefaultModel = async (model: ModelConfig) => {
+    setError(null);
+    try {
+      await updateModelConfig(model.id, { isDefault: true });
+      setModels(await fetchModels());
+      setForm(current => ({ ...current, modelConfigId: model.id }));
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  };
+
+  const handleDeleteModel = async (model: ModelConfig) => {
+    setError(null);
+    try {
+      await deleteModelConfig(model.id);
+      const nextModels = await fetchModels();
+      setModels(nextModels);
+      setForm(current => ({
+        ...current,
+        modelConfigId:
+          current.modelConfigId === model.id
+            ? nextModels.find(next => next.isDefault)?.id || nextModels[0]?.id || ''
+            : current.modelConfigId,
+      }));
+    } catch (err) {
+      setError(toErrorMessage(err));
     }
   };
 
@@ -209,6 +302,21 @@ export function App() {
             <button className="secondary-button" type="button" onClick={() => void handlePickWorkspace()}>
               Choose Folder
             </button>
+            <label>
+              LLM config
+              <select
+                value={form.modelConfigId}
+                onChange={event => setForm({ ...form, modelConfigId: event.target.value })}
+              >
+                <option value="">Select model</option>
+                {models.map(model => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                    {model.isDefault ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button className="primary-button" type="button" disabled={creating} onClick={() => void handleCreateRun()}>
               {creating ? 'Starting...' : 'Start Workflow'}
             </button>
@@ -234,7 +342,15 @@ export function App() {
           </div>
           <div className="panel">
             <PanelTitle title="Models" detail={`${models.length} configs`} />
-            <ModelList models={models} />
+            <ModelSettings
+              models={models}
+              form={modelForm}
+              saving={savingModel}
+              onChange={setModelForm}
+              onSave={() => void handleSaveModel()}
+              onSetDefault={model => void handleSetDefaultModel(model)}
+              onDelete={model => void handleDeleteModel(model)}
+            />
           </div>
         </section>
       </main>
@@ -329,21 +445,140 @@ function EventLog({ events }: { events: WorkflowEvent[] }) {
   );
 }
 
-function ModelList({ models }: { models: ModelConfig[] }) {
-  if (models.length === 0) {
-    return <div className="empty">A placeholder local model config is created when the first run starts</div>;
-  }
+function ModelSettings({
+  models,
+  form,
+  saving,
+  onChange,
+  onSave,
+  onSetDefault,
+  onDelete,
+}: {
+  models: ModelConfig[];
+  form: ModelConfigInput;
+  saving: boolean;
+  onChange: (form: ModelConfigInput) => void;
+  onSave: () => void;
+  onSetDefault: (model: ModelConfig) => void;
+  onDelete: (model: ModelConfig) => void;
+}) {
   return (
-    <div className="stack">
-      {models.map(model => (
-        <div key={model.id} className="list-row">
-          <div>
-            <strong>{model.name}</strong>
-            <span>{model.provider}</span>
-          </div>
-          <small>{model.isDefault ? 'default' : model.apiKeyPreview}</small>
+    <div className="model-settings">
+      <div className="model-form">
+        <label>
+          Name
+          <input value={form.name} onChange={event => onChange({ ...form, name: event.target.value })} />
+        </label>
+        <label>
+          Provider
+          <select value={form.provider} onChange={event => onChange({ ...form, provider: event.target.value })}>
+            <option value="openai-compatible">OpenAI-compatible</option>
+            <option value="anthropic-compatible">Anthropic-compatible</option>
+            <option value="gemini">Gemini</option>
+            <option value="grok">Grok</option>
+          </select>
+        </label>
+        <label>
+          Base URL
+          <input
+            value={form.baseUrl ?? ''}
+            onChange={event => onChange({ ...form, baseUrl: event.target.value })}
+            placeholder="https://api.openai.com/v1"
+          />
+        </label>
+        <label>
+          API key
+          <input
+            type="password"
+            value={form.apiKey}
+            onChange={event => onChange({ ...form, apiKey: event.target.value })}
+            placeholder="Stored server-side, shown masked"
+          />
+        </label>
+        <div className="model-grid">
+          <label>
+            Fast model
+            <input
+              value={form.models.fast ?? ''}
+              onChange={event =>
+                onChange({
+                  ...form,
+                  models: { ...form.models, fast: event.target.value },
+                })
+              }
+              placeholder="optional"
+            />
+          </label>
+          <label>
+            Balanced model
+            <input
+              value={form.models.balanced ?? ''}
+              onChange={event =>
+                onChange({
+                  ...form,
+                  models: { ...form.models, balanced: event.target.value },
+                })
+              }
+              placeholder="required"
+            />
+          </label>
+          <label>
+            Strong model
+            <input
+              value={form.models.strong ?? ''}
+              onChange={event =>
+                onChange({
+                  ...form,
+                  models: { ...form.models, strong: event.target.value },
+                })
+              }
+              placeholder="optional"
+            />
+          </label>
         </div>
-      ))}
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.isDefault === true}
+            onChange={event => onChange({ ...form, isDefault: event.target.checked })}
+          />
+          Default for new runs
+        </label>
+        <button className="primary-button" type="button" disabled={saving} onClick={onSave}>
+          {saving ? 'Saving...' : 'Save Model'}
+        </button>
+      </div>
+
+      {models.length === 0 ? (
+        <div className="empty">Add an LLM config before starting a workflow.</div>
+      ) : (
+        <div className="stack">
+          {models.map(model => (
+            <div key={model.id} className="model-row">
+              <div>
+                <strong>{model.name}</strong>
+                <span>
+                  {model.provider}
+                  {model.baseUrl ? ` · ${model.baseUrl}` : ''}
+                </span>
+                <small>
+                  key {model.apiKeyPreview} · balanced {model.models.balanced ?? 'unset'}
+                </small>
+              </div>
+              <div className="row-actions">
+                {!model.isDefault && (
+                  <button className="secondary-button" type="button" onClick={() => onSetDefault(model)}>
+                    Default
+                  </button>
+                )}
+                <button className="secondary-button danger" type="button" onClick={() => onDelete(model)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

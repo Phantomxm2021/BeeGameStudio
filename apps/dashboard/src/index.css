@@ -17,7 +17,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -199,7 +200,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid #d7cfc4;
   border-radius: 8px;
@@ -296,12 +298,70 @@ textarea {
 }
 
 .list-row strong,
-.list-row span {
+.list-row span,
+.model-row strong,
+.model-row span,
+.model-row small {
   display: block;
 }
 
 .list-row small {
   color: #7a7066;
+}
+
+.model-settings,
+.model-form {
+  display: grid;
+  gap: 12px;
+}
+
+.model-form {
+  border: 1px solid #ded6cc;
+  border-radius: 8px;
+  background: #fffaf4;
+  padding: 12px;
+}
+
+.model-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.model-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #ded6cc;
+  border-radius: 8px;
+  background: #fffaf4;
+  padding: 10px 12px;
+}
+
+.model-row span,
+.model-row small {
+  margin-top: 2px;
+  color: #7a7066;
+  overflow-wrap: anywhere;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.secondary-button.danger {
+  color: #a33a3a;
 }
 
 .event-row {
