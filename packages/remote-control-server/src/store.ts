@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { resetModelConfigs } from './services/model-config'
 
 // ---------- Types ----------
 
@@ -443,5 +442,4 @@ export function storeReset() {
   workItems.clear()
   sessionWorkers.clear()
   sessionOwners.clear()
-  resetModelConfigs()
 }
