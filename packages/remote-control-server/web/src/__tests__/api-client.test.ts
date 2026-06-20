@@ -174,6 +174,65 @@ describe('api functions', () => {
       'Internal Server Error',
     )
   })
+
+  test('apiFetchModelConfigs calls the model config route', async () => {
+    store['rcs_uuid'] = 'browser-uuid'
+    fetchMock.responseData = []
+
+    await client.apiFetchModelConfigs()
+
+    expect(fetchMock.lastUrl).toBe('/web/model-configs?uuid=browser-uuid')
+    expect(fetchMock.lastOpts.method).toBe('GET')
+  })
+
+  test('apiCreateModelConfig sends provider details as JSON', async () => {
+    store['rcs_uuid'] = 'browser-uuid'
+    fetchMock.responseData = { id: 'llm_123' }
+
+    await client.apiCreateModelConfig({
+      name: 'OpenRouter',
+      provider: 'openai-compatible',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-secret',
+      models: {
+        fast: 'fast-model',
+        balanced: 'balanced-model',
+        strong: 'strong-model',
+      },
+      isDefault: true,
+    })
+
+    expect(fetchMock.lastUrl).toBe('/web/model-configs?uuid=browser-uuid')
+    expect(fetchMock.lastOpts.method).toBe('POST')
+    expect(fetchMock.lastOpts.body).toBe(
+      JSON.stringify({
+        name: 'OpenRouter',
+        provider: 'openai-compatible',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        apiKey: 'sk-secret',
+        models: {
+          fast: 'fast-model',
+          balanced: 'balanced-model',
+          strong: 'strong-model',
+        },
+        isDefault: true,
+      }),
+    )
+  })
+
+  test('model config requests keep active token in headers only', async () => {
+    store['rcs_uuid'] = 'browser-uuid'
+    fetchMock.responseData = []
+    client.setActiveApiToken('secret-token')
+
+    await client.apiFetchModelConfigs()
+
+    expect(fetchMock.lastUrl).not.toContain('secret-token')
+    expect(fetchMock.lastOpts.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer secret-token',
+    })
+  })
 })
 
 describe('ACP relay client', () => {
