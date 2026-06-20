@@ -243,12 +243,10 @@ export function App() {
       return;
     }
     try {
-      const handle = await window.showDirectoryPicker();
-      setSessionForm(current => ({
-        ...current,
-        workspacePath: handle.name ? `./${handle.name}` : current.workspacePath,
-      }));
-      setError(null);
+      await window.showDirectoryPicker();
+      setError(
+        'Browser folder picking does not expose an absolute local path. Paste the absolute workspace path instead.',
+      );
     } catch (err) {
       if (toErrorMessage(err).includes('aborted')) return;
       setError(toErrorMessage(err));

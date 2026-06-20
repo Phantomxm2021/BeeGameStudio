@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   mapModelConfigToRuntime,
@@ -71,6 +71,9 @@ export class ConsoleSessionManager {
   ) {}
 
   start(input: StartConsoleSessionInput): ConsoleSession {
+    if (!isAbsolute(input.workspacePath)) {
+      throw new Error('Workspace path must be absolute')
+    }
     const cwd = resolve(input.workspacePath)
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
@@ -236,11 +239,19 @@ function getConsoleCommand(): string[] {
     }
     throw new Error('CLAUDE_CODE_DASHBOARD_COMMAND must be a JSON string array')
   }
-  return ['bun', 'run', join(getRepoRoot(), 'src/entrypoints/cli.tsx')]
+  return getDefaultConsoleCommandForTesting()
 }
 
 function getRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../../../../')
+}
+
+export function getDefaultConsoleCommandForTesting(): string[] {
+  return [
+    process.execPath,
+    'run',
+    join(getRepoRoot(), 'src/entrypoints/cli.tsx'),
+  ]
 }
 
 function buildRuntimeEnv(

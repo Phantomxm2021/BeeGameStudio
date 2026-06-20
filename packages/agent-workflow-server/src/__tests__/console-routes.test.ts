@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createModelConfig,
   resetAgentWorkflow,
@@ -39,6 +42,7 @@ describe('console session routes', () => {
   })
 
   test('starts a Claude Code console session with model env', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'cc-console-'))
     const starts: ConsoleProcessStartInput[] = []
     const processes: FakeConsoleProcess[] = []
     const processFactory: ConsoleProcessFactory = input => {
@@ -56,32 +60,59 @@ describe('console session routes', () => {
       models: { balanced: 'balanced-model' },
     })
 
+    try {
+      const res = await app.request('/api/console/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: model.id,
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const session = await res.json()
+      expect(session.status).toBe('running')
+      expect(starts).toEqual([
+        expect.objectContaining({
+          cwd: workspace,
+          env: expect.objectContaining({
+            CLAUDE_CODE_USE_OPENAI: '1',
+            OPENAI_API_KEY: 'sk-dashboard-secret',
+            OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+          }),
+        }),
+      ])
+      expect(processes).toHaveLength(1)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects relative workspace paths before spawning Claude Code', async () => {
+    const starts: ConsoleProcessStartInput[] = []
+    const app = createAgentWorkflowApp({
+      processFactory: input => {
+        starts.push(input)
+        return new FakeConsoleProcess()
+      },
+    })
+
     const res = await app.request('/api/console/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        workspacePath: '/tmp/console-workspace',
-        modelConfigId: model.id,
-      }),
+      body: JSON.stringify({ workspacePath: './WO' }),
     })
 
-    expect(res.status).toBe(200)
-    const session = await res.json()
-    expect(session.status).toBe('running')
-    expect(starts).toEqual([
-      expect.objectContaining({
-        cwd: '/tmp/console-workspace',
-        env: expect.objectContaining({
-          CLAUDE_CODE_USE_OPENAI: '1',
-          OPENAI_API_KEY: 'sk-dashboard-secret',
-          OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
-        }),
-      }),
-    ])
-    expect(processes).toHaveLength(1)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'Workspace path must be absolute',
+    })
+    expect(starts).toHaveLength(0)
   })
 
   test('sends input and returns output events', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'cc-console-'))
     const processes: FakeConsoleProcess[] = []
     const app = createAgentWorkflowApp({
       processFactory: input => {
@@ -92,43 +123,48 @@ describe('console session routes', () => {
         return process
       },
     })
-    const sessionRes = await app.request('/api/console/sessions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workspacePath: '/tmp/console-workspace' }),
-    })
-    const session = await sessionRes.json()
-
-    const inputRes = await app.request(
-      `/api/console/sessions/${session.id}/input`,
-      {
+    try {
+      const sessionRes = await app.request('/api/console/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Build a tiny puzzle game.' }),
-      },
-    )
-    const process = processes[0]
-    process.emit('stdout', 'Claude Code response\n')
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
 
-    expect(inputRes.status).toBe(200)
-    expect(process.writes).toEqual(['Build a tiny puzzle game.\n'])
+      const inputRes = await app.request(
+        `/api/console/sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Build a tiny puzzle game.' }),
+        },
+      )
+      const process = processes[0]
+      process.emit('stdout', 'Claude Code response\n')
 
-    const eventsRes = await app.request(
-      `/api/console/sessions/${session.id}/events`,
-    )
-    expect(eventsRes.status).toBe(200)
-    const events = await eventsRes.json()
-    expect(events.map((event: { type: string }) => event.type)).toEqual([
-      'session.started',
-      'input',
-      'stdout',
-    ])
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({ text: 'Claude Code response\n' }),
-    )
+      expect(inputRes.status).toBe(200)
+      expect(process.writes).toEqual(['Build a tiny puzzle game.\n'])
+
+      const eventsRes = await app.request(
+        `/api/console/sessions/${session.id}/events`,
+      )
+      expect(eventsRes.status).toBe(200)
+      const events = await eventsRes.json()
+      expect(events.map((event: { type: string }) => event.type)).toEqual([
+        'session.started',
+        'input',
+        'stdout',
+      ])
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({ text: 'Claude Code response\n' }),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('stops a running console session', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'cc-console-'))
     const processes: FakeConsoleProcess[] = []
     const app = createAgentWorkflowApp({
       processFactory: input => {
@@ -139,22 +175,26 @@ describe('console session routes', () => {
         return process
       },
     })
-    const sessionRes = await app.request('/api/console/sessions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workspacePath: '/tmp/console-workspace' }),
-    })
-    const session = await sessionRes.json()
+    try {
+      const sessionRes = await app.request('/api/console/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
 
-    const stopRes = await app.request(
-      `/api/console/sessions/${session.id}/stop`,
-      { method: 'POST' },
-    )
+      const stopRes = await app.request(
+        `/api/console/sessions/${session.id}/stop`,
+        { method: 'POST' },
+      )
 
-    expect(stopRes.status).toBe(200)
-    expect(processes[0].stops).toEqual(['stop'])
-    expect(await stopRes.json()).toEqual(
-      expect.objectContaining({ status: 'stopped' }),
-    )
+      expect(stopRes.status).toBe(200)
+      expect(processes[0].stops).toEqual(['stop'])
+      expect(await stopRes.json()).toEqual(
+        expect.objectContaining({ status: 'stopped' }),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 })
