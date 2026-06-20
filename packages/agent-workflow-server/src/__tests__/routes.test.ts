@@ -58,6 +58,17 @@ describe('agent workflow server routes', () => {
     })
     expect(runRes.status).toBe(200)
     const run = await runRes.json()
+    expect(run.status).toBe('running')
+    expect(run.phases[0]).toEqual(
+      expect.objectContaining({ title: 'Idea Intake', status: 'running' }),
+    )
+
+    const startedDetailRes = await app.request(`/api/runs/${run.id}`)
+    expect(startedDetailRes.status).toBe(200)
+    const startedDetail = await startedDetailRes.json()
+    expect(
+      startedDetail.events.map((event: { type: string }) => event.type),
+    ).toEqual(['run.created', 'phase.updated', 'agent.log'])
 
     const phaseRes = await app.request(`/api/runs/${run.id}/phase`, {
       method: 'POST',
@@ -97,6 +108,8 @@ describe('agent workflow server routes', () => {
     expect(detail.run.currentPhase).toBe('GDD')
     expect(detail.events.map((event: { type: string }) => event.type)).toEqual([
       'run.created',
+      'phase.updated',
+      'agent.log',
       'phase.updated',
       'agent.log',
       'artifact.created',

@@ -104,12 +104,18 @@ export function createAgentWorkflowApp(): Hono {
     if (error) return c.json({ error }, 400)
 
     try {
-      return c.json(
-        createGameRun({
-          projectId: String(body.projectId),
-          modelConfigId: String(body.modelConfigId),
-        }),
-      )
+      const run = createGameRun({
+        projectId: String(body.projectId),
+        modelConfigId: String(body.modelConfigId),
+      })
+      const started = updateRunPhase(run.id, run.currentPhase, 'running')
+      appendWorkflowEvent(run.id, {
+        type: 'agent.log',
+        message: 'Workflow started; waiting for agent executor.',
+        phase: run.currentPhase,
+        agentName: 'orchestrator',
+      })
+      return c.json(started ?? run)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 404)
     }
