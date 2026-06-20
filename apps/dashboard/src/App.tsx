@@ -1,24 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createModelConfig,
   deleteModelConfig,
-  createProject,
-  createRun,
+  fetchConsoleEvents,
+  fetchConsoleSession,
+  fetchConsoleSessions,
   fetchModels,
-  fetchProjects,
-  fetchProjectRuns,
-  fetchRunDetail,
-  fetchWorkers,
+  sendConsoleInput,
+  startConsoleSession,
+  stopConsoleSession,
   updateModelConfig,
-  type Artifact,
-  type ModelConfigInput,
+  type ConsoleEvent,
+  type ConsoleSession,
   type ModelConfig,
-  type Project,
-  type Run,
-  type RunDetail,
-  type RunPhase,
-  type WorkerSummary,
-  type WorkflowEvent,
+  type ModelConfigInput,
 } from './api';
 
 type DirectoryPickerHandle = {
@@ -33,22 +28,18 @@ declare global {
 
 export function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
+  const [sessions, setSessions] = useState<ConsoleSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [events, setEvents] = useState<ConsoleEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    idea: '',
-    targetRuntime: 'custom-runtime',
+  const [sessionForm, setSessionForm] = useState({
     workspacePath: '',
     modelConfigId: '',
   });
+  const [prompt, setPrompt] = useState('');
   const [modelForm, setModelForm] = useState<ModelConfigInput>({
     name: '',
     provider: 'openai-compatible',
@@ -57,46 +48,21 @@ export function App() {
     models: { balanced: '' },
     isDefault: true,
   });
+  const consoleEndRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedProject = useMemo(
-    () => projects.find(project => project.id === selectedProjectId) ?? null,
-    [projects, selectedProjectId],
+  const selectedSession = useMemo(
+    () => sessions.find(session => session.id === selectedSessionId) ?? null,
+    [sessions, selectedSessionId],
   );
-  const selectedRun = useMemo(() => runs.find(run => run.id === selectedRunId) ?? null, [runs, selectedRunId]);
-
-  const loadProjectRuns = useCallback(async (projectId: string, preferredRunId?: string) => {
-    const nextRuns = await fetchProjectRuns(projectId);
-    setRuns(nextRuns);
-    const nextRunId = preferredRunId ?? nextRuns.at(-1)?.id ?? null;
-    setSelectedRunId(nextRunId);
-    if (nextRunId) {
-      setRunDetail(await fetchRunDetail(nextRunId));
-    } else {
-      setRunDetail(null);
-    }
-  }, []);
 
   const loadDashboard = useCallback(async () => {
     setError(null);
     try {
-      const [nextModels, nextProjects, nextWorkers] = await Promise.all([
-        fetchModels(),
-        fetchProjects(),
-        fetchWorkers(),
-      ]);
+      const [nextModels, nextSessions] = await Promise.all([fetchModels(), fetchConsoleSessions()]);
       setModels(nextModels);
-      setProjects(nextProjects);
-      setWorkers(nextWorkers);
-      const nextProjectId = selectedProjectId ?? nextProjects[0]?.id ?? null;
-      setSelectedProjectId(nextProjectId);
-      if (nextProjectId) {
-        await loadProjectRuns(nextProjectId, selectedRunId ?? undefined);
-      } else {
-        setRuns([]);
-        setSelectedRunId(null);
-        setRunDetail(null);
-      }
-      setForm(current => ({
+      setSessions(nextSessions);
+      setSelectedSessionId(current => current ?? nextSessions[0]?.id ?? null);
+      setSessionForm(current => ({
         ...current,
         modelConfigId:
           current.modelConfigId || nextModels.find(model => model.isDefault)?.id || nextModels[0]?.id || '',
@@ -104,48 +70,103 @@ export function App() {
     } catch (err) {
       setError(toErrorMessage(err));
     }
-  }, [loadProjectRuns, selectedProjectId, selectedRunId]);
+  }, []);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
-  const handleCreateRun = async () => {
-    if (!form.name.trim() || !form.idea.trim() || !form.workspacePath.trim()) {
-      setError('Project name, idea, and workspace are required.');
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setEvents([]);
       return;
     }
-    if (!form.modelConfigId) {
-      setError('Create or select an LLM model config before starting a workflow.');
-      return;
-    }
+    let cancelled = false;
+    const loadInitial = async () => {
+      try {
+        const nextEvents = await fetchConsoleEvents(selectedSessionId);
+        if (!cancelled) setEvents(nextEvents);
+      } catch (err) {
+        if (!cancelled) setError(toErrorMessage(err));
+      }
+    };
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSessionId]);
 
-    setCreating(true);
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const timer = window.setInterval(() => {
+      const after = events.at(-1)?.id ?? 0;
+      void fetchConsoleEvents(selectedSessionId, after)
+        .then(nextEvents => {
+          if (nextEvents.length > 0) {
+            setEvents(current => [...current, ...nextEvents]);
+          }
+        })
+        .catch(err => setError(toErrorMessage(err)));
+      void fetchConsoleSession(selectedSessionId)
+        .then(nextSession => {
+          setSessions(current => current.map(session => (session.id === nextSession.id ? nextSession : session)));
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [events, selectedSessionId]);
+
+  useEffect(() => {
+    consoleEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [events]);
+
+  const handleStartSession = async () => {
+    if (!sessionForm.workspacePath.trim()) {
+      setError('Workspace path is required.');
+      return;
+    }
+    setStarting(true);
     setError(null);
     try {
-      const project = await createProject({
-        name: form.name.trim(),
-        idea: form.idea.trim(),
-        targetRuntime: form.targetRuntime.trim() || 'custom-runtime',
-        workspacePath: form.workspacePath.trim(),
+      const session = await startConsoleSession({
+        workspacePath: sessionForm.workspacePath.trim(),
+        ...(sessionForm.modelConfigId ? { modelConfigId: sessionForm.modelConfigId } : {}),
       });
-      const run = await createRun(project.id, form.modelConfigId);
-      const detail = await fetchRunDetail(run.id);
-      setProjects(await fetchProjects());
-      setSelectedProjectId(project.id);
-      await loadProjectRuns(project.id, run.id);
-      setRunDetail(detail);
-      setForm(current => ({
-        name: '',
-        idea: '',
-        targetRuntime: 'custom-runtime',
-        workspacePath: '',
-        modelConfigId: current.modelConfigId,
-      }));
+      setSessions(await fetchConsoleSessions());
+      setSelectedSessionId(session.id);
+      setEvents(await fetchConsoleEvents(session.id));
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
-      setCreating(false);
+      setStarting(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!selectedSessionId || !prompt.trim()) return;
+    setSending(true);
+    setError(null);
+    try {
+      await sendConsoleInput(selectedSessionId, prompt.trim());
+      setPrompt('');
+      const nextEvents = await fetchConsoleEvents(selectedSessionId, events.at(-1)?.id ?? 0);
+      setEvents(current => [...current, ...nextEvents]);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleStop = async () => {
+    if (!selectedSessionId) return;
+    setError(null);
+    try {
+      const stopped = await stopConsoleSession(selectedSessionId);
+      setSessions(current => current.map(session => (session.id === stopped.id ? stopped : session)));
+      setEvents(await fetchConsoleEvents(selectedSessionId));
+    } catch (err) {
+      setError(toErrorMessage(err));
     }
   };
 
@@ -171,7 +192,7 @@ export function App() {
         isDefault: modelForm.isDefault,
       });
       setModels(await fetchModels());
-      setForm(current => ({ ...current, modelConfigId: saved.id }));
+      setSessionForm(current => ({ ...current, modelConfigId: saved.id }));
       setModelForm({
         name: '',
         provider: 'openai-compatible',
@@ -192,7 +213,7 @@ export function App() {
     try {
       await updateModelConfig(model.id, { isDefault: true });
       setModels(await fetchModels());
-      setForm(current => ({ ...current, modelConfigId: model.id }));
+      setSessionForm(current => ({ ...current, modelConfigId: model.id }));
     } catch (err) {
       setError(toErrorMessage(err));
     }
@@ -204,33 +225,13 @@ export function App() {
       await deleteModelConfig(model.id);
       const nextModels = await fetchModels();
       setModels(nextModels);
-      setForm(current => ({
+      setSessionForm(current => ({
         ...current,
         modelConfigId:
           current.modelConfigId === model.id
             ? nextModels.find(next => next.isDefault)?.id || nextModels[0]?.id || ''
             : current.modelConfigId,
       }));
-    } catch (err) {
-      setError(toErrorMessage(err));
-    }
-  };
-
-  const handleSelectProject = async (project: Project) => {
-    setSelectedProjectId(project.id);
-    setError(null);
-    try {
-      await loadProjectRuns(project.id);
-    } catch (err) {
-      setError(toErrorMessage(err));
-    }
-  };
-
-  const handleSelectRun = async (run: Run) => {
-    setSelectedRunId(run.id);
-    setError(null);
-    try {
-      setRunDetail(await fetchRunDetail(run.id));
     } catch (err) {
       setError(toErrorMessage(err));
     }
@@ -243,7 +244,7 @@ export function App() {
     }
     try {
       const handle = await window.showDirectoryPicker();
-      setForm(current => ({
+      setSessionForm(current => ({
         ...current,
         workspacePath: handle.name ? `./${handle.name}` : current.workspacePath,
       }));
@@ -254,46 +255,31 @@ export function App() {
     }
   };
 
-  const activePhases = runDetail?.run.phases ?? defaultPhases;
-  const activeEvents = runDetail?.events ?? [];
-  const activeArtifacts = runDetail?.artifacts ?? [];
-
-  useEffect(() => {
-    if (!selectedRunId || !runDetail || !['queued', 'running', 'requires_action'].includes(runDetail.run.status))
-      return;
-    const timer = window.setInterval(() => {
-      void fetchRunDetail(selectedRunId)
-        .then(setRunDetail)
-        .catch(err => setError(toErrorMessage(err)));
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [runDetail, selectedRunId]);
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">AW</div>
+          <div className="brand-mark">CC</div>
           <div>
-            <h1>Agent Workflow</h1>
-            <p>Visual game creation control room</p>
+            <h1>Claude Code</h1>
+            <p>Web console</p>
           </div>
         </div>
 
         <section className="sidebar-section">
-          <div className="section-title">Projects</div>
+          <div className="section-title">Sessions</div>
           <div className="project-list">
-            {projects.length === 0 ? (
-              <div className="empty">No projects yet</div>
+            {sessions.length === 0 ? (
+              <div className="empty">No sessions yet</div>
             ) : (
-              projects.map(project => (
+              sessions.map(session => (
                 <button
-                  key={project.id}
-                  className={`project-item ${project.id === selectedProjectId ? 'active' : ''}`}
-                  onClick={() => void handleSelectProject(project)}
+                  key={session.id}
+                  className={`project-item ${session.id === selectedSessionId ? 'active' : ''}`}
+                  onClick={() => setSelectedSessionId(session.id)}
                 >
-                  <span>{project.name}</span>
-                  <small>{project.status}</small>
+                  <span>{session.cwd}</span>
+                  <small>{session.status}</small>
                 </button>
               ))
             )}
@@ -301,86 +287,36 @@ export function App() {
         </section>
 
         <section className="sidebar-section">
-          <div className="section-title">Runs</div>
-          <div className="project-list">
-            {runs.length === 0 ? (
-              <div className="empty">No runs for this project</div>
-            ) : (
-              runs.map(run => (
-                <button
-                  key={run.id}
-                  className={`project-item ${run.id === selectedRunId ? 'active' : ''}`}
-                  onClick={() => void handleSelectRun(run)}
-                >
-                  <span>{run.currentPhase}</span>
-                  <small>{run.status}</small>
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-      </aside>
-
-      <main className="main">
-        <header className="topbar">
-          <div>
-            <div className="eyebrow">Dashboard</div>
-            <h2>{selectedProject?.name ?? 'Create a workflow run'}</h2>
-            <p>{selectedRun ? `${selectedRun.status} · ${selectedRun.currentPhase}` : 'No run selected'}</p>
-          </div>
-          <button className="secondary-button" onClick={() => void loadDashboard()}>
-            Refresh
-          </button>
-        </header>
-
-        {error && <div className="error-banner">{error}</div>}
-
-        <section className="composer">
-          <div>
-            <label>
-              Project name
-              <input
-                value={form.name}
-                onChange={event => setForm({ ...form, name: event.target.value })}
-                placeholder="Prototype name"
-              />
-            </label>
-            <label>
-              Target runtime
-              <input
-                value={form.targetRuntime}
-                onChange={event => setForm({ ...form, targetRuntime: event.target.value })}
-                placeholder="custom-runtime"
-              />
-            </label>
-          </div>
-          <label className="idea-field">
-            Idea
-            <textarea
-              value={form.idea}
-              onChange={event => setForm({ ...form, idea: event.target.value })}
-              placeholder="Describe the game idea, desired feel, constraints, and target player experience."
-            />
-          </label>
-          <div className="workspace-row">
+          <div className="section-title">New Session</div>
+          <div className="session-form">
             <label>
               Workspace
               <input
-                value={form.workspacePath}
-                onChange={event => setForm({ ...form, workspacePath: event.target.value })}
-                placeholder="Choose a folder or enter a path"
+                value={sessionForm.workspacePath}
+                onChange={event =>
+                  setSessionForm({
+                    ...sessionForm,
+                    workspacePath: event.target.value,
+                  })
+                }
+                placeholder="/path/to/project"
               />
             </label>
             <button className="secondary-button" type="button" onClick={() => void handlePickWorkspace()}>
               Choose Folder
             </button>
             <label>
-              LLM config
+              Model config
               <select
-                value={form.modelConfigId}
-                onChange={event => setForm({ ...form, modelConfigId: event.target.value })}
+                value={sessionForm.modelConfigId}
+                onChange={event =>
+                  setSessionForm({
+                    ...sessionForm,
+                    modelConfigId: event.target.value,
+                  })
+                }
               >
-                <option value="">Select model</option>
+                <option value="">Use current environment</option>
                 {models.map(model => (
                   <option key={model.id} value={model.id}>
                     {model.name}
@@ -389,29 +325,74 @@ export function App() {
                 ))}
               </select>
             </label>
-            <button className="primary-button" type="button" disabled={creating} onClick={() => void handleCreateRun()}>
-              {creating ? 'Starting...' : 'Start Workflow'}
+            <button
+              className="primary-button"
+              type="button"
+              disabled={starting}
+              onClick={() => void handleStartSession()}
+            >
+              {starting ? 'Starting...' : 'Start Session'}
             </button>
           </div>
         </section>
+      </aside>
 
-        <section className="workflow-grid">
-          <div className="panel wide">
-            <PanelTitle title="Workflow" detail={runDetail?.run.status ?? 'not started'} />
-            <WorkflowTimeline phases={activePhases} />
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <div className="eyebrow">Console</div>
+            <h2>{selectedSession?.cwd ?? 'Start a Claude Code session'}</h2>
+            <p>
+              {selectedSession
+                ? `${selectedSession.status} · ${selectedSession.id}`
+                : 'Web input writes to the Claude Code process.'}
+            </p>
           </div>
-          <div className="panel">
-            <PanelTitle title="Workers" detail={`${workers.length} registered`} />
-            <WorkerList workers={workers} />
+          <div className="row-actions">
+            <button className="secondary-button" type="button" onClick={() => void loadDashboard()}>
+              Refresh
+            </button>
+            <button
+              className="secondary-button danger"
+              type="button"
+              disabled={!selectedSession || selectedSession.status !== 'running'}
+              onClick={() => void handleStop()}
+            >
+              Stop
+            </button>
           </div>
-          <div className="panel">
-            <PanelTitle title="Artifacts" detail={`${activeArtifacts.length} files`} />
-            <ArtifactList artifacts={activeArtifacts} />
+        </header>
+
+        {error && <div className="error-banner">{error}</div>}
+
+        <section className="console-layout">
+          <div className="panel console-panel">
+            <PanelTitle title="Messages" detail={`${events.length} console events`} />
+            <ConsoleLog events={events} endRef={consoleEndRef} />
+            <div className="prompt-box">
+              <textarea
+                value={prompt}
+                disabled={!selectedSession || selectedSession.status !== 'running'}
+                onChange={event => setPrompt(event.target.value)}
+                placeholder="Type the same request you would type in the terminal..."
+                onKeyDown={event => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    void handleSend();
+                  }
+                }}
+              />
+              <button
+                className="primary-button"
+                type="button"
+                disabled={sending || !prompt.trim() || !selectedSession || selectedSession.status !== 'running'}
+                onClick={() => void handleSend()}
+              >
+                {sending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
           </div>
-          <div className="panel wide">
-            <PanelTitle title="Event Log" detail={`${activeEvents.length} events`} />
-            <EventLog events={activeEvents} />
-          </div>
+
           <div className="panel">
             <PanelTitle title="Models" detail={`${models.length} configs`} />
             <ModelSettings
@@ -430,21 +411,6 @@ export function App() {
   );
 }
 
-const defaultPhases: RunPhase[] = [
-  'Idea Intake',
-  'GDD',
-  'Technical Design',
-  'Implementation Plan',
-  'Implementation',
-  'Build/Test',
-  'Preview',
-  'Iteration',
-].map((title, index) => ({
-  id: `${index}`,
-  title,
-  status: 'pending',
-}));
-
 function PanelTitle({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="panel-title">
@@ -454,65 +420,20 @@ function PanelTitle({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function WorkflowTimeline({ phases }: { phases: RunPhase[] }) {
-  return (
-    <div className="timeline">
-      {phases.map((phase, index) => (
-        <div key={phase.id} className={`phase ${phase.status}`}>
-          <div className="phase-index">{index + 1}</div>
-          <div>
-            <strong>{phase.title}</strong>
-            <span>{phase.status}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+function ConsoleLog({ events, endRef }: { events: ConsoleEvent[]; endRef: React.RefObject<HTMLDivElement | null> }) {
+  if (events.length === 0) {
+    return <div className="empty">Start a session to see Claude Code output</div>;
+  }
 
-function WorkerList({ workers }: { workers: WorkerSummary[] }) {
   return (
-    <div className="stack">
-      {workers.map(worker => (
-        <div key={worker.id} className="list-row">
-          <div>
-            <strong>{worker.name}</strong>
-            <span>{worker.role}</span>
-          </div>
-          <small>{worker.status}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ArtifactList({ artifacts }: { artifacts: Artifact[] }) {
-  if (artifacts.length === 0) return <div className="empty">No artifacts yet</div>;
-  return (
-    <div className="stack">
-      {artifacts.map(artifact => (
-        <div key={artifact.id} className="list-row">
-          <div>
-            <strong>{artifact.title}</strong>
-            <span>{artifact.path ?? artifact.url ?? artifact.kind}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EventLog({ events }: { events: WorkflowEvent[] }) {
-  if (events.length === 0) return <div className="empty">Events appear when a run starts</div>;
-  return (
-    <div className="event-log">
+    <div className="console-log">
       {events.map(event => (
-        <div key={event.id} className="event-row">
+        <div key={event.id} className={`console-event ${event.type}`}>
           <span>{event.type}</span>
-          <strong>{event.phase ?? event.agentName ?? 'workflow'}</strong>
-          <p>{event.message}</p>
+          <pre>{event.text}</pre>
         </div>
       ))}
+      <div ref={endRef} />
     </div>
   );
 }
@@ -614,7 +535,7 @@ function ModelSettings({
             checked={form.isDefault === true}
             onChange={event => onChange({ ...form, isDefault: event.target.checked })}
           />
-          Default for new runs
+          Default for new sessions
         </label>
         <button className="primary-button" type="button" disabled={saving} onClick={onSave}>
           {saving ? 'Saving...' : 'Save Model'}
@@ -622,7 +543,7 @@ function ModelSettings({
       </div>
 
       {models.length === 0 ? (
-        <div className="empty">Add an LLM config before starting a workflow.</div>
+        <div className="empty">Add an LLM config or use current environment.</div>
       ) : (
         <div className="stack">
           {models.map(model => (

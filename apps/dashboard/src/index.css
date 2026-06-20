@@ -25,15 +25,15 @@ select {
 .app-shell {
   display: grid;
   min-height: 100vh;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   background: #f6f2ed;
 }
 
 .sidebar {
+  overflow-y: auto;
   border-right: 1px solid #ded6cc;
   background: #fffaf4;
   padding: 24px;
-  overflow-y: auto;
 }
 
 .brand {
@@ -62,15 +62,16 @@ select {
 
 .brand p,
 .panel-title span,
-.list-row span,
 .project-item small,
 .empty,
-.eyebrow {
+.eyebrow,
+.topbar p {
   color: #7a7066;
 }
 
-.brand p {
-  margin: 2px 0 0;
+.brand p,
+.topbar p {
+  margin: 3px 0 0;
   font-size: 13px;
 }
 
@@ -94,15 +95,16 @@ select {
 
 .project-list,
 .stack,
-.event-log {
+.model-settings,
+.model-form,
+.session-form {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .project-item,
-.list-row,
-.event-row,
-.phase {
+.model-row,
+.console-event {
   border: 1px solid #ded6cc;
   border-radius: 8px;
   background: #fffaf4;
@@ -142,9 +144,8 @@ select {
 }
 
 .topbar,
-.workspace-row,
 .panel-title,
-.list-row {
+.row-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -155,9 +156,9 @@ select {
   margin-bottom: 20px;
 }
 
-.topbar p {
-  margin: 4px 0 0;
-  color: #7a7066;
+.row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .secondary-button,
@@ -173,6 +174,10 @@ select {
   color: #3a332d;
 }
 
+.secondary-button.danger {
+  color: #a33a3a;
+}
+
 .primary-button {
   border-color: #d77757;
   background: #d77757;
@@ -180,7 +185,8 @@ select {
   font-weight: 700;
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -194,25 +200,29 @@ select {
   padding: 10px 12px;
 }
 
-.composer,
 .panel {
+  min-width: 0;
   border: 1px solid #ded6cc;
   border-radius: 8px;
   background: #fffdf9;
   box-shadow: 0 1px 0 rgb(40 32 24 / 5%);
-}
-
-.composer {
-  display: grid;
-  gap: 14px;
-  margin-bottom: 20px;
   padding: 16px;
 }
 
-.composer > div:first-child {
+.console-layout {
   display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr 220px;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.console-panel {
+  display: grid;
+  min-height: calc(100vh - 112px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.panel-title {
+  margin-bottom: 14px;
 }
 
 label {
@@ -236,110 +246,67 @@ select {
 }
 
 textarea {
-  min-height: 88px;
+  min-height: 92px;
   resize: vertical;
 }
 
-.idea-field {
-  min-width: 0;
-}
-
-.workspace-row {
-  align-items: end;
-}
-
-.workspace-row label {
-  flex: 1;
-}
-
-.workflow-grid {
+.console-log {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
-}
-
-.panel {
-  min-width: 0;
-  padding: 16px;
-}
-
-.panel.wide {
-  grid-column: span 1;
-}
-
-.panel-title {
-  margin-bottom: 14px;
-}
-
-.timeline {
-  display: grid;
-  gap: 10px;
-}
-
-.phase {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  min-height: 360px;
+  border: 1px solid #ded6cc;
+  border-radius: 8px;
+  background: #2a2520;
   padding: 12px;
 }
 
-.phase-index {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 999px;
-  background: #eee5dc;
-  color: #63594f;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.phase.running {
-  border-color: #d77757;
-  background: #fff2ea;
-}
-
-.phase.completed {
-  border-color: #7c9a69;
-  background: #f0f6eb;
-}
-
-.phase strong,
-.phase span {
-  display: block;
-}
-
-.phase span {
-  margin-top: 2px;
-  color: #7a7066;
-  font-size: 13px;
-}
-
-.list-row {
+.console-event {
+  border-color: rgb(255 250 244 / 12%);
+  background: rgb(255 250 244 / 6%);
+  color: #fffaf4;
   padding: 10px 12px;
 }
 
-.list-row strong,
-.list-row span,
-.model-row strong,
-.model-row span,
-.model-row small {
+.console-event span {
   display: block;
+  margin-bottom: 6px;
+  color: #d77757;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.list-row small {
-  color: #7a7066;
+.console-event pre {
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-.model-settings,
-.model-form {
+.console-event.input {
+  background: rgb(215 119 87 / 18%);
+}
+
+.console-event.stderr,
+.console-event.session.failed {
+  background: rgb(211 95 95 / 18%);
+}
+
+.prompt-box {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  margin-top: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
 }
 
-.model-form {
+.model-form,
+.model-row {
   border: 1px solid #ded6cc;
   border-radius: 8px;
   background: #fffaf4;
@@ -365,10 +332,12 @@ textarea {
 .model-row {
   display: grid;
   gap: 10px;
-  border: 1px solid #ded6cc;
-  border-radius: 8px;
-  background: #fffaf4;
-  padding: 10px 12px;
+}
+
+.model-row strong,
+.model-row span,
+.model-row small {
+  display: block;
 }
 
 .model-row span,
@@ -378,43 +347,13 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.secondary-button.danger {
-  color: #a33a3a;
-}
-
-.event-row {
-  padding: 10px 12px;
-}
-
-.event-row span {
-  color: #d77757;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.event-row strong {
-  display: block;
-  margin-top: 3px;
-}
-
-.event-row p {
-  margin: 4px 0 0;
-  color: #63594f;
-}
-
 .empty {
   border: 1px dashed #d7cfc4;
   border-radius: 8px;
   padding: 16px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -424,13 +363,16 @@ textarea {
     border-bottom: 1px solid #ded6cc;
   }
 
-  .composer > div:first-child,
-  .workflow-grid {
+  .console-layout {
     grid-template-columns: 1fr;
   }
 
-  .workspace-row {
-    align-items: stretch;
-    flex-direction: column;
+  .console-panel {
+    min-height: auto;
+  }
+
+  .prompt-box,
+  .model-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -23,67 +23,29 @@ export type ModelConfigInput = {
   isDefault?: boolean
 }
 
-export type Project = {
+export type ConsoleSession = {
   id: string
-  name: string
-  idea: string
-  targetRuntime: string
-  workspacePath: string
-  status: string
-}
-
-export type RunPhase = {
-  id: string
-  title: string
-  status: string
-}
-
-export type Run = {
-  id: string
-  projectId: string
-  modelConfigId: string
-  status: string
-  currentPhase: string
-  phases: RunPhase[]
-}
-
-export type Artifact = {
-  id: string
-  title: string
-  kind: string
-  path?: string
-  url?: string
-}
-
-export type WorkflowEvent = {
-  id: string
-  type: string
-  message: string
-  phase?: string
-  agentName?: string
+  cwd: string
+  modelConfigId?: string
+  status: 'running' | 'exited' | 'stopped' | 'failed'
+  exitCode?: number | null
   createdAt: string
+  updatedAt: string
 }
 
-export type WorkerSummary = {
-  id: string
-  name: string
-  role: string
-  status: string
-  activeRunId?: string
-}
-
-export type RunDetail = {
-  project: Project
-  run: Run
-  artifacts: Artifact[]
-  events: WorkflowEvent[]
-}
-
-export type ProjectInput = {
-  name: string
-  idea: string
-  targetRuntime: string
-  workspacePath: string
+export type ConsoleEvent = {
+  id: number
+  sessionId: string
+  type:
+    | 'session.started'
+    | 'input'
+    | 'stdout'
+    | 'stderr'
+    | 'session.exited'
+    | 'session.stopped'
+    | 'session.failed'
+  text: string
+  createdAt: string
 }
 
 const ownerId = 'dashboard-local'
@@ -114,34 +76,41 @@ export async function deleteModelConfig(
   return readResponse<{ deleted: boolean }>(response)
 }
 
-export async function fetchProjects(): Promise<Project[]> {
-  return apiGet(`/api/projects?ownerId=${ownerId}`)
+export async function fetchConsoleSessions(): Promise<ConsoleSession[]> {
+  return apiGet('/api/console/sessions')
 }
 
-export async function createProject(input: ProjectInput): Promise<Project> {
-  return apiPost(`/api/projects?ownerId=${ownerId}`, input)
+export async function startConsoleSession(input: {
+  workspacePath: string
+  modelConfigId?: string
+}): Promise<ConsoleSession> {
+  return apiPost('/api/console/sessions', input)
 }
 
-export async function createRun(
-  projectId: string,
-  modelConfigId: string,
-): Promise<Run> {
-  return apiPost(`/api/runs?ownerId=${ownerId}`, {
-    projectId,
-    modelConfigId,
-  })
+export async function fetchConsoleSession(
+  sessionId: string,
+): Promise<ConsoleSession> {
+  return apiGet(`/api/console/sessions/${sessionId}`)
 }
 
-export async function fetchProjectRuns(projectId: string): Promise<Run[]> {
-  return apiGet(`/api/projects/${projectId}/runs`)
+export async function fetchConsoleEvents(
+  sessionId: string,
+  after = 0,
+): Promise<ConsoleEvent[]> {
+  return apiGet(`/api/console/sessions/${sessionId}/events?after=${after}`)
 }
 
-export async function fetchRunDetail(runId: string): Promise<RunDetail> {
-  return apiGet(`/api/runs/${runId}`)
+export async function sendConsoleInput(
+  sessionId: string,
+  text: string,
+): Promise<ConsoleSession> {
+  return apiPost(`/api/console/sessions/${sessionId}/input`, { text })
 }
 
-export async function fetchWorkers(): Promise<WorkerSummary[]> {
-  return apiGet('/api/workers')
+export async function stopConsoleSession(
+  sessionId: string,
+): Promise<ConsoleSession> {
+  return apiPost(`/api/console/sessions/${sessionId}/stop`, {})
 }
 
 async function apiGet<T>(path: string): Promise<T> {

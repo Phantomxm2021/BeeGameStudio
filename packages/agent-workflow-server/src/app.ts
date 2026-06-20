@@ -1,29 +1,28 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import {
-  appendWorkflowEvent,
-  createArtifact,
-  createGameProject,
-  createGameRun,
   createModelConfig,
   deleteModelConfig,
-  getRunDetail,
-  listGameProjectsByOwner,
-  listGameRunsByProject,
   listModelConfigs,
-  listWorkers,
   updateModelConfig,
-  updateRunPhase,
-  type ArtifactKind,
   type ModelProviderKind,
-  type PhaseStatus,
-  type WorkflowEventType,
 } from '@claude-code-best/agent-workflow'
+import {
+  ConsoleSessionManager,
+  type ConsoleProcessFactory,
+} from './console/session-manager'
 
 type JsonObject = Record<string, unknown>
 
-export function createAgentWorkflowApp(): Hono {
+export type AgentWorkflowAppOptions = {
+  processFactory?: ConsoleProcessFactory
+}
+
+export function createAgentWorkflowApp(
+  options: AgentWorkflowAppOptions = {},
+): Hono {
   const app = new Hono()
+  const consoleSessions = new ConsoleSessionManager(options.processFactory)
 
   app.use('/api/*', cors())
 
@@ -75,113 +74,18 @@ export function createAgentWorkflowApp(): Hono {
     return c.json({ deleted: deleteModelConfig(c.req.param('id')) })
   })
 
-  app.get('/api/projects', c => {
-    return c.json(listGameProjectsByOwner(getOwnerId(c.req.query('ownerId'))))
-  })
+  app.get('/api/console/sessions', c => c.json(consoleSessions.list()))
 
-  app.post('/api/projects', async c => {
+  app.post('/api/console/sessions', async c => {
     const body = await readJson(c.req.raw)
-    const error = requireFields(body, [
-      'name',
-      'idea',
-      'targetRuntime',
-      'workspacePath',
-    ])
-    if (error) return c.json({ error }, 400)
-
-    return c.json(
-      createGameProject(getOwnerId(c.req.query('ownerId')), {
-        name: String(body.name),
-        idea: String(body.idea),
-        targetRuntime: String(body.targetRuntime),
-        workspacePath: String(body.workspacePath),
-      }),
-    )
-  })
-
-  app.get('/api/projects/:id/runs', c => {
-    return c.json(listGameRunsByProject(c.req.param('id')))
-  })
-
-  app.post('/api/runs', async c => {
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['projectId', 'modelConfigId'])
-    if (error) return c.json({ error }, 400)
-
-    try {
-      const run = createGameRun({
-        projectId: String(body.projectId),
-        modelConfigId: String(body.modelConfigId),
-      })
-      const started = updateRunPhase(run.id, run.currentPhase, 'running')
-      appendWorkflowEvent(run.id, {
-        type: 'agent.log',
-        message: 'Workflow started; waiting for agent executor.',
-        phase: run.currentPhase,
-        agentName: 'orchestrator',
-      })
-      return c.json(started ?? run)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 404)
-    }
-  })
-
-  app.get('/api/runs/:id', c => {
-    const detail = getRunDetail(c.req.param('id'))
-    return detail ? c.json(detail) : c.json({ error: 'Run not found' }, 404)
-  })
-
-  app.post('/api/runs/:id/phase', async c => {
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['phase', 'status'])
-    if (error) return c.json({ error }, 400)
-    const run = updateRunPhase(
-      c.req.param('id'),
-      String(body.phase),
-      body.status as PhaseStatus,
-    )
-    return run ? c.json(run) : c.json({ error: 'Run phase not found' }, 404)
-  })
-
-  app.post('/api/runs/:id/events', async c => {
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['type', 'message'])
+    const error = requireFields(body, ['workspacePath'])
     if (error) return c.json({ error }, 400)
     try {
       return c.json(
-        appendWorkflowEvent(c.req.param('id'), {
-          type: body.type as WorkflowEventType,
-          message: String(body.message),
-          ...(typeof body.phase === 'string' ? { phase: body.phase } : {}),
-          ...(typeof body.agentName === 'string'
-            ? { agentName: body.agentName }
-            : {}),
-          ...(typeof body.artifactId === 'string'
-            ? { artifactId: body.artifactId }
-            : {}),
-        }),
-      )
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 404)
-    }
-  })
-
-  app.post('/api/artifacts', async c => {
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['projectId', 'runId', 'kind', 'title'])
-    if (error) return c.json({ error }, 400)
-
-    try {
-      return c.json(
-        createArtifact({
-          projectId: String(body.projectId),
-          runId: String(body.runId),
-          kind: body.kind as ArtifactKind,
-          title: String(body.title),
-          ...(typeof body.path === 'string' ? { path: body.path } : {}),
-          ...(typeof body.url === 'string' ? { url: body.url } : {}),
-          ...(typeof body.mimeType === 'string'
-            ? { mimeType: body.mimeType }
+        consoleSessions.start({
+          workspacePath: String(body.workspacePath),
+          ...(typeof body.modelConfigId === 'string' && body.modelConfigId
+            ? { modelConfigId: body.modelConfigId }
             : {}),
         }),
       )
@@ -190,7 +94,42 @@ export function createAgentWorkflowApp(): Hono {
     }
   })
 
-  app.get('/api/workers', c => c.json(listWorkers()))
+  app.get('/api/console/sessions/:id', c => {
+    const session = consoleSessions.get(c.req.param('id'))
+    return session
+      ? c.json(session)
+      : c.json({ error: 'Session not found' }, 404)
+  })
+
+  app.get('/api/console/sessions/:id/events', c => {
+    try {
+      const after = Number.parseInt(c.req.query('after') || '0', 10)
+      return c.json(consoleSessions.events(c.req.param('id'), after))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 404)
+    }
+  })
+
+  app.post('/api/console/sessions/:id/input', async c => {
+    const body = await readJson(c.req.raw)
+    const error = requireFields(body, ['text'])
+    if (error) return c.json({ error }, 400)
+    try {
+      return c.json(
+        await consoleSessions.send(c.req.param('id'), String(body.text)),
+      )
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/console/sessions/:id/stop', c => {
+    try {
+      return c.json(consoleSessions.stop(c.req.param('id')))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 404)
+    }
+  })
 
   return app
 }
