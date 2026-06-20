@@ -132,6 +132,10 @@ export async function createRun(
   })
 }
 
+export async function fetchProjectRuns(projectId: string): Promise<Run[]> {
+  return apiGet(`/api/projects/${projectId}/runs`)
+}
+
 export async function fetchRunDetail(runId: string): Promise<RunDetail> {
   return apiGet(`/api/runs/${runId}`)
 }

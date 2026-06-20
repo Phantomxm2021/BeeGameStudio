@@ -6,6 +6,7 @@ import {
   createRun,
   fetchModels,
   fetchProjects,
+  fetchProjectRuns,
   fetchRunDetail,
   fetchWorkers,
   updateModelConfig,
@@ -33,8 +34,10 @@ declare global {
 export function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [runs, setRuns] = useState<Run[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -59,6 +62,19 @@ export function App() {
     () => projects.find(project => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
+  const selectedRun = useMemo(() => runs.find(run => run.id === selectedRunId) ?? null, [runs, selectedRunId]);
+
+  const loadProjectRuns = useCallback(async (projectId: string, preferredRunId?: string) => {
+    const nextRuns = await fetchProjectRuns(projectId);
+    setRuns(nextRuns);
+    const nextRunId = preferredRunId ?? nextRuns.at(-1)?.id ?? null;
+    setSelectedRunId(nextRunId);
+    if (nextRunId) {
+      setRunDetail(await fetchRunDetail(nextRunId));
+    } else {
+      setRunDetail(null);
+    }
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     setError(null);
@@ -71,7 +87,15 @@ export function App() {
       setModels(nextModels);
       setProjects(nextProjects);
       setWorkers(nextWorkers);
-      setSelectedProjectId(current => current ?? nextProjects[0]?.id ?? null);
+      const nextProjectId = selectedProjectId ?? nextProjects[0]?.id ?? null;
+      setSelectedProjectId(nextProjectId);
+      if (nextProjectId) {
+        await loadProjectRuns(nextProjectId, selectedRunId ?? undefined);
+      } else {
+        setRuns([]);
+        setSelectedRunId(null);
+        setRunDetail(null);
+      }
       setForm(current => ({
         ...current,
         modelConfigId:
@@ -80,7 +104,7 @@ export function App() {
     } catch (err) {
       setError(toErrorMessage(err));
     }
-  }, []);
+  }, [loadProjectRuns, selectedProjectId, selectedRunId]);
 
   useEffect(() => {
     void loadDashboard();
@@ -109,6 +133,7 @@ export function App() {
       const detail = await fetchRunDetail(run.id);
       setProjects(await fetchProjects());
       setSelectedProjectId(project.id);
+      await loadProjectRuns(project.id, run.id);
       setRunDetail(detail);
       setForm(current => ({
         name: '',
@@ -193,7 +218,22 @@ export function App() {
 
   const handleSelectProject = async (project: Project) => {
     setSelectedProjectId(project.id);
-    setRunDetail(null);
+    setError(null);
+    try {
+      await loadProjectRuns(project.id);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  };
+
+  const handleSelectRun = async (run: Run) => {
+    setSelectedRunId(run.id);
+    setError(null);
+    try {
+      setRunDetail(await fetchRunDetail(run.id));
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
   };
 
   const handlePickWorkspace = async () => {
@@ -217,6 +257,17 @@ export function App() {
   const activePhases = runDetail?.run.phases ?? defaultPhases;
   const activeEvents = runDetail?.events ?? [];
   const activeArtifacts = runDetail?.artifacts ?? [];
+
+  useEffect(() => {
+    if (!selectedRunId || !runDetail || !['queued', 'running', 'requires_action'].includes(runDetail.run.status))
+      return;
+    const timer = window.setInterval(() => {
+      void fetchRunDetail(selectedRunId)
+        .then(setRunDetail)
+        .catch(err => setError(toErrorMessage(err)));
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [runDetail, selectedRunId]);
 
   return (
     <div className="app-shell">
@@ -248,6 +299,26 @@ export function App() {
             )}
           </div>
         </section>
+
+        <section className="sidebar-section">
+          <div className="section-title">Runs</div>
+          <div className="project-list">
+            {runs.length === 0 ? (
+              <div className="empty">No runs for this project</div>
+            ) : (
+              runs.map(run => (
+                <button
+                  key={run.id}
+                  className={`project-item ${run.id === selectedRunId ? 'active' : ''}`}
+                  onClick={() => void handleSelectRun(run)}
+                >
+                  <span>{run.currentPhase}</span>
+                  <small>{run.status}</small>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
       </aside>
 
       <main className="main">
@@ -255,6 +326,7 @@ export function App() {
           <div>
             <div className="eyebrow">Dashboard</div>
             <h2>{selectedProject?.name ?? 'Create a workflow run'}</h2>
+            <p>{selectedRun ? `${selectedRun.status} · ${selectedRun.currentPhase}` : 'No run selected'}</p>
           </div>
           <button className="secondary-button" onClick={() => void loadDashboard()}>
             Refresh

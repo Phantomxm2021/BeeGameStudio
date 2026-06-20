@@ -9,6 +9,7 @@ import {
   deleteModelConfig,
   getRunDetail,
   listGameProjectsByOwner,
+  listGameRunsByProject,
   listModelConfigs,
   listWorkers,
   updateModelConfig,
@@ -96,6 +97,10 @@ export function createAgentWorkflowApp(): Hono {
         workspacePath: String(body.workspacePath),
       }),
     )
+  })
+
+  app.get('/api/projects/:id/runs', c => {
+    return c.json(listGameRunsByProject(c.req.param('id')))
   })
 
   app.post('/api/runs', async c => {

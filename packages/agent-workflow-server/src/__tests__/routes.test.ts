@@ -117,6 +117,13 @@ describe('agent workflow server routes', () => {
     expect(detail.artifacts).toEqual([
       expect.objectContaining({ title: 'Game Design Document' }),
     ])
+
+    const runsRes = await app.request(`/api/projects/${project.id}/runs`)
+    expect(runsRes.status).toBe(200)
+    const runs = await runsRes.json()
+    expect(runs).toEqual([
+      expect.objectContaining({ id: run.id, projectId: project.id }),
+    ])
   })
 
   test('lists worker summaries for the visual dashboard', async () => {
