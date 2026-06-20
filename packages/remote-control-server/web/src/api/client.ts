@@ -49,6 +49,89 @@ export interface ModelConfigUpdate {
   isDefault?: boolean
 }
 
+export type TargetPlatform = 'web' | 'unity' | 'godot' | 'custom'
+
+export interface GameProject {
+  id: string
+  ownerId: string
+  name: string
+  idea: string
+  targetPlatform: TargetPlatform
+  workspacePath: string
+  status: 'draft' | 'running' | 'ready' | 'failed' | 'archived'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GameRunPhase {
+  id: string
+  title: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+}
+
+export interface GameRun {
+  id: string
+  projectId: string
+  modelConfigId: string
+  status:
+    | 'queued'
+    | 'running'
+    | 'requires_action'
+    | 'completed'
+    | 'failed'
+    | 'canceled'
+  currentPhase: string
+  phases: GameRunPhase[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Artifact {
+  id: string
+  projectId: string
+  runId: string
+  kind:
+    | 'gdd'
+    | 'tech_design'
+    | 'implementation_plan'
+    | 'source_file'
+    | 'test_report'
+    | 'preview'
+  title: string
+  path?: string
+  url?: string
+  mimeType?: string
+  createdAt: string
+}
+
+export interface GameProjectInput {
+  name: string
+  idea: string
+  targetPlatform: TargetPlatform
+  workspacePath: string
+}
+
+export interface GameRunInput {
+  projectId: string
+  modelConfigId: string
+}
+
+export interface ArtifactInput {
+  projectId: string
+  runId: string
+  kind: Artifact['kind']
+  title: string
+  path?: string
+  url?: string
+  mimeType?: string
+}
+
+export interface GameRunDetail {
+  run: GameRun
+  project: GameProject
+  artifacts: Artifact[]
+}
+
 const BASE = ''
 
 export function getUuid(): string {
@@ -165,4 +248,24 @@ export function apiTestModelConfig(id: string) {
     | { ok: true; provider: ModelProviderKind; model: string }
     | { ok: false; error: { type: string; message: string } }
   >('POST', `/web/model-configs/${id}/test`)
+}
+
+export function apiFetchGameProjects() {
+  return api<GameProject[]>('GET', '/web/projects')
+}
+
+export function apiCreateGameProject(body: GameProjectInput) {
+  return api<GameProject>('POST', '/web/projects', body)
+}
+
+export function apiCreateGameRun(body: GameRunInput) {
+  return api<GameRun>('POST', '/web/runs', body)
+}
+
+export function apiFetchGameRunDetail(id: string) {
+  return api<GameRunDetail>('GET', `/web/runs/${id}`)
+}
+
+export function apiCreateArtifact(body: ArtifactInput) {
+  return api<Artifact>('POST', '/web/artifacts', body)
 }
