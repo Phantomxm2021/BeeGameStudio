@@ -7,10 +7,9 @@ import { NewSessionDialog } from '../components/NewSessionDialog';
 
 interface DashboardProps {
   onNavigateSession: (sessionId: string) => void;
-  onNavigateModels: () => void;
 }
 
-export function Dashboard({ onNavigateSession, onNavigateModels }: DashboardProps) {
+export function Dashboard({ onNavigateSession }: DashboardProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -61,20 +60,12 @@ export function Dashboard({ onNavigateSession, onNavigateModels }: DashboardProp
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold text-text-primary">Sessions</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onNavigateModels}
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
-            >
-              Models
-            </button>
-            <button
-              onClick={() => setDialogOpen(true)}
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-light"
-            >
-              + New Session
-            </button>
-          </div>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-light transition-colors"
+          >
+            + New Session
+          </button>
         </div>
         <SessionList sessions={sessions} onSelect={handleSelectSession} />
       </section>

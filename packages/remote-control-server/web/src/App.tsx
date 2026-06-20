@@ -9,12 +9,9 @@ import { useTokens } from './hooks/useTokens';
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const SessionDetail = lazy(() => import('./pages/SessionDetail').then(m => ({ default: m.SessionDetail })));
-const Models = lazy(() => import('./pages/Models').then(m => ({ default: m.Models })));
-
-type AppRoute = { kind: 'dashboard' } | { kind: 'models' } | { kind: 'session'; sessionId: string };
 
 export default function App() {
-  const [route, setRoute] = useState<AppRoute>({ kind: 'dashboard' });
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [identityOpen, setIdentityOpen] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [acpDirect, setAcpDirect] = useState<{ url: string; token: string } | null>(null);
@@ -78,7 +75,7 @@ export default function App() {
       const url = new URL(window.location.href);
       url.searchParams.delete('sid');
       window.history.replaceState(null, '', `/code/${sid}`);
-      setRoute({ kind: 'session', sessionId: sid });
+      setCurrentSessionId(sid);
       // Bind this session to the current user's UUID for ownership
       apiBind(sid).catch((err: unknown) => {
         console.warn('Failed to bind session:', err);
@@ -86,17 +83,12 @@ export default function App() {
       return;
     }
 
-    if (path === '/code/models') {
-      setRoute({ kind: 'models' });
-      return;
-    }
-
     // Path-based routing: /code/session_xxx → session detail
     const match = path.match(/^\/code\/([^/]+)/);
     if (match && match[1]) {
-      setRoute({ kind: 'session', sessionId: match[1] });
+      setCurrentSessionId(match[1]);
     } else {
-      setRoute({ kind: 'dashboard' });
+      setCurrentSessionId(null);
     }
   }, []);
 
@@ -108,23 +100,14 @@ export default function App() {
 
   const navigateToSession = useCallback((sessionId: string) => {
     window.history.pushState(null, '', `/code/${sessionId}`);
-    setRoute({ kind: 'session', sessionId });
+    setCurrentSessionId(sessionId);
   }, []);
 
   const navigateToDashboard = useCallback(() => {
     window.history.pushState(null, '', '/code/');
-    setRoute({ kind: 'dashboard' });
+    setCurrentSessionId(null);
     setAcpDirect(null);
   }, []);
-
-  const navigateToModels = useCallback(() => {
-    window.history.pushState(null, '', '/code/models');
-    setRoute({ kind: 'models' });
-    setAcpDirect(null);
-  }, []);
-
-  const sessionTitle =
-    route.kind === 'session' ? route.sessionId : route.kind === 'models' ? 'Models' : acpDirect ? 'ACP' : undefined;
 
   return (
     <ThemeProvider defaultTheme="system">
@@ -132,23 +115,19 @@ export default function App() {
         <Navbar
           onIdentityClick={() => setIdentityOpen(true)}
           onTokenClick={() => setTokenDialogOpen(true)}
-          activeTokenLabel={route.kind === 'dashboard' ? activeLabel : undefined}
-          sessionTitle={sessionTitle}
-          onBack={route.kind !== 'dashboard' || acpDirect ? navigateToDashboard : undefined}
+          activeTokenLabel={currentSessionId ? undefined : activeLabel}
+          sessionTitle={currentSessionId || (acpDirect ? 'ACP' : undefined)}
+          onBack={currentSessionId || acpDirect ? navigateToDashboard : undefined}
         />
 
         <Suspense fallback={<div className="flex flex-1 items-center justify-center text-text-muted">Loading...</div>}>
           {acpDirect ? (
             <ACPDirectView url={acpDirect.url} token={acpDirect.token} onBack={navigateToDashboard} />
-          ) : route.kind === 'session' ? (
-            <SessionDetail key={route.sessionId} sessionId={route.sessionId} />
-          ) : route.kind === 'models' ? (
-            <div className="flex-1 overflow-y-auto">
-              <Models />
-            </div>
+          ) : currentSessionId ? (
+            <SessionDetail key={currentSessionId} sessionId={currentSessionId} />
           ) : (
             <div className="flex-1 overflow-y-auto">
-              <Dashboard onNavigateSession={navigateToSession} onNavigateModels={navigateToModels} />
+              <Dashboard onNavigateSession={navigateToSession} />
             </div>
           )}
         </Suspense>
