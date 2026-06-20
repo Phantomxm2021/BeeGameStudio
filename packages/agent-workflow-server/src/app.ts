@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { Context } from 'hono'
 import {
   appendWorkflowEvent,
   createArtifact,
@@ -8,14 +7,10 @@ import {
   createGameRun,
   createModelConfig,
   deleteModelConfig,
-  failRun,
-  getGameProject,
-  getGameRun,
   getRunDetail,
   listGameProjectsByOwner,
   listModelConfigs,
   listWorkers,
-  mapModelConfigToRuntime,
   updateModelConfig,
   updateRunPhase,
   type ArtifactKind,
@@ -23,21 +18,11 @@ import {
   type PhaseStatus,
   type WorkflowEventType,
 } from '@claude-code-best/agent-workflow'
-import { applyRuntimeEvent } from './runtime/events'
-import { createNullRuntimeAdapter } from './runtime/null-runtime-adapter'
-import type { RuntimeAdapter, RuntimeRunControlInput } from './runtime/types'
 
 type JsonObject = Record<string, unknown>
 
-export type AgentWorkflowAppOptions = {
-  runtimeAdapter?: RuntimeAdapter
-}
-
-export function createAgentWorkflowApp(
-  options: AgentWorkflowAppOptions = {},
-): Hono {
+export function createAgentWorkflowApp(): Hono {
   const app = new Hono()
-  const runtimeAdapter = options.runtimeAdapter ?? createNullRuntimeAdapter()
 
   app.use('/api/*', cors())
 
@@ -119,43 +104,26 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
 
     try {
-      const project = getGameProject(String(body.projectId))
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-
-      const runtime = mapModelConfigToRuntime(String(body.modelConfigId))
-      if (!runtime) return c.json({ error: 'Model config not found' }, 404)
-
       const run = createGameRun({
-        projectId: project.id,
+        projectId: String(body.projectId),
         modelConfigId: String(body.modelConfigId),
       })
-      await runtimeAdapter.startRun({
-        project,
-        run,
-        runtime,
-        emit: event => applyRuntimeEvent(run.id, event),
+      const started = updateRunPhase(run.id, run.currentPhase, 'running')
+      appendWorkflowEvent(run.id, {
+        type: 'agent.log',
+        message: 'Workflow started; waiting for agent executor.',
+        phase: run.currentPhase,
+        agentName: 'orchestrator',
       })
-      return c.json(getGameRun(run.id) ?? run)
+      return c.json(started ?? run)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 503)
+      return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
 
   app.get('/api/runs/:id', c => {
     const detail = getRunDetail(c.req.param('id'))
     return detail ? c.json(detail) : c.json({ error: 'Run not found' }, 404)
-  })
-
-  app.post('/api/runs/:id/cancel', async c => {
-    return handleRunControl(c.req.param('id'), c, runtimeAdapter.cancelRun)
-  })
-
-  app.post('/api/runs/:id/retry', async c => {
-    return handleRunControl(c.req.param('id'), c, runtimeAdapter.retryRun)
-  })
-
-  app.post('/api/runs/:id/resume', async c => {
-    return handleRunControl(c.req.param('id'), c, runtimeAdapter.resumeRun)
   })
 
   app.post('/api/runs/:id/phase', async c => {
@@ -220,25 +188,6 @@ export function createAgentWorkflowApp(
   app.get('/api/workers', c => c.json(listWorkers()))
 
   return app
-}
-
-async function handleRunControl(
-  runId: string,
-  c: Context,
-  action: (input: RuntimeRunControlInput) => Promise<void>,
-): Promise<Response> {
-  const run = getGameRun(runId)
-  if (!run) return c.json({ error: 'Run not found' }, 404)
-  try {
-    await action({
-      run,
-      emit: event => applyRuntimeEvent(run.id, event),
-    })
-    return c.json(getGameRun(run.id) ?? run)
-  } catch (err) {
-    failRun(run.id, toErrorMessage(err))
-    return c.json({ error: toErrorMessage(err) }, 400)
-  }
 }
 
 function getOwnerId(ownerId: string | undefined): string {

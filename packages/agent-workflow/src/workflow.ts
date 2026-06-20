@@ -32,10 +32,8 @@ export type WorkflowEventType =
   | 'phase.updated'
   | 'agent.log'
   | 'artifact.created'
-  | 'permission.requested'
   | 'run.completed'
   | 'run.failed'
-  | 'run.canceled'
 
 export type GameProject = {
   id: string
@@ -263,90 +261,6 @@ export function updateRunPhase(
     type: 'phase.updated',
     message: `${phase.title} ${status}`,
     phase: phase.title,
-  })
-  return cloneRun(run)
-}
-
-export function completeRun(
-  runId: string,
-  message = 'Run completed',
-): GameRun | undefined {
-  const run = runs.get(runId)
-  if (!run) return undefined
-  run.status = 'completed'
-  run.updatedAt = new Date()
-  const project = projects.get(run.projectId)
-  if (project) {
-    project.status = 'ready'
-    project.updatedAt = run.updatedAt
-  }
-  appendWorkflowEvent(run.id, {
-    type: 'run.completed',
-    message,
-    phase: run.currentPhase,
-  })
-  return cloneRun(run)
-}
-
-export function failRun(
-  runId: string,
-  message = 'Run failed',
-): GameRun | undefined {
-  const run = runs.get(runId)
-  if (!run) return undefined
-  run.status = 'failed'
-  run.updatedAt = new Date()
-  const currentPhase = run.phases.find(
-    phase => phase.title === run.currentPhase,
-  )
-  if (currentPhase) currentPhase.status = 'failed'
-  const project = projects.get(run.projectId)
-  if (project) {
-    project.status = 'failed'
-    project.updatedAt = run.updatedAt
-  }
-  appendWorkflowEvent(run.id, {
-    type: 'run.failed',
-    message,
-    phase: run.currentPhase,
-  })
-  return cloneRun(run)
-}
-
-export function cancelRun(
-  runId: string,
-  message = 'Run canceled',
-): GameRun | undefined {
-  const run = runs.get(runId)
-  if (!run) return undefined
-  run.status = 'canceled'
-  run.updatedAt = new Date()
-  appendWorkflowEvent(run.id, {
-    type: 'run.canceled',
-    message,
-    phase: run.currentPhase,
-  })
-  return cloneRun(run)
-}
-
-export function requestRunPermission(
-  runId: string,
-  input: {
-    message: string
-    phase?: string
-    agentName?: string
-  },
-): GameRun | undefined {
-  const run = runs.get(runId)
-  if (!run) return undefined
-  run.status = 'requires_action'
-  if (input.phase) run.currentPhase = input.phase
-  run.updatedAt = new Date()
-  appendWorkflowEvent(run.id, {
-    type: 'permission.requested',
-    message: input.message,
-    ...(input.phase ? { phase: input.phase } : {}),
-    ...(input.agentName ? { agentName: input.agentName } : {}),
   })
   return cloneRun(run)
 }

@@ -1,30 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import {
-  createModelConfig,
-  resetAgentWorkflow,
-} from '@claude-code-best/agent-workflow'
+import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
-import type { RuntimeAdapter } from '../runtime/types'
 
 describe('agent workflow server routes', () => {
-  const runtimeAdapter: RuntimeAdapter = {
-    async startRun(input) {
-      input.emit({
-        type: 'phase_started',
-        phase: input.run.currentPhase,
-      })
-      input.emit({
-        type: 'agent_log',
-        message: 'Workflow accepted by test runtime.',
-        phase: input.run.currentPhase,
-        agentName: 'orchestrator',
-      })
-    },
-    async cancelRun() {},
-    async retryRun() {},
-    async resumeRun() {},
-  }
-  const app = createAgentWorkflowApp({ runtimeAdapter })
+  const app = createAgentWorkflowApp()
 
   beforeEach(() => {
     resetAgentWorkflow()
@@ -68,19 +47,13 @@ describe('agent workflow server routes', () => {
     })
     expect(projectRes.status).toBe(200)
     const project = await projectRes.json()
-    const modelConfig = createModelConfig('owner-a', {
-      name: 'Primary LLM',
-      provider: 'openai-compatible',
-      apiKey: 'sk-test-secret',
-      models: { balanced: 'balanced-model' },
-    })
 
     const runRes = await app.request('/api/runs?ownerId=owner-a', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         projectId: project.id,
-        modelConfigId: modelConfig.id,
+        modelConfigId: 'llm-primary',
       }),
     })
     expect(runRes.status).toBe(200)
