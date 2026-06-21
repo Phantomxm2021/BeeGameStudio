@@ -2,8 +2,8 @@
   color: #241f1b;
   background: #f6f2ed;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
   text-rendering: geometricPrecision;
 }
 
@@ -103,8 +103,7 @@ select {
 }
 
 .project-item,
-.model-row,
-.console-event {
+.model-row {
   border: 1px solid #ded6cc;
   border-radius: 8px;
   background: #fffaf4;
@@ -218,7 +217,7 @@ select {
 .console-panel {
   display: grid;
   min-height: calc(100vh - 112px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .panel-title {
@@ -250,59 +249,34 @@ textarea {
   resize: vertical;
 }
 
-.console-log {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  overflow: auto;
-  min-height: 360px;
+.terminal-shell {
+  position: relative;
+  overflow: hidden;
   border: 1px solid #ded6cc;
   border-radius: 8px;
-  background: #2a2520;
+  background: #141312;
   padding: 12px;
 }
 
-.console-event {
-  border-color: rgb(255 250 244 / 12%);
-  background: rgb(255 250 244 / 6%);
-  color: #fffaf4;
-  padding: 10px 12px;
+.terminal-host {
+  width: 100%;
+  height: calc(100vh - 190px);
+  min-height: 520px;
 }
 
-.console-event span {
-  display: block;
-  margin-bottom: 6px;
-  color: #d77757;
-  font-size: 12px;
-  font-weight: 700;
+.terminal-host .xterm {
+  height: 100%;
 }
 
-.console-event pre {
-  overflow-x: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family:
-    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.console-event.input {
-  background: rgb(215 119 87 / 18%);
-}
-
-.console-event.stderr,
-.console-event.session.failed {
-  background: rgb(211 95 95 / 18%);
-}
-
-.prompt-box {
+.terminal-empty {
+  position: absolute;
+  inset: 12px;
   display: grid;
-  gap: 10px;
-  margin-top: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  place-items: center;
+  border: 1px dashed rgb(255 250 244 / 18%);
+  border-radius: 6px;
+  color: #9d9288;
+  pointer-events: none;
 }
 
 .model-form,
@@ -429,8 +403,11 @@ textarea {
     min-height: auto;
   }
 
-  .prompt-box,
   .model-grid {
     grid-template-columns: 1fr;
+  }
+
+  .terminal-host {
+    height: 520px;
   }
 }

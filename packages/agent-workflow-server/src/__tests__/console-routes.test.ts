@@ -143,7 +143,7 @@ describe('console session routes', () => {
       process.emit('stdout', 'Claude Code response\n')
 
       expect(inputRes.status).toBe(200)
-      expect(process.writes).toEqual(['Build a tiny puzzle game.\n'])
+      expect(process.writes).toEqual(['Build a tiny puzzle game.'])
 
       const eventsRes = await app.request(
         `/api/console/sessions/${session.id}/events`,

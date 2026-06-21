@@ -154,9 +154,8 @@ export class ConsoleSessionManager {
     if (record.session.status !== 'running') {
       throw new Error('Session is not running')
     }
-    const payload = text.endsWith('\n') ? text : `${text}\n`
-    await record.process.write(payload)
-    this.append(record, 'input', payload)
+    await record.process.write(text)
+    this.append(record, 'input', text)
     record.session.updatedAt = new Date()
     return cloneSession(record.session)
   }
@@ -199,13 +198,16 @@ export function createDefaultConsoleProcess(
   input: ConsoleProcessStartInput,
 ): ConsoleProcess {
   const child = Bun.spawn({
-    cmd: getConsoleCommand(),
+    cmd: getPtyConsoleCommand(input.cwd),
     cwd: input.cwd,
     env: {
       ...process.env,
       ...input.env,
       CLAUDE_CODE_FORCE_INTERACTIVE: '1',
       PWD: input.cwd,
+      TERM: process.env.TERM || 'xterm-256color',
+      COLUMNS: '120',
+      LINES: '40',
     },
     stdin: 'pipe',
     stdout: 'pipe',
@@ -225,6 +227,20 @@ export function createDefaultConsoleProcess(
       child.kill()
     },
   }
+}
+
+function getPtyConsoleCommand(cwd: string): string[] {
+  const command = getConsoleCommand()
+  if (command.length === 0) {
+    throw new Error('Claude Code console command is empty')
+  }
+
+  return [
+    process.env.PYTHON || 'python3',
+    join(dirname(fileURLToPath(import.meta.url)), 'pty_bridge.py'),
+    JSON.stringify(command),
+    cwd,
+  ]
 }
 
 function getConsoleCommand(): string[] {

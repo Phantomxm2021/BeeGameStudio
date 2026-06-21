@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import {
   createModelConfig,
   deleteModelConfig,
@@ -35,7 +37,6 @@ export function App() {
   const [events, setEvents] = useState<ConsoleEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [sending, setSending] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [directoryListing, setDirectoryListing] = useState<DirectoryListing | null>(null);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
@@ -44,7 +45,6 @@ export function App() {
     workspacePath: '',
     modelConfigId: '',
   });
-  const [prompt, setPrompt] = useState('');
   const [modelForm, setModelForm] = useState<ModelConfigInput>({
     name: '',
     provider: 'openai-compatible',
@@ -53,7 +53,6 @@ export function App() {
     models: { balanced: '' },
     isDefault: true,
   });
-  const consoleEndRef = useRef<HTMLDivElement | null>(null);
 
   const selectedSession = useMemo(
     () => sessions.find(session => session.id === selectedSessionId) ?? null,
@@ -121,10 +120,6 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [events, selectedSessionId]);
 
-  useEffect(() => {
-    consoleEndRef.current?.scrollIntoView({ block: 'end' });
-  }, [events]);
-
   const handleStartSession = async () => {
     if (!sessionForm.workspacePath.trim()) {
       setError('Workspace path is required.');
@@ -144,22 +139,6 @@ export function App() {
       setError(toErrorMessage(err));
     } finally {
       setStarting(false);
-    }
-  };
-
-  const handleSend = async () => {
-    if (!selectedSessionId || !prompt.trim()) return;
-    setSending(true);
-    setError(null);
-    try {
-      await sendConsoleInput(selectedSessionId, prompt.trim());
-      setPrompt('');
-      const nextEvents = await fetchConsoleEvents(selectedSessionId, events.at(-1)?.id ?? 0);
-      setEvents(current => [...current, ...nextEvents]);
-    } catch (err) {
-      setError(toErrorMessage(err));
-    } finally {
-      setSending(false);
     }
   };
 
@@ -393,30 +372,16 @@ export function App() {
 
         <section className="console-layout">
           <div className="panel console-panel">
-            <PanelTitle title="Messages" detail={`${events.length} console events`} />
-            <ConsoleLog events={events} endRef={consoleEndRef} />
-            <div className="prompt-box">
-              <textarea
-                value={prompt}
-                disabled={!selectedSession || selectedSession.status !== 'running'}
-                onChange={event => setPrompt(event.target.value)}
-                placeholder="Type the same request you would type in the terminal..."
-                onKeyDown={event => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                    event.preventDefault();
-                    void handleSend();
-                  }
-                }}
-              />
-              <button
-                className="primary-button"
-                type="button"
-                disabled={sending || !prompt.trim() || !selectedSession || selectedSession.status !== 'running'}
-                onClick={() => void handleSend()}
-              >
-                {sending ? 'Sending...' : 'Send'}
-              </button>
-            </div>
+            <PanelTitle title="Terminal" detail={`${events.length} console events`} />
+            <TerminalView
+              events={events}
+              session={selectedSession}
+              onInput={async text => {
+                if (!selectedSessionId) return;
+                await sendConsoleInput(selectedSessionId, text);
+              }}
+              onError={message => setError(message)}
+            />
           </div>
 
           <div className="panel">
@@ -446,20 +411,93 @@ function PanelTitle({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function ConsoleLog({ events, endRef }: { events: ConsoleEvent[]; endRef: React.RefObject<HTMLDivElement | null> }) {
-  if (events.length === 0) {
-    return <div className="empty">Start a session to see Claude Code output</div>;
-  }
+function TerminalView({
+  events,
+  session,
+  onInput,
+  onError,
+}: {
+  events: ConsoleEvent[];
+  session: ConsoleSession | null;
+  onInput: (text: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const lastEventIdRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
+  const inputRef = useRef(onInput);
+  const errorRef = useRef(onError);
+
+  useEffect(() => {
+    inputRef.current = onInput;
+  }, [onInput]);
+
+  useEffect(() => {
+    errorRef.current = onError;
+  }, [onError]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const terminal = new Terminal({
+      cols: 120,
+      rows: 34,
+      cursorBlink: true,
+      fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontSize: 13,
+      scrollback: 5000,
+      theme: {
+        background: '#141312',
+        foreground: '#f3eee7',
+        cursor: '#d77757',
+        selectionBackground: '#3a312c',
+      },
+    });
+    terminal.open(containerRef.current);
+    terminalRef.current = terminal;
+
+    const dataDisposable = terminal.onData(data => {
+      if (sessionIdRef.current) {
+        void inputRef.current(data).catch(err => errorRef.current(toErrorMessage(err)));
+      }
+    });
+
+    return () => {
+      dataDisposable.dispose();
+      terminal.dispose();
+      terminalRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    if (session?.id !== sessionIdRef.current) {
+      sessionIdRef.current = session?.id ?? null;
+      lastEventIdRef.current = 0;
+      terminal.clear();
+    }
+
+    for (const event of events) {
+      if (event.id <= lastEventIdRef.current) continue;
+      if (event.type === 'stdout' || event.type === 'stderr') {
+        terminal.write(event.text);
+      } else if (
+        event.type === 'session.failed' ||
+        event.type === 'session.stopped' ||
+        event.type === 'session.exited'
+      ) {
+        terminal.writeln(`\r\n[${event.type}] ${event.text}`);
+      }
+      lastEventIdRef.current = event.id;
+    }
+  }, [events, session?.id]);
 
   return (
-    <div className="console-log">
-      {events.map(event => (
-        <div key={event.id} className={`console-event ${event.type}`}>
-          <span>{event.type}</span>
-          <pre>{event.text}</pre>
-        </div>
-      ))}
-      <div ref={endRef} />
+    <div className="terminal-shell">
+      <div ref={containerRef} className="terminal-host" />
+      {!session && <div className="terminal-empty">Start a session to open Claude Code</div>}
     </div>
   );
 }
