@@ -9,6 +9,6 @@ describe('console session manager', () => {
     expect(command[1]).toBe('run')
     expect(command[2]).toEndWith('src/entrypoints/cli.tsx')
     expect(command[3]).toBe('-p')
-    expect(command[4]).toBe('')
+    expect(command).toHaveLength(4)
   })
 })

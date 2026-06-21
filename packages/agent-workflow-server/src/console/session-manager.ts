@@ -197,7 +197,7 @@ export function createDefaultConsoleProcess(
   input: ConsoleProcessStartInput,
 ): ConsoleProcess {
   const child = Bun.spawn({
-    cmd: getConsoleCommand(input.prompt),
+    cmd: getConsoleCommand(),
     cwd: input.cwd,
     env: {
       ...process.env,
@@ -212,6 +212,9 @@ export function createDefaultConsoleProcess(
   void readOutput(child.stdout, text => input.onOutput('stdout', text))
   void readOutput(child.stderr, text => input.onOutput('stderr', text))
   void child.exited.then(exitCode => input.onExit(exitCode))
+  child.stdin.write(input.prompt)
+  child.stdin.flush()
+  child.stdin.end()
 
   return {
     write() {},
@@ -221,7 +224,7 @@ export function createDefaultConsoleProcess(
   }
 }
 
-function getConsoleCommand(prompt: string): string[] {
+function getConsoleCommand(): string[] {
   const configured = process.env.CLAUDE_CODE_DASHBOARD_COMMAND
   if (configured) {
     const parsed = JSON.parse(configured) as unknown
@@ -233,20 +236,19 @@ function getConsoleCommand(prompt: string): string[] {
     }
     throw new Error('CLAUDE_CODE_DASHBOARD_COMMAND must be a JSON string array')
   }
-  return getDefaultConsoleCommandForTesting(prompt)
+  return getDefaultConsoleCommandForTesting()
 }
 
 function getRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../../../../')
 }
 
-export function getDefaultConsoleCommandForTesting(prompt = ''): string[] {
+export function getDefaultConsoleCommandForTesting(): string[] {
   return [
     process.execPath,
     'run',
     join(getRepoRoot(), 'src/entrypoints/cli.tsx'),
     '-p',
-    prompt,
   ]
 }
 
