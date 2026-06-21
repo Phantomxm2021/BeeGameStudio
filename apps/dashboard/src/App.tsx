@@ -5,6 +5,7 @@ import {
   fetchConsoleEvents,
   fetchConsoleSession,
   fetchConsoleSessions,
+  fetchDirectories,
   fetchModels,
   sendConsoleInput,
   startConsoleSession,
@@ -12,6 +13,7 @@ import {
   updateModelConfig,
   type ConsoleEvent,
   type ConsoleSession,
+  type DirectoryListing,
   type ModelConfig,
   type ModelConfigInput,
 } from './api';
@@ -35,6 +37,9 @@ export function App() {
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
+  const [directoryListing, setDirectoryListing] = useState<DirectoryListing | null>(null);
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
+  const [loadingDirectories, setLoadingDirectories] = useState(false);
   const [sessionForm, setSessionForm] = useState({
     workspacePath: '',
     modelConfigId: '',
@@ -238,19 +243,33 @@ export function App() {
   };
 
   const handlePickWorkspace = async () => {
-    if (!window.showDirectoryPicker) {
-      setError('This browser does not expose folder picking. Use manual path input.');
-      return;
-    }
+    setDirectoryPickerOpen(true);
+    setLoadingDirectories(true);
+    setError(null);
     try {
-      await window.showDirectoryPicker();
-      setError(
-        'Browser folder picking does not expose an absolute local path. Paste the absolute workspace path instead.',
-      );
+      setDirectoryListing(await fetchDirectories(sessionForm.workspacePath || undefined));
     } catch (err) {
-      if (toErrorMessage(err).includes('aborted')) return;
       setError(toErrorMessage(err));
+    } finally {
+      setLoadingDirectories(false);
     }
+  };
+
+  const handleOpenDirectory = async (path: string) => {
+    setLoadingDirectories(true);
+    setError(null);
+    try {
+      setDirectoryListing(await fetchDirectories(path));
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setLoadingDirectories(false);
+    }
+  };
+
+  const handleSelectDirectory = (path: string) => {
+    setSessionForm(current => ({ ...current, workspacePath: path }));
+    setDirectoryPickerOpen(false);
   };
 
   return (
@@ -303,6 +322,15 @@ export function App() {
             <button className="secondary-button" type="button" onClick={() => void handlePickWorkspace()}>
               Choose Folder
             </button>
+            {directoryPickerOpen && (
+              <DirectoryPicker
+                listing={directoryListing}
+                loading={loadingDirectories}
+                onOpen={path => void handleOpenDirectory(path)}
+                onSelect={handleSelectDirectory}
+                onClose={() => setDirectoryPickerOpen(false)}
+              />
+            )}
             <label>
               Model config
               <select
@@ -432,6 +460,63 @@ function ConsoleLog({ events, endRef }: { events: ConsoleEvent[]; endRef: React.
         </div>
       ))}
       <div ref={endRef} />
+    </div>
+  );
+}
+
+function DirectoryPicker({
+  listing,
+  loading,
+  onOpen,
+  onSelect,
+  onClose,
+}: {
+  listing: DirectoryListing | null;
+  loading: boolean;
+  onOpen: (path: string) => void;
+  onSelect: (path: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="directory-picker">
+      <div className="directory-picker-header">
+        <div>
+          <strong>Workspace Folder</strong>
+          <span>{listing?.path ?? 'Loading directories...'}</span>
+        </div>
+        <button className="secondary-button" type="button" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="directory-actions">
+        {listing && (
+          <>
+            <button className="secondary-button" type="button" onClick={() => onOpen(listing.homePath)}>
+              Home
+            </button>
+            <button className="secondary-button" type="button" onClick={() => onOpen(listing.parentPath)}>
+              Up
+            </button>
+            <button className="primary-button" type="button" onClick={() => onSelect(listing.path)}>
+              Select Current
+            </button>
+          </>
+        )}
+      </div>
+      {loading ? (
+        <div className="empty">Loading directories...</div>
+      ) : listing && listing.entries.length > 0 ? (
+        <div className="directory-list">
+          {listing.entries.map(entry => (
+            <button key={entry.path} className="directory-row" type="button" onClick={() => onOpen(entry.path)}>
+              <span>{entry.name}</span>
+              <small>{entry.path}</small>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">No child folders</div>
+      )}
     </div>
   );
 }

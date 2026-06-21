@@ -313,6 +313,64 @@ textarea {
   padding: 12px;
 }
 
+.directory-picker {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #ded6cc;
+  border-radius: 8px;
+  background: #fffdf9;
+  padding: 12px;
+}
+
+.directory-picker-header,
+.directory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.directory-picker-header div {
+  min-width: 0;
+}
+
+.directory-picker-header strong,
+.directory-picker-header span,
+.directory-row span,
+.directory-row small {
+  display: block;
+}
+
+.directory-picker-header span,
+.directory-row small {
+  color: #7a7066;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.directory-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.directory-list {
+  display: grid;
+  max-height: 240px;
+  gap: 8px;
+  overflow: auto;
+}
+
+.directory-row {
+  width: 100%;
+  border: 1px solid #ded6cc;
+  border-radius: 8px;
+  background: #fffaf4;
+  color: #241f1b;
+  cursor: pointer;
+  padding: 9px 10px;
+  text-align: left;
+}
+
 .model-grid {
   display: grid;
   gap: 8px;

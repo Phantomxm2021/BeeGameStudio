@@ -11,6 +11,7 @@ import {
   ConsoleSessionManager,
   type ConsoleProcessFactory,
 } from './console/session-manager'
+import { listDirectories } from './filesystem/directories'
 
 type JsonObject = Record<string, unknown>
 
@@ -72,6 +73,14 @@ export function createAgentWorkflowApp(
 
   app.delete('/api/model-configs/:id', c => {
     return c.json({ deleted: deleteModelConfig(c.req.param('id')) })
+  })
+
+  app.get('/api/filesystem/directories', async c => {
+    try {
+      return c.json(await listDirectories(c.req.query('path')))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
   })
 
   app.get('/api/console/sessions', c => c.json(consoleSessions.list()))

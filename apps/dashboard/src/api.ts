@@ -48,6 +48,18 @@ export type ConsoleEvent = {
   createdAt: string
 }
 
+export type DirectoryEntry = {
+  name: string
+  path: string
+}
+
+export type DirectoryListing = {
+  path: string
+  parentPath: string
+  homePath: string
+  entries: DirectoryEntry[]
+}
+
 const ownerId = 'dashboard-local'
 
 export async function fetchModels(): Promise<ModelConfig[]> {
@@ -111,6 +123,13 @@ export async function stopConsoleSession(
   sessionId: string,
 ): Promise<ConsoleSession> {
   return apiPost(`/api/console/sessions/${sessionId}/stop`, {})
+}
+
+export async function fetchDirectories(
+  path?: string,
+): Promise<DirectoryListing> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : ''
+  return apiGet(`/api/filesystem/directories${query}`)
 }
 
 async function apiGet<T>(path: string): Promise<T> {
