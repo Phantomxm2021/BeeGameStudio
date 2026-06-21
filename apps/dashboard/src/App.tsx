@@ -60,13 +60,23 @@ export function App() {
     [sessions, selectedSessionId],
   );
 
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort((a, b) => {
+        if (a.status === 'running' && b.status !== 'running') return -1;
+        if (a.status !== 'running' && b.status === 'running') return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }),
+    [sessions],
+  );
+
   const loadDashboard = useCallback(async () => {
     setError(null);
     try {
       const [nextModels, nextSessions] = await Promise.all([fetchModels(), fetchConsoleSessions()]);
       setModels(nextModels);
       setSessions(nextSessions);
-      setSelectedSessionId(current => current ?? nextSessions[0]?.id ?? null);
+      setSelectedSessionId(current => selectPreferredSession(nextSessions, current));
       setSessionForm(current => ({
         ...current,
         modelConfigId:
@@ -289,7 +299,7 @@ export function App() {
             {sessions.length === 0 ? (
               <div className="empty">No sessions yet</div>
             ) : (
-              sessions.map(session => (
+              sortedSessions.map(session => (
                 <button
                   key={session.id}
                   className={`project-item ${session.id === selectedSessionId ? 'active' : ''}`}
@@ -398,7 +408,6 @@ export function App() {
             <div className="prompt-box">
               <textarea
                 value={prompt}
-                disabled={!selectedSession || selectedSession.status !== 'running'}
                 onChange={event => setPrompt(event.target.value)}
                 placeholder="Type the same request you would type in the terminal..."
                 onKeyDown={event => {
@@ -444,6 +453,19 @@ function PanelTitle({ title, detail }: { title: string; detail: string }) {
       <span>{detail}</span>
     </div>
   );
+}
+
+function selectPreferredSession(sessions: ConsoleSession[], currentId: string | null): string | null {
+  const current = sessions.find(session => session.id === currentId);
+  if (current?.status === 'running') return current.id;
+
+  const running = [...sessions]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .find(session => session.status === 'running');
+  if (running) return running.id;
+  if (current) return current.id;
+
+  return [...sessions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id ?? null;
 }
 
 function ConsoleLog({ events, endRef }: { events: ConsoleEvent[]; endRef: React.RefObject<HTMLDivElement | null> }) {
