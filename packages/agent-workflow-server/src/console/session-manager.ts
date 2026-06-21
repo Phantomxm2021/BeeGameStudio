@@ -38,6 +38,7 @@ export type ConsoleSession = {
 export type ConsoleProcessStartInput = {
   cwd: string
   env: Record<string, string>
+  prompt: string
   onOutput(source: 'stdout' | 'stderr', text: string): void
   onExit(exitCode: number | null): void
 }
@@ -53,9 +54,10 @@ export type ConsoleProcessFactory = (
 
 type SessionRecord = {
   session: ConsoleSession
-  process: ConsoleProcess
+  activeProcess: ConsoleProcess | null
   events: ConsoleEvent[]
   nextEventId: number
+  runtime: RuntimeModelConfig | undefined
 }
 
 export type StartConsoleSessionInput = {
@@ -94,37 +96,17 @@ export class ConsoleSessionManager {
 
     const record: SessionRecord = {
       session,
-      process: nullProcess,
+      activeProcess: null,
       events: [],
       nextEventId: 1,
+      runtime,
     }
     this.sessions.set(session.id, record)
-    this.append(record, 'session.started', `Started Claude Code in ${cwd}`)
-
-    try {
-      record.process = this.processFactory({
-        cwd,
-        env: buildRuntimeEnv(runtime),
-        onOutput: (source, text) => {
-          this.append(record, source, text)
-        },
-        onExit: exitCode => {
-          if (record.session.status === 'stopped') return
-          record.session.status = exitCode === 0 ? 'exited' : 'failed'
-          record.session.exitCode = exitCode
-          record.session.updatedAt = new Date()
-          this.append(
-            record,
-            exitCode === 0 ? 'session.exited' : 'session.failed',
-            `Claude Code exited with code ${exitCode ?? 'unknown'}`,
-          )
-        },
-      })
-    } catch (err) {
-      record.session.status = 'failed'
-      record.session.updatedAt = new Date()
-      this.append(record, 'session.failed', toErrorMessage(err))
-    }
+    this.append(
+      record,
+      'session.started',
+      `Created Claude Code session in ${cwd}`,
+    )
 
     return cloneSession(record.session)
   }
@@ -154,8 +136,30 @@ export class ConsoleSessionManager {
     if (record.session.status !== 'running') {
       throw new Error('Session is not running')
     }
-    await record.process.write(text)
     this.append(record, 'input', text)
+    try {
+      const process = this.processFactory({
+        cwd: record.session.cwd,
+        env: buildRuntimeEnv(record.runtime),
+        prompt: text,
+        onOutput: (source, output) => {
+          this.append(record, source, output)
+        },
+        onExit: exitCode => {
+          record.activeProcess = null
+          record.session.exitCode = exitCode
+          record.session.updatedAt = new Date()
+          this.append(
+            record,
+            exitCode === 0 ? 'session.exited' : 'session.failed',
+            `Claude Code request exited with code ${exitCode ?? 'unknown'}`,
+          )
+        },
+      })
+      record.activeProcess = process
+    } catch (err) {
+      this.append(record, 'session.failed', toErrorMessage(err))
+    }
     record.session.updatedAt = new Date()
     return cloneSession(record.session)
   }
@@ -164,7 +168,7 @@ export class ConsoleSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status === 'running') {
-      record.process.stop()
+      record.activeProcess?.stop()
       record.session.status = 'stopped'
       record.session.updatedAt = new Date()
       this.append(record, 'session.stopped', 'Claude Code session stopped')
@@ -189,16 +193,11 @@ export class ConsoleSessionManager {
   }
 }
 
-const nullProcess: ConsoleProcess = {
-  write() {},
-  stop() {},
-}
-
 export function createDefaultConsoleProcess(
   input: ConsoleProcessStartInput,
 ): ConsoleProcess {
   const child = Bun.spawn({
-    cmd: getConsoleCommand(),
+    cmd: getConsoleCommand(input.prompt),
     cwd: input.cwd,
     env: {
       ...process.env,
@@ -215,17 +214,14 @@ export function createDefaultConsoleProcess(
   void child.exited.then(exitCode => input.onExit(exitCode))
 
   return {
-    write(text: string) {
-      child.stdin.write(text)
-      child.stdin.flush()
-    },
+    write() {},
     stop() {
       child.kill()
     },
   }
 }
 
-function getConsoleCommand(): string[] {
+function getConsoleCommand(prompt: string): string[] {
   const configured = process.env.CLAUDE_CODE_DASHBOARD_COMMAND
   if (configured) {
     const parsed = JSON.parse(configured) as unknown
@@ -237,19 +233,20 @@ function getConsoleCommand(): string[] {
     }
     throw new Error('CLAUDE_CODE_DASHBOARD_COMMAND must be a JSON string array')
   }
-  return getDefaultConsoleCommandForTesting()
+  return getDefaultConsoleCommandForTesting(prompt)
 }
 
 function getRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../../../../')
 }
 
-export function getDefaultConsoleCommandForTesting(): string[] {
+export function getDefaultConsoleCommandForTesting(prompt = ''): string[] {
   return [
     process.execPath,
     'run',
     join(getRepoRoot(), 'src/entrypoints/cli.tsx'),
     '-p',
+    prompt,
   ]
 }
 

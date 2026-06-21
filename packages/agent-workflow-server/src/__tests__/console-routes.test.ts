@@ -41,15 +41,12 @@ describe('console session routes', () => {
     resetAgentWorkflow()
   })
 
-  test('starts a Claude Code console session with model env', async () => {
+  test('creates a dashboard session without spawning Claude Code immediately', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'cc-console-'))
     const starts: ConsoleProcessStartInput[] = []
-    const processes: FakeConsoleProcess[] = []
     const processFactory: ConsoleProcessFactory = input => {
       starts.push(input)
-      const process = new FakeConsoleProcess()
-      processes.push(process)
-      return process
+      return new FakeConsoleProcess()
     }
     const app = createAgentWorkflowApp({ processFactory })
     const model = createModelConfig('dashboard-local', {
@@ -73,17 +70,7 @@ describe('console session routes', () => {
       expect(res.status).toBe(200)
       const session = await res.json()
       expect(session.status).toBe('running')
-      expect(starts).toEqual([
-        expect.objectContaining({
-          cwd: workspace,
-          env: expect.objectContaining({
-            CLAUDE_CODE_USE_OPENAI: '1',
-            OPENAI_API_KEY: 'sk-dashboard-secret',
-            OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
-          }),
-        }),
-      ])
-      expect(processes).toHaveLength(1)
+      expect(starts).toHaveLength(0)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -111,11 +98,13 @@ describe('console session routes', () => {
     expect(starts).toHaveLength(0)
   })
 
-  test('sends input and returns output events', async () => {
+  test('sends input by spawning a print-mode Claude Code request', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'cc-console-'))
+    const starts: ConsoleProcessStartInput[] = []
     const processes: FakeConsoleProcess[] = []
     const app = createAgentWorkflowApp({
       processFactory: input => {
+        starts.push(input)
         const process = new FakeConsoleProcess()
         process.onOutput = input.onOutput
         process.onExit = input.onExit
@@ -141,9 +130,17 @@ describe('console session routes', () => {
       )
       const process = processes[0]
       process.emit('stdout', 'Claude Code response\n')
+      process.exit(0)
 
       expect(inputRes.status).toBe(200)
-      expect(process.writes).toEqual(['Build a tiny puzzle game.'])
+      expect(process.writes).toEqual([])
+      expect(starts).toEqual([
+        expect.objectContaining({
+          cwd: workspace,
+          prompt: 'Build a tiny puzzle game.',
+          env: expect.any(Object),
+        }),
+      ])
 
       const eventsRes = await app.request(
         `/api/console/sessions/${session.id}/events`,
@@ -154,8 +151,9 @@ describe('console session routes', () => {
         'session.started',
         'input',
         'stdout',
+        'session.exited',
       ])
-      expect(events.at(-1)).toEqual(
+      expect(events.at(-2)).toEqual(
         expect.objectContaining({ text: 'Claude Code response\n' }),
       )
     } finally {
@@ -182,6 +180,11 @@ describe('console session routes', () => {
         body: JSON.stringify({ workspacePath: workspace }),
       })
       const session = await sessionRes.json()
+      await app.request(`/api/console/sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a tiny puzzle game.' }),
+      })
 
       const stopRes = await app.request(
         `/api/console/sessions/${session.id}/stop`,
