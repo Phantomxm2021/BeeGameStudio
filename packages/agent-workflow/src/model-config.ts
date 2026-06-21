@@ -53,10 +53,53 @@ type StoredModelConfig = Omit<PublicModelConfig, 'apiKeyPreview' | 'apiKey'> & {
   apiKey: string
 }
 
+export type ModelConfigSnapshotRecord = Omit<
+  StoredModelConfig,
+  'createdAt' | 'updatedAt'
+> & {
+  createdAt: string
+  updatedAt: string
+}
+
 const configs = new Map<string, StoredModelConfig>()
 
 export function resetModelConfigs(): void {
   configs.clear()
+}
+
+export function exportModelConfigSnapshot(): ModelConfigSnapshotRecord[] {
+  return [...configs.values()].map(config => ({
+    id: config.id,
+    ownerId: config.ownerId,
+    name: config.name,
+    provider: config.provider,
+    ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+    apiKey: config.apiKey,
+    models: { ...config.models },
+    isDefault: config.isDefault,
+    createdAt: config.createdAt.toISOString(),
+    updatedAt: config.updatedAt.toISOString(),
+  }))
+}
+
+export function importModelConfigSnapshot(
+  snapshot: ModelConfigSnapshotRecord[],
+): void {
+  configs.clear()
+  for (const config of snapshot) {
+    configs.set(config.id, {
+      id: config.id,
+      ownerId: config.ownerId,
+      name: config.name,
+      provider: config.provider,
+      ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+      apiKey: config.apiKey,
+      models: { ...config.models },
+      isDefault: config.isDefault,
+      createdAt: new Date(config.createdAt),
+      updatedAt: new Date(config.updatedAt),
+    })
+  }
 }
 
 export function createModelConfig(

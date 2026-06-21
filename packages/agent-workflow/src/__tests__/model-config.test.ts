@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import {
   createModelConfig,
   deleteModelConfig,
+  exportModelConfigSnapshot,
+  importModelConfigSnapshot,
   listModelConfigs,
   mapModelConfigToRuntime,
   resetAgentWorkflow,
@@ -94,5 +96,36 @@ describe('agent workflow model configs', () => {
     )
     expect(deleteModelConfig(config.id)).toBe(true)
     expect(listModelConfigs('owner-a')).toEqual([])
+  })
+
+  test('exports and imports model configs with runtime secrets intact', () => {
+    const config = createModelConfig('owner-a', {
+      name: 'Persisted',
+      provider: 'openai-compatible',
+      baseUrl: 'https://llm.example.invalid/v1',
+      apiKey: 'persisted-secret',
+      models: { balanced: 'balanced-model' },
+      isDefault: true,
+    })
+
+    const snapshot = exportModelConfigSnapshot()
+    resetAgentWorkflow()
+    importModelConfigSnapshot(snapshot)
+
+    expect(listModelConfigs('owner-a')).toEqual([
+      expect.objectContaining({
+        id: config.id,
+        name: 'Persisted',
+        apiKeyPreview: 'pers...cret',
+        isDefault: true,
+      }),
+    ])
+    expect(mapModelConfigToRuntime(config.id)).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENAI_API_KEY: 'persisted-secret',
+        }),
+      }),
+    )
   })
 })

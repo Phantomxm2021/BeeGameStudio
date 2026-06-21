@@ -8,7 +8,7 @@ if (import.meta.main) {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port,
-    fetch: createAgentWorkflowApp().fetch,
+    fetch: createAgentWorkflowApp({ modelConfigStore: {} }).fetch,
   })
   console.log(
     `Agent workflow server listening on http://127.0.0.1:${server.port}`,

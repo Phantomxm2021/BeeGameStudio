@@ -12,11 +12,17 @@ import {
   type ConsoleProcessFactory,
 } from './console/session-manager'
 import { listDirectories } from './filesystem/directories'
+import {
+  loadModelConfigsFromStore,
+  saveModelConfigsToStore,
+  type ModelConfigStoreOptions,
+} from './model-config-store'
 
 type JsonObject = Record<string, unknown>
 
 export type AgentWorkflowAppOptions = {
   processFactory?: ConsoleProcessFactory
+  modelConfigStore?: ModelConfigStoreOptions | false
 }
 
 export function createAgentWorkflowApp(
@@ -24,6 +30,10 @@ export function createAgentWorkflowApp(
 ): Hono {
   const app = new Hono()
   const consoleSessions = new ConsoleSessionManager(options.processFactory)
+  const modelConfigStore = options.modelConfigStore
+  if (modelConfigStore !== false && modelConfigStore !== undefined) {
+    loadModelConfigsFromStore(modelConfigStore)
+  }
 
   app.use('/api/*', cors())
 
@@ -38,18 +48,18 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
 
-    return c.json(
-      createModelConfig(getOwnerId(c.req.query('ownerId')), {
-        name: String(body.name),
-        provider: body.provider as ModelProviderKind,
-        ...(typeof body.baseUrl === 'string' && body.baseUrl
-          ? { baseUrl: body.baseUrl }
-          : {}),
-        apiKey: String(body.apiKey),
-        models: toModelMap(body.models),
-        isDefault: body.isDefault === true,
-      }),
-    )
+    const created = createModelConfig(getOwnerId(c.req.query('ownerId')), {
+      name: String(body.name),
+      provider: body.provider as ModelProviderKind,
+      ...(typeof body.baseUrl === 'string' && body.baseUrl
+        ? { baseUrl: body.baseUrl }
+        : {}),
+      apiKey: String(body.apiKey),
+      models: toModelMap(body.models),
+      isDefault: body.isDefault === true,
+    })
+    persistModelConfigs(modelConfigStore)
+    return c.json(created)
   })
 
   app.patch('/api/model-configs/:id', async c => {
@@ -66,13 +76,16 @@ export function createAgentWorkflowApp(
         ? { isDefault: body.isDefault }
         : {}),
     })
-    return updated
-      ? c.json(updated)
-      : c.json({ error: 'Config not found' }, 404)
+    if (!updated) return c.json({ error: 'Config not found' }, 404)
+
+    persistModelConfigs(modelConfigStore)
+    return c.json(updated)
   })
 
   app.delete('/api/model-configs/:id', c => {
-    return c.json({ deleted: deleteModelConfig(c.req.param('id')) })
+    const deleted = deleteModelConfig(c.req.param('id'))
+    if (deleted) persistModelConfigs(modelConfigStore)
+    return c.json({ deleted })
   })
 
   app.get('/api/filesystem/directories', async c => {
@@ -141,6 +154,14 @@ export function createAgentWorkflowApp(
   })
 
   return app
+}
+
+function persistModelConfigs(
+  modelConfigStore: ModelConfigStoreOptions | false | undefined,
+): void {
+  if (modelConfigStore !== false && modelConfigStore !== undefined) {
+    saveModelConfigsToStore(modelConfigStore)
+  }
 }
 
 function getOwnerId(ownerId: string | undefined): string {
