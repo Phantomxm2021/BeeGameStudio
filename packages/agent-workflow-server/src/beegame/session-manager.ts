@@ -61,10 +61,15 @@ const REQUIRED_DESIGN_PACK = [
     ],
   },
 ] as const
+const BUILD_REQUIRED_READ_DOCS = [
+  'BEEGAME_PLAYABLE_SPEC.md',
+  ...REQUIRED_DESIGN_PACK.map(doc => doc.path),
+] as const
 const BUILD_AFTER_PLAYABLE_SPEC_PROMPT = [
   'Now implement the approved playable spec inside the active BeeGame workspace.',
-  'Use ./BEEGAME_PLAYABLE_SPEC.md as the source of truth; read it if details are needed instead of relying on previous conversation history.',
-  'Use ./docs/GDD.md, ./docs/TECH_DESIGN.md, ./docs/ART_AUDIO_DIRECTION.md, ./docs/RESOURCE_PLACEHOLDERS.md, ./docs/LEVEL_TUNING.md, and ./docs/PLAYABILITY_ACCEPTANCE.md as mandatory product, technical, content, and QA contracts.',
+  'Before writing implementation files or running build commands, first read every mandatory design document in this workspace:',
+  ...BUILD_REQUIRED_READ_DOCS.map(path => `- ./${path}`),
+  'Treat those files as the source of truth instead of relying on previous conversation history.',
   'The current working directory is already the project workspace. Do not create another top-level folder with the same project name.',
   'Create implementation files under workspace-local implementation folders such as ./src, ./game, ./public, or another purpose-named folder only when needed.',
   'Implement the playable MVP from those contracts, run build checks, and fix issues before declaring completion.',
@@ -189,6 +194,7 @@ type SessionRecord = {
   rememberedPermissions: Set<string>
   rememberedPermissionTools: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
+  buildReadDocs: Set<string>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
@@ -255,6 +261,7 @@ export class BeeGameSessionManager {
       rememberedPermissions: new Set(),
       rememberedPermissionTools: new Set(),
       toolUses: new Map(),
+      buildReadDocs: new Set(),
       events: [],
       nextEventId: 1,
       nextTurnIndex: 1,
@@ -413,6 +420,7 @@ export class BeeGameSessionManager {
           }
           for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
             this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
+            recordBuildDocReadFromToolEvent(record, toolEvent.payload)
           }
         },
         requestPermission: request => this.requestPermission(record, request),
@@ -452,10 +460,24 @@ export class BeeGameSessionManager {
             }
             for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
               this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
+              recordBuildDocReadFromToolEvent(record, toolEvent.payload)
             }
           },
           requestPermission: request => this.requestPermission(record, request),
         })
+        const missingReadDocs = getMissingBuildReadDocs(record)
+        if (missingReadDocs.length > 0) {
+          this.append(record, 'workflow.blocked', [
+            'BeeGame build turn must read mandatory docs before completion.',
+            `Missing reads: ${missingReadDocs.join(', ')}.`,
+            'Start the build turn by reading those docs, then continue implementation from the documented contracts.',
+          ].join(' '), {
+            type: 'workflow.blocked',
+            phase: record.workflowPhase,
+            missingDocs: missingReadDocs,
+          })
+          return
+        }
       }
       if (!signal.aborted && record.session.status === 'running') {
         if (record.workflowPhase === 'building') {
@@ -577,13 +599,6 @@ export class BeeGameSessionManager {
       return {
         behavior: 'allow',
         message: 'Allowed for required BeeGame design pack output.',
-      }
-    }
-    if (record.workflowPhase === 'planning' && await hasPlayableSpecReady(record)) {
-      const designPackViolation = await getDesignPackViolation(record)
-      if (!designPackViolation) {
-        this.setWorkflowPhase(record, 'building')
-        this.appendVerificationRequired(record)
       }
     }
     const gameplayGateViolation =
@@ -1000,11 +1015,10 @@ async function getGameplayGateViolation(
 ): Promise<string | undefined> {
   if (!isImplementationTool(request.toolName)) return undefined
   if (isDesignPackMutationRequest(record, request)) return undefined
-  if (await hasPlayableSpecReady(record)) return undefined
   return [
-    `Playable Spec gate is not complete before ${request.toolName}.`,
-    `First produce the design pack under ./docs, including docs/PLAYABLE_SPEC.md and docs/PLAYABILITY_ACCEPTANCE.md, with the exact marker "${PLAYABLE_SPEC_READY_MARKER}".`,
-    'If you already drafted the spec in memory, write only those required docs first; do not start implementation files or Bash commands yet.',
+    `Planning phase is docs-only before ${request.toolName}.`,
+    `First produce the Playable Spec and required design pack under ./docs, including docs/PLAYABLE_SPEC.md and docs/PLAYABILITY_ACCEPTANCE.md, with the exact marker "${PLAYABLE_SPEC_READY_MARKER}".`,
+    'After the planning turn finishes, BeeGame will validate those docs and start a separate build turn.',
   ].join(' ')
 }
 
@@ -1041,6 +1055,29 @@ function isDesignPackMutationRequest(
   if (!artifactPath) return false
   const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
   return REQUIRED_DESIGN_PACK.some(doc => normalized === doc.path)
+}
+
+function recordBuildDocReadFromToolEvent(
+  record: SessionRecord,
+  payload: DashboardSDKMessage,
+): void {
+  if (record.workflowPhase !== 'building') return
+  if (getDashboardPayloadString(payload, 'toolName') !== 'Read') return
+  const input = getDashboardPayloadRecord(payload, 'input')
+  const artifactPath = getMutationArtifactPath(input)
+  if (!artifactPath) return
+  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
+  if (isBuildRequiredReadDoc(normalized)) {
+    record.buildReadDocs.add(normalized)
+  }
+}
+
+function getMissingBuildReadDocs(record: SessionRecord): string[] {
+  return BUILD_REQUIRED_READ_DOCS.filter(path => !record.buildReadDocs.has(path))
+}
+
+function isBuildRequiredReadDoc(path: string): path is typeof BUILD_REQUIRED_READ_DOCS[number] {
+  return BUILD_REQUIRED_READ_DOCS.some(requiredPath => requiredPath === path)
 }
 
 async function getDesignPackViolation(

@@ -30,7 +30,18 @@ type FakeRuntimeMode =
   | 'bash_before_playable_spec'
   | 'bash_after_playable_spec'
   | 'planning_then_build'
+  | 'planning_then_build_without_doc_reads'
+  | 'planning_then_permission'
+  | 'planning_then_permission_twice'
+  | 'planning_then_permission_different_tool'
+  | 'planning_docs_then_code_same_turn'
+  | 'planning_then_write_after_playable_spec'
+  | 'planning_then_write_after_playable_spec_file'
+  | 'planning_then_bash_after_playable_spec'
+  | 'planning_then_workspace_root_permission'
+  | 'build_without_doc_reads'
   | 'planning_marker_without_design_pack'
+  | 'build_with_doc_reads'
   | 'build_only'
 
 class FakeBeeGameRuntime {
@@ -52,7 +63,7 @@ class FakeBeeGameRuntime {
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     this.submits.push(input)
-    if (this.mode === 'planning_then_build') {
+    if (isTwoPhasePlanningMode(this.mode) && this.mode !== 'planning_docs_then_code_same_turn') {
       if (this.submits.length === 1) {
         await writeRequiredDesignPack(this.cwd, input)
         input.onMessage({
@@ -71,6 +82,40 @@ class FakeBeeGameRuntime {
         input.onMessage({ type: 'result', result: 'planning complete' })
         return
       }
+    }
+    if (this.mode === 'build_with_doc_reads') {
+      emitMandatoryDocReads(input)
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_build_write',
+        toolName: 'Write',
+        message: 'Write game files?',
+        input: {
+          file_path: 'snake-game/src/main.ts',
+          content: 'console.log("snake")',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `build ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'planning_docs_then_code_same_turn') {
+      await writeRequiredDesignPack(this.cwd, input)
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_same_turn_code_write',
+        toolName: 'Write',
+        message: 'Write code in the same planning turn?',
+        input: {
+          file_path: 'src/main.ts',
+          content: 'console.log("too early")',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `same turn code ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'build_without_doc_reads') {
+      input.onMessage({ type: 'result', result: 'build ended without reading docs' })
+      return
     }
     if (this.mode === 'planning_marker_without_design_pack') {
       input.onMessage({
@@ -429,6 +474,43 @@ async function writeRequiredDesignPack(
   }
 }
 
+function emitMandatoryDocReads(input: BeeGameSessionSubmitInput): void {
+  const paths = [
+    'BEEGAME_PLAYABLE_SPEC.md',
+    'docs/PLAYABLE_SPEC.md',
+    'docs/GDD.md',
+    'docs/TECH_DESIGN.md',
+    'docs/ART_AUDIO_DIRECTION.md',
+    'docs/RESOURCE_PLACEHOLDERS.md',
+    'docs/LEVEL_TUNING.md',
+    'docs/PLAYABILITY_ACCEPTANCE.md',
+  ]
+  for (const [index, path] of paths.entries()) {
+    const toolUseID = `tool_read_doc_${index}`
+    input.onMessage({
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: toolUseID,
+          name: 'Read',
+          input: { file_path: path },
+        }],
+      },
+    })
+    input.onMessage({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolUseID,
+          content: 'doc',
+        }],
+      },
+    })
+  }
+}
+
 function createFakeRunner(
   messages?: DashboardSDKMessage[],
   mode: FakeRuntimeMode = 'messages',
@@ -445,15 +527,44 @@ function createFakeRunner(
     runner: {
       async start(input) {
         starts.push(input)
-        const runtimeMode =
-          mode === 'planning_then_build' && runtimes.length > 0
-            ? 'build_only'
-            : mode
+        const runtimeMode = runtimes.length > 0
+          ? getSecondRuntimeMode(mode)
+          : mode
         const runtime = new FakeBeeGameRuntime(input.cwd, messages, runtimeMode)
         runtimes.push(runtime)
         return runtime
       },
     },
+  }
+}
+
+function isTwoPhasePlanningMode(mode: FakeRuntimeMode): boolean {
+  return getSecondRuntimeMode(mode) !== mode
+}
+
+function getSecondRuntimeMode(mode: FakeRuntimeMode): FakeRuntimeMode {
+  switch (mode) {
+    case 'planning_then_build':
+    case 'planning_docs_then_code_same_turn':
+      return 'build_with_doc_reads'
+    case 'planning_then_build_without_doc_reads':
+      return 'build_without_doc_reads'
+    case 'planning_then_permission':
+      return 'permission'
+    case 'planning_then_permission_twice':
+      return 'permission_twice'
+    case 'planning_then_permission_different_tool':
+      return 'permission_different_tool'
+    case 'planning_then_write_after_playable_spec':
+      return 'write_after_playable_spec'
+    case 'planning_then_write_after_playable_spec_file':
+      return 'write_after_playable_spec_file'
+    case 'planning_then_bash_after_playable_spec':
+      return 'bash_after_playable_spec'
+    case 'planning_then_workspace_root_permission':
+      return 'workspace_root_permission'
+    default:
+      return mode
   }
 }
 
@@ -1099,7 +1210,7 @@ describe('beegame session routes', () => {
 
   test('keeps a turn running until a dashboard permission is approved', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const fake = createFakeRunner(undefined, 'permission')
+    const fake = createFakeRunner(undefined, 'planning_then_permission')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/console/sessions', {
@@ -1141,7 +1252,7 @@ describe('beegame session routes', () => {
       )
 
       expect(resolveRes.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.permissionResults[0] === 'allow')
+      await waitFor(() => fake.runtimes[1]?.permissionResults[0] === 'allow')
       await waitFor(async () => {
         sessionStateRes = await app.request(
           `/api/console/sessions/${session.id}`,
@@ -1167,7 +1278,7 @@ describe('beegame session routes', () => {
 
   test('does not reuse remembered approval for a different Bash command', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const fake = createFakeRunner(undefined, 'permission_twice')
+    const fake = createFakeRunner(undefined, 'planning_then_permission_twice')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
@@ -1216,7 +1327,7 @@ describe('beegame session routes', () => {
             event.payload?.toolUseID === 'tool_2',
         )
       })
-      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow'])
 
       const eventsRes = await app.request(
         `/api/beegame-sessions/${session.id}/events`,
@@ -1241,7 +1352,7 @@ describe('beegame session routes', () => {
 
   test('trusts later in-workspace permissions after the first remembered allow', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
-    const fake = createFakeRunner(undefined, 'permission_different_tool')
+    const fake = createFakeRunner(undefined, 'planning_then_permission_different_tool')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -1281,8 +1392,8 @@ describe('beegame session routes', () => {
         },
       )
 
-      await waitFor(() => fake.runtimes[0]?.permissionResults.length === 2)
-      expect(fake.runtimes[0].permissionResults).toEqual(['allow', 'allow'])
+      await waitFor(() => fake.runtimes[1]?.permissionResults.length === 2)
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow', 'allow'])
 
       const eventsRes = await app.request(
         `/api/beegame-sessions/${session.id}/events`,
@@ -1455,6 +1566,116 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('blocks implementation writes in the same planning turn even after design docs are complete', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_docs_then_code_same_turn')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Plan then write code too early.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'workflow.blocked' &&
+            event.payload?.toolUseID === 'tool_same_turn_code_write',
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults.at(-1)).toBe('deny')
+      expect(fake.starts).toHaveLength(2)
+      expect(fake.runtimes[1].submits[0].prompt).toContain('Now implement the approved playable spec')
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('Planning phase is docs-only'),
+            payload: expect.objectContaining({
+              phase: 'planning',
+              blockedToolName: 'Write',
+              toolUseID: 'tool_same_turn_code_write',
+            }),
+          }),
+        ]),
+      )
+      await expect(stat(join(workspace, 'src', 'main.ts'))).rejects.toThrow()
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not complete the build turn until mandatory docs have been read', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_build_without_doc_reads')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build without reading docs.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; text: string }) =>
+            event.type === 'workflow.blocked' &&
+            event.text.includes('must read mandatory docs'),
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(events.some((event: { type: string }) => event.type === 'turn.completed')).toBe(false)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('must read mandatory docs'),
+            payload: expect.objectContaining({
+              phase: 'building',
+              missingDocs: expect.arrayContaining([
+                'docs/GDD.md',
+                'docs/TECH_DESIGN.md',
+                'docs/PLAYABILITY_ACCEPTANCE.md',
+              ]),
+            }),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('does not start implementation when planning marker is present but required design pack is missing', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'planning_marker_without_design_pack')
@@ -1513,7 +1734,7 @@ describe('beegame session routes', () => {
 
   test('allows normal file-write approval after the Playable Spec gate is complete', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
-    const fake = createFakeRunner(undefined, 'write_after_playable_spec')
+    const fake = createFakeRunner(undefined, 'planning_then_write_after_playable_spec')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -1544,7 +1765,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual([])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1632,7 +1853,7 @@ describe('beegame session routes', () => {
       ].join('\n'),
       'utf8',
     )
-    const fake = createFakeRunner(undefined, 'write_after_playable_spec_file')
+    const fake = createFakeRunner(undefined, 'planning_then_write_after_playable_spec_file')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -1663,7 +1884,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual([])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1731,7 +1952,7 @@ describe('beegame session routes', () => {
 
   test('allows normal Bash approval after the Playable Spec gate is complete', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const fake = createFakeRunner(undefined, 'bash_after_playable_spec')
+    const fake = createFakeRunner(undefined, 'planning_then_bash_after_playable_spec')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
@@ -1759,7 +1980,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual([])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1780,7 +2001,7 @@ describe('beegame session routes', () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'current-project')
     const existingProject = join(projectsRoot, 'existing-project')
-    const fake = createFakeRunner(undefined, 'workspace_root_permission')
+    const fake = createFakeRunner(undefined, 'planning_then_workspace_root_permission')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -1815,7 +2036,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual([])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
