@@ -1,5 +1,9 @@
 import { fileURLToPath } from 'url'
-import type { PublishDiagnosticsParams } from 'vscode-languageserver-protocol'
+import type {
+  Diagnostic,
+  MarkupContent,
+  PublishDiagnosticsParams,
+} from 'vscode-languageserver-protocol'
 import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
@@ -34,6 +38,11 @@ function mapLSPSeverity(
   }
 }
 
+function formatDiagnosticMessage(message: Diagnostic['message']): string {
+  if (typeof message === 'string') return message
+  return (message as MarkupContent).value
+}
+
 /**
  * Convert LSP diagnostics to Claude diagnostic format
  *
@@ -60,20 +69,10 @@ export function formatDiagnosticsForAttachment(
     uri = params.uri
   }
 
-  const diagnostics = params.diagnostics.map(
-    (diag: {
-      message: string
-      severity?: number
-      range: {
-        start: { line: number; character: number }
-        end: { line: number; character: number }
-      }
-      source?: string
-      code?: string | number
-    }) => ({
-      message: diag.message,
-      severity: mapLSPSeverity(diag.severity),
-      range: {
+  const diagnostics = params.diagnostics.map((diag: Diagnostic) => ({
+    message: formatDiagnosticMessage(diag.message),
+    severity: mapLSPSeverity(diag.severity),
+    range: {
         start: {
           line: diag.range.start.line,
           character: diag.range.start.character,

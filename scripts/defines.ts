@@ -59,8 +59,8 @@ export const DEFAULT_BUILD_FEATURES = [
   'DAEMON', // 守护进程模式，长驻 supervisor 管理后台 worker（非 GB 级主因）
   'ACP', // ACP 代理协议，支持外部 agent 接入
   'WORKFLOW_SCRIPTS', // 工作流脚本（.claude/workflows/ 中的 YAML/MD）
-  // 'HISTORY_SNIP', // 已禁用：snip 功能暂时关闭
-  // 'CONTEXT_COLLAPSE', // 已禁用：实现是空壳 stub，启用后会抑制 auto compact 导致上下文管理完全失效
+  'HISTORY_SNIP', // 手动上下文修剪：启用 SnipTool 与 /force-snip
+  'CONTEXT_COLLAPSE', // 上下文折叠 MVP：确定性消息级折叠，避免长会话无限增长
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出
   // 'FORK_SUBAGENT',            // 已禁用：通过 Agent tool 的特殊方式实现了等效功能，无需再开
   'KAIROS', // Kairos 定时任务系统核心
