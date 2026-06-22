@@ -145,6 +145,69 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('use the real package name @ant/ink');
   });
 
+  it('sends follow-up messages without repeating session policy blocks', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_followup',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_followup/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_followup',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_followup') {
+        return jsonResponse({
+          id: 'beegame_followup',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: '贪吃蛇',
+      root_path: '/tmp/beegame-projects',
+    });
+    await beeGameAdapter.sendMessage({
+      project_id: result.project.id,
+      content: '开始游戏后蛇没有吃食物也会变长，请修复。',
+    });
+
+    const inputBodies = fetchMock.mock.calls
+      .filter(([path, init]) => (
+        String(path) === '/api/beegame-sessions/beegame_followup/input' &&
+        init?.method === 'POST'
+      ))
+      .map(([, init]) => JSON.parse(String(init?.body ?? '{}')) as { text?: string });
+    const followUp = inputBodies[1]?.text || '';
+
+    expect(followUp).toBe('开始游戏后蛇没有吃食物也会变长，请修复。');
+    expect(followUp).not.toContain('Branding rule:');
+    expect(followUp).not.toContain('Workspace rule:');
+    expect(followUp).not.toContain('Response language:');
+  });
+
   it('keeps repeated tool calls as distinct chat messages', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

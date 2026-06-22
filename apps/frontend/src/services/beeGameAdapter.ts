@@ -227,7 +227,7 @@ export const beeGameAdapter = {
     client_message_id?: string;
   }): Promise<SendMessageResponse> {
     const session = await ensureProjectSession(data.project_id);
-    const prompt = buildWorkspaceScopedPrompt(data.content);
+    const prompt = data.content;
     rememberSentDisplayText(session.id, prompt, data.content);
     await sendBeeGameInput(session.id, prompt);
     return {
@@ -1045,18 +1045,6 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     'Do not start implementation until the Playable Spec is internally checked against the checklist.',
     'After implementation, run build checks and then self-review the playable result against the Playability Acceptance Checklist.',
   ].filter(Boolean).join('\n');
-}
-
-function buildWorkspaceScopedPrompt(text: string): string {
-  return [
-    text,
-    '',
-    getResponseLanguageInstruction(text),
-    '',
-    getBeeGameBrandInstruction(),
-    '',
-    'Workspace rule: use only the current working directory for all project files. Do not create, read, edit, or cd into paths outside the current working directory. If you create or modify game files, keep them inside this workspace.',
-  ].join('\n');
 }
 
 function getBeeGameBrandInstruction(): string {

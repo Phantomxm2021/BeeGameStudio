@@ -11,6 +11,7 @@ import {
 const PLAYABLE_SPEC_READY_MARKER = 'PLAYABLE_SPEC_READY: yes'
 const BUILD_AFTER_PLAYABLE_SPEC_PROMPT = [
   'Now implement the approved playable spec inside the active BeeGame workspace.',
+  'Use ./BEEGAME_PLAYABLE_SPEC.md as the source of truth; read it if details are needed instead of relying on previous conversation history.',
   'Create files only under a workspace-local game directory such as ./snake-game.',
   'Write the design artifacts into the project directory before code if they are useful.',
   'Then implement the playable MVP, run build checks, and self-review against the Playability Acceptance Checklist.',
@@ -345,7 +346,10 @@ export class BeeGameSessionManager {
       ) {
         await persistPlayableSpec(record)
         this.setWorkflowPhase(record, 'building')
-        await runner.submit({
+        runner.stop()
+        record.runner = null
+        const buildRunner = await this.ensureRunner(record)
+        await buildRunner.submit({
           prompt: BUILD_AFTER_PLAYABLE_SPEC_PROMPT,
           signal,
           onMessage: message => {

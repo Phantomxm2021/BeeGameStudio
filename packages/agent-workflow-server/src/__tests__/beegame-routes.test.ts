@@ -27,6 +27,7 @@ type FakeRuntimeMode =
   | 'bash_before_playable_spec'
   | 'bash_after_playable_spec'
   | 'planning_then_build'
+  | 'build_only'
 
 class FakeBeeGameRuntime {
   readonly submits: BeeGameSessionSubmitInput[] = []
@@ -64,6 +65,8 @@ class FakeBeeGameRuntime {
         input.onMessage({ type: 'result', result: 'planning complete' })
         return
       }
+    }
+    if (this.mode === 'build_only') {
       const decision = await input.requestPermission({
         toolUseID: 'tool_build_write',
         toolName: 'Write',
@@ -245,7 +248,11 @@ function createFakeRunner(
     runner: {
       async start(input) {
         starts.push(input)
-        const runtime = new FakeBeeGameRuntime(messages, mode)
+        const runtimeMode =
+          mode === 'planning_then_build' && runtimes.length > 0
+            ? 'build_only'
+            : mode
+        const runtime = new FakeBeeGameRuntime(messages, runtimeMode)
         runtimes.push(runtime)
         return runtime
       },
@@ -1066,10 +1073,13 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].submits.map(submit => submit.prompt)).toEqual([
+      expect(fake.runtimes.flatMap(runtime => runtime.submits.map(submit => submit.prompt))).toEqual([
         'First produce a Playable Spec for snake.',
         expect.stringContaining('Now implement the approved playable spec'),
       ])
+      expect(fake.starts).toHaveLength(2)
+      expect(fake.runtimes[1].submits[0].prompt).toContain('BEEGAME_PLAYABLE_SPEC.md')
+      expect(fake.runtimes[1].submits[0].prompt).not.toContain('Core Loop, Fun Hook, Skill Test')
       await expect(readFile(join(workspace, 'BEEGAME_PLAYABLE_SPEC.md'), 'utf8')).resolves.toContain(
         'PLAYABLE_SPEC_READY: yes',
       )
