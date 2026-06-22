@@ -93,7 +93,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('generates BeeGame intake options from the default model config', async () => {
+  test('analyzes BeeGame intake and returns game-mode options from the default model config', async () => {
     const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -120,12 +120,30 @@ describe('agent workflow server routes', () => {
           {
             message: {
               content: JSON.stringify({
+                maturity: 'vague',
+                needs_options: true,
+                needs_clarification: false,
+                detected_constraints: ['browser playable demo'],
+                recommended_next_step: 'choose_direction',
                 options: [
                   {
-                    id: 'web_tactics',
-                    title: 'Web 战术版',
-                    pitch: '先做浏览器可玩的战术原型。',
-                    gameplay: '用短局目标验证操作节奏。',
+                    id: 'llm_mode',
+                    title: 'LLM Mode',
+                    pitch: 'LLM generated pitch.',
+                    coreGameplayHypothesis: 'LLM generated hypothesis.',
+                    experienceSnapshot: 'LLM generated snapshot.',
+                    playerFirstMinute: 'LLM generated first minute.',
+                    whyFitsIdea: 'LLM generated fit.',
+                    playablePrototype: 'LLM generated playable build.',
+                    validationTarget: 'LLM generated validation target.',
+                    coreMechanic: 'LLM generated core mechanic.',
+                    firstBuild: 'LLM generated first build.',
+                    validationGoal: 'LLM generated validation goal.',
+                    risk: 'LLM generated risk.',
+                    fit: 'LLM generated fit.',
+                    firstPlayableValidation: 'LLM generated validation.',
+                    riskComplexity: 'LLM generated complexity.',
+                    gameplay: 'LLM generated gameplay rules.',
                     recommendedPlatform: 'Web',
                     recommendedDimension: '2D',
                     recommendedGenre: 'Strategy',
@@ -145,30 +163,441 @@ describe('agent workflow server routes', () => {
       const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ idea: '战术贪吃蛇' }),
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
       })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        options: [
-          expect.objectContaining({
-            id: 'web_tactics',
-            title: 'Web 战术版',
-            recommendedPlatform: 'Web',
-          }),
-        ],
+      const intake = await res.json()
+      expect(intake).toEqual({
+        maturity: 'vague',
+        needsOptions: true,
+        needsClarification: false,
+        clarificationQuestions: [],
+        detectedConstraints: ['browser playable demo'],
+        recommendedNextStep: 'choose_direction',
+        options: [expect.any(Object)],
       })
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_mode',
+        title: 'LLM Mode',
+        coreGameplayHypothesis: 'LLM generated hypothesis.',
+        playerFirstMinute: 'LLM generated first minute.',
+        whyFitsIdea: 'LLM generated fit.',
+        playablePrototype: 'LLM generated playable build.',
+        validationTarget: 'LLM generated validation target.',
+        fit: 'LLM generated fit.',
+        firstPlayableValidation: 'LLM generated validation.',
+        riskComplexity: 'LLM generated complexity.',
+        recommendedPlatform: 'Web',
+      }))
       expect(fetchCalls[0]?.url).toBe('https://llm.example.invalid/v1/chat/completions')
       expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
         model: 'balanced-model',
+        response_format: { type: 'json_object' },
       }))
       const requestBody = fetchCalls[0]?.body as { messages?: Array<{ role: string; content: string }> }
       const systemPrompt = requestBody.messages?.find(message => message.role === 'system')?.content || ''
-      expect(systemPrompt).toContain('Core Loop')
-      expect(systemPrompt).toContain('Fun Hook')
+      expect(systemPrompt).toContain('understand the game request before proposing game modes')
+      expect(systemPrompt).toContain('title must be a game mode name')
+      expect(systemPrompt).toContain('gameplay must explain the playable rules')
+      expect(systemPrompt).toContain('coreGameplayHypothesis')
+      expect(systemPrompt).toContain('whyFitsIdea')
+      expect(systemPrompt).toContain('playablePrototype')
+      expect(systemPrompt).toContain('validationTarget')
+      expect(systemPrompt).toContain('game mode')
       expect(systemPrompt).toContain('Risk/Reward')
       expect(systemPrompt).toContain('First 3 Minutes')
       expect(systemPrompt).toContain('MVP Acceptance')
+      expect(systemPrompt).toContain('maturity')
+      expect(systemPrompt).toContain('needs_options')
+      expect(systemPrompt).toContain('At least one option must stay faithful to the original idea')
+      expect(systemPrompt).toContain('Choose recommended metadata from these lists')
+      expect(systemPrompt).toContain('recommendedPlatform: Web, Unity, Godot, XR, Native')
+      expect(systemPrompt).toContain('recommendedDimension: 2D, 3D, Mixed')
+      expect(systemPrompt).toContain('recommendedInputs: Keyboard/mouse, Gamepad, Touch, Voice, Hand tracking XR')
+      expect(systemPrompt).toContain('Do not output Auto for recommended metadata')
+      expect(systemPrompt).not.toContain('prototype title')
+      expect(systemPrompt).not.toContain('playable prototype name')
+      expect(systemPrompt).not.toContain('FPS')
+      expect(systemPrompt).not.toContain('2D Arcade')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('accepts minimal LLM game-mode options and derives internal brief fields', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'directional',
+              needs_options: true,
+              needs_clarification: false,
+              recommended_next_step: 'choose_direction',
+              options: [
+                {
+                  id: 'llm_minimal_mode',
+                  title: 'LLM Minimal Mode',
+                  gameplay: 'LLM generated playable rules.',
+                  recommended_platform: 'Web',
+                  recommended_dimension: '2D',
+                  recommended_genre: 'Action',
+                  recommended_style: 'Minimal',
+                  recommended_inputs: ['Keyboard/mouse'],
+                  scope: 'Playable demo',
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_minimal_mode',
+        title: 'LLM Minimal Mode',
+        gameplay: 'LLM generated playable rules.',
+        pitch: 'LLM generated playable rules.',
+        coreGameplayHypothesis: 'LLM generated playable rules.',
+        playablePrototype: 'LLM generated playable rules.',
+        recommendedPlatform: 'Web',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Action',
+        recommendedStyle: 'Minimal',
+        recommendedInputs: ['Keyboard/mouse'],
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('accepts OpenAI-compatible content arrays for intake options', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  maturity: 'directional',
+                  needs_options: true,
+                  needs_clarification: false,
+                  recommended_next_step: 'choose_direction',
+                  options: [
+                    {
+                      id: 'llm_content_array_mode',
+                      title: 'LLM Content Array Mode',
+                      gameplay: 'LLM generated playable rules from content array.',
+                      recommended_platform: 'Web',
+                      recommended_dimension: '2D',
+                      recommended_genre: 'Action',
+                      recommended_style: 'Minimal',
+                      recommended_inputs: ['Keyboard/mouse'],
+                      scope: 'Playable demo',
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_content_array_mode',
+        title: 'LLM Content Array Mode',
+        gameplay: 'LLM generated playable rules from content array.',
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('accepts LLM metadata strings or arrays without dropping valid game modes', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              options: [
+                {
+                  id: 'llm_array_metadata_mode',
+                  title: 'LLM Array Metadata Mode',
+                  gameplay: 'LLM generated playable rules with array metadata.',
+                  recommendedPlatform: ['PC', 'Mobile'],
+                  recommendedDimension: '2.5D',
+                  recommendedGenre: 'STG',
+                  recommendedStyle: 'Vector',
+                  recommendedInputs: ['Keyboard/mouse', 'Touch'],
+                  scope: 'Playable demo',
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_array_metadata_mode',
+        recommendedPlatform: 'PC, Mobile',
+        recommendedDimension: '2.5D',
+        recommendedGenre: 'STG',
+        recommendedStyle: 'Vector',
+        recommendedInputs: ['Keyboard/mouse', 'Touch'],
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('does not reject otherwise valid intake options when optional inputs are omitted', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'directional',
+              needs_options: true,
+              options: [
+                {
+                  id: 'llm_no_inputs_mode',
+                  title: 'LLM No Inputs Mode',
+                  gameplay: 'LLM generated playable rules without input metadata.',
+                  recommendedPlatform: 'Web',
+                  recommendedDimension: '2D',
+                  recommendedGenre: 'Action',
+                  recommendedStyle: 'Minimal',
+                  scope: 'Playable demo',
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_no_inputs_mode',
+        recommendedInputs: [],
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('extracts the first complete JSON object from prose-wrapped model output', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const modelJson = JSON.stringify({
+      maturity: 'directional',
+      needs_options: true,
+      options: [
+        {
+          id: 'llm_wrapped_mode',
+          title: 'LLM Wrapped Mode',
+          gameplay: 'LLM generated playable rules from wrapped output.',
+          recommendedPlatform: 'Web',
+          recommendedDimension: '2D',
+          recommendedGenre: 'Action',
+          recommendedStyle: 'Minimal',
+          scope: 'Playable demo',
+        },
+      ],
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: `这里是模型的说明：\n${modelJson}\n补充说明里的 {中文内容} 不应该进入 JSON 解析。`,
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'llm_wrapped_mode',
+        title: 'LLM Wrapped Mode',
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('accepts game-mode options with only title and gameplay', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              options: [
+                {
+                  title: 'LLM Lean Mode',
+                  gameplay: 'LLM generated playable rules without metadata.',
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'mode_1',
+        title: 'LLM Lean Mode',
+        gameplay: 'LLM generated playable rules without metadata.',
+        recommendedPlatform: '',
+        recommendedDimension: '',
+        recommendedGenre: '',
+        recommendedStyle: '',
+        recommendedInputs: [],
+        scope: '',
+      }))
     } finally {
       globalThis.fetch = originalFetch
     }

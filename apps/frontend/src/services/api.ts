@@ -144,6 +144,19 @@ export interface ContextVisibilityPayload {
   memory_hits?: number;
   rag_sources?: string[];
   selected_skills?: string[];
+  runtime_features?: Array<{
+    id?: string;
+    label?: string;
+    stage?: string;
+    status?: string;
+  }>;
+  token_budget?: {
+    status?: string;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  counters?: Record<string, number>;
 }
 
 export interface BuildReportCheckPayload {

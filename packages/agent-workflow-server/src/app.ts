@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { realpath, rm } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import {
   createModelConfig,
@@ -12,6 +13,7 @@ import {
 import {
   BeeGameSessionManager,
   deleteSessionArtifactsFromTranscript,
+  readSessionTranscriptFromDisk,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
 import { listDirectories } from './filesystem/directories'
@@ -29,12 +31,35 @@ type BeeGameIntakeOption = {
   title: string
   pitch: string
   gameplay: string
+  coreGameplayHypothesis: string
+  experienceSnapshot: string
+  playerFirstMinute: string
+  whyFitsIdea: string
+  playablePrototype: string
+  validationTarget: string
+  coreMechanic: string
+  firstBuild: string
+  validationGoal: string
+  risk: string
+  fit: string
+  firstPlayableValidation: string
+  riskComplexity: string
   recommendedPlatform: string
   recommendedDimension: string
   recommendedGenre: string
   recommendedStyle: string
   recommendedInputs: string[]
   scope: string
+}
+
+type BeeGameIntakeAnalysis = {
+  maturity: 'vague' | 'directional' | 'concrete'
+  needsOptions: boolean
+  needsClarification: boolean
+  clarificationQuestions: string[]
+  detectedConstraints: string[]
+  recommendedNextStep: string
+  options: BeeGameIntakeOption[]
 }
 
 export type AgentWorkflowAppOptions = {
@@ -47,7 +72,11 @@ export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
   const app = new Hono()
-  const beeGameSessions = new BeeGameSessionManager(options.sessionRunner)
+  const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
+  const beeGameSessions = new BeeGameSessionManager(
+    options.sessionRunner,
+    dashboardDataRoot,
+  )
   const modelConfigStore = options.modelConfigStore
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     loadModelConfigsFromStore(modelConfigStore)
@@ -132,12 +161,12 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     try {
       return c.json({
-        options: await generateBeeGameIntakeOptions({
+        ...(await generateBeeGameIntakeOptions({
           idea: String(body.idea),
           ownerId: getOwnerId(c.req.query('ownerId')),
           modelConfigId:
             typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
-        }),
+        })),
       })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -164,7 +193,7 @@ async function generateBeeGameIntakeOptions(input: {
   idea: string
   ownerId: string
   modelConfigId?: string
-}): Promise<BeeGameIntakeOption[]> {
+}): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
     listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
@@ -193,14 +222,44 @@ async function generateBeeGameIntakeOptions(input: {
     body: JSON.stringify({
       model,
       temperature: 0.7,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
           content: [
             'You are BeeGame intake planner.',
-            'Return only JSON with an options array of 2 to 4 game direction objects.',
-            'Each object must include id, title, pitch, gameplay, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
-            'Every option must be gameplay-first, not implementation-first.',
+            'First understand the game request before proposing game modes. The options are playable game modes, not project management delivery strategies.',
+            'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
+            'maturity must be one of vague, directional, concrete.',
+            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 4 directions.',
+            'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, core loop, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
+            'Set needs_clarification=true only when a blocking contradiction or missing decision prevents a useful recommendation.',
+            'Each option must include id, title, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+            'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
+            'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
+            'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
+            'Choose recommended metadata from these lists based on the full user request and game mode, not keyword matching.',
+            'recommendedPlatform: Web, Unity, Godot, XR, Native',
+            'recommendedDimension: 2D, 3D, Mixed',
+            'recommendedGenre: Arcade, Puzzle, Action, Adventure, Casual, Simulation, Strategy',
+            'recommendedStyle: Pixel, Cartoon, Minimal, Painterly, Sci-fi, Fantasy, Realistic',
+            'recommendedInputs: Keyboard/mouse, Gamepad, Touch, Voice, Hand tracking XR',
+            'Do not output Auto for recommended metadata.',
+            'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
+            'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
+            'playerFirstMinute must describe exactly what the player does in the first 60 seconds.',
+            'whyFitsIdea must explain how this game mode preserves the user request and constraints.',
+            'playablePrototype must describe the concrete first playable build for this mode, including scene/map, player actions, feedback, win/fail state, and what is omitted.',
+            'validationTarget must describe what demand, fun, control feel, clarity, or risk this game mode validates.',
+            'coreMechanic must name the main repeatable interaction or decision, not a production task.',
+            'firstBuild must describe the concrete first playable deliverable, including scene/map, player actions, feedback, win/fail state, and what is omitted.',
+            'validationGoal must describe what design assumption this playable validates.',
+            'risk must describe the largest gameplay or delivery risk in plain language.',
+            'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
+            'fit must explain why this direction suits the user idea.',
+            'firstPlayableValidation must explain what the first playable build validates.',
+            'riskComplexity must explain the main delivery risk and complexity level.',
+            'Avoid generic production strategy titles such as "faithful prototype", "core loop validation", or "high fidelity slice". Titles should name an actual game mode.',
             'For each option, make gameplay describe the Core Loop, Fun Hook, Skill Test, Risk/Reward, Failure Pressure, First 3 Minutes, and MVP Acceptance in concise language.',
             'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
             'Do not mention dashboard source paths, package paths, commands, or implementation directories.',
@@ -218,77 +277,238 @@ async function generateBeeGameIntakeOptions(input: {
     throw new Error(`Model intake request failed: ${response.status}`)
   }
   const payload = (await response.json()) as JsonObject
-  return parseBeeGameIntakeOptions(payload)
+  return parseBeeGameIntakeAnalysis(payload)
 }
 
-function parseBeeGameIntakeOptions(payload: JsonObject): BeeGameIntakeOption[] {
+function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis {
   const choices = Array.isArray(payload.choices) ? payload.choices : []
   const firstChoice = choices[0]
   const message =
     isObject(firstChoice) && isObject(firstChoice.message)
       ? firstChoice.message
       : undefined
-  const content = typeof message?.content === 'string' ? message.content : ''
+  const content = message ? extractMessageContentText(message) : ''
   const parsed = parseJsonObjectFromText(content)
   const options = Array.isArray(parsed.options) ? parsed.options : []
   const normalized: BeeGameIntakeOption[] = []
-  for (const option of options) {
-    const intakeOption = normalizeBeeGameIntakeOption(option)
+  const rejectedReasons: string[] = []
+  for (let index = 0; index < options.length; index += 1) {
+    const intakeOption = normalizeBeeGameIntakeOption(
+      options[index],
+      rejectedReasons,
+      index,
+    )
     if (intakeOption) normalized.push(intakeOption)
   }
   if (normalized.length === 0) {
-    throw new Error('Model intake response did not include valid options')
+    const keys = Object.keys(parsed).join(', ') || 'none'
+    const reason = rejectedReasons.slice(0, 3).join('; ')
+    throw new Error(
+      `Model intake response did not include valid options. Parsed keys: ${keys}${reason ? `. Rejected: ${reason}` : ''}`,
+    )
   }
-  return normalized.slice(0, 4)
+  const maturity = normalizeMaturity(parsed.maturity)
+  return {
+    maturity,
+    needsOptions: getBooleanField(parsed, 'needsOptions', 'needs_options') ?? maturity !== 'concrete',
+    needsClarification: getBooleanField(parsed, 'needsClarification', 'needs_clarification') ?? false,
+    clarificationQuestions: getStringArrayField(parsed, 'clarificationQuestions', 'clarification_questions'),
+    detectedConstraints: getStringArrayField(parsed, 'detectedConstraints', 'detected_constraints'),
+    recommendedNextStep: getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
+    options: normalized.slice(0, 4),
+  }
+}
+
+function extractMessageContentText(message: JsonObject): string {
+  const content = message.content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (!isObject(item)) return ''
+        const text = item.text ?? item.content
+        return typeof text === 'string' ? text : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  const parsed = message.parsed
+  if (isObject(parsed)) return JSON.stringify(parsed)
+  return ''
 }
 
 function normalizeBeeGameIntakeOption(
   value: unknown,
+  rejectedReasons?: string[],
+  optionIndex = 0,
 ): BeeGameIntakeOption | undefined {
-  if (!isObject(value)) return undefined
-  const inputs = Array.isArray(value.recommendedInputs)
-    ? value.recommendedInputs.map(item => String(item)).filter(Boolean)
-    : []
+  if (!isObject(value)) {
+    rejectedReasons?.push('option was not an object')
+    return undefined
+  }
+  const inputs = getStringArrayField(value, 'recommendedInputs', 'recommended_inputs')
+  const gameplay = String(value.gameplay || '').trim()
+  const pitch = String(value.pitch || '').trim() || gameplay
   const option = {
-    id: String(value.id || '').trim(),
+    id: String(value.id || '').trim() || `mode_${optionIndex + 1}`,
     title: String(value.title || '').trim(),
-    pitch: String(value.pitch || '').trim(),
-    gameplay: String(value.gameplay || '').trim(),
-    recommendedPlatform: String(value.recommendedPlatform || '').trim(),
-    recommendedDimension: String(value.recommendedDimension || '').trim(),
-    recommendedGenre: String(value.recommendedGenre || '').trim(),
-    recommendedStyle: String(value.recommendedStyle || '').trim(),
+    pitch,
+    gameplay,
+    coreGameplayHypothesis: getStringField(value, 'coreGameplayHypothesis', 'core_gameplay_hypothesis') || gameplay,
+    experienceSnapshot: getStringField(value, 'experienceSnapshot', 'experience_snapshot') || pitch,
+    playerFirstMinute: getStringField(value, 'playerFirstMinute', 'player_first_minute') || gameplay,
+    whyFitsIdea: getStringField(value, 'whyFitsIdea', 'why_fits_idea') || getStringField(value, 'fit') || pitch,
+    playablePrototype: getStringField(value, 'playablePrototype', 'playable_prototype') || getStringField(value, 'firstBuild', 'first_build') || getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
+    validationTarget: getStringField(value, 'validationTarget', 'validation_target') || getStringField(value, 'validationGoal', 'validation_goal') || getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
+    coreMechanic: getStringField(value, 'coreMechanic', 'core_mechanic') || getStringField(value, 'coreGameplayHypothesis', 'core_gameplay_hypothesis') || gameplay,
+    firstBuild: getStringField(value, 'firstBuild', 'first_build') || getStringField(value, 'playablePrototype', 'playable_prototype') || getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
+    validationGoal: getStringField(value, 'validationGoal', 'validation_goal') || getStringField(value, 'validationTarget', 'validation_target') || getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
+    risk: getStringField(value, 'risk') || getStringField(value, 'riskComplexity', 'risk_complexity') || 'Complexity depends on selected scope.',
+    fit: getStringField(value, 'fit') || pitch,
+    firstPlayableValidation: getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
+    riskComplexity: getStringField(value, 'riskComplexity', 'risk_complexity') || 'Complexity depends on selected scope.',
+    recommendedPlatform: getStringishField(value, 'recommendedPlatform', 'recommended_platform'),
+    recommendedDimension: getStringishField(value, 'recommendedDimension', 'recommended_dimension'),
+    recommendedGenre: getStringishField(value, 'recommendedGenre', 'recommended_genre'),
+    recommendedStyle: getStringishField(value, 'recommendedStyle', 'recommended_style'),
     recommendedInputs: inputs,
-    scope: String(value.scope || '').trim(),
+    scope: getStringishField(value, 'scope'),
   }
   if (
-    !option.id ||
     !option.title ||
-    !option.pitch ||
-    !option.gameplay ||
-    !option.recommendedPlatform ||
-    !option.recommendedDimension ||
-    !option.recommendedGenre ||
-    !option.recommendedStyle ||
-    option.recommendedInputs.length === 0 ||
-    !option.scope
+    !option.gameplay
   ) {
+    rejectedReasons?.push(
+      [
+        !option.title ? 'title' : '',
+        !option.gameplay ? 'gameplay' : '',
+      ].filter(Boolean).join(', '),
+    )
     return undefined
   }
   return option
+}
+
+function normalizeMaturity(value: unknown): 'vague' | 'directional' | 'concrete' {
+  return value === 'directional' || value === 'concrete' || value === 'vague'
+    ? value
+    : 'vague'
+}
+
+function getBooleanField(
+  value: JsonObject,
+  primary: string,
+  fallback?: string,
+): boolean | undefined {
+  const candidate = value[primary] ?? (fallback ? value[fallback] : undefined)
+  return typeof candidate === 'boolean' ? candidate : undefined
+}
+
+function getStringField(
+  value: JsonObject,
+  primary: string,
+  fallback?: string,
+): string {
+  const candidate = value[primary] ?? (fallback ? value[fallback] : undefined)
+  return typeof candidate === 'string' ? candidate.trim() : ''
+}
+
+function getStringishField(
+  value: JsonObject,
+  primary: string,
+  fallback?: string,
+): string {
+  const candidate = value[primary] ?? (fallback ? value[fallback] : undefined)
+  if (typeof candidate === 'string') return candidate.trim()
+  if (Array.isArray(candidate)) {
+    return candidate
+      .map(item => String(item).trim())
+      .filter(Boolean)
+      .join(', ')
+  }
+  return ''
+}
+
+function getStringArrayField(
+  value: JsonObject,
+  primary: string,
+  fallback?: string,
+): string[] {
+  const candidate = value[primary] ?? (fallback ? value[fallback] : undefined)
+  return Array.isArray(candidate)
+    ? candidate.map(item => String(item)).filter(Boolean)
+    : []
 }
 
 function parseJsonObjectFromText(text: string): JsonObject {
   try {
     return JSON.parse(text) as JsonObject
   } catch {
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start < 0 || end <= start) {
-      throw new Error('Model intake response was not JSON')
+    const fenced = extractFencedJson(text)
+    if (fenced) {
+      try {
+        return JSON.parse(fenced) as JsonObject
+      } catch {
+        // Fall through to balanced object scanning.
+      }
     }
-    return JSON.parse(text.slice(start, end + 1)) as JsonObject
+    const objectText = extractFirstBalancedJsonObject(text)
+    if (!objectText) throw new Error('Model intake response was not JSON')
+    try {
+      return JSON.parse(objectText) as JsonObject
+    } catch {
+      throw new Error('Model intake response was not valid JSON')
+    }
   }
+}
+
+function extractFencedJson(text: string): string | undefined {
+  const fenceStart = text.indexOf('```')
+  if (fenceStart < 0) return undefined
+  const contentStart = text.indexOf('\n', fenceStart)
+  if (contentStart < 0) return undefined
+  const fenceEnd = text.indexOf('```', contentStart + 1)
+  if (fenceEnd < 0) return undefined
+  return text.slice(contentStart + 1, fenceEnd).trim()
+}
+
+function extractFirstBalancedJsonObject(text: string): string | undefined {
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = inString
+        continue
+      }
+      if (char === '"') {
+        inString = !inString
+        continue
+      }
+      if (inString) continue
+      if (char === '{') depth += 1
+      if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          const candidate = text.slice(start, index + 1)
+          try {
+            JSON.parse(candidate)
+            return candidate
+          } catch {
+            break
+          }
+        }
+      }
+    }
+  }
+  return undefined
 }
 
 function joinApiPath(baseUrl: string, path: string): string {
@@ -345,6 +565,15 @@ function registerBeeGameSessionRoutes(
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
     } catch (err) {
+      const workspacePath = c.req.query('workspacePath')
+      if (toErrorMessage(err) === 'Session not found' && workspacePath) {
+        return readTranscriptFromWorkspace(
+          c.req.param('id'),
+          workspacePath,
+          defaultWorkspacePath,
+          getDashboardDataRoot(defaultWorkspacePath),
+        )
+      }
       return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
@@ -413,6 +642,7 @@ function registerBeeGameSessionRoutes(
 
   app.delete(`${basePath}/:id`, async c => {
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
+    const workspacePathQuery = c.req.query('workspacePath')
     try {
       return c.json(
         await beeGameSessions.delete(c.req.param('id'), {
@@ -422,15 +652,26 @@ function registerBeeGameSessionRoutes(
     } catch (err) {
       if (deleteArtifacts && toErrorMessage(err) === 'Session not found') {
         try {
-          const workspacePath = await getDefaultWorkspacePath({
-            defaultWorkspacePath,
-          })
+          const workspacePath = workspacePathQuery
+            ? await resolveSessionWorkspacePath(
+                workspacePathQuery,
+                defaultWorkspacePath,
+              )
+            : await getDefaultWorkspacePath({ defaultWorkspacePath })
+          const dashboardDataRoot = getDashboardDataRoot(defaultWorkspacePath)
+          const deletedArtifactPaths = await deleteSessionArtifactsFromTranscript(
+            c.req.param('id'),
+            workspacePath,
+            dashboardDataRoot,
+          ).catch((): string[] => [])
+          const deletedWorkspacePath = await deleteWorkspaceDirectoryIfSafe(
+            workspacePath,
+            dashboardDataRoot,
+          )
+          if (deletedWorkspacePath) deletedArtifactPaths.push(deletedWorkspacePath)
           return c.json({
             deleted: true,
-            deletedArtifactPaths: await deleteSessionArtifactsFromTranscript(
-              c.req.param('id'),
-              workspacePath,
-            ),
+            deletedArtifactPaths,
           })
         } catch (fallbackErr) {
           return c.json({ error: toErrorMessage(fallbackErr) }, 404)
@@ -439,6 +680,50 @@ function registerBeeGameSessionRoutes(
       return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
+}
+
+async function deleteWorkspaceDirectoryIfSafe(
+  workspacePath: string,
+  dashboardDataRoot: string,
+): Promise<string | undefined> {
+  const workspaceRoot = await realpath(resolve(workspacePath))
+  const dataRoot = await realpath(resolve(dashboardDataRoot))
+  if (workspaceRoot === dataRoot) return undefined
+  const rel = relative(dataRoot, workspaceRoot)
+  if (rel.startsWith('..') || isAbsolute(rel)) return undefined
+  await rm(workspaceRoot, { recursive: true, force: true })
+  return workspaceRoot
+}
+
+async function readTranscriptFromWorkspace(
+  sessionId: string,
+  workspacePath: string,
+  defaultWorkspacePath?: string,
+  dashboardDataRoot?: string,
+): Promise<Response> {
+  try {
+    const resolvedWorkspace = await resolveSessionWorkspacePath(
+      workspacePath,
+      defaultWorkspacePath,
+    )
+    return Response.json(
+      await readSessionTranscriptFromDisk(
+        sessionId,
+        resolvedWorkspace,
+        dashboardDataRoot,
+      ),
+    )
+  } catch (err) {
+    return Response.json({ error: toErrorMessage(err) }, { status: 404 })
+  }
+}
+
+function getDashboardDataRoot(defaultWorkspacePath?: string): string {
+  return resolve(
+    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
+      defaultWorkspacePath?.trim() ||
+      resolve(process.cwd(), 'Projects'),
+  )
 }
 
 async function resolveSessionWorkspacePath(
@@ -456,12 +741,17 @@ async function resolveSessionWorkspacePath(
   const defaultWorkspace = resolve(
     await getDefaultWorkspacePath({ defaultWorkspacePath }),
   )
-  if (!isInsideOrEqual(resolvedWorkspace, defaultWorkspace)) {
+  const canonicalWorkspace = canonicalizeWorkspaceCandidate(
+    resolvedWorkspace,
+    defaultWorkspace,
+    defaultWorkspacePath,
+  )
+  if (!isInsideOrEqual(canonicalWorkspace, defaultWorkspace)) {
     throw new Error(
       `Workspace path must stay inside the default Projects directory: ${defaultWorkspace}`,
     )
   }
-  return resolvedWorkspace
+  return canonicalWorkspace
 }
 
 function hasWorkspaceBoundary(defaultWorkspacePath?: string): boolean {
@@ -474,6 +764,24 @@ function hasWorkspaceBoundary(defaultWorkspacePath?: string): boolean {
 function isInsideOrEqual(candidate: string, root: string): boolean {
   const rel = relative(root, candidate)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function canonicalizeWorkspaceCandidate(
+  candidate: string,
+  canonicalRoot: string,
+  defaultWorkspacePath?: string,
+): string {
+  if (isInsideOrEqual(candidate, canonicalRoot)) return candidate
+  const configuredRoot = resolve(
+    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
+      defaultWorkspacePath?.trim() ||
+      resolve(process.cwd(), 'Projects'),
+  )
+  const rel = relative(configuredRoot, candidate)
+  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+    return resolve(canonicalRoot, rel)
+  }
+  return candidate
 }
 
 function persistModelConfigs(

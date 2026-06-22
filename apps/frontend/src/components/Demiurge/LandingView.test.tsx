@@ -9,6 +9,9 @@ const { analyzeIdeaIntake } = vi.hoisted(() => ({
 const { generateIntakeOptions } = vi.hoisted(() => ({
     generateIntakeOptions: vi.fn(),
 }));
+const { runIdeaIntake } = vi.hoisted(() => ({
+    runIdeaIntake: vi.fn(),
+}));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
 let mockProjects: Array<{ id: string; name: string; created_at: string }> = [];
@@ -38,6 +41,7 @@ vi.mock('../../services/api', () => ({
 vi.mock('../../services/beeGameAdapter', () => ({
     beeGameAdapter: {
         generateIntakeOptions,
+        runIdeaIntake,
     },
 }));
 
@@ -78,12 +82,25 @@ beforeEach(() => {
         clarification_suggestions: [],
     });
     generateIntakeOptions.mockReset();
-    generateIntakeOptions.mockResolvedValue([
+    const options = [
         {
-            id: 'classic_web',
-            title: '经典 Web 版',
-            pitch: '先做一个可玩的浏览器版本，突出清晰操作和即时反馈。',
-            gameplay: '玩家控制角色收集目标并避开失败条件。',
+            id: 'llm_mode_a',
+            title: 'LLM Mode A',
+            pitch: 'LLM generated pitch A.',
+            gameplay: 'LLM generated gameplay rules A.',
+            coreGameplayHypothesis: 'LLM generated hypothesis A.',
+            experienceSnapshot: 'LLM generated snapshot A.',
+            playerFirstMinute: 'LLM generated first minute A.',
+            whyFitsIdea: 'LLM generated fit A.',
+            playablePrototype: 'LLM generated first playable A.',
+            validationTarget: 'LLM generated validation target A.',
+            coreMechanic: 'LLM generated core mechanic A.',
+            firstBuild: 'LLM generated first build A.',
+            validationGoal: 'LLM generated validation goal A.',
+            risk: 'LLM generated risk A.',
+            fit: 'LLM generated fit A.',
+            firstPlayableValidation: 'LLM generated validation A.',
+            riskComplexity: 'LLM generated complexity A.',
             recommendedPlatform: 'Web',
             recommendedDimension: '2D',
             recommendedGenre: 'Arcade',
@@ -92,10 +109,23 @@ beforeEach(() => {
             scope: 'Playable demo',
         },
         {
-            id: 'progression_demo',
-            title: '成长演示版',
-            pitch: '在基础循环上增加成长和关卡节奏。',
-            gameplay: '玩家通过连续完成目标解锁变化。',
+            id: 'llm_mode_b',
+            title: 'LLM Mode B',
+            pitch: 'LLM generated pitch B.',
+            gameplay: 'LLM generated gameplay rules B.',
+            coreGameplayHypothesis: 'LLM generated hypothesis B.',
+            experienceSnapshot: 'LLM generated snapshot B.',
+            playerFirstMinute: 'LLM generated first minute B.',
+            whyFitsIdea: 'LLM generated fit B.',
+            playablePrototype: 'LLM generated first playable B.',
+            validationTarget: 'LLM generated validation target B.',
+            coreMechanic: 'LLM generated core mechanic B.',
+            firstBuild: 'LLM generated first build B.',
+            validationGoal: 'LLM generated validation goal B.',
+            risk: 'LLM generated risk B.',
+            fit: 'LLM generated fit B.',
+            firstPlayableValidation: 'LLM generated validation B.',
+            riskComplexity: 'LLM generated complexity B.',
             recommendedPlatform: 'Web',
             recommendedDimension: '2D',
             recommendedGenre: 'Casual',
@@ -103,7 +133,18 @@ beforeEach(() => {
             recommendedInputs: ['Keyboard/mouse'],
             scope: 'Vertical slice',
         },
-    ]);
+    ];
+    generateIntakeOptions.mockResolvedValue(options);
+    runIdeaIntake.mockReset();
+    runIdeaIntake.mockResolvedValue({
+        maturity: 'vague',
+        needsOptions: true,
+        needsClarification: false,
+        clarificationQuestions: [],
+        detectedConstraints: [],
+        recommendedNextStep: 'choose_direction',
+        options,
+    });
     mockProjects = [];
     mockDeleteProject.mockReset();
     mockSetActiveProject.mockReset();
@@ -117,20 +158,44 @@ describe('LandingView bootstrap submission', () => {
         renderLanding({ onStart });
 
         const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: '贪吃蛇 Web 像素风' } });
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
         expect(textbox).toBeDisabled();
-        await screen.findByText('经典 Web 版');
-        expect(screen.getByText('成长演示版')).toBeInTheDocument();
-        expect(generateIntakeOptions).toHaveBeenCalledWith({ idea: '贪吃蛇 Web 像素风' });
+        await screen.findByText('LLM Mode A');
+        expect(screen.getByText('LLM Mode B')).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea' });
         expect(onStart).not.toHaveBeenCalled();
         expect(analyzeIdeaIntake).not.toHaveBeenCalled();
     });
 
-    it('keeps the landing content visible while generating options', async () => {
+    it('shows generated intake options in a modal instead of embedding them into the landing page', async () => {
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        const dialog = await screen.findByRole('dialog', { name: '选择方案' });
+
+        expect(dialog).toContainElement(screen.getByTestId('intake-options'));
+        expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
+        expect(dialog).toContainElement(screen.getAllByText('游戏模式')[0]);
+        expect(dialog).toContainElement(screen.getAllByText('玩法')[0]);
+        expect(dialog).toContainElement(screen.getByText('LLM generated gameplay rules A.'));
+        expect(dialog).not.toHaveTextContent('AUTO');
+        expect(dialog).not.toHaveTextContent('核心假设');
+        expect(dialog).not.toHaveTextContent('第一分钟');
+        expect(dialog).not.toHaveTextContent('为什么适合');
+        expect(dialog).not.toHaveTextContent('首版原型');
+        expect(dialog).toHaveAttribute('data-intake-modal', 'true');
+        expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
+        expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
+    });
+
+    it('keeps the landing content visible without opening a modal while generating options', async () => {
         let resolveOptions: (value: Awaited<ReturnType<typeof generateIntakeOptions>>) => void = () => undefined;
-        generateIntakeOptions.mockReturnValue(new Promise((resolve) => {
+        runIdeaIntake.mockReturnValue(new Promise((resolve) => {
             resolveOptions = resolve;
         }));
         const onStart = vi.fn();
@@ -138,16 +203,74 @@ describe('LandingView bootstrap submission', () => {
         renderLanding({ onStart });
 
         const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: '贪吃蛇 Web 像素风' } });
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
         expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
         expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
+        expect(screen.queryByText('正在根据你的想法生成可选方案...')).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(textbox).toBeDisabled();
 
-        resolveOptions([]);
-        await waitFor(() => expect(generateIntakeOptions).toHaveBeenCalledTimes(1));
+        resolveOptions({
+            maturity: 'vague',
+            needsOptions: true,
+            needsClarification: false,
+            clarificationQuestions: [],
+            detectedConstraints: [],
+            recommendedNextStep: 'choose_direction',
+            options: [],
+        });
+        await waitFor(() => expect(runIdeaIntake).toHaveBeenCalledTimes(1));
         expect(onStart).not.toHaveBeenCalled();
+    });
+
+    it('skips direction selection for a concrete idea and opens settings with the recommended brief', async () => {
+        runIdeaIntake.mockResolvedValueOnce({
+            maturity: 'concrete',
+            needsOptions: false,
+            needsClarification: false,
+            clarificationQuestions: [],
+            detectedConstraints: ['LLM concrete constraint'],
+            recommendedNextStep: 'configure_details',
+            options: [
+                {
+                    id: 'llm_concrete_mode',
+                    title: 'LLM Concrete Mode',
+                    pitch: 'LLM concrete pitch.',
+                    gameplay: 'LLM concrete gameplay rules.',
+                    coreGameplayHypothesis: 'LLM concrete hypothesis.',
+                    experienceSnapshot: 'LLM concrete snapshot.',
+                    playerFirstMinute: 'LLM concrete first minute.',
+                    whyFitsIdea: 'LLM concrete fit.',
+                    playablePrototype: 'LLM concrete first playable.',
+                    validationTarget: 'LLM concrete validation target.',
+                    coreMechanic: 'LLM concrete core mechanic.',
+                    firstBuild: 'LLM concrete first build.',
+                    validationGoal: 'LLM concrete validation goal.',
+                    risk: 'LLM concrete risk.',
+                    fit: 'LLM concrete fit.',
+                    firstPlayableValidation: 'LLM concrete validation.',
+                    riskComplexity: 'LLM concrete complexity.',
+                    recommendedPlatform: 'Web',
+                    recommendedDimension: '3D',
+                    recommendedGenre: 'Action',
+                    recommendedStyle: 'Stylized',
+                    recommendedInputs: ['Keyboard/mouse'],
+                    scope: 'Playable demo',
+                },
+            ],
+        });
+
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM concrete idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        expect(await screen.findByRole('dialog', { name: 'LLM Concrete Mode' })).toBeInTheDocument();
+        expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+        expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
     });
 
     it('confirms an intake brief before starting the BeeGame session', async () => {
@@ -156,11 +279,13 @@ describe('LandingView bootstrap submission', () => {
         renderLanding({ onStart });
 
         const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: '城市经营游戏' } });
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-        fireEvent.click(await screen.findByRole('button', { name: /经典 Web 版/ }));
-        expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+        expect(screen.getByTestId('intake-settings')).toHaveAttribute('data-panel-depth', 'single');
+        expect(screen.getByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+        expect(screen.queryByText('补齐制作设置')).not.toBeInTheDocument();
 
         fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
@@ -177,8 +302,9 @@ describe('LandingView bootstrap submission', () => {
         const [, clarification, brief] = onStart.mock.calls[0];
         expect(clarification).toBeUndefined();
         expect(brief).toMatchObject({
-            idea: '城市经营游戏',
-            option: { id: 'classic_web', title: '经典 Web 版' },
+            idea: 'LLM generated idea',
+            title: 'LLM generated idea',
+            option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {
                 platform: 'Godot',
                 dimension: '3D',
@@ -265,7 +391,7 @@ describe('LandingView bootstrap submission', () => {
 
     it('opens a centered history modal with project list content', () => {
         mockProjects = [
-            { id: 'project-1', name: 'Classic Snake', created_at: '2026-04-20T00:00:00.000Z' },
+            { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
         ];
 
         renderLanding({ lang: 'zh' });
@@ -273,7 +399,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '历史项目' }));
 
         expect(screen.getByRole('dialog', { name: '历史项目' })).toBeInTheDocument();
-        expect(screen.getByText('Classic Snake')).toBeInTheDocument();
+        expect(screen.getByText('LLM Project')).toBeInTheDocument();
     });
 
     it('shows an empty state in the history modal', () => {

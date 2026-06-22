@@ -2,31 +2,357 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { beeGameAdapter } from './beeGameAdapter';
 
+const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
+  id: 'mode_from_llm',
+  title: 'Mode From LLM',
+  pitch: 'LLM generated pitch.',
+  gameplay: 'LLM generated playable rules.',
+  coreGameplayHypothesis: 'LLM generated hypothesis.',
+  experienceSnapshot: 'LLM generated snapshot.',
+  playerFirstMinute: 'LLM generated first minute.',
+  whyFitsIdea: 'LLM generated fit.',
+  playablePrototype: 'LLM generated first playable.',
+  validationTarget: 'LLM generated validation target.',
+  coreMechanic: 'LLM generated core mechanic.',
+  firstBuild: 'LLM generated first build.',
+  validationGoal: 'LLM generated validation goal.',
+  risk: 'LLM generated risk.',
+  fit: 'LLM generated fit.',
+  firstPlayableValidation: 'LLM generated validation.',
+  riskComplexity: 'LLM generated complexity.',
+  recommendedPlatform: 'Web',
+  recommendedDimension: '2D',
+  recommendedGenre: 'Action',
+  recommendedStyle: 'Minimal',
+  recommendedInputs: ['Keyboard/mouse'],
+  scope: 'Playable demo',
+  ...overrides,
+});
+
 describe('beeGameAdapter prompt rules', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
   });
 
-  it('falls back to path-safe intake options before creating a BeeGame session', async () => {
+  it('does not synthesize local game mode options when LLM intake fails', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'intake unavailable' }, 500));
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', fetchMock);
 
-    const options = await beeGameAdapter.generateIntakeOptions({ idea: '贪吃蛇' });
-
-    expect(options).toHaveLength(3);
-    expect(options[0]).toEqual(expect.objectContaining({
-      id: 'classic_web',
-      recommendedPlatform: 'Web',
-      recommendedDimension: '2D',
-    }));
-    expect(JSON.stringify(options)).not.toContain('apps/frontend');
-    expect(JSON.stringify(options)).not.toContain('apps/dashboard');
-    expect(JSON.stringify(options)).not.toContain('packages/');
+    await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
+      .rejects.toThrow('intake unavailable');
     expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/options?ownerId=dashboard-local', expect.objectContaining({
       method: 'POST',
     }));
+  });
+
+  it('normalizes BeeGame intake analysis with maturity and LLM-provided option fields', async () => {
+    const llmOption = makeLlmOption({
+      title: 'LLM Mode',
+      coreGameplayHypothesis: 'LLM hypothesis',
+      playerFirstMinute: 'LLM first minute',
+      whyFitsIdea: 'LLM fit',
+      playablePrototype: 'LLM first playable',
+      validationTarget: 'LLM validation target',
+      fit: 'LLM fit',
+      firstPlayableValidation: 'LLM validation',
+      riskComplexity: 'LLM complexity',
+    });
+    const fetchMock = vi.fn(async () => jsonResponse({
+      maturity: 'directional',
+      needsOptions: true,
+      needsClarification: false,
+      detectedConstraints: ['LLM constraint'],
+      recommendedNextStep: 'choose_direction',
+      options: [llmOption],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
+
+    expect(intake).toMatchObject({
+      maturity: 'directional',
+      needsOptions: true,
+      needsClarification: false,
+      detectedConstraints: ['LLM constraint'],
+      recommendedNextStep: 'choose_direction',
+    });
+    expect(intake.options[0]).toEqual(expect.objectContaining({
+      title: 'LLM Mode',
+      coreGameplayHypothesis: 'LLM hypothesis',
+      playerFirstMinute: 'LLM first minute',
+      whyFitsIdea: 'LLM fit',
+      playablePrototype: 'LLM first playable',
+      validationTarget: 'LLM validation target',
+      fit: 'LLM fit',
+      firstPlayableValidation: 'LLM validation',
+      riskComplexity: 'LLM complexity',
+    }));
+  });
+
+  it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/filesystem/default-workspace') {
+        return jsonResponse({ path: '/tmp/beegame-projects' });
+      }
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
+        return jsonResponse({
+          id: 'beegame_scoped',
+          cwd: body.workspacePath,
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_scoped/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_scoped',
+          cwd: '/tmp/beegame-projects/snake-web',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: 'LLM generated idea',
+      title: 'LLM Project',
+      option: {
+        id: 'snake_web',
+        title: 'LLM Project',
+        pitch: 'LLM generated pitch.',
+        gameplay: '吃食物、增长、避免撞墙。',
+        coreGameplayHypothesis: 'LLM generated hypothesis.',
+        experienceSnapshot: '你会看到一个网格里的蛇移动、吃食物、变长并撞墙失败。',
+        playerFirstMinute: '玩家用方向键移动，吃到食物并理解撞墙失败。',
+        whyFitsIdea: 'LLM generated fit.',
+        playablePrototype: 'LLM generated first playable.',
+        validationTarget: '验证移动和失败条件。',
+        coreMechanic: '路线规划和风险控制。',
+        firstBuild: 'LLM generated first build.',
+        validationGoal: '验证移动和失败条件。',
+        risk: '低复杂度。',
+        fit: '适合快速验证。',
+        firstPlayableValidation: '验证移动和失败条件。',
+        riskComplexity: '低复杂度。',
+        recommendedPlatform: 'Web',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Arcade',
+        recommendedStyle: 'Pixel',
+        recommendedInputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+      },
+      settings: {
+        platform: 'Web',
+        visualStyle: 'Pixel',
+        dimension: '2D',
+        genre: 'Arcade',
+        inputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+      },
+    });
+
+    const startCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    ));
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
+
+    expect(startBody.workspacePath).toBe('/tmp/beegame-projects/llm-project');
+    expect(result.project.root_path).toBe('/tmp/beegame-projects/llm-project');
+    expect(result.project.name).toBe('llm-project');
+  });
+
+  it('uses a path-safe folder name as the project display name instead of the selected mode title', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/filesystem/default-workspace') {
+        return jsonResponse({ path: '/tmp/beegame-projects' });
+      }
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
+        return jsonResponse({
+          id: 'beegame_safe_path',
+          cwd: body.workspacePath,
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_safe_path/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_safe_path',
+          cwd: '/tmp/beegame-projects/beegame-project-test',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: '移动与瞄准训练',
+      title: '移动与瞄准训练',
+      option: makeLlmOption({ title: '移动与瞄准训练' }),
+      settings: {
+        platform: 'Web',
+        visualStyle: 'Minimal',
+        dimension: '2D',
+        genre: 'Action',
+        inputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+      },
+    });
+
+    const startCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    ));
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
+    const folderName = result.project.root_path?.split('/').at(-1);
+
+    expect(startBody.workspacePath).toMatch(/^\/tmp\/beegame-projects\/beegame-project-/);
+    expect(startBody.workspacePath).not.toContain('移动与瞄准训练');
+    expect(result.project.name).toBe(folderName);
+  });
+
+  it('migrates legacy projects bound to the Projects root before recreating a missing session', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/filesystem/default-workspace') {
+        return jsonResponse({ path: '/tmp/beegame-projects' });
+      }
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions/beegame_legacy') {
+        return jsonResponse({ error: 'Session not found' }, 404);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
+        return jsonResponse({
+          id: 'beegame_migrated',
+          cwd: body.workspacePath,
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_migrated',
+          cwd: '/tmp/beegame-projects/snake-web',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.createProject({
+      name: 'LLM Project',
+      root_path: '/tmp/beegame-projects',
+    });
+    const legacyProject = (await beeGameAdapter.getProjects())[0];
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: legacyProject.id,
+      sessionId: 'beegame_legacy',
+      workspacePath: '/tmp/beegame-projects',
+    }]));
+
+    await beeGameAdapter.sendMessage({
+      project_id: legacyProject.id,
+      content: '修复蛇会自动增长的问题',
+    });
+
+    const startCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    ));
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
+    const [updatedProject] = await beeGameAdapter.getProjects();
+
+    expect(startBody.workspacePath).toBe('/tmp/beegame-projects/llm-project');
+    expect(updatedProject.root_path).toBe('/tmp/beegame-projects/llm-project');
+    expect(updatedProject.name).toBe('llm-project');
+  });
+
+  it('loads chat history from a persisted transcript after the backend restarts', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
+        return jsonResponse({ error: 'Session not found' }, 404);
+      }
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+        return jsonResponse([
+          {
+            id: 1,
+            sessionId: 'beegame_restart',
+            turnId: 'turn-1',
+            type: 'user.message',
+            text: 'LLM generated user message',
+            payload: { type: 'user.message' },
+            createdAt: '2026-06-21T00:00:01.000Z',
+          },
+          {
+            id: 2,
+            sessionId: 'beegame_restart',
+            turnId: 'turn-1',
+            type: 'assistant.message',
+            text: 'LLM generated assistant message.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.createProject({
+      name: 'snake-web',
+      root_path: '/tmp/beegame-projects/snake-web',
+    });
+    const project = (await beeGameAdapter.getProjects())[0];
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: project.id,
+      sessionId: 'beegame_restart',
+      workspacePath: '/tmp/beegame-projects/snake-web',
+    }]));
+
+    const history = await beeGameAdapter.getChatHistory(project.id);
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sender: 'user',
+        content: 'LLM generated user message',
+      }),
+      expect.objectContaining({
+        sender: 'beegame',
+        content: 'LLM generated assistant message.',
+      }),
+    ]));
+    expect(fetchMock.mock.calls.some(([path, init]) => (
+      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    ))).toBe(false);
   });
 
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
@@ -59,9 +385,9 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const [option] = await beeGameAdapter.generateIntakeOptions({ idea: '贪吃蛇' });
+    const option = makeLlmOption();
     await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       option,
       settings: {
         platform: 'Web',
@@ -95,7 +421,9 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('apps/frontend');
     expect(body.text).not.toContain('apps/dashboard');
     expect(body.text).not.toContain('packages');
-    expect(body.text).toContain('./snake-game');
+    expect(body.text).toContain('workspace-local game directory')
+    expect(body.text).not.toContain('./snake-game');
+    expect(body.text).not.toContain('./games/snake');
   });
 
   it('keeps BeeGame branding out of package names and code identifiers', async () => {
@@ -129,7 +457,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
 
@@ -186,7 +514,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     await beeGameAdapter.sendMessage({
@@ -271,7 +599,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -334,7 +662,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -406,7 +734,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -474,7 +802,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const firstPoll = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -540,7 +868,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -613,7 +941,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -628,6 +956,218 @@ describe('beeGameAdapter prompt rules', () => {
         },
       }),
     ]);
+  });
+
+  it('maps runtime observation events into project context without adding chat noise', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_observe',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_observe/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_observe',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_observe') {
+        return jsonResponse({
+          id: 'beegame_observe',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_observe/events?after=0') {
+        return jsonResponse([
+          runtimeObservationEvent(70, 'beegame_observe', 'initialized'),
+          resultEvent(71, 'beegame_observe', 'turn-1', 200, 50),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+    const status = await beeGameAdapter.getProjectStatus(result.project.id);
+
+    expect(polled.messages.some(message => message.content?.includes('runtime observability'))).toBe(false);
+    expect(status.context).toEqual(expect.objectContaining({
+      bundle_id: 'beegame-runtime-beegame_observe',
+      status: 'initialized',
+      selected_skills: expect.arrayContaining([
+        'Context collapse',
+        'History snip',
+        'Token budget',
+        'Monitor tool',
+      ]),
+      token_budget: {
+        status: 'tracking',
+        prompt_tokens: 200,
+        completion_tokens: 50,
+        total_tokens: 250,
+      },
+    }));
+  });
+
+  it('maps BeeGame playability verification requirements into build report checks', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_verify',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_verify/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_verify',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_verify') {
+        return jsonResponse({
+          id: 'beegame_verify',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_verify/events?after=0') {
+        return jsonResponse([
+          verificationRequiredEvent(80, 'beegame_verify'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+    const status = await beeGameAdapter.getProjectStatus(result.project.id);
+
+    expect(polled.messages).toEqual([]);
+    expect(status.build_report).toEqual(expect.objectContaining({
+      status: 'verification_required',
+      report_path: 'BEEGAME_PLAYABILITY_REVIEW.md',
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Clarity within 30 seconds',
+          status: 'required',
+        }),
+        expect.objectContaining({
+          name: 'First interesting decision within 60 seconds',
+          status: 'required',
+        }),
+      ]),
+    }));
+  });
+
+  it('maps BeeGame workflow pipeline events into dashboard phase info', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_pipeline',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_pipeline/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_pipeline',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_pipeline') {
+        return jsonResponse({
+          id: 'beegame_pipeline',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_pipeline/events?after=0') {
+        return jsonResponse([
+          workflowPipelineEvent(90, 'beegame_pipeline', 'gdd', [
+            { id: 'idea_intake', status: 'completed' },
+            { id: 'gdd', status: 'active' },
+            { id: 'implementation', status: 'pending' },
+          ]),
+          workflowPipelineEvent(91, 'beegame_pipeline', 'implementation', [
+            { id: 'idea_intake', status: 'completed' },
+            { id: 'gdd', status: 'completed' },
+            { id: 'implementation', status: 'active' },
+          ]),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const phases = await beeGameAdapter.getWorkflowPhases(result.project.id);
+
+    expect(phases).toEqual({
+      current_phase: 3,
+      phase_name: 'implementation',
+      history: [
+        { phase: 0, name: 'idea_intake', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
+        { phase: 2, name: 'gdd', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
+        { phase: 3, name: 'implementation', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
+      ],
+    });
   });
 
   it('shows workflow blocks separately from real permission requests', async () => {
@@ -686,7 +1226,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
@@ -735,7 +1275,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_delete?deleteArtifacts=1' && init?.method === 'DELETE') {
+      if (path === '/api/beegame-sessions/beegame_delete?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects' && init?.method === 'DELETE') {
         return jsonResponse({ deleted: true, deletedArtifactPaths: ['/tmp/beegame-projects/snake-game'] });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -743,14 +1283,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: '贪吃蛇',
+      idea: 'LLM generated idea',
       root_path: '/tmp/beegame-projects',
     });
 
     await beeGameAdapter.deleteProject(result.project.id);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/beegame-sessions/beegame_delete?deleteArtifacts=1',
+      '/api/beegame-sessions/beegame_delete?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects',
       expect.objectContaining({ method: 'DELETE' }),
     );
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
@@ -801,7 +1341,7 @@ function assistantMessageEvent(id: number, sessionId: string, turnId: string, te
     type: 'assistant.message',
     text,
     payload: { type: 'assistant.message' },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }
 
@@ -813,7 +1353,7 @@ function assistantPartialEvent(id: number, sessionId: string, turnId: string, te
     type: 'assistant.partial',
     text,
     payload: { type: 'assistant.partial' },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }
 
@@ -825,7 +1365,7 @@ function turnStartedEvent(id: number, sessionId: string, turnId: string) {
     type: 'turn.started',
     text: 'Turn started',
     payload: { type: 'turn.started' },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }
 
@@ -863,6 +1403,72 @@ function resultEvent(id: number, sessionId: string, turnId: string, inputTokens:
       },
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function runtimeObservationEvent(id: number, sessionId: string, status: string) {
+  return {
+    id,
+    sessionId,
+    type: 'runtime.observation',
+    text: 'BeeGame runtime observability updated',
+    payload: {
+      type: 'runtime.observation',
+      status,
+      phase: 'planning',
+      features: [
+        { id: 'CONTEXT_COLLAPSE', label: 'Context collapse', stage: 'phase_1', status: 'available' },
+        { id: 'HISTORY_SNIP', label: 'History snip', stage: 'phase_1', status: 'available' },
+        { id: 'TOKEN_BUDGET', label: 'Token budget', stage: 'phase_1', status: 'available' },
+        { id: 'MONITOR_TOOL', label: 'Monitor tool', stage: 'phase_1', status: 'available' },
+      ],
+      counters: {
+        eventCount: 12,
+        toolUseCount: 2,
+        turnIndex: 1,
+      },
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function verificationRequiredEvent(id: number, sessionId: string) {
+  return {
+    id,
+    sessionId,
+    turnId: 'turn-1',
+    type: 'verification.required',
+    text: 'BeeGame playability verification is required',
+    payload: {
+      type: 'verification.required',
+      artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
+      checks: [
+        { id: 'clarity_30s', label: 'Clarity within 30 seconds', detail: 'Player understands goal, controls, and feedback quickly.' },
+        { id: 'interesting_decision_60s', label: 'First interesting decision within 60 seconds', detail: 'The first minute contains a meaningful player decision.' },
+      ],
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function workflowPipelineEvent(
+  id: number,
+  sessionId: string,
+  currentPhase: string,
+  stages: Array<{ id: string; status: string }>,
+) {
+  return {
+    id,
+    sessionId,
+    turnId: 'turn-1',
+    type: 'workflow.pipeline',
+    text: currentPhase,
+    payload: {
+      type: 'workflow.pipeline',
+      currentPhase,
+      stages,
+    },
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }
 

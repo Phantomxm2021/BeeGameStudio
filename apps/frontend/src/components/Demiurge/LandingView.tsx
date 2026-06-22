@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { X } from 'lucide-react';
 import { translations, type Language } from './AgentsConfig';
 import { useProjectStore } from '../../store/projectStore';
 import { HeroIntro } from './Landing/HeroIntro';
@@ -24,11 +25,11 @@ type IntakePhase =
     | 'confirming_brief'
     | 'starting_build';
 
-const platformOptions = ['Web', 'Unity', 'Godot', 'XR', 'Native'];
-const dimensionOptions = ['2D', '3D', 'Mixed'];
-const genreOptions = ['Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy'];
-const styleOptions = ['Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
-const inputOptions = ['Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
+const platformOptions = ['Auto', 'Web', 'Unity', 'Godot', 'XR', 'Native'];
+const dimensionOptions = ['Auto', '2D', '3D', 'Mixed'];
+const genreOptions = ['Auto', 'Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy'];
+const styleOptions = ['Auto', 'Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
+const inputOptions = ['Auto', 'Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
 const scopeOptions = ['Prototype', 'Playable demo', 'Vertical slice', 'MVP'];
 
 interface LandingViewProps {
@@ -40,14 +41,25 @@ interface LandingViewProps {
 }
 
 const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings => ({
-    platform: option.recommendedPlatform,
-    visualStyle: option.recommendedStyle,
-    dimension: option.recommendedDimension,
-    genre: option.recommendedGenre,
+    platform: option.recommendedPlatform || 'Auto',
+    visualStyle: option.recommendedStyle || 'Auto',
+    dimension: option.recommendedDimension || 'Auto',
+    genre: option.recommendedGenre || 'Auto',
     inputs: option.recommendedInputs.length > 0 ? option.recommendedInputs : ['Keyboard/mouse'],
-    scope: option.scope,
+    scope: option.scope || 'Prototype',
     notes: '',
 });
+
+const optionTags = (option: BeeGameIntakeOption): string[] => [
+    option.recommendedPlatform,
+    option.recommendedDimension,
+    option.recommendedGenre,
+].filter(tag => tag && tag !== 'Auto');
+
+const optionsWithCurrentValue = (options: string[], value: string): string[] => {
+    if (!value || options.includes(value)) return options;
+    return [value, ...options];
+};
 
 export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }: LandingViewProps) {
     const [projectName, setProjectName] = useState('');
@@ -61,6 +73,14 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
     const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(null);
     const [intakeError, setIntakeError] = useState('');
     const t = translations[lang];
+    const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
+    const modalTitle = intakePhase === 'options_ready'
+        ? '选择方案'
+        : intakePhase === 'configuring_details'
+            ? selectedOption?.title || '制作设置'
+            : intakePhase === 'confirming_brief'
+                ? '确认构建方案'
+                : '启动构建';
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
 
@@ -75,9 +95,22 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
         setIsPreparing(true);
         setIntakePhase('generating_options');
         try {
-            const options = await beeGameAdapter.generateIntakeOptions({ idea: projectName.trim() });
-            setIntakeOptions(options);
-            setIntakePhase('options_ready');
+            const intake = await beeGameAdapter.runIdeaIntake({ idea: projectName.trim() });
+            if (intake.needsClarification && intake.clarificationQuestions.length > 0) {
+                setIsPreparing(false);
+                setIntakePhase('idle');
+                setIntakeError(intake.clarificationQuestions.join(' / '));
+                return;
+            }
+            setIntakeOptions(intake.options);
+            if (!intake.needsOptions && intake.options[0]) {
+                const option = intake.options[0];
+                setSelectedOption(option);
+                setSettings(settingsFromOption(option));
+                setIntakePhase('configuring_details');
+            } else {
+                setIntakePhase('options_ready');
+            }
             setIsPreparing(false);
         } catch (error) {
             setIsPreparing(false);
@@ -135,6 +168,15 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
         setSettings(null);
     };
 
+    const handleCloseIntake = () => {
+        if (isPreparing || isTransitioning) return;
+        setIntakePhase('idle');
+        setIntakeOptions([]);
+        setSelectedOption(null);
+        setSettings(null);
+        setIntakeError('');
+    };
+
     const handleStartBuild = async () => {
         if (!selectedOption || !settings || isTransitioning || isPreparing) return;
         setIntakeError('');
@@ -145,7 +187,7 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                 idea: projectName.trim(),
                 option: selectedOption,
                 settings,
-                title: selectedOption.title,
+                title: projectName.trim(),
             };
             await onStart(projectName.trim(), undefined, brief);
             setIsTransitioning(true);
@@ -226,18 +268,36 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                     onSubmit={handleStart}
                 />
 
-                <div className="relative z-20 mt-6 w-full max-w-5xl px-4">
-                    {intakePhase === 'generating_options' ? (
-                        <div className="mx-auto max-w-xl rounded-2xl border border-white/15 bg-zinc-950/55 px-5 py-4 text-center text-sm text-zinc-100 shadow-2xl backdrop-blur-xl">
-                            正在根据你的想法生成可选方案...
+                {shouldShowIntakeModal ? (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={modalTitle}
+                    data-intake-modal="true"
+                    className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm"
+                >
+                    <div className="relative flex max-h-[calc(100vh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[32px] border border-white/15 bg-zinc-950/85 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,212,54,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.08),transparent_38%)]" />
+                        <div className="relative z-10 flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
+                            <div className="min-w-0">
+                                <h2 className="text-2xl font-semibold tracking-normal text-white">
+                                    {modalTitle}
+                                </h2>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="关闭方案弹窗"
+                                disabled={isPreparing || isTransitioning}
+                                onClick={handleCloseIntake}
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
                         </div>
-                    ) : null}
+                        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
 
                     {intakePhase === 'options_ready' ? (
                         <div className="space-y-4" data-testid="intake-options">
-                            <div className="text-center text-xs font-semibold uppercase tracking-[0.28em] text-amber-300">
-                                Choose a direction
-                            </div>
                             <div className="grid gap-3 md:grid-cols-3">
                                 {intakeOptions.map((option) => (
                                     <button
@@ -246,13 +306,17 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                                         onClick={() => handleSelectOption(option)}
                                         className="group rounded-2xl border border-white/15 bg-zinc-950/65 p-4 text-left shadow-2xl backdrop-blur-xl transition hover:border-amber-300/70 hover:bg-zinc-900/80"
                                     >
-                                        <div className="text-base font-semibold text-white">{option.title}</div>
-                                        <div className="mt-2 text-sm leading-6 text-zinc-300">{option.pitch}</div>
-                                        <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
-                                            <span className="rounded-full bg-white/10 px-2.5 py-1">{option.recommendedPlatform}</span>
-                                            <span className="rounded-full bg-white/10 px-2.5 py-1">{option.recommendedDimension}</span>
-                                            <span className="rounded-full bg-white/10 px-2.5 py-1">{option.recommendedGenre}</span>
-                                        </div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">游戏模式</div>
+                                        <div className="mt-2 text-base font-semibold text-white">{option.title}</div>
+                                        <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">玩法</div>
+                                        <div className="mt-2 text-sm leading-6 text-zinc-300">{option.gameplay}</div>
+                                        {optionTags(option).length > 0 ? (
+                                            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
+                                                {optionTags(option).map(tag => (
+                                                    <span key={tag} className="rounded-full bg-white/10 px-2.5 py-1">{tag}</span>
+                                                ))}
+                                            </div>
+                                        ) : null}
                                     </button>
                                 ))}
                             </div>
@@ -260,52 +324,46 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                     ) : null}
 
                     {intakePhase === 'configuring_details' && selectedOption && settings ? (
-                        <div className="mx-auto max-w-4xl rounded-3xl border border-white/15 bg-zinc-950/70 p-5 shadow-2xl backdrop-blur-xl" data-testid="intake-settings">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                    <div className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-300">Build settings</div>
-                                    <h2 className="mt-2 text-2xl font-semibold text-white">{selectedOption.title}</h2>
-                                    <p className="mt-2 text-sm leading-6 text-zinc-300">{selectedOption.gameplay}</p>
-                                </div>
-                                <button type="button" onClick={handleBackToOptions} className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-white/10">
-                                    重新选择
-                                </button>
+                        <div className="space-y-5" data-testid="intake-settings" data-panel-depth="single">
+                            <div>
+                                <p className="max-w-3xl text-sm leading-6 text-zinc-300">{selectedOption.coreGameplayHypothesis}</p>
+                                <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">{selectedOption.playablePrototype}</p>
                             </div>
 
-                            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                 <label className="text-sm font-medium text-zinc-200">
                                     平台
                                     <select aria-label="平台" value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {platformOptions.map((option) => <option key={option}>{option}</option>)}
+                                        {optionsWithCurrentValue(platformOptions, settings.platform).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
                                 <label className="text-sm font-medium text-zinc-200">
                                     表现形式
                                     <select aria-label="表现形式" value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {dimensionOptions.map((option) => <option key={option}>{option}</option>)}
+                                        {optionsWithCurrentValue(dimensionOptions, settings.dimension).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
                                 <label className="text-sm font-medium text-zinc-200">
                                     游戏类型
                                     <select aria-label="游戏类型" value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {genreOptions.map((option) => <option key={option}>{option}</option>)}
+                                        {optionsWithCurrentValue(genreOptions, settings.genre).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
                                 <label className="text-sm font-medium text-zinc-200">
                                     风格
                                     <select aria-label="风格" value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {styleOptions.map((option) => <option key={option}>{option}</option>)}
+                                        {optionsWithCurrentValue(styleOptions, settings.visualStyle).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
                                 <label className="text-sm font-medium text-zinc-200">
                                     范围
                                     <select aria-label="范围" value={settings.scope} onChange={(event) => updateSettings({ scope: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {scopeOptions.map((option) => <option key={option}>{option}</option>)}
+                                        {optionsWithCurrentValue(scopeOptions, settings.scope).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
                             </div>
 
-                            <div className="mt-5">
+                            <div>
                                 <div className="text-sm font-medium text-zinc-200">输入方式</div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                     {inputOptions.map((input) => {
@@ -325,7 +383,7 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                                 </div>
                             </div>
 
-                            <label className="mt-5 block text-sm font-medium text-zinc-200">
+                            <label className="block text-sm font-medium text-zinc-200">
                                 补充说明
                                 <textarea
                                     aria-label="补充说明"
@@ -336,7 +394,10 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                                 />
                             </label>
 
-                            <div className="mt-5 flex justify-end">
+                            <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+                                <button type="button" onClick={handleBackToOptions} className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-semibold text-zinc-200 hover:bg-white/10">
+                                    重新选择
+                                </button>
                                 <button type="button" onClick={handleConfirmSettings} className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 hover:bg-amber-200">
                                     确认方案
                                 </button>
@@ -345,9 +406,8 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                     ) : null}
 
                     {intakePhase === 'confirming_brief' && selectedOption && settings ? (
-                        <div className="mx-auto max-w-3xl rounded-3xl border border-amber-300/30 bg-zinc-950/75 p-5 shadow-2xl backdrop-blur-xl" data-testid="confirmed-brief">
-                            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-300">Confirmed brief</div>
-                            <h2 className="mt-2 text-2xl font-semibold text-white">{selectedOption.title}</h2>
+                        <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
+                            <h3 className="text-2xl font-semibold text-white">{selectedOption.title}</h3>
                             <p className="mt-3 text-sm leading-6 text-zinc-300">{selectedOption.pitch}</p>
                             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                                 <div><dt className="text-zinc-500">平台</dt><dd className="font-semibold text-white">{settings.platform}</dd></div>
@@ -368,7 +428,10 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                             </div>
                         </div>
                     ) : null}
+                        </div>
+                    </div>
                 </div>
+                ) : null}
 
                 {intakeError ? (
                     <div className="relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-sm text-red-100 shadow-lg backdrop-blur">

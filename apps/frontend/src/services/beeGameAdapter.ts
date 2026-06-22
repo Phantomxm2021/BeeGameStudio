@@ -33,7 +33,10 @@ type BeeGameEvent = {
     | 'tool.progress'
     | 'permission.requested'
     | 'permission.resolved'
+    | 'runtime.observation'
+    | 'verification.required'
     | 'workflow.phase'
+    | 'workflow.pipeline'
     | 'workflow.blocked'
     | 'system.status'
     | 'result'
@@ -73,12 +76,35 @@ export type BeeGameIntakeOption = {
   title: string;
   pitch: string;
   gameplay: string;
+  coreGameplayHypothesis: string;
+  experienceSnapshot: string;
+  playerFirstMinute: string;
+  whyFitsIdea: string;
+  playablePrototype: string;
+  validationTarget: string;
+  coreMechanic: string;
+  firstBuild: string;
+  validationGoal: string;
+  risk: string;
+  fit: string;
+  firstPlayableValidation: string;
+  riskComplexity: string;
   recommendedPlatform: string;
   recommendedDimension: string;
   recommendedGenre: string;
   recommendedStyle: string;
   recommendedInputs: string[];
   scope: string;
+};
+
+export type BeeGameIdeaIntakeResult = {
+  maturity: 'vague' | 'directional' | 'concrete';
+  needsOptions: boolean;
+  needsClarification: boolean;
+  clarificationQuestions: string[];
+  detectedConstraints: string[];
+  recommendedNextStep: string;
+  options: BeeGameIntakeOption[];
 };
 
 export type BeeGameIntakeSettings = {
@@ -124,19 +150,20 @@ export const beeGameAdapter = {
     return project;
   },
 
-  async generateIntakeOptions(data: { idea: string }): Promise<BeeGameIntakeOption[]> {
-    try {
-      const response = await postJson<{ options: BeeGameIntakeOption[] }>(
-        '/api/beegame-intake/options?ownerId=dashboard-local',
-        { idea: data.idea },
-      );
-      if (Array.isArray(response.options) && response.options.length > 0) {
-        return response.options;
-      }
-    } catch (error) {
-      console.warn('Falling back to local BeeGame intake options:', error);
+  async runIdeaIntake(data: { idea: string }): Promise<BeeGameIdeaIntakeResult> {
+    const response = await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
+      '/api/beegame-intake/options?ownerId=dashboard-local',
+      { idea: data.idea },
+    );
+    const intake = normalizeIdeaIntakeResult(response);
+    if (intake.options.length === 0) {
+      throw new Error('BeeGame intake did not return game mode options');
     }
-    return buildFallbackIntakeOptions(data.idea);
+    return intake;
+  },
+
+  async generateIntakeOptions(data: { idea: string }): Promise<BeeGameIntakeOption[]> {
+    return (await this.runIdeaIntake(data)).options;
   },
 
   async bootstrapProjectFromBrief(data: BeeGameBuildBrief): Promise<{
@@ -145,9 +172,10 @@ export const beeGameAdapter = {
     status: string;
     pipeline: { pipeline_id: string; status: string };
   }> {
-    const workspacePath = await resolveWorkspacePath(data.root_path);
+    const title = data.title || summarizeTitle(data.idea);
+    const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
     const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(data.title || summarizeTitle(data.idea), workspacePath, `project_${session.id}`);
+    const project = createLocalProject(getWorkspaceDisplayName(workspacePath, title), workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
@@ -171,9 +199,10 @@ export const beeGameAdapter = {
     status: string;
     pipeline: { pipeline_id: string; status: string };
   }> {
-    const workspacePath = await resolveWorkspacePath(data.root_path);
+    const title = data.title || summarizeTitle(data.idea);
+    const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
     const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(data.title || summarizeTitle(data.idea), workspacePath, `project_${session.id}`);
+    const project = createLocalProject(getWorkspaceDisplayName(workspacePath, title), workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
@@ -214,7 +243,7 @@ export const beeGameAdapter = {
   async deleteProject(projectId: string): Promise<{ ok: boolean }> {
     const binding = getBinding(projectId);
     if (binding) {
-      await deleteBeeGameSession(binding.sessionId, true);
+      await deleteBeeGameSession(binding.sessionId, true, binding.workspacePath);
     }
     saveProjects(readProjects().filter(project => project.id !== projectId));
     deleteBinding(projectId);
@@ -260,9 +289,15 @@ export const beeGameAdapter = {
   },
 
   async getChatHistory(projectId: string): Promise<unknown[]> {
-    const binding = await ensureProjectBinding(projectId);
+    const binding = getBinding(projectId);
     if (!binding) return [];
-    const events = await fetchBeeGameEvents(binding.sessionId);
+    let events: BeeGameEvent[];
+    try {
+      events = await fetchBeeGameEvents(binding.sessionId);
+    } catch (error) {
+      if (!isSessionNotFoundError(error)) throw error;
+      events = await fetchBeeGameTranscript(binding.sessionId, binding.workspacePath);
+    }
     return eventsToHistory(projectId, events, binding.workspacePath);
   },
 
@@ -294,6 +329,8 @@ export const beeGameAdapter = {
       updated_at: runtimeStatus.updatedAt,
       approval_required: pending.length > 0,
       next_action: runtimeStatus.nextAction,
+      context: deriveContextVisibility(events),
+      build_report: deriveBuildReport(events),
       review_status: pending.length > 0
         ? {
             workflow_id: 'beegame',
@@ -365,9 +402,10 @@ export const beeGameAdapter = {
     return [];
   },
 
-  async getWorkflowPhases(projectId: string): Promise<unknown[]> {
-    const status = await this.getProjectStatus(projectId);
-    return [{ id: 'beegame', name: 'BeeGame', status: status.phase }];
+  async getWorkflowPhases(projectId: string): Promise<unknown> {
+    const binding = await ensureProjectBinding(projectId);
+    const events = binding ? await fetchBeeGameEvents(binding.sessionId) : [];
+    return derivePhaseInfo(events);
   },
 
   async getTokenUsage(): Promise<Record<string, unknown>> {
@@ -461,6 +499,7 @@ function getBinding(projectId: string): ProjectSessionBinding | undefined {
 
 async function ensureProjectSession(projectId: string): Promise<BeeGameSession> {
   const binding = getBinding(projectId);
+  const project = readProjects().find(item => item.id === projectId);
   if (binding) {
     try {
       return await fetchBeeGameSession(binding.sessionId);
@@ -470,8 +509,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSession> 
     }
   }
 
-  const project = readProjects().find(item => item.id === projectId);
-  const workspacePath = await resolveWorkspacePath(project?.root_path);
+  const workspacePath = await resolveExistingProjectWorkspacePath(project, binding?.workspacePath);
   const session = await startBeeGameSession(workspacePath);
   saveBinding({ projectId, sessionId: session.id, workspacePath });
   return session;
@@ -487,7 +525,7 @@ async function ensureProjectBinding(projectId: string): Promise<ProjectSessionBi
     if (!isSessionNotFoundError(error)) throw error;
     deleteBinding(projectId);
     const project = readProjects().find(item => item.id === projectId);
-    const workspacePath = await resolveWorkspacePath(project?.root_path || binding.workspacePath);
+    const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
     const session = await startBeeGameSession(workspacePath);
     const nextBinding = { projectId, sessionId: session.id, workspacePath };
     saveBinding(nextBinding);
@@ -521,10 +559,69 @@ async function resolveWorkspacePath(input?: string): Promise<string> {
   return fallback.path;
 }
 
+async function resolveProjectWorkspacePath(input: string | undefined, title: string): Promise<string> {
+  if (input?.trim()) {
+    return resolveWorkspacePath(input);
+  }
+  const projectsRoot = await resolveWorkspacePath();
+  const projectPath = joinPath(projectsRoot, slugifyPathSegment(title || 'beegame-project'));
+  rememberWorkspace(projectPath);
+  return projectPath;
+}
+
+async function resolveExistingProjectWorkspacePath(
+  project: Project | undefined,
+  bindingWorkspacePath?: string,
+): Promise<string> {
+  const candidate = project?.root_path || bindingWorkspacePath;
+  if (!candidate) {
+    return resolveProjectWorkspacePath(undefined, project?.name || 'BeeGame Project');
+  }
+  const projectsRoot = await resolveWorkspacePath();
+  if (normalizePath(candidate) !== normalizePath(projectsRoot)) {
+    rememberWorkspace(candidate);
+    return candidate;
+  }
+  const migratedPath = joinPath(projectsRoot, slugifyPathSegment(project?.name || 'BeeGame Project'));
+  if (project) {
+    saveProjects(upsertProject(readProjects(), {
+      ...project,
+      name: getWorkspaceDisplayName(migratedPath, project.name),
+      root_path: migratedPath,
+    }));
+  }
+  rememberWorkspace(migratedPath);
+  return migratedPath;
+}
+
+function normalizePath(path: string): string {
+  return path.replaceAll('\\', '/').replace(/\/+$/, '');
+}
+
 function rememberWorkspace(path?: string): void {
   if (path?.trim().startsWith('/')) {
     localStorage.setItem(WORKSPACE_KEY, path.trim());
   }
+}
+
+function slugifyPathSegment(value: string): string {
+  const normalized = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return normalized || `beegame-project-${Date.now().toString(36)}`;
+}
+
+function joinPath(root: string, segment: string): string {
+  return `${root.replace(/\/+$/, '')}/${segment.replace(/^\/+/, '')}`;
+}
+
+function getWorkspaceDisplayName(workspacePath: string, fallback: string): string {
+  const segments = workspacePath.replaceAll('\\', '/').split('/').filter(Boolean);
+  return segments.at(-1) || fallback.trim() || 'BeeGame Project';
 }
 
 async function startBeeGameSession(workspacePath: string): Promise<BeeGameSession> {
@@ -555,13 +652,24 @@ async function sendBeeGameInput(sessionId: string, text: string): Promise<BeeGam
   return postJson(`/api/beegame-sessions/${sessionId}/input`, { text });
 }
 
-async function deleteBeeGameSession(sessionId: string, deleteArtifacts: boolean): Promise<void> {
-  const query = deleteArtifacts ? '?deleteArtifacts=1' : '';
+async function deleteBeeGameSession(
+  sessionId: string,
+  deleteArtifacts: boolean,
+  workspacePath?: string,
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (deleteArtifacts) params.set('deleteArtifacts', '1');
+  if (workspacePath) params.set('workspacePath', workspacePath);
+  const query = params.toString() ? `?${params.toString()}` : '';
   await deleteJson(`/api/beegame-sessions/${sessionId}${query}`);
 }
 
 async function fetchBeeGameEvents(sessionId: string, after = 0): Promise<BeeGameEvent[]> {
   return getJson(`/api/beegame-sessions/${sessionId}/events?after=${after}`);
+}
+
+async function fetchBeeGameTranscript(sessionId: string, workspacePath: string): Promise<BeeGameEvent[]> {
+  return getJson(`/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`);
 }
 
 function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePath = ''): unknown[] {
@@ -580,7 +688,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
   const taskId = event.sessionId;
   switch (event.type) {
     case 'user.message':
-      if (event.payload) return [];
       return [baseMessage('agent_message', { ...event, text: resolveSentDisplayText(event.sessionId, event.text) }, projectId, 'user')];
     case 'turn.started':
       return [
@@ -659,7 +766,13 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         text: describePermissionResolution(event),
       }, projectId, 'system')];
     }
+    case 'runtime.observation':
+      return [];
+    case 'verification.required':
+      return [];
     case 'workflow.phase':
+      return [];
+    case 'workflow.pipeline':
       return [];
     case 'workflow.blocked':
       return [baseMessage('agent_message', {
@@ -675,6 +788,147 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     default:
       return [];
   }
+}
+
+const BEEGAME_PHASE_ORDER = [
+  'idea_intake',
+  'brief',
+  'gdd',
+  'implementation',
+  'qa',
+  'build',
+] as const;
+
+function derivePhaseInfo(events: BeeGameEvent[]): {
+  current_phase: number;
+  phase_name: string;
+  history: Array<{ phase: number; name: string; timestamp: number }>;
+} {
+  const pipelines = events.filter(event => event.type === 'workflow.pipeline');
+  if (pipelines.length === 0) {
+    const status = deriveRuntimeStatus(events, getPendingPermissionEvents(events));
+    const phaseName = status.phase === 'running' ? 'idea_intake' : '';
+    return {
+      current_phase: phaseName ? getBeeGamePhaseIndex(phaseName) : 0,
+      phase_name: phaseName,
+      history: [],
+    };
+  }
+
+  const historyByPhase = new Map<string, { phase: number; name: string; timestamp: number }>();
+  for (const event of pipelines) {
+    const timestamp = Date.parse(event.createdAt) || Date.now();
+    for (const stage of getPayloadArray(event, 'stages').filter(isRecord)) {
+      const name = String(stage.id || '').trim();
+      const status = String(stage.status || '').trim();
+      if (!name || (status !== 'completed' && status !== 'active')) continue;
+      historyByPhase.set(name, {
+        phase: getBeeGamePhaseIndex(name),
+        name,
+        timestamp,
+      });
+    }
+  }
+
+  const latest = pipelines[pipelines.length - 1];
+  const currentPhase = getPayloadString(latest, 'currentPhase') || '';
+  return {
+    current_phase: currentPhase ? getBeeGamePhaseIndex(currentPhase) : 0,
+    phase_name: currentPhase,
+    history: [...historyByPhase.values()].sort((left, right) => left.phase - right.phase),
+  };
+}
+
+function getBeeGamePhaseIndex(name: string): number {
+  const index = (BEEGAME_PHASE_ORDER as readonly string[]).indexOf(name);
+  return index >= 0 ? index : 0;
+}
+
+function deriveContextVisibility(events: BeeGameEvent[]) {
+  const observation = [...events].reverse().find(event => event.type === 'runtime.observation');
+  const usage = getLatestTokenUsage(events);
+  if (!observation && !usage) return null;
+  const features = getRuntimeFeatures(observation);
+  const labels = features
+    .map(feature => String(feature.label || feature.id || '').trim())
+    .filter(Boolean);
+  const counters = observation ? getPayloadRecord(observation, 'counters') : {};
+  const summary = labels.length > 0
+    ? `BeeGame is observing ${labels.join(', ')} for this session.`
+    : 'BeeGame runtime observability is active for this session.';
+  return {
+    bundle_id: observation ? `beegame-runtime-${observation.sessionId}` : 'beegame-runtime',
+    phase: observation ? getPayloadString(observation, 'phase') || deriveRuntimeStatus(events, getPendingPermissionEvents(events)).phase : deriveRuntimeStatus(events, getPendingPermissionEvents(events)).phase,
+    status: observation ? getPayloadString(observation, 'status') || 'active' : 'active',
+    summary,
+    blackboard_record_count: Number(counters.eventCount ?? events.length),
+    memory_hits: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
+    rag_sources: observation ? [`.beegame-dashboard/transcripts/${observation.sessionId}.jsonl`] : [],
+    selected_skills: labels,
+    runtime_features: features,
+    ...(usage ? {
+      token_budget: {
+        status: 'tracking',
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+      },
+    } : {}),
+    counters: {
+      eventCount: Number(counters.eventCount ?? events.length),
+      toolUseCount: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
+      turnIndex: Number(counters.turnIndex ?? 0),
+    },
+  };
+}
+
+function deriveBuildReport(events: BeeGameEvent[]) {
+  const verification = [...events].reverse().find(event => event.type === 'verification.required');
+  if (!verification) return null;
+  const artifactPath = getPayloadString(verification, 'artifactPath') || 'BEEGAME_PLAYABILITY_REVIEW.md';
+  const checks = getPayloadArray(verification, 'checks')
+    .filter(isRecord)
+    .map(check => ({
+      name: String(check.label || check.id || '').trim() || 'Playability check',
+      status: 'required',
+      detail: String(check.detail || '').trim() || undefined,
+      path: artifactPath,
+    }));
+  return {
+    status: 'verification_required',
+    report_path: artifactPath,
+    agents: ['beegame'],
+    generated_paths: [artifactPath],
+    checks,
+    summary: 'BeeGame must write a playability verification report after implementation.',
+  };
+}
+
+function getRuntimeFeatures(event?: BeeGameEvent): Array<{
+  id?: string;
+  label?: string;
+  stage?: string;
+  status?: string;
+}> {
+  const raw = getPayloadArray(event, 'features');
+  return raw
+    .filter(isRecord)
+    .map(feature => ({
+      id: String(feature.id || '').trim() || undefined,
+      label: String(feature.label || '').trim() || undefined,
+      stage: String(feature.stage || '').trim() || undefined,
+      status: String(feature.status || '').trim() || undefined,
+    }))
+    .filter(feature => feature.id || feature.label);
+}
+
+function getLatestTokenUsage(events: BeeGameEvent[]): { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null {
+  for (const event of [...events].reverse()) {
+    if (event.type !== 'result') continue;
+    const usage = getUsageFromResultEvent(event);
+    if (usage) return usage;
+  }
+  return null;
 }
 
 function normalizeDisplayEvents(events: BeeGameEvent[]): BeeGameEvent[] {
@@ -952,46 +1206,43 @@ function getTurnDisplayId(event: BeeGameEvent): string {
   return event.turnId || `beegame-turn-${event.sessionId}-${event.id}`;
 }
 
-function buildFallbackIntakeOptions(idea: string): BeeGameIntakeOption[] {
-  const normalizedIdea = idea.trim() || 'Game';
-  return [
-    {
-      id: 'classic_web',
-      title: '经典 Web 版',
-      pitch: `把「${normalizedIdea}」做成快速可玩的浏览器原型。`,
-      gameplay: '保留核心玩法，优先做清晰规则、即时反馈、分数和失败条件。',
-      recommendedPlatform: 'Web',
-      recommendedDimension: '2D',
-      recommendedGenre: 'Arcade',
-      recommendedStyle: 'Pixel',
-      recommendedInputs: ['Keyboard/mouse', 'Touch'],
-      scope: 'Playable demo',
-    },
-    {
-      id: 'progression_demo',
-      title: '增强成长版',
-      pitch: `为「${normalizedIdea}」加入关卡、道具或难度成长。`,
-      gameplay: '在核心循环外增加目标、奖励、局内变化和可重复游玩的进度感。',
-      recommendedPlatform: 'Web',
-      recommendedDimension: '2D',
-      recommendedGenre: 'Casual',
-      recommendedStyle: 'Cartoon',
-      recommendedInputs: ['Keyboard/mouse', 'Gamepad'],
-      scope: 'Vertical slice',
-    },
-    {
-      id: 'experimental_input',
-      title: '实验交互版',
-      pitch: `探索「${normalizedIdea}」在新输入方式或沉浸场景中的玩法。`,
-      gameplay: '围绕触屏、语音、手柄或 XR 手追等输入设计差异化体验。',
-      recommendedPlatform: 'XR',
-      recommendedDimension: 'Mixed',
-      recommendedGenre: 'Action',
-      recommendedStyle: 'Minimal',
-      recommendedInputs: ['Touch', 'Voice', 'Hand tracking XR'],
-      scope: 'Prototype',
-    },
-  ];
+function normalizeIdeaIntakeResult(
+  response: Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] },
+): BeeGameIdeaIntakeResult {
+  const options = (response.options || []).map((option) => normalizeIntakeOption(option));
+  const maturity = response.maturity === 'directional' || response.maturity === 'concrete' || response.maturity === 'vague'
+    ? response.maturity
+    : 'vague';
+  return {
+    maturity,
+    needsOptions: typeof response.needsOptions === 'boolean' ? response.needsOptions : maturity !== 'concrete',
+    needsClarification: response.needsClarification === true,
+    clarificationQuestions: Array.isArray(response.clarificationQuestions) ? response.clarificationQuestions.map(String).filter(Boolean) : [],
+    detectedConstraints: Array.isArray(response.detectedConstraints) ? response.detectedConstraints.map(String).filter(Boolean) : [],
+    recommendedNextStep: typeof response.recommendedNextStep === 'string' && response.recommendedNextStep
+      ? response.recommendedNextStep
+      : maturity === 'concrete' ? 'configure_details' : 'choose_direction',
+    options,
+  };
+}
+
+function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption {
+  return {
+    ...option,
+    coreGameplayHypothesis: option.coreGameplayHypothesis || option.coreMechanic || option.gameplay,
+    experienceSnapshot: option.experienceSnapshot || option.pitch,
+    playerFirstMinute: option.playerFirstMinute || option.gameplay,
+    whyFitsIdea: option.whyFitsIdea || option.fit || option.pitch,
+    playablePrototype: option.playablePrototype || option.firstBuild || option.firstPlayableValidation || option.gameplay,
+    validationTarget: option.validationTarget || option.validationGoal || option.firstPlayableValidation || option.gameplay,
+    coreMechanic: option.coreMechanic || option.coreGameplayHypothesis || option.gameplay,
+    firstBuild: option.firstBuild || option.playablePrototype || option.firstPlayableValidation || option.gameplay,
+    validationGoal: option.validationGoal || option.validationTarget || option.firstPlayableValidation || option.gameplay,
+    risk: option.risk || option.riskComplexity || '复杂度取决于最终范围，需要先控制第一版目标。',
+    fit: option.fit || option.pitch,
+    firstPlayableValidation: option.firstPlayableValidation || option.gameplay,
+    riskComplexity: option.riskComplexity || '复杂度取决于最终范围，需要先控制第一版目标。',
+  };
 }
 
 function buildIdeaIntakePrompt(idea: string): string {
@@ -1017,9 +1268,19 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     'Confirmed BeeGame build brief:',
     '',
     `Idea: ${brief.idea}`,
-    `Selected direction: ${brief.option.title}`,
-    `Direction pitch: ${brief.option.pitch}`,
+    `Selected game mode: ${brief.option.title}`,
+    `Mode pitch: ${brief.option.pitch}`,
     `Gameplay: ${brief.option.gameplay}`,
+    `Core gameplay hypothesis: ${brief.option.coreGameplayHypothesis}`,
+    `Experience snapshot: ${brief.option.experienceSnapshot}`,
+    `Player first minute: ${brief.option.playerFirstMinute}`,
+    `Why this fits the user idea: ${brief.option.whyFitsIdea}`,
+    `First playable build for this mode: ${brief.option.playablePrototype}`,
+    `Validation target: ${brief.option.validationTarget}`,
+    `Core mechanic: ${brief.option.coreMechanic}`,
+    `First playable build: ${brief.option.firstBuild}`,
+    `Validation goal: ${brief.option.validationGoal}`,
+    `Main risk: ${brief.option.risk}`,
     `Platform: ${settings.platform}`,
     `Visual style: ${settings.visualStyle}`,
     `Dimension: ${settings.dimension}`,
@@ -1033,7 +1294,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     getBeeGameBrandInstruction(),
     '',
     'Workspace rule: create game files only inside the active BeeGame workspace.',
-    'Prefer a new workspace-local game directory such as ./snake-game or ./games/snake.',
+    'Prefer a new workspace-local game directory named for the selected project and game mode.',
     'Do not create, edit, or suggest using BeeGame dashboard or host application source paths.',
     'Do not modify the BeeGame dashboard source code unless the user explicitly asks to modify the dashboard itself.',
     '',
@@ -1266,6 +1527,15 @@ function getPayloadRecord(event: BeeGameEvent, field: string): Record<string, un
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function getPayloadArray(event: BeeGameEvent | undefined, field: string): unknown[] {
+  const value = event?.payload?.[field];
+  return Array.isArray(value) ? value : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 async function getJson<T>(path: string): Promise<T> {

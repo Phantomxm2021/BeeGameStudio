@@ -35,6 +35,12 @@ type PermissionDecision = {
   updatedInput?: Record<string, unknown>
 }
 
+const DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW = '120000'
+const COMPACT_DISABLE_ENV_KEYS = [
+  'DISABLE_COMPACT',
+  'DISABLE_AUTO_COMPACT',
+] as const
+
 let runtimeQueue: Promise<void> = Promise.resolve()
 
 export function createQueryEngineRunner(): BeeGameSessionRunner {
@@ -109,6 +115,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     ])
 
     call(configModule, 'enableConfigs')
+    enableBeeGameRuntimeCompaction(configModule)
     call(
       bootstrapModule,
       'setSessionPersistenceDisabled',
@@ -290,7 +297,12 @@ async function withRuntimeEnvironment(
   const previousCwd = process.cwd()
   const previousEnv = new Map<string, string | undefined>()
 
-  for (const [key, value] of Object.entries(env)) {
+  const runtimeEnv = getBeeGameRuntimeEnvironment(env)
+  for (const key of COMPACT_DISABLE_ENV_KEYS) {
+    previousEnv.set(key, process.env[key])
+    delete process.env[key]
+  }
+  for (const [key, value] of Object.entries(runtimeEnv)) {
     previousEnv.set(key, process.env[key])
     process.env[key] = value
   }
@@ -308,6 +320,29 @@ async function withRuntimeEnvironment(
       }
     }
   }
+}
+
+function getBeeGameRuntimeEnvironment(
+  env: Record<string, string>,
+): Record<string, string> {
+  const runtimeEnv = { ...env }
+  for (const key of COMPACT_DISABLE_ENV_KEYS) {
+    delete runtimeEnv[key]
+  }
+  return {
+    ...runtimeEnv,
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
+      process.env.BEEGAME_AUTO_COMPACT_WINDOW ??
+      process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
+      DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW,
+  }
+}
+
+function enableBeeGameRuntimeCompaction(configModule: DynamicModule): void {
+  const config = call(configModule, 'getGlobalConfig')
+  if (typeof config !== 'object' || config === null) return
+  ;(config as { autoCompactEnabled?: boolean }).autoCompactEnabled = true
 }
 
 function loadRootModule(path: string): Promise<DynamicModule> {

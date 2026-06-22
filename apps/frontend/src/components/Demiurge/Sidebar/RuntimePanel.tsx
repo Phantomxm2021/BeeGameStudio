@@ -164,6 +164,7 @@ export const RuntimePanel = memo(({
     const buildReport = projectStatus?.build_report;
     const documentBundle = projectStatus?.document_bundle;
     const contextEvidence = projectStatus?.context;
+    const isBeeGameRuntimeContext = Boolean(contextEvidence?.bundle_id?.startsWith('beegame-runtime'));
     const latestRevalidationEntries = Object.entries((projectStatus?.governance?.latest_revalidation_by_phase || {}) as Record<string, Record<string, unknown>>);
     const hasExecutionFailure = executionEvidence.some((evidence) => evidence.status === 'failed');
     const hasGovernanceBlock = Boolean(projectStatus?.blocked || projectStatus?.governance?.blocked);
@@ -394,11 +395,32 @@ export const RuntimePanel = memo(({
                         </div>
                         {contextEvidence ? (
                             <div className="space-y-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-900/60">
-                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Context Bundle</div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                                    {isBeeGameRuntimeContext ? 'BeeGame Runtime Observability' : 'Context Bundle'}
+                                </div>
                                 <div className="font-mono text-[11px] text-zinc-800 dark:text-zinc-100">{contextEvidence.bundle_id || 'pending-context'}</div>
                                 <div className="text-[11px] text-zinc-600 dark:text-zinc-300">
-                                    {contextEvidence.phase || 'phase'} · {contextEvidence.status || 'unknown'} · memory {contextEvidence.memory_hits ?? 0} · blackboard {contextEvidence.blackboard_record_count ?? 0}
+                                    {contextEvidence.phase || 'phase'} · {contextEvidence.status || 'unknown'}
+                                    {isBeeGameRuntimeContext
+                                        ? ` · events ${contextEvidence.blackboard_record_count ?? 0} · tools ${contextEvidence.memory_hits ?? 0}`
+                                        : ` · memory ${contextEvidence.memory_hits ?? 0} · blackboard ${contextEvidence.blackboard_record_count ?? 0}`}
                                 </div>
+                                {contextEvidence.token_budget ? (
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="rounded-xl bg-zinc-100 px-2 py-1 dark:bg-zinc-800">
+                                            <div className="text-[8px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Prompt</div>
+                                            <div className="font-mono text-[11px] font-bold text-zinc-900 dark:text-zinc-100">{contextEvidence.token_budget.prompt_tokens ?? 0}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-zinc-100 px-2 py-1 dark:bg-zinc-800">
+                                            <div className="text-[8px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Output</div>
+                                            <div className="font-mono text-[11px] font-bold text-zinc-900 dark:text-zinc-100">{contextEvidence.token_budget.completion_tokens ?? 0}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-zinc-100 px-2 py-1 dark:bg-zinc-800">
+                                            <div className="text-[8px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Total</div>
+                                            <div className="font-mono text-[11px] font-bold text-zinc-900 dark:text-zinc-100">{contextEvidence.token_budget.total_tokens ?? 0}</div>
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {contextEvidence.summary ? (
                                     <div className="text-[11px] text-zinc-600 dark:text-zinc-300">{contextEvidence.summary}</div>
                                 ) : null}

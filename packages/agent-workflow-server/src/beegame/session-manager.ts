@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
@@ -12,9 +12,10 @@ const PLAYABLE_SPEC_READY_MARKER = 'PLAYABLE_SPEC_READY: yes'
 const BUILD_AFTER_PLAYABLE_SPEC_PROMPT = [
   'Now implement the approved playable spec inside the active BeeGame workspace.',
   'Use ./BEEGAME_PLAYABLE_SPEC.md as the source of truth; read it if details are needed instead of relying on previous conversation history.',
-  'Create files only under a workspace-local game directory such as ./snake-game.',
+  'Create files only under a workspace-local game directory named for the selected project.',
   'Write the design artifacts into the project directory before code if they are useful.',
   'Then implement the playable MVP, run build checks, and self-review against the Playability Acceptance Checklist.',
+  'Write the final playability verification to ./BEEGAME_PLAYABILITY_REVIEW.md with verdict, evidence, failed checks, and concrete fixes.',
 ].join('\n')
 import { createQueryEngineRunner } from './query-engine-runner'
 
@@ -34,7 +35,10 @@ export type BeeGameEventType =
   | 'tool.progress'
   | 'permission.requested'
   | 'permission.resolved'
+  | 'runtime.observation'
+  | 'verification.required'
   | 'workflow.phase'
+  | 'workflow.pipeline'
   | 'workflow.blocked'
   | 'system.status'
   | 'result'
@@ -145,16 +149,25 @@ export type StartBeeGameSessionInput = {
 
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
+  private readonly dashboardDataRoot: string
 
   constructor(
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
-  ) {}
+    dashboardDataRoot?: string,
+  ) {
+    this.dashboardDataRoot = resolve(
+      dashboardDataRoot?.trim() ||
+        process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
+        resolve(process.cwd(), 'Projects'),
+    )
+  }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
     const cwd = resolve(input.workspacePath)
+    mkdirSync(cwd, { recursive: true })
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
       : undefined
@@ -176,7 +189,10 @@ export class BeeGameSessionManager {
     const record: SessionRecord = {
       session,
       runtime,
-      transcriptPath: resolve(cwd, '.beegame-dashboard', 'transcripts', `${session.id}.jsonl`),
+      transcriptPath: getSessionTranscriptPath(
+        session.id,
+        this.dashboardDataRoot,
+      ),
       runner: null,
       abortController: null,
       pendingPermissions: new Map(),
@@ -192,6 +208,7 @@ export class BeeGameSessionManager {
     }
     this.sessions.set(session.id, record)
     this.append(record, 'session.started', `Created BeeGame session in ${cwd}`)
+    this.appendRuntimeObservation(record, 'initialized')
 
     return cloneSession(record.session)
   }
@@ -295,6 +312,13 @@ export class BeeGameSessionManager {
     const deletedArtifactPaths = options.deleteArtifacts
       ? await deleteSessionArtifactRoots(record)
       : []
+    if (options.deleteArtifacts) {
+      const deletedWorkspacePath = await deleteSessionWorkspaceRoot(
+        record,
+        this.dashboardDataRoot,
+      )
+      if (deletedWorkspacePath) deletedArtifactPaths.push(deletedWorkspacePath)
+    }
     this.sessions.delete(sessionId)
     return { deleted: true, deletedArtifactPaths }
   }
@@ -346,6 +370,7 @@ export class BeeGameSessionManager {
       ) {
         await persistPlayableSpec(record)
         this.setWorkflowPhase(record, 'building')
+        this.appendVerificationRequired(record)
         runner.stop()
         record.runner = null
         const buildRunner = await this.ensureRunner(record)
@@ -368,6 +393,7 @@ export class BeeGameSessionManager {
         if (record.workflowPhase === 'building') {
           this.setWorkflowPhase(record, 'completed')
         }
+        this.appendRuntimeObservation(record, 'turn_completed')
         this.append(record, 'turn.completed', 'BeeGame turn completed')
       }
     } catch (err) {
@@ -465,6 +491,7 @@ export class BeeGameSessionManager {
     }
     if (record.workflowPhase === 'planning' && hasPlayableSpecReadyMarker(record)) {
       this.setWorkflowPhase(record, 'building')
+      this.appendVerificationRequired(record)
     }
     const gameplayGateViolation =
       record.workflowPhase === 'planning'
@@ -522,6 +549,112 @@ export class BeeGameSessionManager {
       type: 'workflow.phase',
       phase,
     })
+    this.appendWorkflowPipeline(record)
+  }
+
+  private appendWorkflowPipeline(record: SessionRecord): void {
+    const stages = getWorkflowPipelineStages(record.workflowPhase)
+    this.append(record, 'workflow.pipeline', getCurrentPipelinePhase(record.workflowPhase), {
+      type: 'workflow.pipeline',
+      currentPhase: getCurrentPipelinePhase(record.workflowPhase),
+      stages,
+    })
+  }
+
+  private appendVerificationRequired(record: SessionRecord): void {
+    if (record.events.some(event => event.type === 'verification.required')) {
+      return
+    }
+    this.append(record, 'verification.required', 'BeeGame playability verification is required', {
+      type: 'verification.required',
+      artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
+      checks: [
+        {
+          id: 'clarity_30s',
+          label: 'Clarity within 30 seconds',
+          detail: 'Player understands goal, controls, and feedback quickly.',
+        },
+        {
+          id: 'interesting_decision_60s',
+          label: 'First interesting decision within 60 seconds',
+          detail: 'The first minute contains a meaningful player decision.',
+        },
+        {
+          id: 'responsive_input',
+          label: 'Responsive input feel',
+          detail: 'Core controls respond immediately and consistently.',
+        },
+        {
+          id: 'readable_feedback',
+          label: 'Readable feedback',
+          detail: 'Scoring, damage, progress, and failure feedback are visible.',
+        },
+        {
+          id: 'failure_pressure',
+          label: 'Failure pressure',
+          detail: 'The game has pressure, fail state, or escalating challenge.',
+        },
+        {
+          id: 'replayable_challenge',
+          label: 'Replayable challenge',
+          detail: 'There is at least one reason to retry and improve.',
+        },
+      ],
+    })
+  }
+
+  private appendRuntimeObservation(
+    record: SessionRecord,
+    status: 'initialized' | 'turn_completed',
+  ): void {
+    this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
+      type: 'runtime.observation',
+      status,
+      phase: record.workflowPhase,
+      features: [
+        {
+          id: 'CONTEXT_COLLAPSE',
+          label: 'Context collapse',
+          stage: 'phase_1',
+          status: 'available',
+        },
+        {
+          id: 'HISTORY_SNIP',
+          label: 'History snip',
+          stage: 'phase_1',
+          status: 'available',
+        },
+        {
+          id: 'TOKEN_BUDGET',
+          label: 'Token budget',
+          stage: 'phase_1',
+          status: 'available',
+        },
+        {
+          id: 'PROMPT_CACHE_BREAK_DETECTION',
+          label: 'Prompt cache diagnostics',
+          stage: 'phase_1',
+          status: 'available',
+        },
+        {
+          id: 'SHOT_STATS',
+          label: 'Shot stats',
+          stage: 'phase_1',
+          status: 'available',
+        },
+        {
+          id: 'MONITOR_TOOL',
+          label: 'Monitor tool',
+          stage: 'phase_1',
+          status: 'available',
+        },
+      ],
+      counters: {
+        eventCount: record.events.length,
+        toolUseCount: record.toolUses.size,
+        turnIndex: Math.max(0, record.nextTurnIndex - 1),
+      },
+    })
   }
 
   private resolveAllPendingPermissions(
@@ -560,6 +693,37 @@ export class BeeGameSessionManager {
   }
 }
 
+function getCurrentPipelinePhase(phase: WorkflowPhase): string {
+  if (phase === 'planning') return 'gdd'
+  if (phase === 'building') return 'implementation'
+  return 'build'
+}
+
+function getWorkflowPipelineStages(phase: WorkflowPhase): Array<{
+  id: string
+  label: string
+  status: 'completed' | 'active' | 'pending'
+}> {
+  const current = getCurrentPipelinePhase(phase)
+  const order = [
+    { id: 'idea_intake', label: 'Idea Intake' },
+    { id: 'gdd', label: 'Playable Spec' },
+    { id: 'implementation', label: 'Implementation' },
+    { id: 'qa', label: 'Playability Review' },
+    { id: 'build', label: 'Build/Preview' },
+  ]
+  const currentIndex = order.findIndex(stage => stage.id === current)
+  return order.map((stage, index) => ({
+    ...stage,
+    status:
+      phase === 'completed' || index < currentIndex
+        ? 'completed'
+        : index === currentIndex
+          ? 'active'
+          : 'pending',
+  }))
+}
+
 async function deleteSessionArtifactRoots(
   record: SessionRecord,
 ): Promise<string[]> {
@@ -572,22 +736,29 @@ async function deleteSessionArtifactRoots(
   return deleted
 }
 
+async function deleteSessionWorkspaceRoot(
+  record: SessionRecord,
+  dashboardDataRoot: string,
+): Promise<string | undefined> {
+  const workspaceRoot = await realpath(resolve(record.session.cwd))
+  const dataRoot = await realpath(resolve(dashboardDataRoot))
+  if (workspaceRoot === dataRoot) return undefined
+  const rel = relative(dataRoot, workspaceRoot)
+  if (rel.startsWith('..') || isAbsolute(rel)) return undefined
+  await rm(workspaceRoot, { recursive: true, force: true })
+  return workspaceRoot
+}
+
 export async function deleteSessionArtifactsFromTranscript(
   sessionId: string,
   cwd: string,
+  dashboardDataRoot?: string,
 ): Promise<string[]> {
-  const transcriptPath = resolve(
+  const events = await readSessionTranscriptFromDisk(
+    sessionId,
     cwd,
-    '.beegame-dashboard',
-    'transcripts',
-    `${sessionId}.jsonl`,
+    dashboardDataRoot,
   )
-  const raw = await readFile(transcriptPath, 'utf8')
-  const events = raw
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => JSON.parse(line) as Pick<BeeGameEvent, 'type' | 'payload'>)
   const roots = getSessionArtifactRootPathsForEvents(cwd, events)
   const deleted: string[] = []
   for (const path of roots) {
@@ -595,6 +766,66 @@ export async function deleteSessionArtifactsFromTranscript(
     deleted.push(path)
   }
   return deleted
+}
+
+export async function readSessionTranscriptFromDisk(
+  sessionId: string,
+  cwd: string,
+  dashboardDataRoot?: string,
+): Promise<Array<{
+  id: number
+  type: BeeGameEventType
+  text: string
+  turnId?: string
+  payload?: DashboardSDKMessage
+  createdAt: string
+}>> {
+  const transcriptPath = await resolveReadableTranscriptPath(
+    sessionId,
+    cwd,
+    dashboardDataRoot,
+  )
+  const raw = await readFile(transcriptPath, 'utf8')
+  return raw
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => JSON.parse(line) as {
+      id: number
+      type: BeeGameEventType
+      text: string
+      turnId?: string
+      payload?: DashboardSDKMessage
+      createdAt: string
+    })
+}
+
+async function resolveReadableTranscriptPath(
+  sessionId: string,
+  cwd: string,
+  dashboardDataRoot?: string,
+): Promise<string> {
+  const primary = getSessionTranscriptPath(
+    sessionId,
+    resolve(dashboardDataRoot || cwd),
+  )
+  try {
+    await readFile(primary, 'utf8')
+    return primary
+  } catch {
+    const legacy = resolve(
+      cwd,
+      '.beegame-dashboard',
+      'transcripts',
+      `${sessionId}.jsonl`,
+    )
+    await readFile(legacy, 'utf8')
+    return legacy
+  }
+}
+
+function getSessionTranscriptPath(sessionId: string, root: string): string {
+  return resolve(root, '.beegame-dashboard', 'transcripts', `${sessionId}.jsonl`)
 }
 
 function getSessionArtifactRootPaths(record: SessionRecord): string[] {

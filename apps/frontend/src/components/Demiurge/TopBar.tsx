@@ -11,10 +11,11 @@ interface TopBarProps {
     isSyncing: boolean;
     onRename: (newName: string) => void;
     mode?: 'demiurge' | 'beegame';
+    phaseLabel?: string;
 }
 
 
-export function TopBar({ projectName, lang, status, progress, tokens, isSyncing, onRename, mode = 'demiurge' }: TopBarProps) {
+export function TopBar({ projectName, lang, status, progress, tokens, isSyncing, onRename, mode = 'demiurge', phaseLabel }: TopBarProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [tempName, setTempName] = useState(projectName);
     const t = translations[lang];
@@ -104,10 +105,12 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
             <div className="flex items-center space-x-8 px-1">
                 <div className="flex flex-col">
                     <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">
-                        {mode === 'beegame' ? 'SESSION' : t.progress}
+                        {mode === 'beegame' ? 'PHASE' : t.progress}
                     </span>
                     <span className="font-mono text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                        {mode === 'beegame' ? status.toUpperCase().replace('_', ' ') : `${Math.floor(progress)}%`}
+                        {mode === 'beegame'
+                            ? `${phaseLabel || status.toUpperCase().replace('_', ' ')} · ${Math.floor(progress)}%`
+                            : `${Math.floor(progress)}%`}
                     </span>
                 </div>
 

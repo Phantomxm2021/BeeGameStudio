@@ -343,10 +343,38 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('sends input through a structured BeeGame session runner', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+  test('creates a missing project workspace directory inside the configured Projects directory', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'snake-web')
     const fake = createFakeRunner()
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+
+    try {
+      const res = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+
+      expect(res.status).toBe(200)
+      expect((await stat(workspace)).isDirectory()).toBe(true)
+      expect(fake.starts).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('sends input through a structured BeeGame session runner', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'game-one')
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
     const model = createModelConfig('dashboard-local', {
       name: 'Primary LLM',
       provider: 'openai-compatible',
@@ -375,12 +403,13 @@ describe('beegame session routes', () => {
       )
 
       await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      const resolvedWorkspace = await realpath(workspace)
 
       expect(inputRes.status).toBe(200)
       expect(fake.starts).toEqual([
         expect.objectContaining({
           sessionId: session.id,
-          cwd: workspace,
+          cwd: resolvedWorkspace,
           env: expect.objectContaining({
             BEEGAME_CONFIG_DIR: expect.stringContaining('.beegame'),
             BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
@@ -403,14 +432,32 @@ describe('beegame session routes', () => {
       const events = await eventsRes.json()
       expect(events.map((event: { type: string }) => event.type)).toEqual([
         'session.started',
+        'runtime.observation',
         'turn.started',
         'workflow.phase',
+        'workflow.pipeline',
         'user.message',
         'system.status',
         'assistant.message',
         'result',
+        'runtime.observation',
         'turn.completed',
       ])
+      expect(events.find((event: { type: string }) => event.type === 'runtime.observation')).toEqual(
+        expect.objectContaining({
+          type: 'runtime.observation',
+          text: 'BeeGame runtime observability updated',
+          payload: expect.objectContaining({
+            type: 'runtime.observation',
+            features: expect.arrayContaining([
+              expect.objectContaining({ id: 'CONTEXT_COLLAPSE' }),
+              expect.objectContaining({ id: 'HISTORY_SNIP' }),
+              expect.objectContaining({ id: 'TOKEN_BUDGET' }),
+              expect.objectContaining({ id: 'MONITOR_TOOL' }),
+            ]),
+          }),
+        }),
+      )
       expect(events.find((event: { type: string }) => event.type === 'assistant.message')).toEqual(
         expect.objectContaining({
           type: 'assistant.message',
@@ -418,9 +465,10 @@ describe('beegame session routes', () => {
         }),
       )
       const transcript = await readFile(
-        join(workspace, '.beegame-dashboard', 'transcripts', `${session.id}.jsonl`),
+        join(projectsRoot, '.beegame-dashboard', 'transcripts', `${session.id}.jsonl`),
         'utf8',
       )
+      await expect(stat(join(workspace, '.beegame-dashboard'))).rejects.toThrow()
       const transcriptEvents = transcript
         .trim()
         .split('\n')
@@ -438,7 +486,7 @@ describe('beegame session routes', () => {
         ]),
       )
     } finally {
-      await rm(workspace, { recursive: true, force: true })
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 
@@ -1079,12 +1127,27 @@ describe('beegame session routes', () => {
       ])
       expect(fake.starts).toHaveLength(2)
       expect(fake.runtimes[1].submits[0].prompt).toContain('BEEGAME_PLAYABLE_SPEC.md')
+      expect(fake.runtimes[1].submits[0].prompt).toContain(
+        'Write the final playability verification to ./BEEGAME_PLAYABILITY_REVIEW.md',
+      )
       expect(fake.runtimes[1].submits[0].prompt).not.toContain('Core Loop, Fun Hook, Skill Test')
       await expect(readFile(join(workspace, 'BEEGAME_PLAYABLE_SPEC.md'), 'utf8')).resolves.toContain(
         'PLAYABLE_SPEC_READY: yes',
       )
       expect(events).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.pipeline',
+            payload: expect.objectContaining({
+              currentPhase: 'implementation',
+              stages: expect.arrayContaining([
+                expect.objectContaining({ id: 'idea_intake', status: 'completed' }),
+                expect.objectContaining({ id: 'gdd', label: 'Playable Spec', status: 'completed' }),
+                expect.objectContaining({ id: 'implementation', status: 'active' }),
+                expect.objectContaining({ id: 'qa', label: 'Playability Review', status: 'pending' }),
+              ]),
+            }),
+          }),
           expect.objectContaining({
             type: 'workflow.phase',
             text: 'planning',
@@ -1096,6 +1159,18 @@ describe('beegame session routes', () => {
           expect.objectContaining({
             type: 'workflow.phase',
             text: 'building',
+          }),
+          expect.objectContaining({
+            type: 'verification.required',
+            text: 'BeeGame playability verification is required',
+            payload: expect.objectContaining({
+              artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
+              checks: expect.arrayContaining([
+                expect.objectContaining({ id: 'clarity_30s' }),
+                expect.objectContaining({ id: 'interesting_decision_60s' }),
+                expect.objectContaining({ id: 'failure_pressure' }),
+              ]),
+            }),
           }),
           expect.objectContaining({
             type: 'permission.requested',
@@ -1518,6 +1593,42 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('deletes the active session workspace directory when it is a project under Projects', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'project-one')
+    const fake = createFakeRunner([{ type: 'result', result: 'Done' }])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      await mkdir(workspace, { recursive: true })
+      await writeFile(join(workspace, 'README.md'), 'project')
+      const resolvedWorkspace = await realpath(workspace)
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const deleteRes = await app.request(
+        `/api/beegame-sessions/${session.id}?deleteArtifacts=1`,
+        { method: 'DELETE' },
+      )
+
+      expect(deleteRes.status).toBe(200)
+      const result = await deleteRes.json()
+      expect(result.deleted).toBe(true)
+      expect(result.deletedArtifactPaths).toEqual([resolvedWorkspace])
+      await expect(stat(workspace)).rejects.toThrow()
+      await expect(stat(projectsRoot)).resolves.toEqual(expect.anything())
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('deletes project directories from transcript after backend restart loses the session', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const resolvedWorkspace = await realpath(workspace)
@@ -1564,6 +1675,86 @@ describe('beegame session routes', () => {
       })
       await expect(stat(gameDir)).rejects.toThrow()
       await expect(stat(workspace)).resolves.toEqual(expect.anything())
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('deletes a project workspace after backend restart loses the session', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'project-after-restart')
+    const sessionId = 'beegame_restart_delete_workspace'
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      await mkdir(workspace, { recursive: true })
+      await writeFile(join(workspace, 'README.md'), 'project')
+      const resolvedWorkspace = await realpath(workspace)
+
+      const deleteRes = await app.request(
+        `/api/beegame-sessions/${sessionId}?deleteArtifacts=1&workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'DELETE' },
+      )
+
+      expect(deleteRes.status).toBe(200)
+      const result = await deleteRes.json()
+      expect(result.deleted).toBe(true)
+      expect(result.deletedArtifactPaths).toEqual([resolvedWorkspace])
+      await expect(stat(workspace)).rejects.toThrow()
+      await expect(stat(projectsRoot)).resolves.toEqual(expect.anything())
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('reads transcript from disk after backend restart loses the session', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-transcript-read-'))
+    const sessionId = 'beegame_transcript_read'
+    const transcriptDir = join(workspace, '.beegame-dashboard', 'transcripts')
+    const app = createAgentWorkflowApp()
+
+    try {
+      await mkdir(transcriptDir, { recursive: true })
+      await writeFile(
+        join(transcriptDir, `${sessionId}.jsonl`),
+        [
+          JSON.stringify({
+            id: 1,
+            sessionId,
+            type: 'user.message',
+            text: '做一个贪吃蛇',
+            createdAt: '2026-06-21T00:00:01.000Z',
+          }),
+          JSON.stringify({
+            id: 2,
+            sessionId,
+            type: 'assistant.message',
+            text: '已生成可玩的贪吃蛇原型。',
+            createdAt: '2026-06-21T00:00:02.000Z',
+          }),
+        ].join('\n'),
+        'utf8',
+      )
+
+      const res = await app.request(
+        `/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual([
+        expect.objectContaining({
+          id: 1,
+          type: 'user.message',
+          text: '做一个贪吃蛇',
+        }),
+        expect.objectContaining({
+          id: 2,
+          type: 'assistant.message',
+          text: '已生成可玩的贪吃蛇原型。',
+        }),
+      ])
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

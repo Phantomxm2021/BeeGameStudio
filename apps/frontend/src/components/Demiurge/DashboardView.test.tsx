@@ -190,6 +190,26 @@ describe('DashboardView runtime loading', () => {
         expect(capturedRightSidebarProps?.progress).toBe(capturedTopBarProps?.progress);
     });
 
+    it('passes BeeGame pipeline phase labels to the top bar', async () => {
+        mockedPhaseInfo = {
+            current_phase: 3,
+            phase_name: 'implementation',
+            history: [
+                { phase: 0, name: 'idea_intake', timestamp: 1_000 },
+                { phase: 2, name: 'gdd', timestamp: 2_000 },
+                { phase: 3, name: 'implementation', timestamp: 3_000 },
+            ],
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+
+        expect(capturedTopBarProps?.mode).toBe('beegame');
+        expect(capturedTopBarProps?.phaseLabel).toBe('Implementation');
+        expect(capturedTopBarProps?.progress).toBeGreaterThan(0);
+    });
+
     it('opens OperatorControls in a new browser tab when test operations are enabled', async () => {
         const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);

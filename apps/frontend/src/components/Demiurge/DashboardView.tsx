@@ -215,6 +215,25 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         });
     }, [phaseInfo, currentStatus, messages]);
 
+    const phaseLabel = useMemo(() => {
+        const phaseName = String(phaseInfo?.phase_name || '').trim();
+        if (!phaseName) return 'Idea Intake';
+        const labels: Record<string, string> = {
+            idea_intake: 'Idea Intake',
+            brief: 'Build Brief',
+            gdd: 'Playable Spec',
+            architecture: 'Architecture',
+            art_direction: 'Art Direction',
+            ui: 'UI',
+            asset: 'Assets',
+            implementation: 'Implementation',
+            qa: 'Playability Review',
+            polish: 'Polish',
+            build: 'Build/Preview',
+        };
+        return labels[phaseName] || phaseName.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    }, [phaseInfo?.phase_name]);
+
     // Derive agent active states
     const agentStatuses = useMemo(() => {
         const statuses: Record<string, string> = {};
@@ -308,6 +327,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 isSyncing={isSyncing}
                 onRename={handleRename}
                 mode={isBeeGameMode ? 'beegame' : 'demiurge'}
+                phaseLabel={isBeeGameMode ? phaseLabel : undefined}
             />
 
             <SideMenu
