@@ -225,6 +225,79 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('returns structured clarification when the model cannot recommend modes yet', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'vague',
+              needs_options: false,
+              needs_clarification: true,
+              clarification: {
+                prompt: 'Which interpretation should BeeGame use?',
+                options: [
+                  { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+                  { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+                ],
+                freeform_label: 'Add detail',
+              },
+              clarification_questions: [],
+              detected_constraints: [],
+              recommended_next_step: 'clarify',
+              options: [],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'idea requiring clarification' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake).toEqual({
+        maturity: 'vague',
+        needsOptions: false,
+        needsClarification: true,
+        clarification: {
+          prompt: 'Which interpretation should BeeGame use?',
+          options: [
+            { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+            { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+          ],
+          freeformLabel: 'Add detail',
+        },
+        clarificationQuestions: [],
+        detectedConstraints: [],
+        recommendedNextStep: 'clarify',
+        options: [],
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('accepts minimal LLM game-mode options and derives internal brief fields', async () => {
     const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
       method: 'POST',

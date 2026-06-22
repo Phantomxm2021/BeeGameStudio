@@ -29,6 +29,7 @@ type JsonObject = Record<string, unknown>
 type BeeGameIntakeOption = {
   id: string
   title: string
+  projectFolderName: string
   pitch: string
   gameplay: string
   coreGameplayHypothesis: string
@@ -52,10 +53,24 @@ type BeeGameIntakeOption = {
   scope: string
 }
 
+type BeeGameClarificationOption = {
+  id: string
+  label: string
+  description?: string
+  value?: string
+}
+
+type BeeGameClarification = {
+  prompt: string
+  options: BeeGameClarificationOption[]
+  freeformLabel?: string
+}
+
 type BeeGameIntakeAnalysis = {
   maturity: 'vague' | 'directional' | 'concrete'
   needsOptions: boolean
   needsClarification: boolean
+  clarification?: BeeGameClarification
   clarificationQuestions: string[]
   detectedConstraints: string[]
   recommendedNextStep: string
@@ -229,12 +244,16 @@ async function generateBeeGameIntakeOptions(input: {
           content: [
             'You are BeeGame intake planner.',
             'First understand the game request before proposing game modes. The options are playable game modes, not project management delivery strategies.',
-            'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
+            'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
             'maturity must be one of vague, directional, concrete.',
             'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 4 directions.',
             'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, core loop, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
             'Set needs_clarification=true only when a blocking contradiction or missing decision prevents a useful recommendation.',
-            'Each option must include id, title, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+            'When needs_clarification=true, clarification must contain exactly one prompt string for the most blocking question, 2 to 4 short options with id, label, optional description, and optional value, plus optional freeform_label. Do not bundle multiple questions into one prompt.',
+            'When needs_clarification=true, recommended_next_step must be "clarify"; options may be empty because the user must answer first.',
+            'When needs_clarification=false, return 1 to 4 valid options.',
+            'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+            'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
             'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
             'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
             'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
@@ -300,7 +319,9 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
     )
     if (intakeOption) normalized.push(intakeOption)
   }
-  if (normalized.length === 0) {
+  const needsClarification = getBooleanField(parsed, 'needsClarification', 'needs_clarification') ?? false
+  const clarification = normalizeBeeGameClarification(parsed.clarification)
+  if (normalized.length === 0 && !(needsClarification && clarification)) {
     const keys = Object.keys(parsed).join(', ') || 'none'
     const reason = rejectedReasons.slice(0, 3).join('; ')
     throw new Error(
@@ -311,11 +332,41 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
   return {
     maturity,
     needsOptions: getBooleanField(parsed, 'needsOptions', 'needs_options') ?? maturity !== 'concrete',
-    needsClarification: getBooleanField(parsed, 'needsClarification', 'needs_clarification') ?? false,
+    needsClarification,
+    ...(clarification ? { clarification } : {}),
     clarificationQuestions: getStringArrayField(parsed, 'clarificationQuestions', 'clarification_questions'),
     detectedConstraints: getStringArrayField(parsed, 'detectedConstraints', 'detected_constraints'),
-    recommendedNextStep: getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
+    recommendedNextStep: getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (needsClarification ? 'clarify' : maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
     options: normalized.slice(0, 4),
+  }
+}
+
+function normalizeBeeGameClarification(value: unknown): BeeGameClarification | undefined {
+  if (!isObject(value)) return undefined
+  const prompt = getStringField(value, 'prompt')
+  if (!prompt) return undefined
+  const rawOptions = Array.isArray(value.options) ? value.options : []
+  const options = rawOptions
+    .map((option, index): BeeGameClarificationOption | undefined => {
+      if (!isObject(option)) return undefined
+      const label = getStringField(option, 'label')
+      if (!label) return undefined
+      const description = getStringField(option, 'description')
+      const optionValue = getStringField(option, 'value')
+      return {
+        id: getStringField(option, 'id') || `clarification_${index + 1}`,
+        label,
+        ...(description ? { description } : {}),
+        ...(optionValue ? { value: optionValue } : {}),
+      }
+    })
+    .filter((option): option is BeeGameClarificationOption => Boolean(option))
+    .slice(0, 4)
+  const freeformLabel = getStringField(value, 'freeformLabel', 'freeform_label')
+  return {
+    prompt,
+    options,
+    ...(freeformLabel ? { freeformLabel } : {}),
   }
 }
 
@@ -353,6 +404,7 @@ function normalizeBeeGameIntakeOption(
   const option = {
     id: String(value.id || '').trim() || `mode_${optionIndex + 1}`,
     title: String(value.title || '').trim(),
+    projectFolderName: getStringField(value, 'projectFolderName', 'project_folder_name'),
     pitch,
     gameplay,
     coreGameplayHypothesis: getStringField(value, 'coreGameplayHypothesis', 'core_gameplay_hypothesis') || gameplay,
@@ -530,6 +582,10 @@ function registerBeeGameSessionRoutes(
     try {
       const workspacePath = await resolveSessionWorkspacePath(
         String(body.workspacePath),
+        defaultWorkspacePath,
+      )
+      await assertSessionWorkspaceIsProjectDirectory(
+        workspacePath,
         defaultWorkspacePath,
       )
       return c.json(
@@ -718,10 +774,25 @@ async function readTranscriptFromWorkspace(
   }
 }
 
+async function assertSessionWorkspaceIsProjectDirectory(
+  workspacePath: string,
+  defaultWorkspacePath?: string,
+): Promise<void> {
+  if (!hasWorkspaceBoundary(defaultWorkspacePath)) return
+  const defaultWorkspace = resolve(
+    await getDefaultWorkspacePath({ defaultWorkspacePath }),
+  )
+  const resolvedWorkspace = resolve(workspacePath)
+  if (resolvedWorkspace !== defaultWorkspace) return
+  throw new Error(
+    `Workspace path must target a project directory under the default Projects directory, not the Projects root: ${defaultWorkspace}`,
+  )
+}
+
 function getDashboardDataRoot(defaultWorkspacePath?: string): string {
   return resolve(
-    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      defaultWorkspacePath?.trim() ||
+    defaultWorkspacePath?.trim() ||
+      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
       resolve(process.cwd(), 'Projects'),
   )
 }

@@ -43,6 +43,18 @@ vi.mock('../../services/beeGameAdapter', () => ({
         generateIntakeOptions,
         runIdeaIntake,
     },
+    getBeeGameWorkspaceSettings: vi.fn().mockResolvedValue({
+        workspacePath: '/tmp/beegame-projects',
+        isDefault: true,
+    }),
+    resetBeeGameWorkspaceRoot: vi.fn().mockResolvedValue({
+        workspacePath: '/tmp/beegame-projects',
+        isDefault: true,
+    }),
+    setBeeGameWorkspaceRoot: vi.fn().mockReturnValue({
+        workspacePath: '/tmp/beegame-projects',
+        isDefault: false,
+    }),
 }));
 
 vi.mock('../../services/modelConfigApi', () => ({
@@ -72,6 +84,59 @@ const renderLanding = (props?: Partial<React.ComponentProps<typeof LandingView>>
     />,
 );
 
+const makeIntakeOptions = () => [
+    {
+        id: 'llm_mode_a',
+        title: 'LLM Mode A',
+        pitch: 'LLM generated pitch A.',
+        gameplay: 'LLM generated gameplay rules A.',
+        coreGameplayHypothesis: 'LLM generated hypothesis A.',
+        experienceSnapshot: 'LLM generated snapshot A.',
+        playerFirstMinute: 'LLM generated first minute A.',
+        whyFitsIdea: 'LLM generated fit A.',
+        playablePrototype: 'LLM generated first playable A.',
+        validationTarget: 'LLM generated validation target A.',
+        coreMechanic: 'LLM generated core mechanic A.',
+        firstBuild: 'LLM generated first build A.',
+        validationGoal: 'LLM generated validation goal A.',
+        risk: 'LLM generated risk A.',
+        fit: 'LLM generated fit A.',
+        firstPlayableValidation: 'LLM generated validation A.',
+        riskComplexity: 'LLM generated complexity A.',
+        recommendedPlatform: 'Web',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Arcade',
+        recommendedStyle: 'Pixel',
+        recommendedInputs: ['Keyboard/mouse', 'Touch'],
+        scope: 'Playable demo',
+    },
+    {
+        id: 'llm_mode_b',
+        title: 'LLM Mode B',
+        pitch: 'LLM generated pitch B.',
+        gameplay: 'LLM generated gameplay rules B.',
+        coreGameplayHypothesis: 'LLM generated hypothesis B.',
+        experienceSnapshot: 'LLM generated snapshot B.',
+        playerFirstMinute: 'LLM generated first minute B.',
+        whyFitsIdea: 'LLM generated fit B.',
+        playablePrototype: 'LLM generated first playable B.',
+        validationTarget: 'LLM generated validation target B.',
+        coreMechanic: 'LLM generated core mechanic B.',
+        firstBuild: 'LLM generated first build B.',
+        validationGoal: 'LLM generated validation goal B.',
+        risk: 'LLM generated risk B.',
+        fit: 'LLM generated fit B.',
+        firstPlayableValidation: 'LLM generated validation B.',
+        riskComplexity: 'LLM generated complexity B.',
+        recommendedPlatform: 'Web',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Casual',
+        recommendedStyle: 'Cartoon',
+        recommendedInputs: ['Keyboard/mouse'],
+        scope: 'Vertical slice',
+    },
+];
+
 beforeEach(() => {
     analyzeIdeaIntake.mockReset();
     analyzeIdeaIntake.mockResolvedValue({
@@ -82,58 +147,7 @@ beforeEach(() => {
         clarification_suggestions: [],
     });
     generateIntakeOptions.mockReset();
-    const options = [
-        {
-            id: 'llm_mode_a',
-            title: 'LLM Mode A',
-            pitch: 'LLM generated pitch A.',
-            gameplay: 'LLM generated gameplay rules A.',
-            coreGameplayHypothesis: 'LLM generated hypothesis A.',
-            experienceSnapshot: 'LLM generated snapshot A.',
-            playerFirstMinute: 'LLM generated first minute A.',
-            whyFitsIdea: 'LLM generated fit A.',
-            playablePrototype: 'LLM generated first playable A.',
-            validationTarget: 'LLM generated validation target A.',
-            coreMechanic: 'LLM generated core mechanic A.',
-            firstBuild: 'LLM generated first build A.',
-            validationGoal: 'LLM generated validation goal A.',
-            risk: 'LLM generated risk A.',
-            fit: 'LLM generated fit A.',
-            firstPlayableValidation: 'LLM generated validation A.',
-            riskComplexity: 'LLM generated complexity A.',
-            recommendedPlatform: 'Web',
-            recommendedDimension: '2D',
-            recommendedGenre: 'Arcade',
-            recommendedStyle: 'Pixel',
-            recommendedInputs: ['Keyboard/mouse', 'Touch'],
-            scope: 'Playable demo',
-        },
-        {
-            id: 'llm_mode_b',
-            title: 'LLM Mode B',
-            pitch: 'LLM generated pitch B.',
-            gameplay: 'LLM generated gameplay rules B.',
-            coreGameplayHypothesis: 'LLM generated hypothesis B.',
-            experienceSnapshot: 'LLM generated snapshot B.',
-            playerFirstMinute: 'LLM generated first minute B.',
-            whyFitsIdea: 'LLM generated fit B.',
-            playablePrototype: 'LLM generated first playable B.',
-            validationTarget: 'LLM generated validation target B.',
-            coreMechanic: 'LLM generated core mechanic B.',
-            firstBuild: 'LLM generated first build B.',
-            validationGoal: 'LLM generated validation goal B.',
-            risk: 'LLM generated risk B.',
-            fit: 'LLM generated fit B.',
-            firstPlayableValidation: 'LLM generated validation B.',
-            riskComplexity: 'LLM generated complexity B.',
-            recommendedPlatform: 'Web',
-            recommendedDimension: '2D',
-            recommendedGenre: 'Casual',
-            recommendedStyle: 'Cartoon',
-            recommendedInputs: ['Keyboard/mouse'],
-            scope: 'Vertical slice',
-        },
-    ];
+    const options = makeIntakeOptions();
     generateIntakeOptions.mockResolvedValue(options);
     runIdeaIntake.mockReset();
     runIdeaIntake.mockResolvedValue({
@@ -191,6 +205,55 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
         expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
         expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
+    });
+
+    it('shows clarification as a neutral prompt and continues intake after an answer', async () => {
+        runIdeaIntake
+            .mockResolvedValueOnce({
+                maturity: 'vague',
+                needsOptions: false,
+                needsClarification: true,
+                clarification: {
+                    prompt: 'Which interpretation should BeeGame use?',
+                    options: [
+                        { id: 'clarify_a', label: 'Interpretation A', description: 'Use the first interpretation.' },
+                        { id: 'clarify_b', label: 'Interpretation B', value: 'Use the second interpretation.' },
+                    ],
+                    freeformLabel: 'Add more detail',
+                },
+                clarificationQuestions: [],
+                detectedConstraints: [],
+                recommendedNextStep: 'clarify',
+                options: [],
+            })
+            .mockResolvedValueOnce({
+                maturity: 'directional',
+                needsOptions: true,
+                needsClarification: false,
+                clarificationQuestions: [],
+                detectedConstraints: [],
+                recommendedNextStep: 'choose_direction',
+                options: makeIntakeOptions(),
+            });
+
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        const clarification = await screen.findByTestId('intake-clarification');
+        expect(clarification).toHaveTextContent('需求补充');
+        expect(clarification).toHaveTextContent('Which interpretation should BeeGame use?');
+        expect(clarification).not.toHaveClass('bg-red-950/60');
+        expect(screen.queryByText('Which interpretation should BeeGame use? /')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: /Interpretation B/ }));
+
+        await screen.findByText('LLM Mode A');
+        expect(runIdeaIntake).toHaveBeenCalledTimes(2);
+        expect(runIdeaIntake.mock.calls[1][0].idea).toContain('Question: Which interpretation should BeeGame use?');
+        expect(runIdeaIntake.mock.calls[1][0].idea).toContain('Answer: Use the second interpretation.');
     });
 
     it('keeps the landing content visible without opening a modal while generating options', async () => {
@@ -303,7 +366,7 @@ describe('LandingView bootstrap submission', () => {
         expect(clarification).toBeUndefined();
         expect(brief).toMatchObject({
             idea: 'LLM generated idea',
-            title: 'LLM generated idea',
+            title: 'LLM Mode A',
             option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {
                 platform: 'Godot',

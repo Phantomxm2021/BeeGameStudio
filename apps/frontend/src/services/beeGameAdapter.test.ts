@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { beeGameAdapter } from './beeGameAdapter';
+import {
+  beeGameAdapter,
+  getBeeGameWorkspaceSettings,
+  setBeeGameWorkspaceRoot,
+} from './beeGameAdapter';
 
 const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
   id: 'mode_from_llm',
@@ -90,6 +94,43 @@ describe('beeGameAdapter prompt rules', () => {
     }));
   });
 
+  it('accepts structured clarification without synthesizing local options', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      maturity: 'vague',
+      needsOptions: false,
+      needsClarification: true,
+      clarification: {
+        prompt: 'Which direction should BeeGame use?',
+        options: [
+          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+        ],
+        freeformLabel: 'Add detail',
+      },
+      clarificationQuestions: [],
+      detectedConstraints: [],
+      recommendedNextStep: 'clarify',
+      options: [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' });
+
+    expect(intake).toMatchObject({
+      needsClarification: true,
+      recommendedNextStep: 'clarify',
+      options: [],
+      clarification: {
+        prompt: 'Which direction should BeeGame use?',
+        options: [
+          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+        ],
+        freeformLabel: 'Add detail',
+      },
+    });
+  });
+
   it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -169,10 +210,68 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(startBody.workspacePath).toBe('/tmp/beegame-projects/llm-project');
     expect(result.project.root_path).toBe('/tmp/beegame-projects/llm-project');
-    expect(result.project.name).toBe('llm-project');
+    expect(result.project.name).toBe('LLM Project');
   });
 
-  it('uses a path-safe folder name as the project display name instead of the selected mode title', async () => {
+  it('uses the configured workspace root for new projects without replacing it with a project path', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
+        return jsonResponse({
+          id: 'beegame_custom_root',
+          cwd: body.workspacePath,
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_custom_root/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_custom_root',
+          cwd: '/tmp/custom-beegame-projects/arena-prototype',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setBeeGameWorkspaceRoot('/tmp/custom-beegame-projects');
+
+    const result = await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: 'arena prototype',
+      title: 'Arena Prototype',
+      option: makeLlmOption({ title: 'Arena Prototype' }),
+      settings: {
+        platform: 'Web',
+        visualStyle: 'Minimal',
+        dimension: '2D',
+        genre: 'Action',
+        inputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+      },
+    });
+
+    const startCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+    ));
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
+    const settings = await getBeeGameWorkspaceSettings();
+
+    expect(startBody.workspacePath).toBe('/tmp/custom-beegame-projects/arena-prototype');
+    expect(result.project.root_path).toBe('/tmp/custom-beegame-projects/arena-prototype');
+    expect(settings.workspacePath).toBe('/tmp/custom-beegame-projects');
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
+  });
+
+  it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/filesystem/default-workspace') {
@@ -195,7 +294,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_safe_path/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_safe_path',
-          cwd: '/tmp/beegame-projects/beegame-project-test',
+          cwd: '/tmp/beegame-projects/movement-aim-trainer',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -209,7 +308,7 @@ describe('beeGameAdapter prompt rules', () => {
     const result = await beeGameAdapter.bootstrapProjectFromBrief({
       idea: '移动与瞄准训练',
       title: '移动与瞄准训练',
-      option: makeLlmOption({ title: '移动与瞄准训练' }),
+      option: makeLlmOption({ title: '移动与瞄准训练', projectFolderName: 'movement-aim-trainer' }),
       settings: {
         platform: 'Web',
         visualStyle: 'Minimal',
@@ -224,11 +323,10 @@ describe('beeGameAdapter prompt rules', () => {
       String(path) === '/api/beegame-sessions' && init?.method === 'POST'
     ));
     const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
-    const folderName = result.project.root_path?.split('/').at(-1);
-
-    expect(startBody.workspacePath).toMatch(/^\/tmp\/beegame-projects\/beegame-project-/);
+    expect(startBody.workspacePath).toBe('/tmp/beegame-projects/movement-aim-trainer');
     expect(startBody.workspacePath).not.toContain('移动与瞄准训练');
-    expect(result.project.name).toBe(folderName);
+    expect(startBody.workspacePath).not.toContain('beegame-project-');
+    expect(result.project.name).toBe('移动与瞄准训练');
   });
 
   it('migrates legacy projects bound to the Projects root before recreating a missing session', async () => {
@@ -410,18 +508,27 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('Confirmed BeeGame build brief');
     expect(body.text).toContain('Platform: Web');
     expect(body.text).toContain('Inputs: Keyboard/mouse, Touch');
-    expect(body.text).toContain('First produce a Playable Spec, not a generic GDD.');
+    expect(body.text).toContain('First produce a mandatory BeeGame design pack before implementation.');
+    expect(body.text).toContain('docs/GDD.md');
+    expect(body.text).toContain('docs/TECH_DESIGN.md');
+    expect(body.text).toContain('docs/ART_AUDIO_DIRECTION.md');
+    expect(body.text).toContain('docs/RESOURCE_PLACEHOLDERS.md');
+    expect(body.text).toContain('docs/LEVEL_TUNING.md');
+    expect(body.text).toContain('docs/PLAYABILITY_ACCEPTANCE.md');
+    expect(body.text).toContain('Also produce a concise Playable Spec in the conversation');
     expect(body.text).toContain('Core Loop');
     expect(body.text).toContain('Fun Hook');
     expect(body.text).toContain('Risk/Reward');
     expect(body.text).toContain('First 3 Minutes');
     expect(body.text).toContain('Playability Acceptance Checklist');
     expect(body.text).toContain('Do not start implementation until the Playable Spec is internally checked against the checklist.');
+    expect(body.text).toContain('PLAYABILITY_CHECKS_PASSED: yes');
     expect(body.text).toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
     expect(body.text).not.toContain('apps/frontend');
     expect(body.text).not.toContain('apps/dashboard');
     expect(body.text).not.toContain('packages');
-    expect(body.text).toContain('workspace-local game directory')
+    expect(body.text).toContain('current working directory is already the project directory')
+    expect(body.text).toContain('Do not create another top-level folder')
     expect(body.text).not.toContain('./snake-game');
     expect(body.text).not.toContain('./games/snake');
   });

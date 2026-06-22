@@ -13,6 +13,7 @@ import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
     type BeeGameBuildBrief,
+    type BeeGameClarification,
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
@@ -72,6 +73,8 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
     const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(null);
     const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(null);
     const [intakeError, setIntakeError] = useState('');
+    const [clarification, setClarification] = useState<BeeGameClarification | null>(null);
+    const [clarificationDraft, setClarificationDraft] = useState('');
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -84,22 +87,31 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
 
-    const handleStart = async (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!projectName.trim() || isTransitioning || isPreparing) return;
-
+    const runIntake = async (idea: string) => {
         setIntakeError('');
         setSelectedOption(null);
         setSettings(null);
         setIntakeOptions([]);
+        setClarification(null);
+        setClarificationDraft('');
         setIsPreparing(true);
         setIntakePhase('generating_options');
         try {
-            const intake = await beeGameAdapter.runIdeaIntake({ idea: projectName.trim() });
+            const intake = await beeGameAdapter.runIdeaIntake({ idea });
+            if (intake.needsClarification && intake.clarification) {
+                setIsPreparing(false);
+                setIntakePhase('idle');
+                setClarification(intake.clarification);
+                return;
+            }
             if (intake.needsClarification && intake.clarificationQuestions.length > 0) {
                 setIsPreparing(false);
                 setIntakePhase('idle');
-                setIntakeError(intake.clarificationQuestions.join(' / '));
+                setClarification({
+                    prompt: intake.clarificationQuestions[0],
+                    options: [],
+                    freeformLabel: '我来补充',
+                });
                 return;
             }
             setIntakeOptions(intake.options);
@@ -121,6 +133,13 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
         }
     };
 
+    const handleStart = async (event: React.FormEvent) => {
+        event.preventDefault();
+        const idea = projectName.trim();
+        if (!idea || isTransitioning || isPreparing) return;
+        await runIntake(idea);
+    };
+
     const handleProjectNameChange = (value: string) => {
         setProjectName(value);
         if (intakePhase !== 'idle' && !isPreparing && !isTransitioning) {
@@ -129,7 +148,23 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
             setSelectedOption(null);
             setSettings(null);
             setIntakeError('');
+            setClarification(null);
+            setClarificationDraft('');
         }
+    };
+
+    const handleClarificationAnswer = async (answer: string) => {
+        if (!clarification || isPreparing || isTransitioning) return;
+        const normalizedAnswer = answer.trim();
+        if (!normalizedAnswer) return;
+        const clarifiedIdea = [
+            projectName.trim(),
+            '',
+            'Additional clarification:',
+            `Question: ${clarification.prompt}`,
+            `Answer: ${normalizedAnswer}`,
+        ].join('\n');
+        await runIntake(clarifiedIdea);
     };
 
     const handleSelectOption = (option: BeeGameIntakeOption) => {
@@ -175,6 +210,8 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
         setSelectedOption(null);
         setSettings(null);
         setIntakeError('');
+        setClarification(null);
+        setClarificationDraft('');
     };
 
     const handleStartBuild = async () => {
@@ -187,7 +224,7 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                 idea: projectName.trim(),
                 option: selectedOption,
                 settings,
-                title: projectName.trim(),
+                title: selectedOption.title,
             };
             await onStart(projectName.trim(), undefined, brief);
             setIsTransitioning(true);
@@ -431,6 +468,59 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                         </div>
                     </div>
                 </div>
+                ) : null}
+
+                {clarification ? (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        data-testid="intake-clarification"
+                        className="relative z-20 mt-4 w-[min(760px,calc(100vw-2rem))] rounded-[24px] border border-white/15 bg-zinc-950/60 px-5 py-4 text-left text-zinc-100 shadow-[0_18px_55px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
+                    >
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">需求补充</div>
+                        <p className="mt-2 text-sm leading-6 text-zinc-200">{clarification.prompt}</p>
+                        {clarification.options.length > 0 ? (
+                            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                {clarification.options.map((option) => (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        disabled={isPreparing || isTransitioning}
+                                        onClick={() => handleClarificationAnswer(option.value || option.label)}
+                                        className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-left transition hover:border-amber-300/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <span className="block text-sm font-semibold text-white">{option.label}</span>
+                                        {option.description ? (
+                                            <span className="mt-1 block text-xs leading-5 text-zinc-400">{option.description}</span>
+                                        ) : null}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+                        <form
+                            className="mt-4 flex flex-col gap-2 sm:flex-row"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                void handleClarificationAnswer(clarificationDraft);
+                            }}
+                        >
+                            <input
+                                aria-label={clarification.freeformLabel || '补充说明'}
+                                value={clarificationDraft}
+                                disabled={isPreparing || isTransitioning}
+                                onChange={(event) => setClarificationDraft(event.target.value)}
+                                placeholder={clarification.freeformLabel || '也可以直接补充你的理解'}
+                                className="min-w-0 flex-1 rounded-full border border-white/15 bg-zinc-900/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                            />
+                            <button
+                                type="submit"
+                                disabled={!clarificationDraft.trim() || isPreparing || isTransitioning}
+                                className="rounded-full bg-white px-5 py-3 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                继续
+                            </button>
+                        </form>
+                    </div>
                 ) : null}
 
                 {intakeError ? (

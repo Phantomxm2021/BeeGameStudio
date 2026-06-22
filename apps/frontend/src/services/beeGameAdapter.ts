@@ -74,6 +74,7 @@ type BeeGameArtifact = {
 export type BeeGameIntakeOption = {
   id: string;
   title: string;
+  projectFolderName?: string;
   pitch: string;
   gameplay: string;
   coreGameplayHypothesis: string;
@@ -97,10 +98,24 @@ export type BeeGameIntakeOption = {
   scope: string;
 };
 
+export type BeeGameClarificationOption = {
+  id: string;
+  label: string;
+  description?: string;
+  value?: string;
+};
+
+export type BeeGameClarification = {
+  prompt: string;
+  options: BeeGameClarificationOption[];
+  freeformLabel?: string;
+};
+
 export type BeeGameIdeaIntakeResult = {
   maturity: 'vague' | 'directional' | 'concrete';
   needsOptions: boolean;
   needsClarification: boolean;
+  clarification?: BeeGameClarification;
   clarificationQuestions: string[];
   detectedConstraints: string[];
   recommendedNextStep: string;
@@ -128,6 +143,7 @@ export type BeeGameBuildBrief = {
 const PROJECTS_KEY = 'beegame-adapter-projects';
 const BINDINGS_KEY = 'beegame-adapter-bindings';
 const WORKSPACE_KEY = 'beegame-adapter-workspace-path';
+const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const USER_QUESTION_TOOL = 'AskUserQuestion';
@@ -136,6 +152,33 @@ const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
 
 export function isBeeGameAdapterEnabled(): boolean {
   return String(import.meta.env.VITE_BEEGAME_ADAPTER ?? '1') !== '0';
+}
+
+export type BeeGameWorkspaceSettings = {
+  workspacePath: string;
+  isDefault: boolean;
+};
+
+export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSettings> {
+  const configured = readConfiguredWorkspaceRoot();
+  if (configured) {
+    return { workspacePath: configured, isDefault: false };
+  }
+  return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
+}
+
+export function setBeeGameWorkspaceRoot(path: string): BeeGameWorkspaceSettings {
+  const normalized = path.trim();
+  if (!isAbsolutePath(normalized)) {
+    throw new Error('工作路径必须是绝对路径');
+  }
+  localStorage.setItem(WORKSPACE_ROOT_KEY, normalized);
+  return { workspacePath: normalized, isDefault: false };
+}
+
+export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSettings> {
+  localStorage.removeItem(WORKSPACE_ROOT_KEY);
+  return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
 }
 
 export const beeGameAdapter = {
@@ -156,7 +199,7 @@ export const beeGameAdapter = {
       { idea: data.idea },
     );
     const intake = normalizeIdeaIntakeResult(response);
-    if (intake.options.length === 0) {
+    if (intake.options.length === 0 && !intake.clarification) {
       throw new Error('BeeGame intake did not return game mode options');
     }
     return intake;
@@ -172,10 +215,10 @@ export const beeGameAdapter = {
     status: string;
     pipeline: { pipeline_id: string; status: string };
   }> {
-    const title = data.title || summarizeTitle(data.idea);
-    const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
+    const title = getBriefDisplayTitle(data);
+    const workspacePath = await resolveProjectWorkspacePath(data.root_path, getBriefFolderName(data, title));
     const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(getWorkspaceDisplayName(workspacePath, title), workspacePath, `project_${session.id}`);
+    const project = createLocalProject(title, workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
@@ -202,7 +245,7 @@ export const beeGameAdapter = {
     const title = data.title || summarizeTitle(data.idea);
     const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
     const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(getWorkspaceDisplayName(workspacePath, title), workspacePath, `project_${session.id}`);
+    const project = createLocalProject(title, workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
@@ -458,6 +501,24 @@ function createLocalProject(name: string, rootPath?: string, id = newProjectId()
   };
 }
 
+function getBriefDisplayTitle(brief: BeeGameBuildBrief): string {
+  return (brief.title || brief.option.title || summarizeTitle(brief.idea)).trim() || 'BeeGame Project';
+}
+
+function getBriefFolderName(brief: BeeGameBuildBrief, displayTitle: string): string {
+  const candidates = [
+    brief.option.projectFolderName,
+    brief.option.title,
+    displayTitle,
+    brief.option.id,
+  ];
+  for (const candidate of candidates) {
+    const folderName = slugifyPathSegment(candidate || '', '');
+    if (folderName) return folderName;
+  }
+  return stableProjectFolderName(displayTitle || brief.idea);
+}
+
 function summarizeTitle(idea: string): string {
   const normalized = idea.replace(/\s+/g, ' ').trim();
   return normalized.length > 42 ? `${normalized.slice(0, 42)}...` : normalized || 'BeeGame Project';
@@ -538,33 +599,20 @@ function isSessionNotFoundError(error: unknown): boolean {
 }
 
 async function resolveWorkspacePath(input?: string): Promise<string> {
-  const workspacePath = (input || ENV_WORKSPACE_PATH || '').trim();
-  if (workspacePath.startsWith('/')) {
-    rememberWorkspace(workspacePath);
+  const workspacePath = (input || ENV_WORKSPACE_PATH || readConfiguredWorkspaceRoot() || '').trim();
+  if (isAbsolutePath(workspacePath)) {
     return workspacePath;
   }
 
-  let fallback: { path: string };
-  try {
-    fallback = await getJson<{ path: string }>('/api/filesystem/default-workspace');
-  } catch (error) {
-    throw new Error(
-      `无法获取默认 Workspace path，请重启 agent-workflow-server 后端服务。${error instanceof Error ? ` (${error.message})` : ''}`,
-    );
-  }
-  if (!fallback.path?.startsWith('/')) {
-    throw new Error('后端没有返回可用的默认 Workspace path');
-  }
-  rememberWorkspace(fallback.path);
-  return fallback.path;
+  return resolveDefaultWorkspacePath();
 }
 
-async function resolveProjectWorkspacePath(input: string | undefined, title: string): Promise<string> {
+async function resolveProjectWorkspacePath(input: string | undefined, folderName: string): Promise<string> {
   if (input?.trim()) {
     return resolveWorkspacePath(input);
   }
   const projectsRoot = await resolveWorkspacePath();
-  const projectPath = joinPath(projectsRoot, slugifyPathSegment(title || 'beegame-project'));
+  const projectPath = joinPath(projectsRoot, slugifyPathSegment(folderName || 'game-project', 'game-project'));
   rememberWorkspace(projectPath);
   return projectPath;
 }
@@ -599,12 +647,36 @@ function normalizePath(path: string): string {
 }
 
 function rememberWorkspace(path?: string): void {
-  if (path?.trim().startsWith('/')) {
+  if (isAbsolutePath(path?.trim() || '')) {
     localStorage.setItem(WORKSPACE_KEY, path.trim());
   }
 }
 
-function slugifyPathSegment(value: string): string {
+function readConfiguredWorkspaceRoot(): string {
+  const value = String(localStorage.getItem(WORKSPACE_ROOT_KEY) || '').trim();
+  return isAbsolutePath(value) ? value : '';
+}
+
+async function resolveDefaultWorkspacePath(): Promise<string> {
+  let fallback: { path: string };
+  try {
+    fallback = await getJson<{ path: string }>('/api/filesystem/default-workspace');
+  } catch (error) {
+    throw new Error(
+      `无法获取默认 Workspace path，请重启 agent-workflow-server 后端服务。${error instanceof Error ? ` (${error.message})` : ''}`,
+    );
+  }
+  if (!isAbsolutePath(fallback.path || '')) {
+    throw new Error('后端没有返回可用的默认 Workspace path');
+  }
+  return fallback.path;
+}
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function slugifyPathSegment(value: string, fallback = 'game-project'): string {
   const normalized = value
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -612,7 +684,11 @@ function slugifyPathSegment(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return normalized || `beegame-project-${Date.now().toString(36)}`;
+  return normalized || fallback;
+}
+
+function stableProjectFolderName(value: string): string {
+  return `game-project-${stableTextHash(value || 'BeeGame Project')}`;
 }
 
 function joinPath(root: string, segment: string): string {
@@ -863,7 +939,7 @@ function deriveContextVisibility(events: BeeGameEvent[]) {
     summary,
     blackboard_record_count: Number(counters.eventCount ?? events.length),
     memory_hits: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
-    rag_sources: observation ? [`.beegame-dashboard/transcripts/${observation.sessionId}.jsonl`] : [],
+    rag_sources: observation ? ['.beegame-dashboard/transcripts/<project-folder>__<session-hash>.jsonl'] : [],
     selected_skills: labels,
     runtime_features: features,
     ...(usage ? {
@@ -1210,6 +1286,7 @@ function normalizeIdeaIntakeResult(
   response: Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] },
 ): BeeGameIdeaIntakeResult {
   const options = (response.options || []).map((option) => normalizeIntakeOption(option));
+  const clarification = normalizeClarification(response.clarification);
   const maturity = response.maturity === 'directional' || response.maturity === 'concrete' || response.maturity === 'vague'
     ? response.maturity
     : 'vague';
@@ -1217,6 +1294,7 @@ function normalizeIdeaIntakeResult(
     maturity,
     needsOptions: typeof response.needsOptions === 'boolean' ? response.needsOptions : maturity !== 'concrete',
     needsClarification: response.needsClarification === true,
+    ...(clarification ? { clarification } : {}),
     clarificationQuestions: Array.isArray(response.clarificationQuestions) ? response.clarificationQuestions.map(String).filter(Boolean) : [],
     detectedConstraints: Array.isArray(response.detectedConstraints) ? response.detectedConstraints.map(String).filter(Boolean) : [],
     recommendedNextStep: typeof response.recommendedNextStep === 'string' && response.recommendedNextStep
@@ -1226,9 +1304,49 @@ function normalizeIdeaIntakeResult(
   };
 }
 
+function normalizeClarification(value: unknown): BeeGameClarification | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const prompt = typeof record.prompt === 'string' ? record.prompt.trim() : '';
+  if (!prompt) return undefined;
+  const options = Array.isArray(record.options)
+    ? record.options
+      .map((item, index): BeeGameClarificationOption | undefined => {
+        if (!item || typeof item !== 'object') return undefined;
+        const option = item as Record<string, unknown>;
+        const label = typeof option.label === 'string' ? option.label.trim() : '';
+        if (!label) return undefined;
+        const id = typeof option.id === 'string' && option.id.trim()
+          ? option.id.trim()
+          : `clarification_${index + 1}`;
+        const description = typeof option.description === 'string' ? option.description.trim() : '';
+        const optionValue = typeof option.value === 'string' ? option.value.trim() : '';
+        return {
+          id,
+          label,
+          ...(description ? { description } : {}),
+          ...(optionValue ? { value: optionValue } : {}),
+        };
+      })
+      .filter((item): item is BeeGameClarificationOption => Boolean(item))
+      .slice(0, 4)
+    : [];
+  const freeformLabel = typeof record.freeformLabel === 'string'
+    ? record.freeformLabel.trim()
+    : typeof record.freeform_label === 'string'
+      ? record.freeform_label.trim()
+      : '';
+  return {
+    prompt,
+    options,
+    ...(freeformLabel ? { freeformLabel } : {}),
+  };
+}
+
 function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption {
   return {
     ...option,
+    projectFolderName: option.projectFolderName || (option as BeeGameIntakeOption & { project_folder_name?: string }).project_folder_name || '',
     coreGameplayHypothesis: option.coreGameplayHypothesis || option.coreMechanic || option.gameplay,
     experienceSnapshot: option.experienceSnapshot || option.pitch,
     playerFirstMinute: option.playerFirstMinute || option.gameplay,
@@ -1269,6 +1387,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     '',
     `Idea: ${brief.idea}`,
     `Selected game mode: ${brief.option.title}`,
+    `Project folder name: ${getBriefFolderName(brief, getBriefDisplayTitle(brief))}`,
     `Mode pitch: ${brief.option.pitch}`,
     `Gameplay: ${brief.option.gameplay}`,
     `Core gameplay hypothesis: ${brief.option.coreGameplayHypothesis}`,
@@ -1294,17 +1413,27 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     getBeeGameBrandInstruction(),
     '',
     'Workspace rule: create game files only inside the active BeeGame workspace.',
-    'Prefer a new workspace-local game directory named for the selected project and game mode.',
+    'The current working directory is already the project directory. Do not create another top-level folder named after the project or selected game mode.',
+    'Write project documents under ./docs/ and implementation files under workspace-local implementation folders such as ./src, ./game, or ./public.',
     'Do not create, edit, or suggest using BeeGame dashboard or host application source paths.',
     'Do not modify the BeeGame dashboard source code unless the user explicitly asks to modify the dashboard itself.',
     '',
-    'First produce a Playable Spec, not a generic GDD.',
+    'First produce a mandatory BeeGame design pack before implementation.',
+    'Write these files under ./docs/: GDD.md, TECH_DESIGN.md, ART_AUDIO_DIRECTION.md, RESOURCE_PLACEHOLDERS.md, LEVEL_TUNING.md, and PLAYABILITY_ACCEPTANCE.md.',
+    'docs/GDD.md must include: Player Promise, Core Loop, First Minute, and Win Lose Rules.',
+    'docs/TECH_DESIGN.md must include: Runtime Architecture, State Model, and Build Validation.',
+    'docs/ART_AUDIO_DIRECTION.md must include: Visual Language, Feedback VFX, and Audio Cues.',
+    'docs/RESOURCE_PLACEHOLDERS.md must include: Placeholder Assets, VFX Slots, and SFX Slots.',
+    'docs/LEVEL_TUNING.md must include: Level Layout, Difficulty Curve, and Replay Target.',
+    'docs/PLAYABILITY_ACCEPTANCE.md must include: Clarity 30s, Interesting Decision 60s, Responsive Input, Readable Feedback, Failure Pressure, and Replayable Challenge.',
+    'Also produce a concise Playable Spec in the conversation, not a generic GDD.',
     'The Playable Spec must include: Core Loop, Fun Hook, Skill Test, Risk/Reward, Failure Pressure, First 3 Minutes, MVP Acceptance, technical architecture, art direction, asset slots, and level plan.',
     'Every proposed mechanic must explain why it improves player decisions, risk, skill, feedback, or replayability. Remove mechanics that do not serve one of those purposes.',
     'Create a Playability Acceptance Checklist before implementation. It must cover clarity within 30 seconds, first interesting decision within 60 seconds, responsive input feel, readable feedback, failure pressure, and one replayable challenge.',
     'When the Playable Spec and checklist are complete and internally checked, include this exact standalone line before implementation: PLAYABLE_SPEC_READY: yes',
     'Do not start implementation until the Playable Spec is internally checked against the checklist.',
     'After implementation, run build checks and then self-review the playable result against the Playability Acceptance Checklist.',
+    'Only write PLAYABILITY_CHECKS_PASSED: yes in BEEGAME_PLAYABILITY_REVIEW.md if every required playability check passes; otherwise fix the game first.',
   ].filter(Boolean).join('\n');
 }
 

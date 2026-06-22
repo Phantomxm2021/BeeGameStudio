@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   createModelConfig,
   resetAgentWorkflow,
@@ -20,13 +20,17 @@ type FakeRuntimeMode =
   | 'permission_twice'
   | 'permission_different_tool'
   | 'outside_permission'
+  | 'workspace_root_permission'
   | 'outside_bash_permission'
   | 'ask_user_question_permission'
   | 'write_before_playable_spec'
   | 'write_after_playable_spec'
+  | 'write_playable_spec_doc_absolute_path'
+  | 'write_after_playable_spec_file'
   | 'bash_before_playable_spec'
   | 'bash_after_playable_spec'
   | 'planning_then_build'
+  | 'planning_marker_without_design_pack'
   | 'build_only'
 
 class FakeBeeGameRuntime {
@@ -35,6 +39,7 @@ class FakeBeeGameRuntime {
   readonly permissionResults: string[] = []
 
   constructor(
+    private readonly cwd: string,
     private readonly messages: DashboardSDKMessage[] = [
       {
         type: 'assistant',
@@ -49,6 +54,7 @@ class FakeBeeGameRuntime {
     this.submits.push(input)
     if (this.mode === 'planning_then_build') {
       if (this.submits.length === 1) {
+        await writeRequiredDesignPack(this.cwd, input)
         input.onMessage({
           type: 'assistant',
           message: {
@@ -65,6 +71,23 @@ class FakeBeeGameRuntime {
         input.onMessage({ type: 'result', result: 'planning complete' })
         return
       }
+    }
+    if (this.mode === 'planning_marker_without_design_pack') {
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'text',
+            text: [
+              '# Playable Spec',
+              'This is a short spec that declares readiness without writing required design artifacts.',
+              'PLAYABLE_SPEC_READY: yes',
+            ].join('\n'),
+          }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'planning marker only' })
+      return
     }
     if (this.mode === 'build_only') {
       const decision = await input.requestPermission({
@@ -120,6 +143,17 @@ class FakeBeeGameRuntime {
       })
       this.permissionResults.push(decision.behavior)
       input.onMessage({ type: 'result', result: `outside ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'workspace_root_permission') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_workspace_root_write',
+        toolName: 'Write',
+        message: 'Write inside configured workspace root?',
+        input: { file_path: join(dirname(this.cwd), 'existing-project', 'README.md') },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `workspace root ${decision.behavior}` })
       return
     }
     if (this.mode === 'outside_bash_permission') {
@@ -185,6 +219,45 @@ class FakeBeeGameRuntime {
       input.onMessage({ type: 'result', result: `write after spec ${decision.behavior}` })
       return
     }
+    if (this.mode === 'write_playable_spec_doc_absolute_path') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_write_playable_spec_doc',
+        toolName: 'Write',
+        message: 'Write Playable Spec doc?',
+        input: {
+          file_path: join(this.cwd, 'docs', 'PLAYABLE_SPEC.md'),
+          content: [
+            '# Playable Spec',
+            'Core Loop',
+            'Fun Hook',
+            'Skill Test',
+            'Risk/Reward',
+            'Failure Pressure',
+            'First 3 Minutes',
+            'MVP Acceptance',
+            'Playability Acceptance Checklist',
+            'PLAYABLE_SPEC_READY: yes',
+          ].join('\n'),
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `write playable spec ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'write_after_playable_spec_file') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_write_after_spec_file',
+        toolName: 'Write',
+        message: 'Write game files?',
+        input: {
+          file_path: join(this.cwd, 'game', 'src', 'main.ts'),
+          content: 'console.log("game")',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `write after spec file ${decision.behavior}` })
+      return
+    }
     if (this.mode === 'bash_before_playable_spec') {
       const decision = await input.requestPermission({
         toolUseID: 'tool_bash_before_spec',
@@ -232,6 +305,130 @@ class FakeBeeGameRuntime {
   }
 }
 
+async function writeRequiredDesignPack(
+  cwd: string,
+  input: BeeGameSessionSubmitInput,
+): Promise<void> {
+  const requiredDocs = [
+    {
+      path: 'docs/PLAYABLE_SPEC.md',
+      content: [
+        '# Playable Spec',
+        '## Core Loop',
+        'Observe, decide, act, receive feedback, and retry.',
+        '## Fun Hook',
+        'A single clear mechanic creates replay tension.',
+        '## Skill Test',
+        'The player must make a readable decision under pressure.',
+        '## Risk/Reward',
+        'The player can choose safe progress or risky high-value play.',
+        '## Failure Pressure',
+        'A clear timer, threat, or resource limit creates urgency.',
+        '## First 3 Minutes',
+        'The player learns, makes a decision, and sees a result quickly.',
+        '## MVP Acceptance',
+        'The first playable is small but complete.',
+        'PLAYABLE_SPEC_READY: yes',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/GDD.md',
+      content: [
+        '# GDD',
+        '## Player Promise',
+        'A focused playable promise.',
+        '## Core Loop',
+        'Observe, decide, act, receive feedback, and retry.',
+        '## First Minute',
+        'The player understands the goal and makes one meaningful choice.',
+        '## Win Lose Rules',
+        'The game has explicit success and failure conditions.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/TECH_DESIGN.md',
+      content: [
+        '# Tech Design',
+        '## Runtime Architecture',
+        'Scene, input, simulation, feedback, and UI modules are separated.',
+        '## State Model',
+        'Game state tracks player, objective, score, fail state, and restart.',
+        '## Build Validation',
+        'The build command must run before completion.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/ART_AUDIO_DIRECTION.md',
+      content: [
+        '# Art Audio Direction',
+        '## Visual Language',
+        'Readable shapes, strong contrast, and clear target markers.',
+        '## Feedback VFX',
+        'Hits, misses, progress, and danger have visible effects.',
+        '## Audio Cues',
+        'Actions, success, failure, and pressure have placeholder cues.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/RESOURCE_PLACEHOLDERS.md',
+      content: [
+        '# Resource Placeholders',
+        '## Placeholder Assets',
+        'List every temporary asset used by the playable build.',
+        '## VFX Slots',
+        'Hit, goal, danger, and completion effects are reserved.',
+        '## SFX Slots',
+        'Input, hit, score, fail, and restart sounds are reserved.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/LEVEL_TUNING.md',
+      content: [
+        '# Level Tuning',
+        '## Level Layout',
+        'The first level creates a clear path, obstacle, and decision point.',
+        '## Difficulty Curve',
+        'Pressure rises after the player learns the first action.',
+        '## Replay Target',
+        'A score, timer, or mastery target encourages retry.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/PLAYABILITY_ACCEPTANCE.md',
+      content: [
+        '# Playability Acceptance',
+        '## Clarity 30s',
+        'Goal, controls, and feedback are understandable within 30 seconds.',
+        '## Interesting Decision 60s',
+        'The player makes a meaningful decision within 60 seconds.',
+        '## Responsive Input',
+        'Core input responds immediately.',
+        '## Readable Feedback',
+        'The player sees progress, result, and failure feedback.',
+        '## Failure Pressure',
+        'There is a fail state or escalating pressure.',
+        '## Replayable Challenge',
+        'The player has a reason to retry and improve.',
+      ].join('\n'),
+    },
+  ]
+
+  for (const doc of requiredDocs) {
+    const fullPath = join(cwd, doc.path)
+    await mkdir(dirname(fullPath), { recursive: true })
+    await writeFile(fullPath, doc.content, 'utf8')
+    await input.requestPermission({
+      toolUseID: `tool_design_${doc.path.replaceAll('/', '_')}`,
+      toolName: 'Write',
+      message: `Write ${doc.path}`,
+      input: {
+        file_path: doc.path,
+        content: doc.content,
+      },
+    })
+  }
+}
+
 function createFakeRunner(
   messages?: DashboardSDKMessage[],
   mode: FakeRuntimeMode = 'messages',
@@ -252,12 +449,22 @@ function createFakeRunner(
           mode === 'planning_then_build' && runtimes.length > 0
             ? 'build_only'
             : mode
-        const runtime = new FakeBeeGameRuntime(messages, runtimeMode)
+        const runtime = new FakeBeeGameRuntime(input.cwd, messages, runtimeMode)
         runtimes.push(runtime)
         return runtime
       },
     },
   }
+}
+
+async function createConfiguredProjectWorkspace(): Promise<{
+  projectsRoot: string
+  workspace: string
+}> {
+  const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+  const workspace = join(projectsRoot, 'current-project')
+  await mkdir(workspace, { recursive: true })
+  return { projectsRoot, workspace }
 }
 
 describe('beegame session routes', () => {
@@ -367,6 +574,32 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('rejects starting a BeeGame session directly in the default Projects root', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+
+    try {
+      const resolvedProjectsRoot = await realpath(projectsRoot)
+      const res = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: projectsRoot }),
+      })
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: `Workspace path must target a project directory under the default Projects directory, not the Projects root: ${resolvedProjectsRoot}`,
+      })
+      expect(fake.starts).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('sends input through a structured BeeGame session runner', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'game-one')
@@ -402,7 +635,13 @@ describe('beegame session routes', () => {
         },
       )
 
-      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/console/sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
       const resolvedWorkspace = await realpath(workspace)
 
       expect(inputRes.status).toBe(200)
@@ -464,8 +703,13 @@ describe('beegame session routes', () => {
           text: 'Acknowledged.',
         }),
       )
+      const transcriptDir = join(projectsRoot, '.beegame-dashboard', 'transcripts')
+      const transcriptFiles = await readdir(transcriptDir)
+      expect(transcriptFiles).toHaveLength(1)
+      expect(transcriptFiles[0]).toMatch(/^game-one__[a-f0-9]{8}\.jsonl$/)
+      expect(transcriptFiles[0]).not.toBe(`${session.id}.jsonl`)
       const transcript = await readFile(
-        join(projectsRoot, '.beegame-dashboard', 'transcripts', `${session.id}.jsonl`),
+        join(transcriptDir, transcriptFiles[0]),
         'utf8',
       )
       await expect(stat(join(workspace, '.beegame-dashboard'))).rejects.toThrow()
@@ -479,6 +723,22 @@ describe('beegame session routes', () => {
             type: 'user.message',
             text: 'Build a tiny puzzle game.',
           }),
+          expect.objectContaining({
+            type: 'assistant.message',
+            text: 'Acknowledged.',
+          }),
+        ]),
+      )
+      const restartedApp = createAgentWorkflowApp({
+        sessionRunner: createFakeRunner().runner,
+        defaultWorkspacePath: projectsRoot,
+      })
+      const transcriptRes = await restartedApp.request(
+        `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      expect(transcriptRes.status).toBe(200)
+      expect(await transcriptRes.json()).toEqual(
+        expect.arrayContaining([
           expect.objectContaining({
             type: 'assistant.message',
             text: 'Acknowledged.',
@@ -980,9 +1240,12 @@ describe('beegame session routes', () => {
   })
 
   test('trusts later in-workspace permissions after the first remembered allow', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'permission_different_tool')
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
@@ -1041,14 +1304,17 @@ describe('beegame session routes', () => {
         ]),
       )
     } finally {
-      await rm(workspace, { recursive: true, force: true })
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 
   test('emits workflow block instead of permission resolution before a Playable Spec exists', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'write_before_playable_spec')
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
@@ -1087,14 +1353,17 @@ describe('beegame session routes', () => {
       expect(events.some((event: { type: string }) => event.type === 'permission.resolved')).toBe(false)
       expect(events.some((event: { type: string }) => event.type === 'permission.requested')).toBe(false)
     } finally {
-      await rm(workspace, { recursive: true, force: true })
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 
   test('starts build phase after planning marker and then uses normal permissions', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'planning_then_build')
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
@@ -1182,14 +1451,73 @@ describe('beegame session routes', () => {
         ]),
       )
     } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not start implementation when planning marker is present but required design pack is missing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner(undefined, 'planning_marker_without_design_pack')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Produce the design gate.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; text: string }) =>
+            event.type === 'workflow.blocked' &&
+            event.text.includes('required design pack'),
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.starts).toHaveLength(1)
+      expect(fake.runtimes).toHaveLength(1)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('required design pack'),
+            payload: expect.objectContaining({
+              phase: 'planning',
+              reason: expect.stringContaining('docs/GDD.md'),
+            }),
+          }),
+        ]),
+      )
+      expect(
+        events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'permission.requested' &&
+            event.payload?.toolUseID === 'tool_build_write',
+        ),
+      ).toBe(false)
+    } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
 
   test('allows normal file-write approval after the Playable Spec gate is complete', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'write_after_playable_spec')
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
@@ -1241,7 +1569,117 @@ describe('beegame session routes', () => {
         ),
       ).toBe(false)
     } finally {
-      await rm(workspace, { recursive: true, force: true })
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('allows planning to write PLAYABLE_SPEC.md using an absolute workspace path', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'write_playable_spec_doc_absolute_path')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Write playable spec doc.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length > 0)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'permission.resolved',
+            payload: expect.objectContaining({
+              toolUseID: 'tool_write_playable_spec_doc',
+              toolName: 'Write',
+              decision: 'allow',
+              autoApproved: true,
+            }),
+          }),
+        ]),
+      )
+      expect(
+        events.some((event: { type: string }) => event.type === 'workflow.blocked'),
+      ).toBe(false)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('recognizes an existing playable spec file before gating implementation writes', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    await writeFile(
+      join(workspace, 'BEEGAME_PLAYABLE_SPEC.md'),
+      [
+        '# Playable Spec',
+        'Core Loop',
+        'Playability Acceptance Checklist',
+        'PLAYABLE_SPEC_READY: yes',
+      ].join('\n'),
+      'utf8',
+    )
+    const fake = createFakeRunner(undefined, 'write_after_playable_spec_file')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Continue implementation from existing spec.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'permission.requested' &&
+            event.payload?.toolUseID === 'tool_write_after_spec_file',
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'permission.requested',
+            payload: expect.objectContaining({
+              toolUseID: 'tool_write_after_spec_file',
+              toolName: 'Write',
+            }),
+          }),
+        ]),
+      )
+      expect(
+        events.some((event: { type: string }) => event.type === 'workflow.blocked'),
+      ).toBe(false)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 
@@ -1338,7 +1776,71 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('auto-denies permissions that target paths outside the session workspace', async () => {
+  test('allows permissions inside the configured workspace root even outside the current project', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'current-project')
+    const existingProject = join(projectsRoot, 'existing-project')
+    const fake = createFakeRunner(undefined, 'workspace_root_permission')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      await mkdir(existingProject, { recursive: true })
+      await writeRequiredDesignPack(workspace, {
+        requestPermission: async () => ({ behavior: 'allow' }),
+      } as unknown as BeeGameSessionSubmitInput)
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Modify existing project.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'permission.requested' &&
+            event.payload?.toolUseID === 'tool_workspace_root_write',
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual([])
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'permission.requested',
+            payload: expect.objectContaining({
+              toolUseID: 'tool_workspace_root_write',
+              toolName: 'Write',
+            }),
+          }),
+        ]),
+      )
+      expect(
+        events.some(
+          (event: { type: string; payload?: { toolUseID?: string; autoDenied?: boolean } }) =>
+            event.type === 'permission.resolved' &&
+            event.payload?.toolUseID === 'tool_workspace_root_write' &&
+            event.payload?.autoDenied === true,
+        ),
+      ).toBe(false)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-denies permissions that target paths outside the configured workspace root', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'outside_permission')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
@@ -1382,7 +1884,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('auto-denies Bash permissions that reference paths outside the session workspace', async () => {
+  test('auto-denies Bash permissions that reference paths outside the configured workspace root', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'outside_bash_permission')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })

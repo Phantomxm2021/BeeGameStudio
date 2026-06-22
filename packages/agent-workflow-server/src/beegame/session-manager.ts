@@ -1,21 +1,75 @@
-import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
 } from '@claude-code-best/agent-workflow'
 
 const PLAYABLE_SPEC_READY_MARKER = 'PLAYABLE_SPEC_READY: yes'
+const PLAYABILITY_CHECKS_PASSED_MARKER = 'PLAYABILITY_CHECKS_PASSED: yes'
+const REQUIRED_DESIGN_PACK = [
+  {
+    path: 'docs/PLAYABLE_SPEC.md',
+    sections: [
+      'Core Loop',
+      'Fun Hook',
+      'Skill Test',
+      'Risk/Reward',
+      'Failure Pressure',
+      'First 3 Minutes',
+      'MVP Acceptance',
+      PLAYABLE_SPEC_READY_MARKER,
+    ],
+  },
+  {
+    path: 'docs/GDD.md',
+    sections: [
+      'Player Promise',
+      'Core Loop',
+      'First Minute',
+      'Win Lose Rules',
+    ],
+  },
+  {
+    path: 'docs/TECH_DESIGN.md',
+    sections: ['Runtime Architecture', 'State Model', 'Build Validation'],
+  },
+  {
+    path: 'docs/ART_AUDIO_DIRECTION.md',
+    sections: ['Visual Language', 'Feedback VFX', 'Audio Cues'],
+  },
+  {
+    path: 'docs/RESOURCE_PLACEHOLDERS.md',
+    sections: ['Placeholder Assets', 'VFX Slots', 'SFX Slots'],
+  },
+  {
+    path: 'docs/LEVEL_TUNING.md',
+    sections: ['Level Layout', 'Difficulty Curve', 'Replay Target'],
+  },
+  {
+    path: 'docs/PLAYABILITY_ACCEPTANCE.md',
+    sections: [
+      'Clarity 30s',
+      'Interesting Decision 60s',
+      'Responsive Input',
+      'Readable Feedback',
+      'Failure Pressure',
+      'Replayable Challenge',
+    ],
+  },
+] as const
 const BUILD_AFTER_PLAYABLE_SPEC_PROMPT = [
   'Now implement the approved playable spec inside the active BeeGame workspace.',
   'Use ./BEEGAME_PLAYABLE_SPEC.md as the source of truth; read it if details are needed instead of relying on previous conversation history.',
-  'Create files only under a workspace-local game directory named for the selected project.',
-  'Write the design artifacts into the project directory before code if they are useful.',
-  'Then implement the playable MVP, run build checks, and self-review against the Playability Acceptance Checklist.',
+  'Use ./docs/GDD.md, ./docs/TECH_DESIGN.md, ./docs/ART_AUDIO_DIRECTION.md, ./docs/RESOURCE_PLACEHOLDERS.md, ./docs/LEVEL_TUNING.md, and ./docs/PLAYABILITY_ACCEPTANCE.md as mandatory product, technical, content, and QA contracts.',
+  'The current working directory is already the project workspace. Do not create another top-level folder with the same project name.',
+  'Create implementation files under workspace-local implementation folders such as ./src, ./game, ./public, or another purpose-named folder only when needed.',
+  'Implement the playable MVP from those contracts, run build checks, and fix issues before declaring completion.',
   'Write the final playability verification to ./BEEGAME_PLAYABILITY_REVIEW.md with verdict, evidence, failed checks, and concrete fixes.',
+  `Only include "${PLAYABILITY_CHECKS_PASSED_MARKER}" if every required check passes in the actual playable result; otherwise keep fixing before finishing.`,
 ].join('\n')
 import { createQueryEngineRunner } from './query-engine-runner'
 
@@ -155,7 +209,7 @@ export class BeeGameSessionManager {
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
     dashboardDataRoot?: string,
   ) {
-    this.dashboardDataRoot = resolve(
+    this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
         process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
         resolve(process.cwd(), 'Projects'),
@@ -191,6 +245,7 @@ export class BeeGameSessionManager {
       runtime,
       transcriptPath: getSessionTranscriptPath(
         session.id,
+        session.cwd,
         this.dashboardDataRoot,
       ),
       runner: null,
@@ -366,8 +421,21 @@ export class BeeGameSessionManager {
         !signal.aborted &&
         record.session.status === 'running' &&
         record.workflowPhase === 'planning' &&
-        hasPlayableSpecReadyMarker(record)
+        await hasPlayableSpecReady(record)
       ) {
+        const designPackViolation = await getDesignPackViolation(record)
+        if (designPackViolation) {
+          this.append(record, 'workflow.blocked', designPackViolation, {
+            type: 'workflow.blocked',
+            phase: record.workflowPhase,
+            reason: designPackViolation,
+            requiredArtifacts: REQUIRED_DESIGN_PACK.map(doc => ({
+              path: doc.path,
+              sections: [...doc.sections],
+            })),
+          })
+          return
+        }
         await persistPlayableSpec(record)
         this.setWorkflowPhase(record, 'building')
         this.appendVerificationRequired(record)
@@ -454,7 +522,7 @@ export class BeeGameSessionManager {
     return { resolved: true }
   }
 
-  private requestPermission(
+  private async requestPermission(
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
@@ -473,7 +541,11 @@ export class BeeGameSessionManager {
         message: 'Allowed so BeeGame can ask the user for clarification.',
       })
     }
-    const workspaceViolation = getWorkspaceViolation(record.session.cwd, request)
+    const workspaceViolation = getWorkspaceViolation(
+      record.session.cwd,
+      this.dashboardDataRoot,
+      request,
+    )
     if (workspaceViolation) {
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved',
@@ -489,13 +561,34 @@ export class BeeGameSessionManager {
         message: workspaceViolation,
       })
     }
-    if (record.workflowPhase === 'planning' && hasPlayableSpecReadyMarker(record)) {
-      this.setWorkflowPhase(record, 'building')
-      this.appendVerificationRequired(record)
+    if (
+      record.workflowPhase === 'planning' &&
+      isDesignPackMutationRequest(record, request)
+    ) {
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        autoApproved: true,
+        reason: 'Required BeeGame design pack files may be written during planning.',
+        input: request.input,
+      })
+      return {
+        behavior: 'allow',
+        message: 'Allowed for required BeeGame design pack output.',
+      }
+    }
+    if (record.workflowPhase === 'planning' && await hasPlayableSpecReady(record)) {
+      const designPackViolation = await getDesignPackViolation(record)
+      if (!designPackViolation) {
+        this.setWorkflowPhase(record, 'building')
+        this.appendVerificationRequired(record)
+      }
     }
     const gameplayGateViolation =
       record.workflowPhase === 'planning'
-        ? getGameplayGateViolation(record, request)
+        ? await getGameplayGateViolation(record, request)
         : undefined
     if (gameplayGateViolation) {
       this.append(record, 'workflow.blocked', gameplayGateViolation, {
@@ -693,6 +786,15 @@ export class BeeGameSessionManager {
   }
 }
 
+function resolveExistingPath(path: string): string {
+  const resolved = resolve(path)
+  try {
+    return realpathSync(resolved)
+  } catch {
+    return resolved
+  }
+}
+
 function getCurrentPipelinePhase(phase: WorkflowPhase): string {
   if (phase === 'planning') return 'gdd'
   if (phase === 'building') return 'implementation'
@@ -807,25 +909,61 @@ async function resolveReadableTranscriptPath(
 ): Promise<string> {
   const primary = getSessionTranscriptPath(
     sessionId,
+    cwd,
     resolve(dashboardDataRoot || cwd),
   )
   try {
     await readFile(primary, 'utf8')
     return primary
   } catch {
-    const legacy = resolve(
-      cwd,
-      '.beegame-dashboard',
-      'transcripts',
-      `${sessionId}.jsonl`,
-    )
-    await readFile(legacy, 'utf8')
-    return legacy
+    const candidates = [
+      getLegacySessionTranscriptPath(sessionId, resolve(dashboardDataRoot || cwd)),
+      getSessionTranscriptPath(sessionId, cwd, cwd),
+      getLegacySessionTranscriptPath(sessionId, cwd),
+    ]
+    for (const candidate of candidates) {
+      try {
+        await readFile(candidate, 'utf8')
+        return candidate
+      } catch {
+        // Try the next compatible transcript location.
+      }
+    }
+    await readFile(primary, 'utf8')
+    return primary
   }
 }
 
-function getSessionTranscriptPath(sessionId: string, root: string): string {
+function getSessionTranscriptPath(
+  sessionId: string,
+  cwd: string,
+  root: string,
+): string {
+  return resolve(
+    root,
+    '.beegame-dashboard',
+    'transcripts',
+    `${getTranscriptProjectPrefix(cwd, sessionId)}__${getShortSessionHash(sessionId)}.jsonl`,
+  )
+}
+
+function getLegacySessionTranscriptPath(sessionId: string, root: string): string {
   return resolve(root, '.beegame-dashboard', 'transcripts', `${sessionId}.jsonl`)
+}
+
+function getTranscriptProjectPrefix(cwd: string, sessionId: string): string {
+  const normalized = basename(resolve(cwd))
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return normalized || `project-${getShortSessionHash(sessionId)}`
+}
+
+function getShortSessionHash(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex').slice(0, 8)
 }
 
 function getSessionArtifactRootPaths(record: SessionRecord): string[] {
@@ -856,13 +994,18 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-function getGameplayGateViolation(
+async function getGameplayGateViolation(
   record: SessionRecord,
-  request: Pick<DashboardPermissionRequest, 'toolName'>,
-): string | undefined {
+  request: DashboardPermissionRequest,
+): Promise<string | undefined> {
   if (!isImplementationTool(request.toolName)) return undefined
-  if (hasPlayableSpecReadyMarker(record)) return undefined
-  return `Playable Spec gate is not complete. BeeGame must first produce a Playable Spec, Playability Acceptance Checklist, and the exact marker "${PLAYABLE_SPEC_READY_MARKER}" before using ${request.toolName}.`
+  if (isDesignPackMutationRequest(record, request)) return undefined
+  if (await hasPlayableSpecReady(record)) return undefined
+  return [
+    `Playable Spec gate is not complete before ${request.toolName}.`,
+    `First produce the design pack under ./docs, including docs/PLAYABLE_SPEC.md and docs/PLAYABILITY_ACCEPTANCE.md, with the exact marker "${PLAYABLE_SPEC_READY_MARKER}".`,
+    'If you already drafted the spec in memory, write only those required docs first; do not start implementation files or Bash commands yet.',
+  ].join(' ')
 }
 
 function isImplementationTool(toolName: string): boolean {
@@ -876,7 +1019,65 @@ function hasPlayableSpecReadyMarker(record: SessionRecord): boolean {
   )
 }
 
+async function hasPlayableSpecReady(record: SessionRecord): Promise<boolean> {
+  if (hasPlayableSpecReadyMarker(record)) return true
+  for (const path of ['BEEGAME_PLAYABLE_SPEC.md', 'docs/PLAYABLE_SPEC.md']) {
+    try {
+      const content = await readFile(resolve(record.session.cwd, path), 'utf8')
+      if (content.includes(PLAYABLE_SPEC_READY_MARKER)) return true
+    } catch {
+      // Absence means the gate is still pending.
+    }
+  }
+  return false
+}
+
+function isDesignPackMutationRequest(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): boolean {
+  if (!isFileMutationTool(request.toolName)) return false
+  const artifactPath = getMutationArtifactPath(request.input)
+  if (!artifactPath) return false
+  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
+  return REQUIRED_DESIGN_PACK.some(doc => normalized === doc.path)
+}
+
+async function getDesignPackViolation(
+  record: SessionRecord,
+): Promise<string | undefined> {
+  const missing: string[] = []
+  const incomplete: string[] = []
+  for (const doc of REQUIRED_DESIGN_PACK) {
+    let content = ''
+    try {
+      content = await readFile(resolve(record.session.cwd, doc.path), 'utf8')
+    } catch {
+      missing.push(doc.path)
+      continue
+    }
+    const missingSections = doc.sections.filter(section =>
+      !content.includes(section),
+    )
+    if (missingSections.length > 0) {
+      incomplete.push(`${doc.path} missing ${missingSections.join(', ')}`)
+    }
+  }
+  if (missing.length === 0 && incomplete.length === 0) return undefined
+  const details = [...missing, ...incomplete].join('; ')
+  return `BeeGame required design pack is incomplete before implementation: ${details}`
+}
+
 async function persistPlayableSpec(record: SessionRecord): Promise<void> {
+  try {
+    const docContent = await readFile(resolve(record.session.cwd, 'docs/PLAYABLE_SPEC.md'), 'utf8')
+    if (docContent.includes(PLAYABLE_SPEC_READY_MARKER)) {
+      await writeFile(resolve(record.session.cwd, 'BEEGAME_PLAYABLE_SPEC.md'), `${docContent.trim()}\n`, 'utf8')
+      return
+    }
+  } catch {
+    // Fall back to the current turn transcript when no spec document exists yet.
+  }
   const currentTurnId = record.currentTurnId
   const content = record.events
     .filter(event =>
@@ -893,6 +1094,15 @@ async function persistPlayableSpec(record: SessionRecord): Promise<void> {
 
 function getMutationArtifactPath(input: Record<string, unknown>): string {
   return String(input.file_path || input.path || input.notebook_path || '').trim()
+}
+
+function getWorkspaceRelativeMutationPath(cwd: string, artifactPath: string): string {
+  const targetPath = isAbsolute(artifactPath)
+    ? resolve(artifactPath)
+    : resolve(cwd, artifactPath)
+  const rel = relative(cwd, targetPath)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return ''
+  return rel.split('\\').join('/')
 }
 
 function getTopLevelWorkspacePath(cwd: string, artifactPath: string): string {
@@ -930,12 +1140,13 @@ function isUserQuestionTool(toolName: string): boolean {
 
 function getWorkspaceViolation(
   cwd: string,
+  allowedRoot: string,
   request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>,
 ): string {
   const paths = extractPermissionPaths(request.input)
-  const outsidePath = paths.find(path => !isPathInside(cwd, path))
+  const outsidePath = paths.find(path => !isPathInside(cwd, allowedRoot, path))
   if (!outsidePath) return ''
-  return `${request.toolName} requested access outside the session workspace: ${outsidePath}. The dashboard session is restricted to ${cwd}.`
+  return `${request.toolName} requested access outside the configured workspace root: ${outsidePath}. The dashboard session is restricted to ${allowedRoot}.`
 }
 
 function extractPermissionPaths(input: Record<string, unknown>): string[] {
@@ -1036,9 +1247,9 @@ function isPathReference(token: string): boolean {
   )
 }
 
-function isPathInside(cwd: string, path: string): boolean {
+function isPathInside(cwd: string, allowedRoot: string, path: string): boolean {
   const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
-  const relativePath = relative(cwd, resolvedPath)
+  const relativePath = relative(resolve(allowedRoot), resolvedPath)
   return (
     relativePath === '' ||
     (!relativePath.startsWith('..') && !isAbsolute(relativePath))
