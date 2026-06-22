@@ -1,0 +1,499 @@
+import type {
+  BuildReportPayload,
+  ContextVisibilityPayload,
+  DocumentBundleStatusPayload,
+  OperatorVisibilityPayload,
+  PendingUserReviewItem,
+  ProjectBaselineStatusPayload,
+  ExecutionEvidencePayload,
+  GovernanceVisibilityPayload,
+  ReviewBindingRef,
+  ReviewStatusPayload,
+  VerificationSummaryPayload,
+} from '../services/api';
+import type { GovernanceSnapshot, Message } from '../types/message';
+
+export interface GovernanceDisplaySnapshot {
+  kind?: string;
+  scope?: string;
+  status?: string;
+  reason?: string;
+  convergence_status?: string;
+  blocking_issue_count?: number;
+  open_issue_count?: number;
+}
+
+export interface ChatDisplayMessage
+  extends Pick<
+    Message,
+    | 'id'
+    | 'messageId'
+    | 'clientMessageId'
+    | 'dedupeKey'
+    | 'sender'
+    | 'content'
+    | 'timestamp'
+    | 'type'
+    | 'isDocument'
+    | 'documentTitle'
+    | 'thought'
+    | 'taskId'
+    | 'artifactId'
+    | 'renderHint'
+    | 'artifactType'
+    | 'taskKind'
+    | 'nextAction'
+    | 'requiresUserAction'
+    | 'errorDetails'
+  > {
+  governanceSnapshot?: GovernanceDisplaySnapshot;
+  diagnostic?: {
+    rawGovernanceSnapshot?: GovernanceSnapshot;
+  };
+}
+
+export interface ReviewStatusDisplayPayload {
+  workflow_id: string;
+  lane_id: string;
+  lane_status: string;
+  decision_status: string;
+  requires_user_action: boolean;
+  user_action_kind?: string;
+  message?: {
+    message_key?: string;
+  } | null;
+}
+
+export interface ReviewDisplayBindingRef extends Pick<
+  ReviewBindingRef,
+  'artifact_id' | 'artifact_version' | 'checkpoint_id' | 'workspace_ref' | 'workspace_path'
+> {}
+
+export interface ReviewDisplaySummary {
+  current_run?: Record<string, unknown> | null;
+  current_snapshot?: Record<string, unknown> | null;
+  latest_validation?: Record<string, unknown> | null;
+  latest_review?: Record<string, unknown> | null;
+  block_reason?: string;
+  next_action?: string;
+}
+
+export interface ReviewDisplayVerification {
+  verification_decision?: VerificationSummaryPayload['verification_decision'];
+  verification_run_id?: string;
+  policy_bundle_version?: string;
+  attestation_ref?: string;
+  blocking_finding_count?: number;
+  blocking_findings?: VerificationSummaryPayload['blocking_findings'];
+}
+
+export interface BuildReportCheckDisplay {
+  name?: string;
+  status?: string;
+  detail?: string;
+  path?: string;
+}
+
+export interface BuildReportDisplayModel {
+  status?: string;
+  entrypoint?: string;
+  report_path?: string;
+  build_url?: string;
+  agents: string[];
+  generated_paths: string[];
+  checks: BuildReportCheckDisplay[];
+  summary?: string;
+  failure_reason?: string;
+  created_at?: string;
+}
+
+export interface DocumentBundleDisplayModel {
+  bundle_id?: string;
+  bundle_type?: string;
+  gate_kind?: string;
+  user_action_kind?: string;
+  artifact_id?: string;
+  status?: string;
+  title?: string;
+  ready_for_user_approval?: boolean;
+  ready_for_promotion?: boolean;
+  open_issue_ids: string[];
+  open_blocker_ids: string[];
+}
+
+export interface ReviewDisplayModel {
+  gate_id: string;
+  type?: string;
+  title?: string;
+  task_id?: string | null;
+  gate_kind?: string;
+  user_action_kind?: string;
+  artifact?: Record<string, unknown>;
+  artifact_type?: string;
+  artifact_id?: string;
+  artifact_version?: number;
+  checkpoint_id?: string;
+  workspace_ref?: string;
+  workspace_path?: string;
+  current_review_artifact_id?: string;
+  current_review_iteration?: number;
+  review_iteration?: number;
+  revised_from_artifact_id?: string;
+  open_issue_ids: string[];
+  open_blocker_ids: string[];
+  ready_for_user_approval: boolean;
+  ready_for_promotion: boolean;
+  history_only: boolean;
+  verification_decision?: VerificationSummaryPayload['verification_decision'];
+  binding?: ReviewDisplayBindingRef;
+  review_status?: ReviewStatusDisplayPayload | null;
+  summary?: ReviewDisplaySummary;
+  verification?: ReviewDisplayVerification;
+  quorum?: Record<string, unknown>;
+  rollback_manifest?: Record<string, unknown>;
+  execution_manifest?: Record<string, unknown>;
+  change_request?: Record<string, unknown>;
+  raw?: PendingUserReviewItem;
+}
+
+export interface ProjectRuntimeDisplayModel {
+  project_id: string;
+  phase?: string;
+  blocked?: boolean;
+  blocked_reason?: string | null;
+  baseline?: ReviewDisplayBindingRef | null;
+  next_action?: string;
+  review_status?: ReviewStatusDisplayPayload | null;
+  governance?: GovernanceVisibilityPayload;
+  context?: ContextVisibilityPayload;
+  execution_evidence?: ExecutionEvidencePayload[];
+  build_report?: BuildReportDisplayModel;
+  document_bundle?: DocumentBundleDisplayModel;
+  diagnostic?: {
+    raw?: ProjectBaselineStatusPayload | OperatorVisibilityPayload | null;
+  };
+}
+
+const trimString = (value: unknown): string => String(value ?? '').trim();
+
+const unwrapProjectRuntimePayload = (
+  payload?: ProjectBaselineStatusPayload | OperatorVisibilityPayload | null,
+): ProjectBaselineStatusPayload | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+  if ('operator_visibility' in payload) {
+    return payload.operator_visibility ?? undefined;
+  }
+  return payload as ProjectBaselineStatusPayload;
+};
+
+const normalizeGovernanceDisplaySnapshot = (
+  payload?: GovernanceSnapshot,
+): GovernanceDisplaySnapshot | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+  const snapshot: GovernanceDisplaySnapshot = {
+    kind: trimString(payload.kind) || undefined,
+    scope: trimString(payload.scope) || undefined,
+    status: trimString(payload.status) || undefined,
+    reason: trimString(payload.reason) || undefined,
+    convergence_status: trimString(payload.convergence_status) || undefined,
+    blocking_issue_count:
+      typeof payload.blocking_issue_count === 'number' ? payload.blocking_issue_count : undefined,
+    open_issue_count:
+      typeof payload.open_issue_count === 'number' ? payload.open_issue_count : undefined,
+  };
+  return Object.values(snapshot).some((value) => value !== undefined) ? snapshot : undefined;
+};
+
+const normalizeReviewStatusDisplay = (
+  payload?: ReviewStatusPayload | null,
+): ReviewStatusDisplayPayload | null => {
+  if (!payload) {
+    return null;
+  }
+  return {
+    workflow_id: trimString(payload.workflow_id),
+    lane_id: trimString(payload.lane_id),
+    lane_status: trimString(payload.lane_status),
+    decision_status: trimString(payload.decision_status),
+    requires_user_action: Boolean(payload.requires_user_action),
+    user_action_kind: trimString(payload.user_action_kind) || undefined,
+    message: trimString(payload.message?.message_key)
+      ? { message_key: trimString(payload.message?.message_key) }
+      : null,
+  };
+};
+
+const normalizeBindingDisplay = (
+  payload?: ReviewBindingRef | null,
+): ReviewDisplayBindingRef | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+  const normalized: ReviewDisplayBindingRef = {
+    artifact_id: trimString(payload.artifact_id) || undefined,
+    artifact_version:
+      typeof payload.artifact_version === 'number' ? payload.artifact_version : undefined,
+    checkpoint_id: trimString(payload.checkpoint_id) || undefined,
+    workspace_ref: trimString(payload.workspace_ref ?? payload.workspace_path) || undefined,
+    workspace_path: trimString(payload.workspace_path ?? payload.workspace_ref) || undefined,
+  };
+  return Object.values(normalized).some((value) => value !== undefined) ? normalized : undefined;
+};
+
+const normalizeBuildReportDisplay = (
+  payload?: BuildReportPayload | null,
+): BuildReportDisplayModel | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+  const buildReport: BuildReportDisplayModel = {
+    status: trimString(payload.status) || undefined,
+    entrypoint: trimString(payload.entrypoint) || undefined,
+    report_path: trimString(payload.report_path) || undefined,
+    build_url: trimString(payload.build_url) || undefined,
+    agents: Array.isArray(payload.agents)
+      ? payload.agents.map((item) => trimString(item)).filter(Boolean)
+      : [],
+    generated_paths: Array.isArray(payload.generated_paths)
+      ? payload.generated_paths.map((item) => trimString(item)).filter(Boolean)
+      : [],
+    checks: Array.isArray(payload.checks)
+      ? payload.checks
+          .map((item) => ({
+            name: trimString(item?.name) || undefined,
+            status: trimString(item?.status) || undefined,
+            detail: trimString(item?.detail) || undefined,
+            path: trimString(item?.path) || undefined,
+          }))
+          .filter((item) => Object.values(item).some((value) => value !== undefined))
+      : [],
+    summary: trimString(payload.summary) || undefined,
+    failure_reason: trimString(payload.failure_reason) || undefined,
+    created_at: trimString(payload.created_at) || undefined,
+  };
+  return Object.values(buildReport).some((value) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return value !== undefined;
+  })
+    ? buildReport
+    : undefined;
+};
+
+const normalizeDocumentBundleDisplay = (
+  payload?: DocumentBundleStatusPayload | null,
+): DocumentBundleDisplayModel | undefined => {
+  if (!payload) {
+    return undefined;
+  }
+  const bundle: DocumentBundleDisplayModel = {
+    bundle_id: trimString(payload.bundle_id) || undefined,
+    bundle_type: trimString(payload.bundle_type) || undefined,
+    gate_kind: trimString(payload.gate_kind) || undefined,
+    user_action_kind: trimString(payload.user_action_kind) || undefined,
+    artifact_id: trimString(payload.artifact_id) || undefined,
+    status: trimString(payload.status) || undefined,
+    title: trimString(payload.title) || undefined,
+    ready_for_user_approval: Boolean(payload.ready_for_user_approval),
+    ready_for_promotion: Boolean(payload.ready_for_promotion),
+    open_issue_ids: Array.isArray(payload.open_issue_ids)
+      ? payload.open_issue_ids.map((item) => trimString(item)).filter(Boolean)
+      : [],
+    open_blocker_ids: Array.isArray(payload.open_blocker_ids)
+      ? payload.open_blocker_ids.map((item) => trimString(item)).filter(Boolean)
+      : [],
+  };
+  return Object.values(bundle).some((value) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return value !== undefined;
+  })
+    ? bundle
+    : undefined;
+};
+
+export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
+  id: message.id,
+  messageId: message.messageId,
+  clientMessageId: message.clientMessageId,
+  dedupeKey: message.dedupeKey,
+  sender: message.sender,
+  content: message.content,
+  timestamp: message.timestamp,
+  type: message.type,
+  isDocument: message.isDocument,
+  documentTitle: message.documentTitle,
+  thought: message.thought,
+  taskId: message.taskId,
+  artifactId: message.artifactId,
+  renderHint: message.renderHint,
+  artifactType: message.artifactType,
+  taskKind: message.taskKind,
+  nextAction: message.nextAction,
+  requiresUserAction: message.requiresUserAction,
+  errorDetails: message.errorDetails,
+  governanceSnapshot: normalizeGovernanceDisplaySnapshot(message.governanceSnapshot),
+  diagnostic: message.governanceSnapshot
+    ? {
+        rawGovernanceSnapshot: message.governanceSnapshot,
+      }
+    : undefined,
+});
+
+export const toChatDisplayMessages = (messages: Message[]): ChatDisplayMessage[] =>
+  messages.map(toChatDisplayMessage);
+
+export const toReviewDisplayModel = (review: PendingUserReviewItem): ReviewDisplayModel => ({
+  gate_id: trimString(review.gate_id),
+  type: trimString(review.type) || undefined,
+  title: trimString(review.title) || undefined,
+  task_id: trimString(review.task_id) || undefined,
+  gate_kind: trimString(review.gate_kind) || undefined,
+  user_action_kind: trimString(review.user_action_kind) || undefined,
+  artifact:
+    review.artifact && typeof review.artifact === 'object'
+      ? review.artifact
+      : undefined,
+  artifact_type:
+    trimString(
+      review.artifact_type ?? ((review.artifact as Record<string, unknown> | undefined)?.artifact_type),
+    ) || undefined,
+  artifact_id: trimString(review.artifact_id) || undefined,
+  artifact_version: typeof review.artifact_version === 'number' ? review.artifact_version : undefined,
+  checkpoint_id: trimString(review.checkpoint_id) || undefined,
+  workspace_ref: trimString(review.workspace_ref ?? review.workspace_path) || undefined,
+  workspace_path: trimString(review.workspace_path ?? review.workspace_ref) || undefined,
+  current_review_artifact_id: trimString(review.current_review_artifact_id || review.artifact_id) || undefined,
+  current_review_iteration:
+    typeof review.current_review_iteration === 'number' ? review.current_review_iteration : undefined,
+  review_iteration: typeof review.review_iteration === 'number' ? review.review_iteration : undefined,
+  revised_from_artifact_id: trimString(review.revised_from_artifact_id) || undefined,
+  open_issue_ids: Array.isArray(review.open_issue_ids) ? review.open_issue_ids.map((item) => trimString(item)).filter(Boolean) : [],
+  open_blocker_ids: Array.isArray(review.open_blocker_ids)
+    ? review.open_blocker_ids.map((item) => trimString(item)).filter(Boolean)
+    : [],
+  ready_for_user_approval: Boolean(review.ready_for_user_approval),
+  ready_for_promotion: Boolean(review.ready_for_promotion),
+  history_only: Boolean(review.history_only),
+  verification_decision: review.verification_decision,
+  binding: normalizeBindingDisplay(review.binding ?? review),
+  review_status: normalizeReviewStatusDisplay(review.review_status),
+  summary: review.summary
+    ? {
+        current_run: review.summary.current_run ?? null,
+        current_snapshot: review.summary.current_snapshot ?? null,
+        latest_validation: review.summary.latest_validation ?? null,
+        latest_review: review.summary.latest_review ?? null,
+        block_reason: trimString(review.summary.block_reason) || undefined,
+        next_action: trimString(review.summary.next_action) || undefined,
+      }
+    : undefined,
+  verification: review.verification
+    ? {
+        verification_decision: review.verification.verification_decision,
+        verification_run_id: trimString(review.verification.verification_run_id) || undefined,
+        policy_bundle_version: trimString(review.verification.policy_bundle_version) || undefined,
+        attestation_ref: trimString(review.verification.attestation_ref) || undefined,
+        blocking_finding_count:
+          typeof review.verification.blocking_finding_count === 'number'
+            ? review.verification.blocking_finding_count
+            : undefined,
+        blocking_findings: Array.isArray(review.verification.blocking_findings)
+          ? review.verification.blocking_findings
+          : undefined,
+      }
+    : undefined,
+  quorum: review.quorum ?? undefined,
+  rollback_manifest:
+    review.rollback_manifest && typeof review.rollback_manifest === 'object'
+      ? review.rollback_manifest
+      : undefined,
+  execution_manifest:
+    review.execution_manifest && typeof review.execution_manifest === 'object'
+      ? review.execution_manifest
+      : undefined,
+  change_request:
+    review.change_request && typeof review.change_request === 'object'
+      ? review.change_request
+      : undefined,
+  raw: review,
+});
+
+export const toReviewDisplayModels = (reviews: PendingUserReviewItem[]): ReviewDisplayModel[] =>
+  reviews.map(toReviewDisplayModel);
+
+export const toProjectRuntimeDisplayModel = (
+  payload?: ProjectBaselineStatusPayload | OperatorVisibilityPayload | null,
+): ProjectRuntimeDisplayModel | null => {
+  const normalizedPayload = unwrapProjectRuntimePayload(payload);
+  if (!normalizedPayload) {
+    return null;
+  }
+  return {
+    project_id: trimString(normalizedPayload.project_id),
+    phase: trimString(normalizedPayload.phase) || undefined,
+    blocked: Boolean(normalizedPayload.blocked),
+    blocked_reason: normalizedPayload.blocked_reason ?? null,
+    baseline: normalizeBindingDisplay(normalizedPayload.baseline),
+    next_action: trimString(normalizedPayload.next_action) || undefined,
+    review_status: normalizeReviewStatusDisplay(normalizedPayload.review_status),
+    governance: normalizedPayload.governance
+      ? {
+          blocked: Boolean(normalizedPayload.governance.blocked),
+          blocked_phase: trimString(normalizedPayload.governance.blocked_phase) || undefined,
+          open_blocker_ids: Array.isArray(normalizedPayload.governance.open_blocker_ids)
+            ? normalizedPayload.governance.open_blocker_ids.map((item) => trimString(item)).filter(Boolean)
+            : [],
+          unrevalidated_blocker_ids: Array.isArray(normalizedPayload.governance.unrevalidated_blocker_ids)
+            ? normalizedPayload.governance.unrevalidated_blocker_ids.map((item) => trimString(item)).filter(Boolean)
+            : [],
+          unresolved_conflict_ids: Array.isArray(normalizedPayload.governance.unresolved_conflict_ids)
+            ? normalizedPayload.governance.unresolved_conflict_ids.map((item) => trimString(item)).filter(Boolean)
+            : [],
+          promotion_status_by_phase: normalizedPayload.governance.promotion_status_by_phase ?? {},
+          latest_revalidation_by_phase: normalizedPayload.governance.latest_revalidation_by_phase ?? {},
+        }
+      : undefined,
+    context: normalizedPayload.context
+      ? {
+          bundle_id: trimString(normalizedPayload.context.bundle_id) || undefined,
+          phase: trimString(normalizedPayload.context.phase) || undefined,
+          status: trimString(normalizedPayload.context.status) || undefined,
+          summary: trimString(normalizedPayload.context.summary) || undefined,
+          failure_reason: trimString(normalizedPayload.context.failure_reason) || undefined,
+          blackboard_record_count: Number(normalizedPayload.context.blackboard_record_count ?? 0),
+          memory_hits: Number(normalizedPayload.context.memory_hits ?? 0),
+          rag_sources: Array.isArray(normalizedPayload.context.rag_sources)
+            ? normalizedPayload.context.rag_sources.map((item) => trimString(item)).filter(Boolean)
+            : [],
+          selected_skills: Array.isArray(normalizedPayload.context.selected_skills)
+            ? normalizedPayload.context.selected_skills.map((item) => trimString(item)).filter(Boolean)
+            : [],
+        }
+      : undefined,
+    build_report: normalizeBuildReportDisplay(normalizedPayload.build_report),
+    document_bundle: normalizeDocumentBundleDisplay(normalizedPayload.document_bundle),
+    execution_evidence: Array.isArray(normalizedPayload.execution_evidence)
+      ? normalizedPayload.execution_evidence.map((item) => ({
+          ...item,
+          execution_id: trimString(item.execution_id) || undefined,
+          agent: trimString(item.agent),
+          status: trimString(item.status),
+          generated_paths: Array.isArray(item.generated_paths)
+            ? item.generated_paths.map((path) => trimString(path)).filter(Boolean)
+            : [],
+          summary: trimString(item.summary) || undefined,
+          failure_reason: trimString(item.failure_reason) || undefined,
+        }))
+      : [],
+    diagnostic: {
+      raw: payload,
+    },
+  };
+};

@@ -1,0 +1,86 @@
+import { Loader2, Paperclip, Sparkles } from 'lucide-react';
+
+function ShinyText({ text, disabled = false, speed = 5, className = "" }: { text: string; disabled?: boolean; speed?: number; className?: string }) {
+    return (
+        <span
+            className={`bg-clip-text inline-block ${className}`}
+            style={{
+                color: 'rgba(236, 236, 236, 0.65)',
+                backgroundImage: 'linear-gradient(120deg, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 60%)',
+                backgroundSize: '200% 100%',
+                WebkitBackgroundClip: 'text',
+                animation: disabled ? 'none' : `shine ${speed}s linear infinite`,
+            }}
+        >
+            {text}
+        </span>
+    );
+}
+
+interface IdeaPromptFormProps {
+    value: string;
+    placeholder: string;
+    generateLabel: string;
+    isTransitioning: boolean;
+    onChange: (value: string) => void;
+    onSubmit: (event: React.FormEvent) => void;
+}
+
+export function IdeaPromptForm({
+    value,
+    placeholder,
+    generateLabel,
+    isTransitioning,
+    onChange,
+    onSubmit,
+}: IdeaPromptFormProps) {
+    return (
+        <form
+            onSubmit={onSubmit}
+            className="relative z-10 flex w-full justify-center px-4 sm:px-6"
+        >
+            <div
+                data-testid="idea-prompt-surface"
+                data-surface="frosted-glass"
+                data-style-source="pixelfork"
+                data-glass-density="reinforced"
+                className="input-surface relative w-full max-w-[760px] overflow-hidden rounded-full px-1 shadow-[0_22px_70px_rgba(0,0,0,0.32)]"
+            >
+                <div className="relative z-10 flex h-[66px] items-center gap-2 rounded-full px-3 py-3 sm:h-[72px]">
+                    <button
+                        type="button"
+                        aria-label="Upload attachment"
+                        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#757575]/20 p-2 text-[#c5c1b9] transition-colors hover:bg-[#3f3f3e] hover:text-[#ececec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95"
+                    >
+                        <span className="relative block h-6 w-6" aria-hidden="true">
+                            <Paperclip className="h-6 w-6" />
+                        </span>
+                    </button>
+
+                    <input
+                        className="my-auto min-w-0 flex-1 bg-transparent py-0 text-base font-normal tracking-normal text-[#c5c1b9] outline-none placeholder:text-[#818080] disabled:cursor-not-allowed disabled:opacity-60"
+                        placeholder={placeholder}
+                        value={value}
+                        onChange={(event) => onChange(event.target.value)}
+                        disabled={isTransitioning}
+                        autoFocus
+                    />
+
+                    <button
+                        type="submit"
+                        disabled={!value.trim() || isTransitioning}
+                        className={`flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold tracking-normal text-[#ececec] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95 disabled:cursor-not-allowed sm:px-5 ${isTransitioning ? 'bg-[#3f3f3e] opacity-100' : 'bg-[#757575]/20 hover:bg-[#3f3f3e] disabled:opacity-50'
+                            }`}
+                    >
+                        <ShinyText text={generateLabel} disabled={!isTransitioning} speed={0.5} />
+                        {isTransitioning ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-[#c5c1b9]" />
+                        ) : (
+                            <Sparkles className="h-4 w-4" />
+                        )}
+                    </button>
+                </div>
+            </div>
+        </form>
+    );
+}

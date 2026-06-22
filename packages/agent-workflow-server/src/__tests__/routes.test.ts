@@ -92,4 +92,85 @@ describe('agent workflow server routes', () => {
       await rm(dataDir, { recursive: true, force: true })
     }
   })
+
+  test('generates BeeGame intake options from the default model config', async () => {
+    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    const fetchCalls: Array<{ url: string; body: unknown }> = []
+    globalThis.fetch = (async (url, init) => {
+      fetchCalls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      })
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                options: [
+                  {
+                    id: 'web_tactics',
+                    title: 'Web 战术版',
+                    pitch: '先做浏览器可玩的战术原型。',
+                    gameplay: '用短局目标验证操作节奏。',
+                    recommendedPlatform: 'Web',
+                    recommendedDimension: '2D',
+                    recommendedGenre: 'Strategy',
+                    recommendedStyle: 'Pixel',
+                    recommendedInputs: ['Keyboard/mouse'],
+                    scope: 'Playable demo',
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      })
+    }) as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: '战术贪吃蛇' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        options: [
+          expect.objectContaining({
+            id: 'web_tactics',
+            title: 'Web 战术版',
+            recommendedPlatform: 'Web',
+          }),
+        ],
+      })
+      expect(fetchCalls[0]?.url).toBe('https://llm.example.invalid/v1/chat/completions')
+      expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
+        model: 'balanced-model',
+      }))
+      const requestBody = fetchCalls[0]?.body as { messages?: Array<{ role: string; content: string }> }
+      const systemPrompt = requestBody.messages?.find(message => message.role === 'system')?.content || ''
+      expect(systemPrompt).toContain('Core Loop')
+      expect(systemPrompt).toContain('Fun Hook')
+      expect(systemPrompt).toContain('Risk/Reward')
+      expect(systemPrompt).toContain('First 3 Minutes')
+      expect(systemPrompt).toContain('MVP Acceptance')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

@@ -27,7 +27,7 @@ type StorePayload = {
 export function getDefaultModelConfigStoreDir(): string {
   return (
     process.env.AGENT_WORKFLOW_DATA_DIR ??
-    join(homedir(), '.claude', 'dashboard')
+    join(homedir(), '.beegame', 'dashboard')
   )
 }
 

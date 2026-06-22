@@ -46,4 +46,21 @@ describe('filesystem routes', () => {
       error: 'Path must be absolute',
     })
   })
+
+  test('creates and returns a default workspace directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cc-default-workspace-'))
+    const workspace = join(root, 'Projects')
+    const app = createAgentWorkflowApp({ defaultWorkspacePath: workspace })
+
+    try {
+      const res = await app.request('/api/filesystem/default-workspace')
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        path: await realpath(workspace),
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

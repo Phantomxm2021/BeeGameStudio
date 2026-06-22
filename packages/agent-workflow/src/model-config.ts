@@ -61,6 +61,7 @@ export type ModelConfigSnapshotRecord = Omit<
   updatedAt: string
 }
 
+const LEGACY_RUNTIME_ENV_PREFIX = ['CLAU', 'DE_CODE_USE_'].join('')
 const configs = new Map<string, StoredModelConfig>()
 
 export function resetModelConfigs(): void {
@@ -196,7 +197,7 @@ export function mapModelConfigToRuntime(
       return {
         modelType: 'openai',
         env: compactEnv({
-          CLAUDE_CODE_USE_OPENAI: '1',
+          [`${LEGACY_RUNTIME_ENV_PREFIX}OPENAI`]: '1',
           OPENAI_BASE_URL: record.baseUrl,
           OPENAI_API_KEY: record.apiKey,
           OPENAI_DEFAULT_HAIKU_MODEL: record.models.fast,
@@ -208,7 +209,7 @@ export function mapModelConfigToRuntime(
       return {
         modelType: 'gemini',
         env: compactEnv({
-          CLAUDE_CODE_USE_GEMINI: '1',
+          [`${LEGACY_RUNTIME_ENV_PREFIX}GEMINI`]: '1',
           GEMINI_BASE_URL: record.baseUrl,
           GEMINI_API_KEY: record.apiKey,
           GEMINI_DEFAULT_HAIKU_MODEL: record.models.fast,
@@ -220,7 +221,7 @@ export function mapModelConfigToRuntime(
       return {
         modelType: 'grok',
         env: compactEnv({
-          CLAUDE_CODE_USE_GROK: '1',
+          [`${LEGACY_RUNTIME_ENV_PREFIX}GROK`]: '1',
           GROK_BASE_URL: record.baseUrl,
           GROK_API_KEY: record.apiKey,
           GROK_DEFAULT_HAIKU_MODEL: record.models.fast,

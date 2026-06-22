@@ -1,0 +1,592 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+Play, Square, RotateCcw, Send, Download, Layers,
+User, Cpu, FileText, Code, CheckCircle, Search,
+Moon, Sun, MessageSquare, Palette, Bug,
+ChevronRight, Minus, Maximize2, Info, Settings,
+Globe, PlusCircle
+} from 'lucide-react';
+
+// --- I18N 数据 ---
+const translations = {
+zh: {
+placeholder: "输入项目愿景开始...",
+newProject: "新建项目",
+stop: "停止项目",
+resume: "恢复项目",
+active: "运行中",
+idle: "空闲",
+stopped: "已停止",
+chat: "团队协作",
+artifacts: "交付产物",
+tokens: "消耗",
+progress: "进度",
+settings: "系统设置",
+theme: "主题切换",
+language: "语言选择"
+},
+en: {
+placeholder: "Enter project vision...",
+newProject: "New Project",
+stop: "Stop",
+resume: "Resume",
+active: "Running",
+idle: "Idle",
+stopped: "Stopped",
+chat: "Collab",
+artifacts: "Artifacts",
+tokens: "Tokens",
+progress: "Progress",
+settings: "Settings",
+theme: "Theme",
+language: "Language"
+},
+ja: {
+placeholder: "ビジョンを入力...",
+newProject: "新規作成",
+stop: "停止",
+resume: "再開",
+active: "実行中",
+idle: "待機",
+stopped: "停止中",
+chat: "チャット",
+artifacts: "成果物",
+tokens: "トークン",
+progress: "進捗",
+settings: "設定",
+theme: "テーマ",
+language: "言語"
+}
+};
+
+// --- Agent 配置 ---
+const AGENTS_CONFIG = [
+{
+id: 'pm', name: 'Alex', role: 'PM', x: 200, y: 350, icon: User,
+color: 'bg-blue-500', text: 'text-blue-500', border: 'border-blue-500/50',
+bio: '产品专家，擅长需求分析与路线图规划。'
+},
+{
+id: 'arch', name: 'Elena', role: 'ARCH', x: 500, y: 150, icon: Cpu,
+color: 'bg-purple-500', text: 'text-purple-500', border: 'border-purple-500/50',
+bio: '系统架构师，专注于高并发与分布式系统设计。'
+},
+{
+id: 'ui', name: 'Yuki', role: 'UI', x: 500, y: 550, icon: Palette,
+color: 'bg-pink-500', text: 'text-pink-500', border: 'border-pink-500/50',
+bio: '体验设计师，追求极致的视觉与交互美学。'
+},
+{
+id: 'dev', name: 'Jordan', role: 'DEV', x: 850, y: 350, icon: Code,
+color: 'bg-emerald-500', text: 'text-emerald-500', border: 'border-emerald-500/50',
+bio: '资深开发者，代码洁癖，精通全栈技术栈。'
+},
+{
+id: 'qa', name: 'Sam', role: 'QA', x: 1150, y: 350, icon: Bug,
+color: 'bg-amber-500', text: 'text-amber-500', border: 'border-amber-500/50',
+bio: '质量保障专家，不放过任何一个潜在的 Bug。'
+},
+];
+
+const CONNECTIONS = [
+{ from: 'pm', to: 'arch' }, { from: 'pm', to: 'ui' },
+{ from: 'arch', to: 'dev' }, { from: 'ui', to: 'dev' },
+{ from: 'dev', to: 'qa' }, { from: 'qa', to: 'pm' },
+];
+
+const ARTIFACT_TYPES = ['Vision', 'GDD', 'ADD', 'UI/UX', 'XDD', 'TDD'];
+
+// --- Markdown 渲染组件 ---
+const MarkdownRenderer = ({ content, isUser }) => {
+const parts = content.split('\n');
+const textColor = isUser ? 'text-white' : 'text-zinc-800 dark:text-zinc-100';
+const borderColor = isUser ? 'border-white/20' : 'border-zinc-200 dark:border-zinc-700';
+
+return (
+<div className={`text-sm leading-relaxed space-y-2 ${textColor}`}>
+    {parts.map((part, i) => {
+    if (part.startsWith('# ')) return <h1 key={i} className={`text-lg font-bold border-b ${borderColor} pb-1 mb-2`}>
+        {part.substring(2)}</h1>;
+    if (part.startsWith('- ')) return <li key={i} className="ml-4 list-disc opacity-90">{part.substring(2)}</li>;
+    if (part.startsWith('**')) return <p key={i} className="font-bold">{part.replace(/\*\*/g, '')}</p>;
+    return <p key={i} className="opacity-90">{part}</p>;
+    })}
+</div>
+);
+};
+
+export default function App() {
+const [isStarted, setIsStarted] = useState(false);
+const [projectName, setProjectName] = useState('');
+const [lang, setLang] = useState('zh');
+const [isDark, setIsDark] = useState(true);
+const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+// 项目状态
+const [status, setStatus] = useState('idle');
+const [progress, setProgress] = useState(0);
+const [tokens, setTokens] = useState(0);
+const [activeAgentId, setActiveAgentId] = useState(null);
+const [agentStatuses, setAgentStatuses] = useState({});
+const [commFlow, setCommFlow] = useState([]);
+
+// 侧边栏状态
+const [activeTab, setActiveTab] = useState('chat');
+const [isChatMinimized, setIsChatMinimized] = useState(false);
+const [messages, setMessages] = useState([]);
+const [chatInput, setChatInput] = useState('');
+const [hoveredAgent, setHoveredAgent] = useState(null);
+
+// 画布视图
+const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
+const [isDragging, setIsDragging] = useState(false);
+const lastMousePos = useRef({ x: 0, y: 0 });
+
+const t = translations[lang];
+
+// 模拟工作流逻辑
+const runSimulation = async () => {
+const sequence = ['pm', 'arch', 'ui', 'dev', 'qa'];
+for (const id of sequence) {
+if (status === 'stopped') break;
+setActiveAgentId(id);
+setAgentStatuses(prev => ({ ...prev, [id]: 'working' }));
+
+const agent = AGENTS_CONFIG.find(a => a.id === id);
+setMessages(prev => [...prev, {
+role: 'agent',
+agentId: id,
+text: `# ${agent.role} 已就绪\n正在同步项目 **${projectName}** 的 ${ARTIFACT_TYPES[sequence.indexOf(id)]} 核心逻辑...\n- 注入架构上下文\n-
+验证合规性`
+}]);
+
+for (let p = 0; p <= 100; p +=10) { await new Promise(r=> setTimeout(r, 200));
+    if (status === 'stopped') break;
+    setProgress(prev => Math.min(prev + 0.4, 100));
+    setTokens(prev => prev + Math.floor(Math.random() * 450));
+    }
+
+    setAgentStatuses(prev => ({ ...prev, [id]: 'done' }));
+    const nextId = sequence[sequence.indexOf(id) + 1];
+    if (nextId) {
+    setCommFlow(prev => [...prev, { from: id, to: nextId, id: Date.now() }]);
+    setTimeout(() => setCommFlow(prev => prev.slice(1)), 2000);
+    }
+    }
+    setActiveAgentId(null);
+    setStatus('idle');
+    };
+
+    const handleStart = (e) => {
+    e.preventDefault();
+    if (!projectName.trim()) return;
+    setIsStarted(true);
+    setStatus('active');
+    runSimulation();
+    };
+
+    const handleDrag = (e) => {
+    if (isDragging) {
+    setViewOffset(prev => ({ x: prev.x + e.movementX, y: prev.y + e.movementY }));
+    }
+    };
+
+    const toggleStatus = () => {
+    if (status === 'active') {
+    setStatus('stopped');
+    } else {
+    setStatus('active');
+    runSimulation();
+    }
+    };
+
+    const handleNewProject = () => {
+    setIsStarted(false);
+    setIsMenuOpen(false);
+    setProjectName('');
+    setProgress(0);
+    setTokens(0);
+    setMessages([]);
+    setAgentStatuses({});
+    };
+
+    const springTransition = { type: "spring", stiffness: 260, damping: 26 };
+
+    return (
+    <div className={`${isDark ? 'dark' : '' } h-screen w-full flex overflow-hidden font-sans select-none bg-zinc-50
+        dark:bg-zinc-950 transition-colors duration-700`}>
+
+        {/* 启动页面 */}
+        <AnimatePresence mode="wait">
+            {!isStarted && (
+            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 1.05,
+                filter: 'blur(20px)' }} transition={{ duration: 0.8 }}
+                className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white dark:bg-zinc-950">
+                <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}
+                    className="mb-12 text-7xl font-black tracking-tighter flex items-center space-x-4 text-zinc-900 dark:text-zinc-100">
+                    <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-100 rounded-[1.5rem] rotate-12 shadow-2xl" />
+                    <span>DEMIURGE</span>
+                </motion.div>
+                <form onSubmit={handleStart} className="w-full max-w-xl px-6">
+                    <input
+                        className="w-full bg-zinc-100 dark:bg-zinc-900 border-2 border-transparent focus:border-zinc-300 dark:focus:border-zinc-700 rounded-[2rem] px-10 py-6 text-2xl outline-none shadow-2xl text-center transition-all focus:scale-[1.02] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600"
+                        placeholder={t.placeholder} value={projectName} onChange={(e)=> setProjectName(e.target.value)}
+                    autoFocus
+                    />
+                </form>
+            </motion.div>
+            )}
+        </AnimatePresence>
+
+        {/* 顶部状态栏 */}
+        {isStarted && (
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
+            className="absolute top-12 left-12 z-40 pointer-events-none">
+            <div className="flex items-baseline space-x-6">
+                <h1
+                    className="text-7xl font-black tracking-tighter opacity-20 dark:opacity-40 uppercase text-zinc-900 dark:text-zinc-100">
+                    {projectName}
+                </h1>
+                <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.2em]
+                    pointer-events-auto shadow-sm transition-colors ${status==='active'
+                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                    : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400' }`}>
+                    {status === 'active' ? t.active : t.stopped}
+                </span>
+            </div>
+            <div className="mt-6 flex items-center space-x-16 pointer-events-auto">
+                <div className="flex flex-col">
+                    <span
+                        className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t.progress}</span>
+                    <div className="flex items-center space-x-4">
+                        <div className="w-56 h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                            <motion.div
+                                className="h-full bg-zinc-900 dark:bg-zinc-100 shadow-[0_0_10px_rgba(255,255,255,0.5)]"
+                                animate={{ width: `${progress}%` }} transition={{ type: 'spring' , bounce: 0 }} />
+                        </div>
+                        <span
+                            className="font-mono text-sm font-bold opacity-60 text-zinc-900 dark:text-zinc-100">{Math.floor(progress)}%</span>
+                    </div>
+                </div>
+                <div className="flex flex-col">
+                    <span
+                        className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t.tokens}</span>
+                    <span
+                        className="font-mono text-lg font-bold text-zinc-900 dark:text-zinc-100">{tokens.toLocaleString()}</span>
+                </div>
+            </div>
+        </motion.div>
+        )}
+
+        {/* 侧部菜单栏 */}
+        {isStarted && (
+        <div className="absolute bottom-12 left-12 z-50 flex flex-col items-start">
+            <AnimatePresence>
+                {isMenuOpen && (
+                <motion.div initial={{ opacity: 0, y: 15, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 15, scale: 0.95 }}
+                    className="mb-4 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 rounded-[2.5rem] p-5 shadow-2xl min-w-[220px]">
+                    <div className="space-y-3">
+                        {/* 多语言 */}
+                        <div className="flex items-center justify-between px-3">
+                            <div className="flex items-center space-x-3 text-zinc-400 dark:text-zinc-500">
+                                <Globe className="w-4 h-4" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">{t.language}</span>
+                            </div>
+                            <div
+                                className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-1 border border-zinc-200/50 dark:border-transparent">
+                                {['zh', 'en', 'ja'].map(l => (
+                                <button key={l} onClick={()=> setLang(l)}
+                                    className={`w-7 h-7 flex items-center justify-center rounded-full text-[9px]
+                                    font-black uppercase transition-all ${lang === l ? 'bg-white dark:bg-zinc-700
+                                    text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-600
+                                    dark:hover:text-zinc-300'}`}
+                                    >
+                                    {l}
+                                </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800/50 mx-2" />
+
+                        {/* Dark Mode */}
+                        <button onClick={()=> setIsDark(!isDark)}
+                            className="w-full flex items-center justify-between px-3 py-3 hover:bg-zinc-50
+                            dark:hover:bg-zinc-800/50 rounded-2xl transition-colors group"
+                            >
+                            <div
+                                className="flex items-center space-x-3 text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors">
+                                {isDark ?
+                                <Sun className="w-4 h-4" /> :
+                                <Moon className="w-4 h-4" />}
+                                <span className="text-[10px] font-black uppercase tracking-widest">{t.theme}</span>
+                            </div>
+                            <div className={`w-9 h-5 rounded-full relative transition-colors border ${isDark
+                                ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-200 border-zinc-300' }`}>
+                                <motion.div animate={{ x: isDark ? 16 : 0 }} className={`absolute top-0.5 left-0.5 w-3.5
+                                    h-3.5 rounded-full shadow-sm ${isDark ? 'bg-zinc-100' : 'bg-white' }`} />
+                            </div>
+                        </button>
+
+                        <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800/50 mx-2" />
+
+                        {/* 新建 */}
+                        <button onClick={handleNewProject}
+                            className="w-full flex items-center space-x-3 px-3 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-2xl transition-colors group">
+                            <div
+                                className="flex items-center space-x-3 text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors">
+                                <PlusCircle className="w-4 h-4" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">{t.newProject}</span>
+                            </div>
+                        </button>
+                    </div>
+                </motion.div>
+                )}
+            </AnimatePresence>
+
+            <div className="flex items-center space-x-4">
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={toggleStatus}
+                    className={`w-16 h-16 flex items-center justify-center rounded-full shadow-2xl transition-all
+                    duration-500 ${status==='active' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800'
+                    }`}>
+                    {status === 'active' ?
+                    <Square className="w-6 h-6 fill-current" /> :
+                    <Play className="w-6 h-6 fill-current ml-1" />}
+                </motion.button>
+
+                <motion.button whileHover={{ scale: 1.05, rotate: 45 }} whileTap={{ scale: 0.95 }} onClick={()=>
+                    setIsMenuOpen(!isMenuOpen)}
+                    className={`w-12 h-12 flex items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90
+                    backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 shadow-xl transition-all ${isMenuOpen ?
+                    'text-zinc-900 dark:text-white' : 'text-zinc-400 dark:text-zinc-600'}`}
+                    >
+                    <Settings className="w-5 h-5" />
+                </motion.button>
+            </div>
+        </div>
+        )}
+
+        {/* 画布 */}
+        <div className="w-full h-full relative cursor-grab active:cursor-grabbing overflow-hidden" onMouseDown={(e)=> {
+            if (e.button === 1 || (e.button === 0 && e.altKey)) setIsDragging(true) }}
+            onMouseMove={handleDrag}
+            onMouseUp={() => setIsDragging(false)}
+            >
+            {isStarted && (
+            <motion.div style={{ x: viewOffset.x, y: viewOffset.y }}
+                className="absolute inset-0 transition-transform duration-75">
+                <div className="absolute inset-[-4000px] opacity-[0.04] dark:opacity-[0.1]" style={{
+                    backgroundImage: 'radial-gradient(circle, currentColor 1.5px, transparent 1.5px)' ,
+                    backgroundSize: '60px 60px' }} />
+
+                <svg className="absolute inset-0 w-[4000px] h-[4000px] pointer-events-none overflow-visible">
+                    {CONNECTIONS.map((conn, idx) => {
+                    const from = AGENTS_CONFIG.find(a => a.id === conn.from);
+                    const to = AGENTS_CONFIG.find(a => a.id === conn.to);
+                    const isActiveFlow = commFlow.some(f => f.from === conn.from && f.to === conn.to);
+                    return (
+                    <g key={idx}>
+                        <path d={`M ${from.x + 100} ${from.y + 45} C ${from.x + 250} ${from.y + 45}, ${to.x - 150}
+                            ${to.y + 45}, ${to.x} ${to.y + 45}`} stroke="currentColor" strokeWidth="1" fill="none"
+                            className="text-zinc-200 dark:text-zinc-800 transition-colors duration-500" />
+                        {isActiveFlow && (
+                        <motion.path d={`M ${from.x + 100} ${from.y + 45} C ${from.x + 250} ${from.y + 45}, ${to.x -
+                            150} ${to.y + 45}, ${to.x} ${to.y + 45}`} stroke="currentColor" strokeWidth="3"
+                            strokeDasharray="12 12" fill="none" className="text-zinc-900 dark:text-zinc-100" initial={{
+                            strokeDashoffset: 100 }} animate={{ strokeDashoffset: 0 }} transition={{ repeat: Infinity,
+                            ease: "linear" , duration: 0.8 }} />
+                        )}
+                    </g>
+                    );
+                    })}
+                </svg>
+
+                {AGENTS_CONFIG.map((agent) => {
+                const isWorking = activeAgentId === agent.id;
+                const isDone = agentStatuses[agent.id] === 'done';
+                return (
+                <motion.div key={agent.id} initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: isWorking ? 1.08 : 1,
+                    opacity: 1, boxShadow: isWorking ? (isDark ? '0 0 40px rgba(255,255,255,0.05)'
+                    : '0 25px 50px -12px rgba(0,0,0,0.15)' ) : 'none' }} className={`absolute w-56 p-5 rounded-[2.5rem]
+                    border-2 transition-all duration-700 backdrop-blur-2xl ${isWorking
+                    ? 'border-zinc-900 dark:border-zinc-100 bg-white dark:bg-zinc-900 z-20'
+                    : 'border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-950/40' }`} style={{ left: agent.x,
+                    top: agent.y }}>
+                    <div className="flex items-center space-x-4 mb-4">
+                        <div className={`p-3 rounded-2xl shadow-inner transition-colors ${isWorking
+                            ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                            : 'bg-zinc-100 dark:bg-zinc-800 opacity-50 text-zinc-500' }`}>
+                            <agent.icon className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <div
+                                className="text-[10px] font-black uppercase opacity-40 tracking-widest text-zinc-900 dark:text-zinc-100">
+                                {agent.role}</div>
+                            <div className="font-bold text-sm text-zinc-900 dark:text-zinc-100">{agent.name}</div>
+                        </div>
+                    </div>
+                    {isWorking && (
+                    <div className="space-y-2">
+                        <div className="h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                            <motion.div className="h-full bg-zinc-900 dark:bg-zinc-100" initial={{ width: 0 }}
+                                animate={{ width: '100%' }} transition={{ duration: 4, ease: "linear" }} />
+                        </div>
+                        <div
+                            className="text-[9px] font-bold text-center opacity-40 animate-pulse uppercase tracking-widest text-zinc-900 dark:text-zinc-100">
+                            Syncing Engine...</div>
+                    </div>
+                    )}
+                    {isDone && !isWorking && <div className="flex justify-center">
+                        <CheckCircle className="w-5 h-5 text-emerald-500" />
+                    </div>}
+                </motion.div>
+                );
+                })}
+            </motion.div>
+            )}
+        </div>
+
+        {/* 右侧边栏 */}
+        {isStarted && (
+        <motion.div animate={{ y: isChatMinimized ? 840 : 0, opacity: isChatMinimized ? 0 : 1, pointerEvents:
+            isChatMinimized ? 'none' : 'auto' }} transition={springTransition}
+            className="absolute right-12 top-28 bottom-12 w-[440px] z-40">
+            <div
+                className="h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200 dark:border-zinc-800 rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden">
+                <div className="flex items-center justify-between px-8 pt-8 pb-4">
+                    <div className="flex space-x-6">
+                        {['chat', 'artifacts'].map(tab => (
+                        <button key={tab} onClick={()=> setActiveTab(tab)} className={`text-xs font-black uppercase
+                            tracking-[0.2em] transition-all relative pb-2 ${activeTab === tab ? 'text-zinc-900
+                            dark:text-zinc-100' : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'}`}>
+                            {t[tab]}
+                            {activeTab === tab &&
+                            <motion.div layoutId="tabUnderline"
+                                className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100" />}
+                        </button>
+                        ))}
+                    </div>
+                    <button onClick={()=> setIsChatMinimized(true)} className="p-2 hover:bg-zinc-100
+                        dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-900 dark:text-zinc-100">
+                        <Minus className="w-5 h-5" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide relative">
+                    {activeTab === 'chat' ? (
+                    <AnimatePresence initial={false}>
+                        {messages.map((m, i) => {
+                        const agent = AGENTS_CONFIG.find(a => a.id === m.agentId);
+                        const isUser = m.role === 'user';
+                        return (
+                        <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                            className={`flex items-start space-x-4 ${isUser ? 'flex-row-reverse space-x-reverse' : ''
+                            }`}>
+                            <div className="relative">
+                                <motion.div onMouseEnter={()=> agent && setHoveredAgent(agent)} onMouseLeave={() =>
+                                    setHoveredAgent(null)}
+                                    whileHover={{ scale: 1.1 }}
+                                    className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg
+                                    transition-all ${isUser ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
+                                    : agent?.color + ' text-white'}`}
+                                    >
+                                    {isUser ?
+                                    <User className="w-6 h-6" /> : agent &&
+                                    <agent.icon className="w-6 h-6" />}
+                                </motion.div>
+                                <AnimatePresence>
+                                    {hoveredAgent?.id === m.agentId && (
+                                    <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0 }} className={`absolute ${isUser ? 'right-full' : 'left-full'
+                                        } top-0 w-56 p-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900
+                                        rounded-2xl z-50 shadow-2xl border border-white/10 mx-3`}>
+                                        <div className="text-[10px] font-black uppercase opacity-50 mb-1">{agent.role}
+                                        </div>
+                                        <div className="font-bold text-sm mb-2">{agent.name}</div>
+                                        <p className="text-[11px] leading-relaxed opacity-70 italic">{agent.bio}</p>
+                                    </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                            <div className={`max-w-[82%] p-5 rounded-[1.8rem] shadow-sm border ${isUser
+                                ? 'bg-zinc-900 text-white border-transparent dark:bg-zinc-100 dark:text-zinc-900' :
+                                `bg-white dark:bg-zinc-800/40 dark:border-zinc-700/50 ${agent?.border}`}`}>
+                                {!isUser && agent && <div className={`text-[10px] font-black mb-2 flex items-center
+                                    space-x-2 ${agent.text}`}><span>{agent.role}</span><span
+                                        className="opacity-30">•</span><span>{agent.name}</span></div>}
+                                <MarkdownRenderer content={m.text} isUser={isUser} />
+                            </div>
+                        </motion.div>
+                        );
+                        })}
+                    </AnimatePresence>
+                    ) : (
+                    <div className="space-y-4">
+                        {ARTIFACT_TYPES.map((type, idx) => {
+                        const isUnlocked = progress > (idx * 16);
+                        return (
+                        <motion.div key={type} className={`p-5 rounded-[1.8rem] border-2 transition-all ${isUnlocked
+                            ? 'border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/30'
+                            : 'opacity-20 border-dashed pointer-events-none' }`}>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-4">
+                                    <div
+                                        className="p-3 bg-zinc-100 dark:bg-zinc-900 rounded-xl text-zinc-900 dark:text-zinc-100">
+                                        <FileText className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{type}
+                                            System Doc</div>
+                                        <div className="text-[10px] opacity-40 uppercase font-mono tracking-tighter">
+                                            Ready</div>
+                                    </div>
+                                </div>
+                                <Download
+                                    className="w-5 h-5 opacity-40 hover:opacity-100 cursor-pointer text-zinc-900 dark:text-zinc-100" />
+                            </div>
+                        </motion.div>
+                        );
+                        })}
+                    </div>
+                    )}
+                </div>
+
+                {activeTab === 'chat' && (
+                <div className="p-8 bg-white dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-800">
+                    <div className="relative group">
+                        <input
+                            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[1.8rem] px-8 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-sm text-zinc-900 dark:text-zinc-100"
+                            placeholder="Ask team..." value={chatInput} onChange={(e)=> setChatInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && chatInput.trim()) { setMessages([...messages, {
+                        role: 'user', text: chatInput }]); setChatInput(''); } }}
+                        />
+                        <button
+                            className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform">
+                            <Send className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+                )}
+            </div>
+        </motion.div>
+        )}
+
+        {/* 最小化展开按钮 */}
+        {isStarted && isChatMinimized && (
+        <motion.button initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} onClick={()=>
+            setIsChatMinimized(false)}
+            className="absolute bottom-12 right-12 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-10 py-5
+            rounded-[2.5rem] shadow-2xl flex items-center space-x-4 z-50 font-black text-xs uppercase tracking-[0.2em]
+            hover:scale-105 active:scale-95 transition-transform"
+            >
+            <MessageSquare className="w-5 h-5" />
+            <span>Expand Collab</span>
+        </motion.button>
+        )}
+
+    </div>
+    );
+    }

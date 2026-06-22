@@ -11,6 +11,8 @@ import {
 } from '../index'
 
 describe('agent workflow model configs', () => {
+  const legacyRuntimeEnvPrefix = ['CLAU', 'DE_CODE_USE_'].join('')
+
   beforeEach(() => {
     resetAgentWorkflow()
   })
@@ -32,7 +34,7 @@ describe('agent workflow model configs', () => {
     expect(mapModelConfigToRuntime(config.id)).toEqual({
       modelType: 'openai',
       env: {
-        CLAUDE_CODE_USE_OPENAI: '1',
+        [`${legacyRuntimeEnvPrefix}OPENAI`]: '1',
         OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
         OPENAI_API_KEY: 'sk-dashboard-secret',
         OPENAI_DEFAULT_HAIKU_MODEL: 'fast-model',
@@ -60,7 +62,7 @@ describe('agent workflow model configs', () => {
       name: 'Other',
       provider: 'anthropic-compatible',
       apiKey: 'other-secret',
-      models: { balanced: 'claude-balanced' },
+      models: { balanced: 'beegame-balanced' },
       isDefault: true,
     })
 

@@ -45,6 +45,11 @@ export type MarkdownFile = {
   source: SettingSource
 }
 
+function getProjectConfigDirectoryNames(): string[] {
+  const configured = process.env.BEEGAME_PROJECT_CONFIG_DIR_NAME?.trim()
+  return configured ? [configured, '.claude'] : ['.claude']
+}
+
 /**
  * Extracts a description from markdown content
  * Uses the first non-empty line as the description, or falls back to a default
@@ -250,18 +255,20 @@ export function getProjectDirsUpToHome(
       break
     }
 
-    const claudeSubdir = join(current, '.claude', subdir)
-    // Filter to existing dirs. This is a perf filter (avoids spawning
-    // ripgrep on non-existent dirs downstream) and the worktree fallback
-    // in loadMarkdownFilesForSubdir relies on it. statSync + explicit error
-    // handling instead of existsSync — re-throws unexpected errors rather
-    // than silently swallowing them. Downstream loadMarkdownFiles handles
-    // the TOCTOU window (dir disappearing before read) gracefully.
-    try {
-      statSync(claudeSubdir)
-      dirs.push(claudeSubdir)
-    } catch (e: unknown) {
-      if (!isFsInaccessible(e)) throw e
+    for (const configDirName of getProjectConfigDirectoryNames()) {
+      const configSubdir = join(current, configDirName, subdir)
+      // Filter to existing dirs. This is a perf filter (avoids spawning
+      // ripgrep on non-existent dirs downstream) and the worktree fallback
+      // in loadMarkdownFilesForSubdir relies on it. statSync + explicit error
+      // handling instead of existsSync — re-throws unexpected errors rather
+      // than silently swallowing them. Downstream loadMarkdownFiles handles
+      // the TOCTOU window (dir disappearing before read) gracefully.
+      try {
+        statSync(configSubdir)
+        dirs.push(configSubdir)
+      } catch (e: unknown) {
+        if (!isFsInaccessible(e)) throw e
+      }
     }
 
     // Stop after processing the git root directory - this prevents commands from parent
@@ -320,16 +327,18 @@ export const loadMarkdownFilesForSubdir = memoize(
     const gitRoot = findGitRoot(cwd)
     const canonicalRoot = findCanonicalGitRoot(cwd)
     if (gitRoot && canonicalRoot && canonicalRoot !== gitRoot) {
-      const worktreeSubdir = normalizePathForComparison(
-        join(gitRoot, '.claude', subdir),
-      )
-      const worktreeHasSubdir = projectDirs.some(
-        dir => normalizePathForComparison(dir) === worktreeSubdir,
-      )
-      if (!worktreeHasSubdir) {
-        const mainClaudeSubdir = join(canonicalRoot, '.claude', subdir)
-        if (!projectDirs.includes(mainClaudeSubdir)) {
-          projectDirs.push(mainClaudeSubdir)
+      for (const configDirName of getProjectConfigDirectoryNames()) {
+        const worktreeSubdir = normalizePathForComparison(
+          join(gitRoot, configDirName, subdir),
+        )
+        const worktreeHasSubdir = projectDirs.some(
+          dir => normalizePathForComparison(dir) === worktreeSubdir,
+        )
+        if (!worktreeHasSubdir) {
+          const mainConfigSubdir = join(canonicalRoot, configDirName, subdir)
+          if (!projectDirs.includes(mainConfigSubdir)) {
+            projectDirs.push(mainConfigSubdir)
+          }
         }
       }
     }
