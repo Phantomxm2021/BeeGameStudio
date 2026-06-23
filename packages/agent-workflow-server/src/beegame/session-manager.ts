@@ -728,7 +728,7 @@ export class BeeGameSessionManager {
     if (record.workflowPhase === 'planning') {
       const violation = await this.validatePlanningAgent(record)
       if (violation) {
-        return { kind: 'dead', reason: 'unknown', detail: violation }
+        return { kind: 'skipped' }
       }
       await persistPlayableSpec(record)
     }
@@ -736,7 +736,7 @@ export class BeeGameSessionManager {
     if (record.workflowPhase === 'building') {
       const violation = await this.validateBuildAgent(record)
       if (violation) {
-        return { kind: 'dead', reason: 'unknown', detail: violation }
+        return { kind: 'skipped' }
       }
     }
 
@@ -1679,6 +1679,7 @@ async function getDesignPackViolation(
 
 async function shouldRunBuildRecovery(record: SessionRecord): Promise<boolean> {
   if (record.workflowPhase === 'building') return true
+  if (!(await getDesignPackViolation(record))) return true
   return record.events.some(event => {
     if (event.type !== 'workflow.blocked') return false
     const payload = getPayloadRecordFromEvent(event)
@@ -1830,7 +1831,7 @@ function parsePlayableLoopReviewMarkdown(
 ): { ok: true; passedChecks: Set<string> } | { ok: false; message: string } {
   const lines = content
     .split('\n')
-    .map(line => line.trim().toLowerCase())
+    .map(normalizePlayableLoopReviewLine)
     .filter(Boolean)
   if (!lines.some(line => line === 'verdict: pass' || line === '- verdict: pass')) {
     return { ok: false, message: 'verdict is not pass' }
@@ -1842,6 +1843,14 @@ function parsePlayableLoopReviewMarkdown(
     }
   }
   return { ok: true, passedChecks }
+}
+
+function normalizePlayableLoopReviewLine(line: string): string {
+  return line
+    .trim()
+    .toLowerCase()
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^\*\*(.+)\*\*$/, '$1')
 }
 
 async function readJsonArtifact(

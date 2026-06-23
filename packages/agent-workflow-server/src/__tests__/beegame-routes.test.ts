@@ -757,14 +757,19 @@ async function writeMarkdownBuildQualityGateArtifacts(
       content: [
         '# Playable Loop Review',
         '',
-        'verdict: pass',
+        '### Verdict: pass',
         '',
         '## Evidence',
-        '- start: pass - The game reaches a playable start state.',
-        '- player_action: pass - Core input changes game state.',
-        '- feedback: pass - The player sees clear result feedback.',
-        '- pressure: pass - Challenge pressure advances during play.',
-        '- terminal_state: pass - Win/loss and restart are available.',
+        '### start: pass',
+        'The game reaches a playable start state.',
+        '### player_action: pass',
+        'Core input changes game state.',
+        '### feedback: pass',
+        'The player sees clear result feedback.',
+        '### pressure: pass',
+        'Challenge pressure advances during play.',
+        '### terminal_state: pass',
+        'Win/loss and restart are available.',
       ].join('\n'),
     },
   ]
@@ -2244,7 +2249,6 @@ describe('beegame session routes', () => {
     const fake = createSequencedFakeRunner([
       'planning_then_build',
       'build_with_invalid_quality_review',
-      'build_with_invalid_quality_review',
       'build_with_markdown_quality_review',
     ])
     const app = createAgentWorkflowApp({
@@ -2278,6 +2282,14 @@ describe('beegame session routes', () => {
       })
       const pausedEventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const pausedEvents = await pausedEventsRes.json()
+      expect(fake.runtimes).toHaveLength(2)
+      expect(
+        pausedEvents.some(
+          (event: { type: string; text?: string }) =>
+            event.type === 'system.status' &&
+            String(event.text || '').includes('retrying once'),
+        ),
+      ).toBe(false)
       const latestBlock = [...pausedEvents]
         .reverse()
         .find((event: { type: string }) => event.type === 'workflow.blocked')
@@ -2313,7 +2325,7 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
-      expect(fake.runtimes[3].submits[0].prompt).toContain('Recover the paused BeeGame build')
+      expect(fake.runtimes[2].submits[0].prompt).toContain('Recover the paused BeeGame build')
       expect(events).not.toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2639,10 +2651,9 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.starts).toHaveLength(2)
-      expect(fake.runtimes).toHaveLength(2)
+      expect(fake.starts).toHaveLength(1)
+      expect(fake.runtimes).toHaveLength(1)
       expect(fake.runtimes.flatMap(runtime => runtime.submits.map(submit => submit.prompt))).toEqual([
-        'Produce the design gate.',
         'Produce the design gate.',
       ])
       await expect(readFile(join(workspace, 'docs', 'PLAYABLE_SPEC.md'), 'utf8')).rejects.toThrow()
@@ -2955,7 +2966,7 @@ describe('beegame session routes', () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'current-project')
     const existingProject = join(projectsRoot, 'existing-project')
-    const fake = createFakeRunner(undefined, 'planning_then_workspace_root_permission')
+    const fake = createFakeRunner(undefined, 'workspace_root_permission')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -2990,7 +3001,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[1].permissionResults).toEqual([])
+      expect(fake.runtimes[0].permissionResults).toEqual([])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
