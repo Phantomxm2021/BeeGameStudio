@@ -246,12 +246,12 @@ async function generateBeeGameIntakeOptions(input: {
             'First understand the game request before proposing game modes. The options are playable game modes, not project management delivery strategies.',
             'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
             'maturity must be one of vague, directional, concrete.',
-            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 4 directions.',
-            'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, core loop, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
+            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 3 directions.',
+            'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, repeated player activity, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
             'Set needs_clarification=true only when a blocking contradiction or missing decision prevents a useful recommendation.',
             'When needs_clarification=true, clarification must contain exactly one prompt string for the most blocking question, 2 to 4 short options with id, label, optional description, and optional value, plus optional freeform_label. Do not bundle multiple questions into one prompt.',
             'When needs_clarification=true, recommended_next_step must be "clarify"; options may be empty because the user must answer first.',
-            'When needs_clarification=false, return 1 to 4 valid options.',
+            'When needs_clarification=false, return 1 to 3 valid options.',
             'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
             'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
             'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
@@ -278,8 +278,8 @@ async function generateBeeGameIntakeOptions(input: {
             'fit must explain why this direction suits the user idea.',
             'firstPlayableValidation must explain what the first playable build validates.',
             'riskComplexity must explain the main delivery risk and complexity level.',
-            'Avoid generic production strategy titles such as "faithful prototype", "core loop validation", or "high fidelity slice". Titles should name an actual game mode.',
-            'For each option, make gameplay describe the Core Loop, Fun Hook, Skill Test, Risk/Reward, Failure Pressure, First 3 Minutes, and MVP Acceptance in concise language.',
+            'Avoid generic production strategy titles. Titles should name an actual game mode.',
+            'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
             'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
             'Do not mention dashboard source paths, package paths, commands, or implementation directories.',
             'Keep the response language aligned with the user idea.',
@@ -337,7 +337,7 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
     clarificationQuestions: getStringArrayField(parsed, 'clarificationQuestions', 'clarification_questions'),
     detectedConstraints: getStringArrayField(parsed, 'detectedConstraints', 'detected_constraints'),
     recommendedNextStep: getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (needsClarification ? 'clarify' : maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
-    options: normalized.slice(0, 4),
+    options: normalized.slice(0, 3),
   }
 }
 
@@ -594,6 +594,9 @@ function registerBeeGameSessionRoutes(
           ...(typeof body.modelConfigId === 'string' && body.modelConfigId
             ? { modelConfigId: body.modelConfigId }
             : {}),
+          ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
+            ? { transcriptSessionId: body.transcriptSessionId }
+            : {}),
         }),
       )
     } catch (err) {
@@ -742,13 +745,34 @@ async function deleteWorkspaceDirectoryIfSafe(
   workspacePath: string,
   dashboardDataRoot: string,
 ): Promise<string | undefined> {
-  const workspaceRoot = await realpath(resolve(workspacePath))
   const dataRoot = await realpath(resolve(dashboardDataRoot))
+  const resolvedWorkspace = resolve(workspacePath)
+  let workspaceRoot: string
+  try {
+    workspaceRoot = await realpath(resolvedWorkspace)
+  } catch (err) {
+    if (isNodeErrorCode(err, 'ENOENT')) {
+      if (resolvedWorkspace === dataRoot) return undefined
+      const rel = relative(dataRoot, resolvedWorkspace)
+      if (rel.startsWith('..') || isAbsolute(rel)) return undefined
+      return undefined
+    }
+    throw err
+  }
   if (workspaceRoot === dataRoot) return undefined
   const rel = relative(dataRoot, workspaceRoot)
   if (rel.startsWith('..') || isAbsolute(rel)) return undefined
   await rm(workspaceRoot, { recursive: true, force: true })
   return workspaceRoot
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === code,
+  )
 }
 
 async function readTranscriptFromWorkspace(

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
@@ -17,22 +18,53 @@ const formatProjectDate = (createdAt: number | string) => {
     return date.toLocaleDateString();
 };
 
+const MENU_WIDTH = 150;
+const MENU_MARGIN = 12;
+const MENU_OFFSET = 8;
+
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
     const { projects, deleteProject } = useProjectStore();
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+    const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
     const t = translations[lang];
+
+    const closeMenu = () => {
+        setActiveMenuId(null);
+        setMenuPosition(null);
+        setConfirmingDeleteId(null);
+    };
 
     const handleDelete = async (event: React.MouseEvent, id: string) => {
         event.stopPropagation();
         if (confirmingDeleteId === id) {
             await deleteProject(id);
-            setActiveMenuId(null);
-            setConfirmingDeleteId(null);
+            closeMenu();
             return;
         }
         setConfirmingDeleteId(id);
     };
+
+    const toggleMenu = (event: React.MouseEvent<HTMLButtonElement>, id: string) => {
+        event.stopPropagation();
+        if (activeMenuId === id) {
+            closeMenu();
+            return;
+        }
+
+        const rect = event.currentTarget.getBoundingClientRect();
+        const maxLeft = window.innerWidth - MENU_WIDTH - MENU_MARGIN;
+        setMenuPosition({
+            left: Math.max(MENU_MARGIN, Math.min(maxLeft, rect.right - MENU_WIDTH)),
+            top: rect.bottom + MENU_OFFSET,
+        });
+        setConfirmingDeleteId(null);
+        setActiveMenuId(id);
+    };
+
+    const activeProject = activeMenuId
+        ? projects.find(project => project.id === activeMenuId)
+        : undefined;
 
     return (
         <AnimatePresence>
@@ -43,7 +75,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={() => {
-                            setActiveMenuId(null);
+                            closeMenu();
                             onClose();
                         }}
                         className="fixed inset-0 z-[60] bg-zinc-950/45 backdrop-blur-sm"
@@ -70,7 +102,10 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             <button
                                 type="button"
                                 aria-label="Close"
-                                onClick={onClose}
+                                onClick={() => {
+                                    closeMenu();
+                                    onClose();
+                                }}
                                 className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-white/30"
                             >
                                 <X className="h-5 w-5" />
@@ -111,44 +146,43 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             <button
                                                 type="button"
                                                 aria-label={`More actions for ${project.name || 'Untitled Project'}`}
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    setConfirmingDeleteId(null);
-                                                    setActiveMenuId(activeMenuId === project.id ? null : project.id);
-                                                }}
+                                                onClick={(event) => toggleMenu(event, project.id)}
                                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-white/30"
                                             >
                                                 <MoreHorizontal className="h-4 w-4" />
                                             </button>
                                         </motion.div>
-
-                                        <AnimatePresence>
-                                            {activeMenuId === project.id && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: -4, scale: 0.96 }}
-                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                    exit={{ opacity: 0, y: -4, scale: 0.96 }}
-                                                    className="absolute right-3 top-12 z-[80] min-w-[150px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
-                                                >
-                                                    <button
-                                                        type="button"
-                                                        onClick={(event) => handleDelete(event, project.id)}
-                                                        className={`flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === project.id
-                                                            ? 'bg-rose-500 text-white'
-                                                            : 'text-zinc-600 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-300 dark:hover:bg-rose-950/30 dark:hover:text-rose-300'
-                                                            }`}
-                                                    >
-                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                        {confirmingDeleteId === project.id ? 'Confirm Delete' : 'Delete Project'}
-                                                    </button>
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
                                     </div>
                                 ))
                             )}
                         </div>
                     </motion.div>
+                    {activeProject && menuPosition
+                        ? createPortal(
+                            <AnimatePresence>
+                                <motion.div
+                                    initial={{ opacity: 0, y: -4, scale: 0.96 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: -4, scale: 0.96 }}
+                                    style={{ left: menuPosition.left, top: menuPosition.top }}
+                                    className="fixed z-[90] min-w-[150px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={(event) => handleDelete(event, activeProject.id)}
+                                        className={`flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
+                                            ? 'bg-rose-500 text-white'
+                                            : 'text-zinc-600 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-300 dark:hover:bg-rose-950/30 dark:hover:text-rose-300'
+                                            }`}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        {confirmingDeleteId === activeProject.id ? 'Confirm Delete' : 'Delete Project'}
+                                    </button>
+                                </motion.div>
+                            </AnimatePresence>,
+                            document.body,
+                        )
+                        : null}
                 </>
             )}
         </AnimatePresence>

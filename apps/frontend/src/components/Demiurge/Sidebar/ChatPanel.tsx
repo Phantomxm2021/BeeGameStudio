@@ -38,6 +38,7 @@ interface ChatPanelProps {
     onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
     waitingApproval: WaitingApprovalState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
+    isComposerLocked?: boolean;
 }
 
 const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
@@ -65,7 +66,8 @@ export const ChatPanel = memo(({
     onUploadManifestCsv,
     onApproveManifest,
     waitingApproval,
-    projectStatus
+    projectStatus,
+    isComposerLocked = false,
 }: ChatPanelProps) => {
     const reviewActionLabel = (
         review: ReviewDisplayModel,
@@ -279,7 +281,7 @@ export const ChatPanel = memo(({
                         <textarea
                             ref={textareaRef}
                             className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto"
-                            placeholder={isLoading ? "AI is processing..." : waitingApproval.placeholder}
+                            placeholder={isComposerLocked || isLoading ? "AI is processing..." : waitingApproval.placeholder}
                             value={chatInput}
                             onChange={(e) => onChatInputChange(e.target.value)}
                             onCompositionStart={() => setIsComposing(true)}
@@ -290,11 +292,11 @@ export const ChatPanel = memo(({
                                     onSend();
                                 }
                             }}
-                            disabled={isLoading || waitingApproval.isBlockingChat}
+                            disabled={isComposerLocked || isLoading || waitingApproval.isBlockingChat}
                         />
                         <button
                             onClick={onSend}
-                            disabled={!chatInput.trim() || isLoading || waitingApproval.isBlockingChat}
+                            disabled={!chatInput.trim() || isComposerLocked || isLoading || waitingApproval.isBlockingChat}
                             className="absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400"
                         >
                             <Send className="w-5 h-5 -ml-0.5" />

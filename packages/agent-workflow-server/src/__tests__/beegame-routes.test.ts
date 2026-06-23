@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   createModelConfig,
   resetAgentWorkflow,
@@ -19,10 +20,13 @@ type FakeRuntimeMode =
   | 'permission'
   | 'permission_twice'
   | 'permission_different_tool'
+  | 'dangerous_bash_permission'
+  | 'dangerous_bash_twice'
   | 'outside_permission'
   | 'workspace_root_permission'
   | 'outside_bash_permission'
   | 'ask_user_question_permission'
+  | 'build_with_doc_reads_complete'
   | 'write_before_playable_spec'
   | 'write_after_playable_spec'
   | 'write_playable_spec_doc_absolute_path'
@@ -30,11 +34,26 @@ type FakeRuntimeMode =
   | 'bash_before_playable_spec'
   | 'bash_after_playable_spec'
   | 'planning_then_build'
+  | 'planning_then_build_complete'
+  | 'planning_then_build_with_quality_gates'
+  | 'planning_then_build_with_markdown_quality_review'
+  | 'build_with_invalid_quality_review'
+  | 'planning_then_build_with_root_quality_gates'
+  | 'build_with_quality_gates'
+  | 'build_with_markdown_quality_review'
+  | 'build_with_root_quality_gates'
   | 'planning_then_build_without_doc_reads'
   | 'planning_then_permission'
   | 'planning_then_permission_twice'
   | 'planning_then_permission_different_tool'
+  | 'planning_then_dangerous_bash_permission'
+  | 'planning_then_dangerous_bash_twice'
   | 'planning_docs_then_code_same_turn'
+  | 'planning_docs_with_extra_markdown'
+  | 'planning_messages_then_build_complete'
+  | 'planning_unstructured_design_pack'
+  | 'synthetic_user_message'
+  | 'planning_wrong_project_design_doc'
   | 'planning_then_write_after_playable_spec'
   | 'planning_then_write_after_playable_spec_file'
   | 'planning_then_bash_after_playable_spec'
@@ -63,7 +82,28 @@ class FakeBeeGameRuntime {
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     this.submits.push(input)
-    if (isTwoPhasePlanningMode(this.mode) && this.mode !== 'planning_docs_then_code_same_turn') {
+    if (this.mode === 'planning_messages_then_build_complete' && this.submits.length === 1) {
+      await writeRequiredDesignPack(this.cwd, input)
+      for (const message of this.messages) {
+        if (input.signal.aborted) return
+        input.onMessage(message)
+      }
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'Planning complete.\nPLAYABLE_SPEC_READY: yes' }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'planning complete' })
+      return
+    }
+    if (
+      isTwoPhasePlanningMode(this.mode) &&
+      this.mode !== 'planning_docs_then_code_same_turn' &&
+      this.mode !== 'planning_docs_with_extra_markdown' &&
+      this.mode !== 'planning_unstructured_design_pack' &&
+      this.mode !== 'planning_marker_without_design_pack'
+    ) {
       if (this.submits.length === 1) {
         await writeRequiredDesignPack(this.cwd, input)
         input.onMessage({
@@ -98,6 +138,35 @@ class FakeBeeGameRuntime {
       input.onMessage({ type: 'result', result: `build ${decision.behavior}` })
       return
     }
+    if (this.mode === 'build_with_doc_reads_complete') {
+      emitMandatoryDocReads(input)
+      input.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Build complete.' }] },
+      })
+      input.onMessage({ type: 'result', result: 'build complete' })
+      return
+    }
+    if (this.mode === 'build_with_quality_gates') {
+      emitMandatoryDocReads(input)
+      await writeBuildQualityGateArtifacts(this.cwd, input)
+      input.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Build complete with traceability evidence.' }] },
+      })
+      input.onMessage({ type: 'result', result: 'build complete with quality gates' })
+      return
+    }
+    if (this.mode === 'build_with_root_quality_gates') {
+      emitMandatoryDocReads(input)
+      await writeBuildQualityGateArtifacts(this.cwd, input, '')
+      input.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Build complete with root quality gates.' }] },
+      })
+      input.onMessage({ type: 'result', result: 'build complete with root quality gates' })
+      return
+    }
     if (this.mode === 'planning_docs_then_code_same_turn') {
       await writeRequiredDesignPack(this.cwd, input)
       const decision = await input.requestPermission({
@@ -113,11 +182,120 @@ class FakeBeeGameRuntime {
       input.onMessage({ type: 'result', result: `same turn code ${decision.behavior}` })
       return
     }
+    if (this.mode === 'planning_docs_with_extra_markdown') {
+      await writeRequiredDesignPack(this.cwd, input)
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_extra_markdown_doc',
+        toolName: 'Write',
+        message: 'Write an extra planning markdown doc?',
+        input: {
+          file_path: 'docs/PLAYABILITY_CHECKLIST.md',
+          content: '# Playability Checklist\n\nUse this during design review.',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      if (decision.behavior === 'allow') {
+        const fullPath = join(this.cwd, 'docs', 'PLAYABILITY_CHECKLIST.md')
+        await mkdir(dirname(fullPath), { recursive: true })
+        await writeFile(fullPath, '# Playability Checklist\n\nUse this during design review.', 'utf8')
+      }
+      input.onMessage({ type: 'result', result: `extra markdown ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'planning_unstructured_design_pack') {
+      await writeUnstructuredDesignPack(this.cwd, input)
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'text',
+            text: 'Unstructured design pack complete.\nPLAYABLE_SPEC_READY: yes',
+          }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'unstructured planning complete' })
+      return
+    }
+    if (this.mode === 'synthetic_user_message') {
+      await writeRequiredDesignPack(this.cwd, input)
+      input.onMessage({
+        type: 'user',
+        isSynthetic: true,
+        message: {
+          role: 'user',
+          content: [{
+            type: 'text',
+            text: 'This session is being continued from a previous conversation that ran out of context.',
+          }],
+        },
+      })
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'Planning complete.\nPLAYABLE_SPEC_READY: yes' }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'planning done' })
+      return
+    }
+    if (this.mode === 'planning_wrong_project_design_doc') {
+      const wrongPath = join(dirname(this.cwd), 'other-game', 'docs', 'PLAYABLE_SPEC.md')
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_wrong_project_design_doc',
+        toolName: 'Write',
+        message: 'Write design doc to another project?',
+        input: {
+          file_path: wrongPath,
+          content: 'PLAYABLE_SPEC_READY: yes',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `wrong project ${decision.behavior}` })
+      return
+    }
     if (this.mode === 'build_without_doc_reads') {
       input.onMessage({ type: 'result', result: 'build ended without reading docs' })
       return
     }
+    if (this.mode === 'build_with_markdown_quality_review') {
+      emitMandatoryDocReads(input)
+      await writeMarkdownBuildQualityGateArtifacts(this.cwd, input)
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'Playable build verified with Markdown review.' }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'build with markdown quality review complete' })
+      return
+    }
+    if (this.mode === 'build_with_invalid_quality_review') {
+      emitMandatoryDocReads(input)
+      await writeTraceabilityArtifact(this.cwd, input)
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'Build produced traceability but no playable loop review.' }],
+        },
+      })
+      input.onMessage({ type: 'result', result: 'build with invalid quality review' })
+      return
+    }
     if (this.mode === 'planning_marker_without_design_pack') {
+      if (input.prompt.includes('Repair the BeeGame design pack')) {
+        await writeRequiredDesignPack(this.cwd, input)
+        input.onMessage({
+          type: 'assistant',
+          message: {
+            content: [{
+              type: 'text',
+              text: 'Design pack repaired.\nDESIGN_PACK_REPAIRED: yes',
+            }],
+          },
+        })
+        input.onMessage({ type: 'result', result: 'design pack repaired' })
+        return
+      }
       input.onMessage({
         type: 'assistant',
         message: {
@@ -148,7 +326,14 @@ class FakeBeeGameRuntime {
       input.onMessage({ type: 'result', result: `build ${decision.behavior}` })
       return
     }
-    if (this.mode === 'permission' || this.mode === 'permission_twice' || this.mode === 'permission_different_tool') {
+    if (
+      this.mode === 'permission' ||
+      this.mode === 'permission_twice' ||
+      this.mode === 'permission_different_tool' ||
+      this.mode === 'dangerous_bash_permission' ||
+      this.mode === 'dangerous_bash_twice'
+    ) {
+      emitMandatoryDocReads(input)
       input.onMessage({
         type: 'assistant',
         message: {
@@ -161,21 +346,40 @@ class FakeBeeGameRuntime {
       const decision = await input.requestPermission({
         toolUseID: 'tool_1',
         toolName: 'Bash',
-        message: 'Allow Bash to run npm test?',
-        input: { command: 'npm test' },
+        message: this.mode.startsWith('dangerous_bash')
+          ? 'Allow Bash to remove dist?'
+          : 'Allow Bash to run npm test?',
+        input: {
+          command: this.mode.startsWith('dangerous_bash')
+            ? 'rm -rf dist'
+            : 'npm test',
+        },
       })
       this.permissionResults.push(decision.behavior)
-      if (this.mode === 'permission_twice' || this.mode === 'permission_different_tool') {
+      if (
+        this.mode === 'permission_twice' ||
+        this.mode === 'permission_different_tool' ||
+        this.mode === 'dangerous_bash_twice'
+      ) {
         const secondDecision = await input.requestPermission({
           toolUseID: 'tool_2',
           toolName: this.mode === 'permission_different_tool' ? 'Read' : 'Bash',
-          message: this.mode === 'permission_different_tool' ? 'Allow Read?' : 'Allow Bash to run npm run build?',
+          message: this.mode === 'permission_different_tool'
+            ? 'Allow Read?'
+            : this.mode === 'dangerous_bash_twice'
+              ? 'Allow Bash to chmod dist?'
+              : 'Allow Bash to run npm run build?',
           input: this.mode === 'permission_different_tool'
             ? { file_path: 'src/index.ts' }
-            : { command: 'npm run build' },
+            : {
+              command: this.mode === 'dangerous_bash_twice'
+                ? 'chmod -R 755 dist'
+                : 'npm run build',
+            },
         })
         this.permissionResults.push(secondDecision.behavior)
       }
+      await writeBuildQualityGateArtifacts(this.cwd, input)
       input.onMessage({ type: 'result', result: `permission ${decision.behavior}` })
       return
     }
@@ -474,6 +678,201 @@ async function writeRequiredDesignPack(
   }
 }
 
+async function writeBuildQualityGateArtifacts(
+  cwd: string,
+  input: BeeGameSessionSubmitInput,
+  artifactDir = 'docs',
+): Promise<void> {
+  const artifactPath = (filename: string) => artifactDir ? join(artifactDir, filename) : filename
+  const artifacts = [
+    {
+      path: artifactPath('traceability_matrix.json'),
+      content: JSON.stringify({
+        version: 1,
+        mappings: [
+          {
+            requirementId: 'core_loop',
+            implementation: ['src/store/gameStore.ts', 'src/components/MainScreen.tsx'],
+            verification: ['bun test', 'manual playable-loop review'],
+            status: 'implemented',
+          },
+          {
+            requirementId: 'readable_feedback',
+            implementation: ['src/components/GameBoard.tsx'],
+            verification: ['manual playable-loop review'],
+            status: 'implemented',
+          },
+        ],
+      }, null, 2),
+    },
+    {
+      path: artifactPath('playable_loop_review.md'),
+      content: [
+        '# Playable Loop Review',
+        '',
+        'verdict: pass',
+        'start: pass',
+        'player_action: pass',
+        'feedback: pass',
+        'pressure: pass',
+        'terminal_state: pass',
+        '',
+        'Command results: bun test and bun run build passed.',
+      ].join('\n'),
+    },
+  ]
+  for (const artifact of artifacts) {
+    await input.requestPermission({
+      toolUseID: `quality_${artifact.path}`,
+      toolName: 'Write',
+      message: `Write ${artifact.path}?`,
+      input: { file_path: artifact.path, content: artifact.content },
+    })
+    await mkdir(join(cwd, dirname(artifact.path)), { recursive: true })
+    await writeFile(join(cwd, artifact.path), artifact.content, 'utf8')
+  }
+}
+
+async function writeMarkdownBuildQualityGateArtifacts(
+  cwd: string,
+  input: BeeGameSessionSubmitInput,
+): Promise<void> {
+  const artifacts = [
+    {
+      path: 'docs/traceability_matrix.json',
+      content: JSON.stringify({
+        version: 1,
+        mappings: [
+          {
+            requirementId: 'core_loop',
+            implementation: ['src/store/gameStore.ts'],
+            verification: ['bun run build'],
+            status: 'implemented',
+          },
+        ],
+      }, null, 2),
+    },
+    {
+      path: 'docs/playable_loop_review.md',
+      content: [
+        '# Playable Loop Review',
+        '',
+        'verdict: pass',
+        '',
+        '## Evidence',
+        '- start: pass - The game reaches a playable start state.',
+        '- player_action: pass - Core input changes game state.',
+        '- feedback: pass - The player sees clear result feedback.',
+        '- pressure: pass - Challenge pressure advances during play.',
+        '- terminal_state: pass - Win/loss and restart are available.',
+      ].join('\n'),
+    },
+  ]
+  for (const artifact of artifacts) {
+    await input.requestPermission({
+      toolUseID: `quality_markdown_${artifact.path}`,
+      toolName: 'Write',
+      message: `Write ${artifact.path}?`,
+      input: { file_path: artifact.path, content: artifact.content },
+    })
+    await mkdir(join(cwd, dirname(artifact.path)), { recursive: true })
+    await writeFile(join(cwd, artifact.path), artifact.content, 'utf8')
+  }
+}
+
+async function writeTraceabilityArtifact(
+  cwd: string,
+  input: BeeGameSessionSubmitInput,
+): Promise<void> {
+  const artifactPath = 'traceability_matrix.json'
+  const content = JSON.stringify({
+    version: 1,
+    mappings: [
+      {
+        requirementId: 'core_loop',
+        implementation: ['src/store/gameStore.ts'],
+        verification: ['bun run build'],
+        status: 'implemented',
+      },
+    ],
+  }, null, 2)
+  await input.requestPermission({
+    toolUseID: 'quality_traceability_only',
+    toolName: 'Write',
+    message: `Write ${artifactPath}?`,
+    input: { file_path: artifactPath, content },
+  })
+  await writeFile(join(cwd, artifactPath), content, 'utf8')
+}
+
+async function writeUnstructuredDesignPack(
+  cwd: string,
+  input: BeeGameSessionSubmitInput,
+): Promise<void> {
+  const docs = [
+    {
+      path: 'docs/PLAYABLE_SPEC.md',
+      content: [
+        '# Playable planning notes',
+        'The playable build describes repeated player activity, why the interaction is interesting, how skill is tested, how pressure appears, and what the first playable must prove.',
+        'PLAYABLE_SPEC_READY: yes',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/GDD.md',
+      content: [
+        '# Design notes',
+        'This file describes the player promise, repeated play pattern, opening moment, and how success or failure is decided without using fixed section labels.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/TECH_DESIGN.md',
+      content: [
+        '# Technical notes',
+        'Runtime structure, state ownership, and build validation are described in prose.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/ART_AUDIO_DIRECTION.md',
+      content: [
+        '# Presentation notes',
+        'Visual language, feedback effects, and audio cues are described in prose.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/RESOURCE_PLACEHOLDERS.md',
+      content: [
+        '# Resource notes',
+        'Temporary assets, visual effect slots, and sound slots are described in prose.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/LEVEL_TUNING.md',
+      content: [
+        '# Tuning notes',
+        'Layout, rising difficulty, and a replay target are described in prose.',
+      ].join('\n'),
+    },
+    {
+      path: 'docs/PLAYABILITY_ACCEPTANCE.md',
+      content: [
+        '# Acceptance notes',
+        'The playable acceptance criteria describe early clarity, an early meaningful decision, responsive input, readable feedback, pressure, and replay value in prose.',
+      ].join('\n'),
+    },
+  ]
+  for (const doc of docs) {
+    await input.requestPermission({
+      toolUseID: `unstructured_${doc.path}`,
+      toolName: 'Write',
+      message: `Write ${doc.path}?`,
+      input: { file_path: doc.path, content: doc.content },
+    })
+    await mkdir(join(cwd, dirname(doc.path)), { recursive: true })
+    await writeFile(join(cwd, doc.path), doc.content)
+  }
+}
+
 function emitMandatoryDocReads(input: BeeGameSessionSubmitInput): void {
   const paths = [
     'BEEGAME_PLAYABLE_SPEC.md',
@@ -513,7 +912,34 @@ function emitMandatoryDocReads(input: BeeGameSessionSubmitInput): void {
 
 function createFakeRunner(
   messages?: DashboardSDKMessage[],
-  mode: FakeRuntimeMode = 'messages',
+  mode?: FakeRuntimeMode,
+): {
+  starts: BeeGameSessionRunnerStartInput[]
+  runtimes: FakeBeeGameRuntime[]
+  runner: BeeGameSessionRunner
+} {
+  const defaultMode = mode ?? (messages ? 'messages' : 'planning_then_build_with_quality_gates')
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const runtimes: FakeBeeGameRuntime[] = []
+  return {
+    starts,
+    runtimes,
+    runner: {
+      async start(input) {
+        starts.push(input)
+        const runtimeMode = runtimes.length > 0
+          ? getSecondRuntimeMode(defaultMode)
+          : defaultMode
+        const runtime = new FakeBeeGameRuntime(input.cwd, messages, runtimeMode)
+        runtimes.push(runtime)
+        return runtime
+      },
+    },
+  }
+}
+
+function createSequencedFakeRunner(
+  modes: FakeRuntimeMode[],
 ): {
   starts: BeeGameSessionRunnerStartInput[]
   runtimes: FakeBeeGameRuntime[]
@@ -527,15 +953,25 @@ function createFakeRunner(
     runner: {
       async start(input) {
         starts.push(input)
-        const runtimeMode = runtimes.length > 0
-          ? getSecondRuntimeMode(mode)
-          : mode
-        const runtime = new FakeBeeGameRuntime(input.cwd, messages, runtimeMode)
+        const mode = modes[runtimes.length] ?? modes[modes.length - 1] ?? 'messages'
+        const runtime = new FakeBeeGameRuntime(input.cwd, undefined, mode)
         runtimes.push(runtime)
         return runtime
       },
     },
   }
+}
+
+function getTestTranscriptPath(root: string, workspace: string, sessionId: string): string {
+  const projectName = basename(workspace)
+  const sessionHash = createHash('sha256').update(sessionId).digest('hex').slice(0, 8)
+  return join(
+    root,
+    '.beegame-dashboard',
+    'transcripts',
+    projectName,
+    `${projectName}__${sessionHash}.jsonl`,
+  )
 }
 
 function isTwoPhasePlanningMode(mode: FakeRuntimeMode): boolean {
@@ -545,7 +981,21 @@ function isTwoPhasePlanningMode(mode: FakeRuntimeMode): boolean {
 function getSecondRuntimeMode(mode: FakeRuntimeMode): FakeRuntimeMode {
   switch (mode) {
     case 'planning_then_build':
+      return 'build_with_doc_reads'
+    case 'planning_then_build_complete':
+      return 'build_with_doc_reads_complete'
+    case 'planning_messages_then_build_complete':
+    case 'synthetic_user_message':
+      return 'build_with_quality_gates'
+    case 'planning_then_build_with_quality_gates':
+      return 'build_with_quality_gates'
+    case 'planning_then_build_with_markdown_quality_review':
+      return 'build_with_markdown_quality_review'
+    case 'planning_then_build_with_root_quality_gates':
+      return 'build_with_root_quality_gates'
     case 'planning_docs_then_code_same_turn':
+    case 'planning_unstructured_design_pack':
+    case 'planning_marker_without_design_pack':
       return 'build_with_doc_reads'
     case 'planning_then_build_without_doc_reads':
       return 'build_without_doc_reads'
@@ -555,6 +1005,10 @@ function getSecondRuntimeMode(mode: FakeRuntimeMode): FakeRuntimeMode {
       return 'permission_twice'
     case 'planning_then_permission_different_tool':
       return 'permission_different_tool'
+    case 'planning_then_dangerous_bash_permission':
+      return 'dangerous_bash_permission'
+    case 'planning_then_dangerous_bash_twice':
+      return 'dangerous_bash_twice'
     case 'planning_then_write_after_playable_spec':
       return 'write_after_playable_spec'
     case 'planning_then_write_after_playable_spec_file':
@@ -770,6 +1224,19 @@ describe('beegame session routes', () => {
             OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
           }),
         }),
+        expect.objectContaining({
+          sessionId: session.id,
+          cwd: resolvedWorkspace,
+          env: expect.objectContaining({
+            BEEGAME_CONFIG_DIR: expect.stringContaining('.beegame'),
+            BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
+            CLAUDE_CONFIG_DIR: expect.stringContaining('.beegame'),
+            [`${legacyRuntimeEnvPrefix}OPENAI`]: '1',
+            OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
+            OPENAI_API_KEY: 'sk-dashboard-secret',
+            OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+          }),
+        }),
       ])
       expect(fake.runtimes[0].submits[0].prompt).toBe(
         'Build a tiny puzzle game.',
@@ -780,19 +1247,21 @@ describe('beegame session routes', () => {
       )
       expect(eventsRes.status).toBe(200)
       const events = await eventsRes.json()
-      expect(events.map((event: { type: string }) => event.type)).toEqual([
-        'session.started',
-        'runtime.observation',
-        'turn.started',
-        'workflow.phase',
-        'workflow.pipeline',
-        'user.message',
-        'system.status',
-        'assistant.message',
-        'result',
-        'runtime.observation',
-        'turn.completed',
-      ])
+      expect(events.map((event: { type: string }) => event.type)).toEqual(
+        expect.arrayContaining([
+          'session.started',
+          'runtime.observation',
+          'turn.started',
+          'workflow.pipeline',
+          'workflow.phase',
+          'user.message',
+          'system.status',
+          'assistant.message',
+          'result',
+          'verification.required',
+          'turn.completed',
+        ]),
+      )
       expect(events.find((event: { type: string }) => event.type === 'runtime.observation')).toEqual(
         expect.objectContaining({
           type: 'runtime.observation',
@@ -811,16 +1280,18 @@ describe('beegame session routes', () => {
       expect(events.find((event: { type: string }) => event.type === 'assistant.message')).toEqual(
         expect.objectContaining({
           type: 'assistant.message',
-          text: 'Acknowledged.',
+          text: expect.stringContaining('PLAYABLE_SPEC_READY: yes'),
         }),
       )
       const transcriptDir = join(projectsRoot, '.beegame-dashboard', 'transcripts')
-      const transcriptFiles = await readdir(transcriptDir)
+      const transcriptProjects = await readdir(transcriptDir)
+      expect(transcriptProjects).toEqual(['game-one'])
+      const transcriptFiles = await readdir(join(transcriptDir, 'game-one'))
       expect(transcriptFiles).toHaveLength(1)
       expect(transcriptFiles[0]).toMatch(/^game-one__[a-f0-9]{8}\.jsonl$/)
       expect(transcriptFiles[0]).not.toBe(`${session.id}.jsonl`)
       const transcript = await readFile(
-        join(transcriptDir, transcriptFiles[0]),
+        join(transcriptDir, 'game-one', transcriptFiles[0]),
         'utf8',
       )
       await expect(stat(join(workspace, '.beegame-dashboard'))).rejects.toThrow()
@@ -836,7 +1307,7 @@ describe('beegame session routes', () => {
           }),
           expect.objectContaining({
             type: 'assistant.message',
-            text: 'Acknowledged.',
+            text: expect.stringContaining('PLAYABLE_SPEC_READY: yes'),
           }),
         ]),
       )
@@ -852,7 +1323,7 @@ describe('beegame session routes', () => {
         expect.arrayContaining([
           expect.objectContaining({
             type: 'assistant.message',
-            text: 'Acknowledged.',
+            text: expect.stringContaining('PLAYABLE_SPEC_READY: yes'),
           }),
         ]),
       )
@@ -883,7 +1354,13 @@ describe('beegame session routes', () => {
         },
       )
       expect(inputRes.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
 
       const eventsRes = await app.request(
         `/api/beegame-sessions/${session.id}/events`,
@@ -1140,7 +1617,7 @@ describe('beegame session routes', () => {
         },
       },
       { type: 'result', result: `${legacyTitle} finished` },
-    ])
+    ], 'planning_messages_then_build_complete')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
@@ -1210,7 +1687,7 @@ describe('beegame session routes', () => {
 
   test('keeps a turn running until a dashboard permission is approved', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const fake = createFakeRunner(undefined, 'planning_then_permission')
+    const fake = createFakeRunner(undefined, 'planning_then_dangerous_bash_permission')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/console/sessions', {
@@ -1278,7 +1755,7 @@ describe('beegame session routes', () => {
 
   test('does not reuse remembered approval for a different Bash command', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const fake = createFakeRunner(undefined, 'planning_then_permission_twice')
+    const fake = createFakeRunner(undefined, 'planning_then_dangerous_bash_twice')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
@@ -1350,7 +1827,104 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('trusts later in-workspace permissions after the first remembered allow', async () => {
+  test('auto-approves low-risk build and test Bash commands inside the BeeGame workspace', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_permission_twice')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Run project validation.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return fake.runtimes[1]?.permissionResults.length === 2 ||
+          events.some((event: { type: string }) => event.type === 'permission.requested')
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow', 'allow'])
+      expect(events.filter((event: { type: string }) => event.type === 'permission.requested')).toHaveLength(0)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'permission.resolved',
+          payload: expect.objectContaining({
+            toolUseID: 'tool_1',
+            toolName: 'Bash',
+            autoApproved: true,
+          }),
+        }),
+        expect.objectContaining({
+          type: 'permission.resolved',
+          payload: expect.objectContaining({
+            toolUseID: 'tool_2',
+            toolName: 'Bash',
+            autoApproved: true,
+          }),
+        }),
+      ]))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-approves project-local implementation writes during build', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_write_after_playable_spec')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Implement game files.' }),
+      })
+
+      await waitFor(() => fake.runtimes[1]?.permissionResults.length === 1)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow'])
+      expect(events.filter((event: { type: string }) => event.type === 'permission.requested')).toHaveLength(0)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'permission.resolved',
+          payload: expect.objectContaining({
+            toolUseID: 'tool_write_after_spec',
+            toolName: 'Write',
+            autoApproved: true,
+          }),
+        }),
+      ]))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-approves low-risk Bash and read-only tools without remember prompts', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'planning_then_permission_different_tool')
     const app = createAgentWorkflowApp({
@@ -1371,27 +1945,6 @@ describe('beegame session routes', () => {
         body: JSON.stringify({ text: 'Run and inspect.' }),
       })
 
-      await waitFor(async () => {
-        const eventsRes = await app.request(
-          `/api/beegame-sessions/${session.id}/events`,
-        )
-        const events = await eventsRes.json()
-        return events.some(
-          (event: { type: string; payload?: { toolUseID?: string } }) =>
-            event.type === 'permission.requested' &&
-            event.payload?.toolUseID === 'tool_1',
-        )
-      })
-
-      await app.request(
-        `/api/beegame-sessions/${session.id}/permissions/tool_1`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ decision: 'allow', remember: true }),
-        },
-      )
-
       await waitFor(() => fake.runtimes[1]?.permissionResults.length === 2)
       expect(fake.runtimes[1].permissionResults).toEqual(['allow', 'allow'])
 
@@ -1401,7 +1954,7 @@ describe('beegame session routes', () => {
       const events = await eventsRes.json()
       expect(
         events.filter((event: { type: string }) => event.type === 'permission.requested'),
-      ).toHaveLength(1)
+      ).toHaveLength(0)
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1494,21 +2047,21 @@ describe('beegame session routes', () => {
         const events = await eventsRes.json()
         return events.some(
           (event: { type: string; payload?: { toolUseID?: string } }) =>
-            event.type === 'permission.requested' &&
+            event.type === 'permission.resolved' &&
             event.payload?.toolUseID === 'tool_build_write',
         )
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes.flatMap(runtime => runtime.submits.map(submit => submit.prompt))).toEqual([
-        'First produce a Playable Spec for snake.',
-        expect.stringContaining('Now implement the approved playable spec'),
-      ])
-      expect(fake.starts).toHaveLength(2)
+      expect(fake.runtimes[0].submits[0].prompt).toBe('First produce a Playable Spec for snake.')
+      expect(fake.runtimes[1].submits[0].prompt).toContain('Now implement the approved playable spec')
+      expect(fake.starts.length).toBeGreaterThanOrEqual(2)
       expect(fake.runtimes[1].submits[0].prompt).toContain('BEEGAME_PLAYABLE_SPEC.md')
+      expect(fake.runtimes[1].submits[0].prompt).toContain('traceability_matrix.json')
+      expect(fake.runtimes[1].submits[0].prompt).toContain('playable_loop_review.md')
       expect(fake.runtimes[1].submits[0].prompt).toContain(
-        'Write the final playability verification to ./BEEGAME_PLAYABILITY_REVIEW.md',
+        'Do not write ./BEEGAME_PLAYABILITY_REVIEW.md yourself',
       )
       expect(fake.runtimes[1].submits[0].prompt).not.toContain('Core Loop, Fun Hook, Skill Test')
       await expect(readFile(join(workspace, 'BEEGAME_PLAYABLE_SPEC.md'), 'utf8')).resolves.toContain(
@@ -1553,10 +2106,389 @@ describe('beegame session routes', () => {
             }),
           }),
           expect.objectContaining({
-            type: 'permission.requested',
+            type: 'permission.resolved',
             payload: expect.objectContaining({
               toolUseID: 'tool_build_write',
               toolName: 'Write',
+              autoApproved: true,
+            }),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not mark BeeGame complete when build lacks traceability and playable loop review artifacts', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_build_complete')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a playable game from the spec.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; text?: string }) =>
+            event.type === 'workflow.blocked' &&
+            String(event.text || '').includes('traceability_matrix.json'),
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(events.some((event: { type: string }) => event.type === 'turn.completed')).toBe(false)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('traceability_matrix.json'),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('generates verifier-owned playability review only after traceability and loop review pass', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_build_with_quality_gates')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a playable game from the spec.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const review = await readFile(join(workspace, 'BEEGAME_PLAYABILITY_REVIEW.md'), 'utf8')
+      expect(review).toContain('Generated by BeeGame playable loop verifier')
+      expect(review).toContain('PLAYABILITY_CHECKS_PASSED: yes')
+      expect(review).toContain('traceability_matrix.json')
+      expect(review).toContain('playable_loop_review.md')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts markdown playable loop review when it carries required structured evidence', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_build_with_markdown_quality_review')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a playable game from the spec.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const review = await readFile(join(workspace, 'BEEGAME_PLAYABILITY_REVIEW.md'), 'utf8')
+      expect(review).toContain('PLAYABILITY_CHECKS_PASSED: yes')
+      expect(review).toContain('playable_loop_review')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('continues a paused build quality gate in build phase instead of restarting planning', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createSequencedFakeRunner([
+      'planning_then_build',
+      'build_with_invalid_quality_review',
+      'build_with_invalid_quality_review',
+      'build_with_markdown_quality_review',
+    ])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a playable game from the spec.' }),
+      })
+
+      await waitFor(() => fake.runtimes.length >= 2)
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'workflow.blocked')
+      })
+      await waitFor(async () => {
+        const statusRes = await app.request(`/api/beegame-sessions/${session.id}`)
+        const status = await statusRes.json()
+        return status.turnStatus === 'idle'
+      })
+      const pausedEventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const pausedEvents = await pausedEventsRes.json()
+      const latestBlock = [...pausedEvents]
+        .reverse()
+        .find((event: { type: string }) => event.type === 'workflow.blocked')
+      expect(latestBlock).toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            phase: 'building',
+          }),
+        }),
+      )
+
+      const continueRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '继续任务' }),
+      })
+      expect(continueRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              type: 'workflow.recovery.started',
+            }),
+          }),
+        ]),
+      )
+      expect(fake.runtimes[3].submits[0].prompt).toContain('Recover the paused BeeGame build')
+      expect(events).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('Planning phase is docs-only'),
+          }),
+        ]),
+      )
+      const review = await readFile(join(workspace, 'BEEGAME_PLAYABILITY_REVIEW.md'), 'utf8')
+      expect(review).toContain('PLAYABILITY_CHECKS_PASSED: yes')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts root quality gate artifacts for verifier review', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_then_build_with_root_quality_gates')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a playable game from the spec.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      await expect(readFile(join(workspace, 'traceability_matrix.json'), 'utf8')).resolves.toContain('core_loop')
+      await expect(readFile(join(workspace, 'playable_loop_review.md'), 'utf8')).resolves.toContain('verdict: pass')
+      const review = await readFile(join(workspace, 'BEEGAME_PLAYABILITY_REVIEW.md'), 'utf8')
+      expect(review).toContain('PLAYABILITY_CHECKS_PASSED: yes')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not require fixed section keywords in design pack docs', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_unstructured_design_pack')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Plan the game.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'permission.resolved' &&
+            event.payload?.toolUseID === 'tool_build_write',
+        )
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.starts.length).toBeGreaterThanOrEqual(2)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.phase',
+            text: 'building',
+          }),
+        ]),
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('allows planning to write additional markdown documents under project docs', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_docs_with_extra_markdown')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Plan the game with an extra checklist.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length > 0)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toContain('allow')
+      expect(
+        events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'workflow.blocked' &&
+            event.payload?.toolUseID === 'tool_extra_markdown_doc',
+        ),
+      ).toBe(false)
+      await expect(readFile(join(workspace, 'docs', 'PLAYABILITY_CHECKLIST.md'), 'utf8')).resolves.toContain(
+        'Playability Checklist',
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('marks planning writes to another project as recoverable path mistakes', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'planning_wrong_project_design_doc')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Plan the game.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length > 0)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['deny'])
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'workflow.blocked',
+            text: expect.stringContaining('another project folder'),
+            payload: expect.objectContaining({
+              recoverable: true,
+              recoveryKind: 'planning_path_rewrite',
+              currentWorkspace: expect.stringContaining('current-project'),
+              targetPath: expect.stringContaining('other-game/docs/PLAYABLE_SPEC.md'),
             }),
           }),
         ]),
@@ -1596,11 +2528,12 @@ describe('beegame session routes', () => {
             event.payload?.toolUseID === 'tool_same_turn_code_write',
         )
       })
+      await waitFor(() => fake.starts.length >= 2)
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
       expect(fake.runtimes[0].permissionResults.at(-1)).toBe('deny')
-      expect(fake.starts).toHaveLength(2)
+      expect(fake.starts.length).toBeGreaterThanOrEqual(2)
       expect(fake.runtimes[1].submits[0].prompt).toContain('Now implement the approved playable spec')
       expect(events).toEqual(
         expect.arrayContaining([
@@ -1698,41 +2631,54 @@ describe('beegame session routes', () => {
         const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
         const events = await eventsRes.json()
         return events.some(
-          (event: { type: string; text: string }) =>
+          (event: { type: string; payload?: { recoveryKind?: string } }) =>
             event.type === 'workflow.blocked' &&
-            event.text.includes('required design pack'),
+            event.payload?.recoveryKind === 'design_pack_repair',
         )
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.starts).toHaveLength(1)
-      expect(fake.runtimes).toHaveLength(1)
+      expect(fake.starts).toHaveLength(2)
+      expect(fake.runtimes).toHaveLength(2)
+      expect(fake.runtimes.flatMap(runtime => runtime.submits.map(submit => submit.prompt))).toEqual([
+        'Produce the design gate.',
+        'Produce the design gate.',
+      ])
+      await expect(readFile(join(workspace, 'docs', 'PLAYABLE_SPEC.md'), 'utf8')).rejects.toThrow()
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             type: 'workflow.blocked',
-            text: expect.stringContaining('required design pack'),
             payload: expect.objectContaining({
-              phase: 'planning',
-              reason: expect.stringContaining('docs/GDD.md'),
+              recoverable: true,
+              recoveryKind: 'design_pack_repair',
             }),
           }),
         ]),
       )
       expect(
-        events.some(
-          (event: { type: string; payload?: { toolUseID?: string } }) =>
-            event.type === 'permission.requested' &&
-            event.payload?.toolUseID === 'tool_build_write',
-        ),
+        events.some((event: { type: string }) => event.type === 'turn.completed'),
       ).toBe(false)
+      expect(
+        events.some((event: { type: string }) => event.type === 'turn.failed'),
+      ).toBe(false)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'system.status',
+            payload: expect.objectContaining({
+              type: 'workflow.paused',
+            }),
+          }),
+        ]),
+      )
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
 
-  test('allows normal file-write approval after the Playable Spec gate is complete', async () => {
+  test('auto-approves project-local file writes after the Playable Spec gate is complete', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'planning_then_write_after_playable_spec')
     const app = createAgentWorkflowApp({
@@ -1758,14 +2704,14 @@ describe('beegame session routes', () => {
         const events = await eventsRes.json()
         return events.some(
           (event: { type: string; payload?: { toolUseID?: string } }) =>
-            event.type === 'permission.requested' &&
+            event.type === 'permission.resolved' &&
             event.payload?.toolUseID === 'tool_write_after_spec',
         )
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[1].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow'])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1773,10 +2719,11 @@ describe('beegame session routes', () => {
             text: expect.stringContaining('PLAYABLE_SPEC_READY: yes'),
           }),
           expect.objectContaining({
-            type: 'permission.requested',
+            type: 'permission.resolved',
             payload: expect.objectContaining({
               toolUseID: 'tool_write_after_spec',
               toolName: 'Write',
+              autoApproved: true,
             }),
           }),
         ]),
@@ -1834,7 +2781,10 @@ describe('beegame session routes', () => {
         ]),
       )
       expect(
-        events.some((event: { type: string }) => event.type === 'workflow.blocked'),
+        events.some((event: { type: string; payload?: { toolUseID?: string } }) =>
+          event.type === 'workflow.blocked' &&
+          event.payload?.toolUseID === 'tool_write_after_spec_file',
+        ),
       ).toBe(false)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -1877,27 +2827,31 @@ describe('beegame session routes', () => {
         const events = await eventsRes.json()
         return events.some(
           (event: { type: string; payload?: { toolUseID?: string } }) =>
-            event.type === 'permission.requested' &&
+            event.type === 'permission.resolved' &&
             event.payload?.toolUseID === 'tool_write_after_spec_file',
         )
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[1].permissionResults).toEqual([])
+      expect(fake.runtimes[1].permissionResults).toEqual(['allow'])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            type: 'permission.requested',
+            type: 'permission.resolved',
             payload: expect.objectContaining({
               toolUseID: 'tool_write_after_spec_file',
               toolName: 'Write',
+              autoApproved: true,
             }),
           }),
         ]),
       )
       expect(
-        events.some((event: { type: string }) => event.type === 'workflow.blocked'),
+        events.some((event: { type: string; payload?: { toolUseID?: string } }) =>
+          event.type === 'workflow.blocked' &&
+          event.payload?.toolUseID === 'tool_write_after_spec_file',
+        ),
       ).toBe(false)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -2273,7 +3227,7 @@ describe('beegame session routes', () => {
         },
       },
       { type: 'result', result: 'Done' },
-    ])
+    ], 'planning_messages_then_build_complete')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
     try {
       await mkdir(gameDir, { recursive: true })
@@ -2357,17 +3311,17 @@ describe('beegame session routes', () => {
     const resolvedWorkspace = await realpath(workspace)
     const sessionId = 'beegame_transcript_only'
     const gameDir = join(resolvedWorkspace, 'snake-game')
-    const transcriptDir = join(resolvedWorkspace, '.beegame-dashboard', 'transcripts')
+    const transcriptPath = getTestTranscriptPath(resolvedWorkspace, resolvedWorkspace, sessionId)
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
       defaultWorkspacePath: resolvedWorkspace,
     })
     try {
       await mkdir(gameDir, { recursive: true })
-      await mkdir(transcriptDir, { recursive: true })
+      await mkdir(dirname(transcriptPath), { recursive: true })
       await writeFile(join(gameDir, 'package.json'), '{}')
       await writeFile(
-        join(transcriptDir, `${sessionId}.jsonl`),
+        transcriptPath,
         `${JSON.stringify({
           id: 1,
           sessionId,
@@ -2432,16 +3386,40 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('treats missing project workspace as deleted after backend restart loses the session', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'already-deleted-project')
+    const sessionId = 'beegame_restart_delete_missing_workspace'
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const deleteRes = await app.request(
+        `/api/beegame-sessions/${sessionId}?deleteArtifacts=1&workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'DELETE' },
+      )
+
+      expect(deleteRes.status).toBe(200)
+      const result = await deleteRes.json()
+      expect(result.deleted).toBe(true)
+      expect(result.deletedArtifactPaths).toEqual([])
+      await expect(stat(projectsRoot)).resolves.toEqual(expect.anything())
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('reads transcript from disk after backend restart loses the session', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-transcript-read-'))
     const sessionId = 'beegame_transcript_read'
-    const transcriptDir = join(workspace, '.beegame-dashboard', 'transcripts')
-    const app = createAgentWorkflowApp()
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const app = createAgentWorkflowApp({ defaultWorkspacePath: workspace })
 
     try {
-      await mkdir(transcriptDir, { recursive: true })
+      await mkdir(dirname(transcriptPath), { recursive: true })
       await writeFile(
-        join(transcriptDir, `${sessionId}.jsonl`),
+        transcriptPath,
         [
           JSON.stringify({
             id: 1,
@@ -2478,6 +3456,105 @@ describe('beegame session routes', () => {
           text: '已生成可玩的贪吃蛇原型。',
         }),
       ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('resumes backend restart sessions into the existing transcript file', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-transcript-resume-'))
+    const workspace = join(projectsRoot, 'game-one')
+
+    try {
+      await mkdir(workspace, { recursive: true })
+      const app = createAgentWorkflowApp({
+        sessionRunner: createFakeRunner().runner,
+        defaultWorkspacePath: projectsRoot,
+      })
+      const startRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        body: JSON.stringify({ workspacePath: workspace }),
+        headers: { 'content-type': 'application/json' },
+      })
+      const firstSession = await startRes.json() as { id: string }
+      const transcriptDir = join(projectsRoot, '.beegame-dashboard', 'transcripts')
+      const transcriptProjects = await readdir(transcriptDir)
+      expect(transcriptProjects).toEqual(['game-one'])
+      const projectTranscriptDir = join(transcriptDir, 'game-one')
+      const initialFiles = await readdir(projectTranscriptDir)
+      expect(initialFiles).toHaveLength(1)
+      const transcriptPath = join(projectTranscriptDir, initialFiles[0]!)
+      const initialTranscript = await readFile(transcriptPath, 'utf8')
+      const initialEvents = initialTranscript.trim().split('\n')
+      expect(initialEvents.length).toBeGreaterThan(0)
+
+      const restartedApp = createAgentWorkflowApp({
+        sessionRunner: createFakeRunner().runner,
+        defaultWorkspacePath: projectsRoot,
+      })
+      const resumeRes = await restartedApp.request('/api/beegame-sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          workspacePath: workspace,
+          transcriptSessionId: firstSession.id,
+        }),
+        headers: { 'content-type': 'application/json' },
+      })
+      expect(resumeRes.status).toBe(200)
+      const resumedSession = await resumeRes.json() as { id: string }
+      expect(resumedSession.id).not.toBe(firstSession.id)
+
+      const resumedFiles = await readdir(projectTranscriptDir)
+      expect(resumedFiles).toEqual(initialFiles)
+      const resumedTranscript = await readFile(transcriptPath, 'utf8')
+      const resumedEvents = resumedTranscript
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line) as { id: number; sessionId: string; type: string })
+      expect(resumedEvents.length).toBeGreaterThan(initialEvents.length)
+      expect(resumedEvents.at(-1)).toEqual(expect.objectContaining({
+        id: initialEvents.length + 2,
+        sessionId: resumedSession.id,
+        type: 'runtime.observation',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not expose synthetic runtime continuation messages as user chat', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner(undefined, 'synthetic_user_message')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Create match game.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      const userMessages = events.filter((event: { type: string }) => event.type === 'user.message')
+      expect(userMessages).toEqual([
+        expect.objectContaining({
+          text: 'Create match game.',
+        }),
+      ])
+      expect(JSON.stringify(events)).not.toContain('continued from a previous conversation')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

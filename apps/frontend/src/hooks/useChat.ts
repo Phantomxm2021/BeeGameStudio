@@ -739,9 +739,7 @@ export const useChat = ({
 
       setCurrentTaskId(response.task_id);
       console.log('[useChat] Message sent, task ID:', response.task_id);
-      if (wsState !== 'connected') {
-        await syncAfterReconnect();
-      }
+      await syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to send message:', error);
       setIsLoading(false);
@@ -792,9 +790,7 @@ export const useChat = ({
 
       setCurrentTaskId(response.resume_task_id);
       console.log('[useChat] Task continued, task ID:', response.resume_task_id);
-      if (wsState !== 'connected') {
-        await syncAfterReconnect();
-      }
+      await syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to continue task:', error);
       setIsLoading(false);

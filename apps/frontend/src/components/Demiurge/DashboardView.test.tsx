@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
+import type { ProjectBaselineStatusPayload } from '../../services/api';
 
 const loadPhases = vi.fn().mockResolvedValue(undefined);
 const loadTokenUsage = vi.fn().mockResolvedValue(undefined);
@@ -30,11 +31,22 @@ let capturedTopBarProps: Record<string, any> | null = null;
 let capturedSideMenuProps: Record<string, any> | null = null;
 let mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] as Array<{ phase: number; name: string; timestamp: number }> };
 let mockedMessages: Array<{ id: string; sender: string; content: string; timestamp: number }> = [];
+let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
+let mockedProjectStatus: ProjectBaselineStatusPayload = {
+    project_id: 'proj_1',
+    phase: 'DESIGN_IN_PROGRESS',
+    blocked: true,
+    approval_required: true,
+    baseline: {
+        artifact_id: 'art_1',
+    },
+};
+let mockedProjects: Array<{ id: string; name: string; root_path?: string; created_at: number }> = [];
 
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: () => ({
         status,
-        tokenUsage: {},
+        tokenUsage: mockedTokenUsage,
         phaseInfo: mockedPhaseInfo,
         loadPhases,
         loadTokenUsage,
@@ -51,6 +63,7 @@ vi.mock('../../store/systemStore', () => ({
 
 vi.mock('../../store/projectStore', () => ({
     useProjectStore: () => ({
+        projects: mockedProjects,
         pendingReviews: [
             {
                 gate_id: 'gate_human_gdd',
@@ -60,15 +73,7 @@ vi.mock('../../store/projectStore', () => ({
                 },
             },
         ],
-        projectStatus: {
-            project_id: 'proj_1',
-            phase: 'DESIGN_IN_PROGRESS',
-            blocked: true,
-            approval_required: true,
-            baseline: {
-                artifact_id: 'art_1',
-            },
-        },
+        projectStatus: mockedProjectStatus,
         runtimeReadiness: null,
         loadPendingReviews,
         loadProjectStatus,
@@ -151,6 +156,17 @@ describe('DashboardView runtime loading', () => {
         capturedSideMenuProps = null;
         mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] };
         mockedMessages = [];
+        mockedTokenUsage = {};
+        mockedProjectStatus = {
+            project_id: 'proj_1',
+            phase: 'DESIGN_IN_PROGRESS',
+            blocked: true,
+            approval_required: true,
+            baseline: {
+                artifact_id: 'art_1',
+            },
+        };
+        mockedProjects = [];
         status.capabilities.operator_controls_enabled = true;
         status.capabilities.stage_control_enabled = true;
     });
@@ -206,8 +222,61 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
 
         expect(capturedTopBarProps?.mode).toBe('beegame');
-        expect(capturedTopBarProps?.phaseLabel).toBe('Implementation');
+        expect(capturedTopBarProps?.phaseLabel).toBe('实现构建');
         expect(capturedTopBarProps?.progress).toBeGreaterThan(0);
+    });
+
+    it('passes localized BeeGame phase labels to the top bar', async () => {
+        mockedPhaseInfo = {
+            current_phase: 3,
+            phase_name: 'implementation',
+            history: [{ phase: 3, name: 'implementation', timestamp: 3_000 }],
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+
+        expect(capturedTopBarProps?.phaseLabel).toBe('实现构建');
+    });
+
+    it('uses live runtime token budget when persisted token usage has not caught up', async () => {
+        mockedTokenUsage = {
+            proj_1: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        };
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            context: {
+                token_budget: {
+                    prompt_tokens: 120,
+                    completion_tokens: 30,
+                    total_tokens: 150,
+                },
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+
+        expect(capturedTopBarProps?.tokens).toBe(150);
+    });
+
+    it('shows the workspace folder name as the dashboard project title without renaming the project', async () => {
+        mockedProjects = [
+            {
+                id: 'proj_1',
+                name: 'RPG 融合模式',
+                root_path: '/tmp/beegame-workspace/lightweight-web-challenge',
+                created_at: Date.now(),
+            },
+        ];
+
+        render(<DashboardView projectId="proj_1" projectName="RPG 融合模式" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+
+        expect(capturedTopBarProps?.projectName).toBe('lightweight-web-challenge');
     });
 
     it('opens OperatorControls in a new browser tab when test operations are enabled', async () => {

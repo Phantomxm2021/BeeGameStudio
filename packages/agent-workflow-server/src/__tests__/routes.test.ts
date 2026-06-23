@@ -151,6 +151,9 @@ describe('agent workflow server routes', () => {
                     recommendedInputs: ['Keyboard/mouse'],
                     scope: 'Playable demo',
                   },
+                  { id: 'mode_two', title: 'Mode Two', gameplay: 'Second playable mode.' },
+                  { id: 'mode_three', title: 'Mode Three', gameplay: 'Third playable mode.' },
+                  { id: 'mode_four', title: 'Mode Four', gameplay: 'Fourth playable mode.' },
                 ],
               }),
             },
@@ -168,15 +171,20 @@ describe('agent workflow server routes', () => {
 
       expect(res.status).toBe(200)
       const intake = await res.json()
-      expect(intake).toEqual({
+      expect(intake).toEqual(expect.objectContaining({
         maturity: 'vague',
         needsOptions: true,
         needsClarification: false,
         clarificationQuestions: [],
         detectedConstraints: ['browser playable demo'],
         recommendedNextStep: 'choose_direction',
-        options: [expect.any(Object)],
-      })
+      }))
+      expect(intake.options).toHaveLength(3)
+      expect(intake.options.map((option: { id: string }) => option.id)).toEqual([
+        'llm_mode',
+        'mode_two',
+        'mode_three',
+      ])
       expect(intake.options[0]).toEqual(expect.objectContaining({
         id: 'llm_mode',
         title: 'LLM Mode',
@@ -205,9 +213,7 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('playablePrototype')
       expect(systemPrompt).toContain('validationTarget')
       expect(systemPrompt).toContain('game mode')
-      expect(systemPrompt).toContain('Risk/Reward')
-      expect(systemPrompt).toContain('First 3 Minutes')
-      expect(systemPrompt).toContain('MVP Acceptance')
+      expect(systemPrompt).toContain('Do not output internal rubric names')
       expect(systemPrompt).toContain('maturity')
       expect(systemPrompt).toContain('needs_options')
       expect(systemPrompt).toContain('At least one option must stay faithful to the original idea')
@@ -218,6 +224,11 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('Do not output Auto for recommended metadata')
       expect(systemPrompt).not.toContain('prototype title')
       expect(systemPrompt).not.toContain('playable prototype name')
+      expect(systemPrompt).not.toContain('Core Loop')
+      expect(systemPrompt).not.toContain('Fun Hook')
+      expect(systemPrompt).not.toContain('Risk/Reward')
+      expect(systemPrompt).not.toContain('First 3 Minutes')
+      expect(systemPrompt).not.toContain('MVP Acceptance')
       expect(systemPrompt).not.toContain('FPS')
       expect(systemPrompt).not.toContain('2D Arcade')
     } finally {

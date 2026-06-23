@@ -118,6 +118,28 @@ export const getWaitingApprovalState = (
     };
   }
 
+  if (projectStatus?.blocked && normalize(projectStatus.blocked_reason)) {
+    if (
+      normalize(projectStatus.phase).toLowerCase() === 'paused' &&
+      !projectStatus.approval_required
+    ) {
+      return {
+        kind: 'none',
+        isWaitingStatus: false,
+        isBlockingChat: false,
+        message: normalize(projectStatus.blocked_reason),
+        placeholder: '输入修复要求或继续任务...',
+      };
+    }
+    return {
+      kind: 'gdd',
+      isWaitingStatus: true,
+      isBlockingChat: true,
+      message: normalize(projectStatus.blocked_reason),
+      placeholder: '当前 workflow 已暂停...',
+    };
+  }
+
   return DEFAULT_STATE;
 };
 

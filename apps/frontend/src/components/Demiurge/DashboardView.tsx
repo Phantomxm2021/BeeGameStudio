@@ -25,6 +25,153 @@ interface DashboardViewProps {
     initialPrompt?: string;
 }
 
+const BEEGAME_PHASE_LABELS: Record<Language, Record<string, string>> = {
+    zh: {
+        idea_intake: '需求理解',
+        brief: '构建方案',
+        gdd: '可玩规格',
+        architecture: '技术架构',
+        art_direction: '美术方向',
+        ui: '交互界面',
+        asset: '资源准备',
+        implementation: '实现构建',
+        qa: '可玩性检查',
+        polish: '打磨优化',
+        build: '构建预览',
+    },
+    'zh-TW': {
+        idea_intake: '需求理解',
+        brief: '建構方案',
+        gdd: '可玩規格',
+        architecture: '技術架構',
+        art_direction: '美術方向',
+        ui: '互動介面',
+        asset: '資源準備',
+        implementation: '實作建構',
+        qa: '可玩性檢查',
+        polish: '打磨優化',
+        build: '建構預覽',
+    },
+    en: {
+        idea_intake: 'Idea Intake',
+        brief: 'Build Brief',
+        gdd: 'Playable Spec',
+        architecture: 'Architecture',
+        art_direction: 'Art Direction',
+        ui: 'UI',
+        asset: 'Assets',
+        implementation: 'Implementation',
+        qa: 'Playability Review',
+        polish: 'Polish',
+        build: 'Build Preview',
+    },
+    ja: {
+        idea_intake: '要件整理',
+        brief: '制作概要',
+        gdd: 'プレイ仕様',
+        architecture: '技術設計',
+        art_direction: 'アート方針',
+        ui: 'UI',
+        asset: 'アセット準備',
+        implementation: '実装',
+        qa: 'プレイ確認',
+        polish: '仕上げ',
+        build: 'ビルド確認',
+    },
+    ko: {
+        idea_intake: '요구 이해',
+        brief: '제작 개요',
+        gdd: '플레이 사양',
+        architecture: '기술 설계',
+        art_direction: '아트 방향',
+        ui: 'UI',
+        asset: '에셋 준비',
+        implementation: '구현',
+        qa: '플레이 검수',
+        polish: '마무리',
+        build: '빌드 미리보기',
+    },
+    fr: {
+        idea_intake: 'Cadrage',
+        brief: 'Brief de création',
+        gdd: 'Spécification jouable',
+        architecture: 'Architecture',
+        art_direction: 'Direction artistique',
+        ui: 'Interface',
+        asset: 'Ressources',
+        implementation: 'Implémentation',
+        qa: 'Revue jouable',
+        polish: 'Finition',
+        build: 'Build aperçu',
+    },
+    de: {
+        idea_intake: 'Ideenklärung',
+        brief: 'Build-Brief',
+        gdd: 'Spielbare Spezifikation',
+        architecture: 'Architektur',
+        art_direction: 'Art Direction',
+        ui: 'UI',
+        asset: 'Assets',
+        implementation: 'Implementierung',
+        qa: 'Spielbarkeitsprüfung',
+        polish: 'Feinschliff',
+        build: 'Build-Vorschau',
+    },
+    es: {
+        idea_intake: 'Definición',
+        brief: 'Brief de construcción',
+        gdd: 'Especificación jugable',
+        architecture: 'Arquitectura',
+        art_direction: 'Dirección artística',
+        ui: 'Interfaz',
+        asset: 'Recursos',
+        implementation: 'Implementación',
+        qa: 'Revisión jugable',
+        polish: 'Pulido',
+        build: 'Vista previa',
+    },
+    it: {
+        idea_intake: 'Definizione',
+        brief: 'Brief di costruzione',
+        gdd: 'Specifica giocabile',
+        architecture: 'Architettura',
+        art_direction: 'Direzione artistica',
+        ui: 'Interfaccia',
+        asset: 'Asset',
+        implementation: 'Implementazione',
+        qa: 'Revisione giocabilità',
+        polish: 'Rifinitura',
+        build: 'Anteprima build',
+    },
+    pt: {
+        idea_intake: 'Entendimento',
+        brief: 'Brief de construção',
+        gdd: 'Especificação jogável',
+        architecture: 'Arquitetura',
+        art_direction: 'Direção de arte',
+        ui: 'Interface',
+        asset: 'Recursos',
+        implementation: 'Implementação',
+        qa: 'Revisão jogável',
+        polish: 'Polimento',
+        build: 'Prévia da build',
+    },
+};
+
+const getWorkspaceFolderName = (rootPath?: string): string => {
+    const normalized = String(rootPath || '').replaceAll('\\', '/');
+    const parts = normalized.split('/').filter(Boolean);
+    return parts[parts.length - 1] || '';
+};
+
+const fallbackPhaseLabel = (phaseName: string): string => {
+    return phaseName
+        .split('_')
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+};
+
 export function DashboardView({ projectId, projectName, lang, onSetLang, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
     const hasSentInitialPrompt = useRef(false);
@@ -47,7 +194,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         isDark,
         toggleTheme
     } = useSystemStore();
-    const { pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
+    const { projects, pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
     const { messages, currentSender, isStreaming } = useChatStore();
     const { showSuccess, showError } = useToast();
 
@@ -191,6 +338,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
 
         // Setup polling every 10 seconds while project is active
         const interval = setInterval(poll, 10000);
+        const tokenInterval = setInterval(() => {
+            if (document.hidden) return;
+            if (currentStatus === 'running' || hasUnfinishedTasks || isPipelineActive) {
+                loadTokenUsage(projectId).catch(console.error);
+            }
+        }, 2000);
 
         // Add visibility change listener to trigger immediate poll when returning to tab
         const handleVisibilityChange = () => {
@@ -202,6 +355,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
 
         return () => {
             clearInterval(interval);
+            clearInterval(tokenInterval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [projectId, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive]);
@@ -217,22 +371,21 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
 
     const phaseLabel = useMemo(() => {
         const phaseName = String(phaseInfo?.phase_name || '').trim();
-        if (!phaseName) return 'Idea Intake';
-        const labels: Record<string, string> = {
-            idea_intake: 'Idea Intake',
-            brief: 'Build Brief',
-            gdd: 'Playable Spec',
-            architecture: 'Architecture',
-            art_direction: 'Art Direction',
-            ui: 'UI',
-            asset: 'Assets',
-            implementation: 'Implementation',
-            qa: 'Playability Review',
-            polish: 'Polish',
-            build: 'Build/Preview',
-        };
-        return labels[phaseName] || phaseName.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-    }, [phaseInfo?.phase_name]);
+        const labels = BEEGAME_PHASE_LABELS[lang] || BEEGAME_PHASE_LABELS.en;
+        if (!phaseName) return labels.idea_intake;
+        return labels[phaseName] || BEEGAME_PHASE_LABELS.en[phaseName] || fallbackPhaseLabel(phaseName);
+    }, [phaseInfo?.phase_name, lang]);
+
+    const displayProjectName = useMemo(() => {
+        const activeProject = projects.find((project) => project.id === projectId);
+        return getWorkspaceFolderName(activeProject?.root_path) || projectName;
+    }, [projectId, projectName, projects]);
+
+    const displayedTokenTotal = useMemo(() => {
+        const storedTotal = Number(tokenUsage[projectId]?.total_tokens) || 0;
+        const runtimeTotal = Number(projectStatus?.context?.token_budget?.total_tokens) || 0;
+        return Math.max(storedTotal, runtimeTotal);
+    }, [projectId, projectStatus?.context?.token_budget?.total_tokens, tokenUsage]);
 
     // Derive agent active states
     const agentStatuses = useMemo(() => {
@@ -319,11 +472,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
     return (
         <div className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}>
             <TopBar
-                projectName={projectName}
+                projectName={displayProjectName}
                 lang={lang}
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
                 progress={progressPercent}
-                tokens={tokenUsage[projectId]?.total_tokens || 0}
+                tokens={displayedTokenTotal}
                 isSyncing={isSyncing}
                 onRename={handleRename}
                 mode={isBeeGameMode ? 'beegame' : 'demiurge'}
@@ -359,6 +512,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 progress={progressPercent}
                 onSendMessage={sendMessage}
                 isLoading={isLoading}
+                isRuntimeBusy={currentStatus === 'running'}
                 onApprovePlan={hasPendingPlanReview ? approvePlan : undefined}
                 approvalState={approvalState}
                 pendingReviews={reviewDisplayModels}

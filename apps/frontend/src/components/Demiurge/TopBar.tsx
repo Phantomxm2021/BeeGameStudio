@@ -45,12 +45,12 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
 
     const getStatusText = () => {
         if (mode === 'beegame') {
-            if (status === 'running') return 'BeeGame Running';
-            if (status === 'waiting_approval') return 'Permission Req.';
-            if (status === 'offline') return 'Server Unreachable';
+            if (status === 'running') return t.active;
+            if (status === 'waiting_approval') return t.paused || 'Waiting';
+            if (status === 'offline') return t.offline || 'Server Unreachable';
             if (status === 'paused') return 'Paused';
             if (status === 'finished') return 'Turn Complete';
-            return 'Ready';
+            return t.idle;
         }
         if (status === 'running') return t.active;
         if (status === 'offline') return (t as any).offline || 'Server Unreachable';
@@ -105,7 +105,7 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
             <div className="flex items-center space-x-8 px-1">
                 <div className="flex flex-col">
                     <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">
-                        {mode === 'beegame' ? 'PHASE' : t.progress}
+                        {mode === 'beegame' ? (t.phase || 'Phase') : t.progress}
                     </span>
                     <span className="font-mono text-sm font-bold text-zinc-800 dark:text-zinc-200">
                         {mode === 'beegame'

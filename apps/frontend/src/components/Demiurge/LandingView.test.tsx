@@ -465,6 +465,22 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByText('LLM Project')).toBeInTheDocument();
     });
 
+    it('renders the project action menu outside the history dialog to avoid clipping', () => {
+        mockProjects = [
+            { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
+        ];
+
+        renderLanding({ lang: 'en' });
+
+        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+        const dialog = screen.getByRole('dialog', { name: 'History Projects' });
+
+        fireEvent.click(screen.getByRole('button', { name: 'More actions for LLM Project' }));
+
+        const deleteAction = screen.getByRole('button', { name: 'Delete Project' });
+        expect(dialog).not.toContainElement(deleteAction);
+    });
+
     it('shows an empty state in the history modal', () => {
         renderLanding({ lang: 'en' });
 

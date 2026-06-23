@@ -270,6 +270,50 @@ describe('useChat clarification gate handling', () => {
     }));
   });
 
+  it('refreshes REST state after sendMessage even when WebSocket is already connected', async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue({
+      task_id: 'task_1',
+      command_id: 'task_1',
+      state: 'running',
+    } as any);
+
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await result.current.sendMessage('continue from paused state');
+    });
+
+    expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'continue from paused state',
+      project_id: 'proj_1',
+    }));
+    expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
+    expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+    expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+  });
+
+  it('refreshes REST state after continueTask even when WebSocket is already connected', async () => {
+    vi.mocked(api.continueTask).mockResolvedValue({
+      resume_task_id: 'task_1',
+      command_id: 'task_1',
+      resume_mode: 'resume',
+      state: 'resuming',
+    } as any);
+
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await result.current.continueTask();
+    });
+
+    expect(api.continueTask).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'proj_1',
+    }));
+    expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
+    expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+    expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+  });
+
   it('blocks sendMessage while governance blockers remain unresolved', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',

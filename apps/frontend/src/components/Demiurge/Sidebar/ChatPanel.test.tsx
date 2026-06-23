@@ -126,7 +126,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByRole('button', { name: /^revise$/i })).toBeEnabled();
 
         const approveButton = screen.getByRole('button', { name: /^submitting$/i });
-        expect(approveButton.parentElement).toHaveClass('grid-cols-2');
+        expect(approveButton.parentElement).toHaveClass('min-[360px]:grid-cols-2');
     });
 
     it('restores interaction after a failed approval attempt', async () => {
@@ -172,6 +172,18 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByPlaceholderText(/ask team/i)).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+    });
+
+    it('locks the normal composer while the runtime is busy', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            chatInput: 'continue',
+            isComposerLocked: true,
+        });
+
+        expect(screen.getByPlaceholderText(/AI is processing/i)).toBeDisabled();
+        expect(screen.getByRole('button')).toBeDisabled();
     });
 
     it('does not show stale approval actions after the project has failed', () => {

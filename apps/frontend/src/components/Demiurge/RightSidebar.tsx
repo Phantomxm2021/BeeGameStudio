@@ -21,6 +21,7 @@ interface RightSidebarProps {
     progress: number;
     onSendMessage: (msg: string) => void;
     isLoading: boolean;
+    isRuntimeBusy?: boolean;
     onApprovePlan?: (
         review: ReviewBindingPayload & { gate_id: string },
         feedback?: string,
@@ -46,6 +47,7 @@ export function RightSidebar({
     messages,
     onSendMessage,
     isLoading,
+    isRuntimeBusy = false,
     onApprovePlan,
     approvalState = { gateId: null, action: null, phase: 'idle', message: '' },
     pendingReviews = [],
@@ -73,6 +75,7 @@ export function RightSidebar({
 
     const t = translations[lang];
     const springTransition = { type: "spring" as const, stiffness: 260, damping: 26 };
+    const isComposerLocked = isLoading || isRuntimeBusy;
 
     // Derived Data
     const gddReview = useMemo(() => 
@@ -95,7 +98,7 @@ export function RightSidebar({
 
     // Handlers
     const handleSend = () => {
-        if (!chatInput.trim() || isLoading || waitingApproval.isBlockingChat) return;
+        if (!chatInput.trim() || isComposerLocked || waitingApproval.isBlockingChat) return;
         onSendMessage(chatInput);
         setChatInput('');
     };
@@ -261,6 +264,7 @@ export function RightSidebar({
                             <ChatPanel 
                                 messages={messages}
                                 isLoading={isLoading}
+                                isComposerLocked={isComposerLocked}
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}
                                 onSend={handleSend}

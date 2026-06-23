@@ -116,12 +116,23 @@ export function resolveBuiltinWithFallback(
   }
 }
 
+export function resolveRipgrepConfigAtRuntime(
+  config: RipgrepConfig,
+  systemRgPath?: string | null,
+  platform?: string,
+): RipgrepConfig {
+  if (config.mode !== 'builtin' || existsSync(config.command)) {
+    return config
+  }
+  return resolveBuiltinWithFallback(config.command, systemRgPath, platform)
+}
+
 export function ripgrepCommand(): {
   rgPath: string
   rgArgs: string[]
   argv0?: string
 } {
-  const config = getRipgrepConfig()
+  const config = resolveRipgrepConfigAtRuntime(getRipgrepConfig())
   return {
     rgPath: config.command,
     rgArgs: config.args,
@@ -591,7 +602,7 @@ export function getRipgrepStatus(): {
   working: boolean | null // null if not yet tested
   note?: string
 } {
-  const config = getRipgrepConfig()
+  const config = resolveRipgrepConfigAtRuntime(getRipgrepConfig())
   return {
     mode: config.mode,
     path: config.command,
