@@ -1556,8 +1556,10 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       '',
       '请先在 docs/ 下完成游戏策划、GDD、技术方案、art direction、美术资源占位说明、audio direction、UI/UX、调参与验收说明。',
       '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder asset，并说明 replaceable 规则。',
-      '实现后请运行你认为适合当前项目的检查和验证，发现问题就继续修复。',
-      '最终请总结已完成内容、验证结果和仍然遗留的问题。',
+      '实现后请运行你认为适合当前项目的检查和验证，发现问题就继续修复。不能只用 TypeScript、lint 或构建命令通过来证明游戏已完成。',
+      '不能把没有真实测试用例的测试命令或空测试通过当作完成依据。不要为了让测试通过而加入 pass-with-no-tests、passWithNoTests 或同类配置。',
+      '请自己选择合适方式验证真实玩家路径：玩家能启动游戏、进入关卡或主场景、执行核心操作、看到反馈、达到胜负或进度变化、并能重开或继续。',
+      '最终总结必须列出你实际验证过的玩家路径、验证方式、发现并修复的问题，以及仍然遗留的问题。',
     ].filter(Boolean).join('\n');
   }
   return [
@@ -1581,8 +1583,10 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     '',
     'First create project documents under docs/: game design, GDD, technical design, art direction, placeholder asset inventory, audio direction, UI/UX, tuning, and acceptance notes.',
     'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder asset files that are easy to replace and document the replaceable rules.',
-    'After implementation, run the checks and validation you think fit this project. If you find problems, keep fixing them.',
-    'Finally summarize what was completed, what was validated, and what remains.',
+    'After implementation, run the checks and validation you think fit this project. If you find problems, keep fixing them. Do not use TypeScript, lint, or build success alone as proof that the game is complete.',
+    'Do not treat a test command with no real test cases, empty-test success, pass-with-no-tests, passWithNoTests, or similar configuration as completion evidence.',
+    'Choose an appropriate way to validate the real player path: the player can start the game, enter a level or main scene, perform the core action, receive feedback, reach a win/fail or progression state, and restart or continue.',
+    'Finally summarize the actual player paths you validated, the validation method, issues found and fixed, and anything still remaining.',
   ].filter(Boolean).join('\n');
 }
 

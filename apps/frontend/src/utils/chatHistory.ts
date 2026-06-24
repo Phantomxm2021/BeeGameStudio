@@ -107,11 +107,11 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       ? record.governance_snapshot
       : metadata.governance_snapshot
     ) as Message['governanceSnapshot'] | undefined;
-    const renderHint = String(record.render_hint ?? metadata.render_hint ?? '').trim() as Message['renderHint'];
-    const artifactType = String(record.artifact_type ?? metadata.artifact_type ?? '').trim() || undefined;
-    const taskKind = String(record.task_kind ?? metadata.task_kind ?? '').trim() || undefined;
-    const nextAction = String(record.next_action ?? metadata.next_action ?? '').trim() || undefined;
-    const requiresUserActionRaw = record.requires_user_action ?? metadata.requires_user_action;
+    const renderHint = String(record.render_hint ?? record.renderHint ?? metadata.render_hint ?? metadata.renderHint ?? '').trim() as Message['renderHint'];
+    const artifactType = String(record.artifact_type ?? record.artifactType ?? metadata.artifact_type ?? metadata.artifactType ?? '').trim() || undefined;
+    const taskKind = String(record.task_kind ?? record.taskKind ?? metadata.task_kind ?? metadata.taskKind ?? '').trim() || undefined;
+    const nextAction = String(record.next_action ?? record.nextAction ?? metadata.next_action ?? metadata.nextAction ?? '').trim() || undefined;
+    const requiresUserActionRaw = record.requires_user_action ?? record.requiresUserAction ?? metadata.requires_user_action ?? metadata.requiresUserAction;
     const semanticType = normalizeHistorySemanticType({
       messageType: rawType,
       renderHint,

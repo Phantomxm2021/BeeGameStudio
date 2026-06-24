@@ -819,6 +819,11 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('UI/UX');
     expect(body.text).toContain('placeholder asset');
     expect(body.text).toContain('replaceable');
+    expect(body.text).toContain('不能把没有真实测试用例的测试命令或空测试通过当作完成依据');
+    expect(body.text).toContain('不要为了让测试通过而加入 pass-with-no-tests、passWithNoTests 或同类配置');
+    expect(body.text).toContain('玩家能启动游戏、进入关卡或主场景、执行核心操作、看到反馈、达到胜负或进度变化、并能重开或继续');
+    expect(body.text).toContain('不能只用 TypeScript、lint 或构建命令通过来证明游戏已完成');
+    expect(body.text).toContain('最终总结必须列出你实际验证过的玩家路径');
     expect(body.text).not.toContain('Create useful project documents under ./docs/');
     expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
     expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
@@ -837,7 +842,6 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('If it returns BLOCKED');
     expect(body.text).not.toContain('Do not treat a normal assistant turn ending');
     expect(body.text).toContain('实现后请运行你认为适合当前项目的检查和验证');
-    expect(body.text).not.toContain('Run the project with its own tooling when possible');
     expect(body.text).not.toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
     expect(body.text).not.toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
     expect(body.text).not.toContain('apps/frontend');

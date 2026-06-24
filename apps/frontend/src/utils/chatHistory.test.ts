@@ -56,6 +56,29 @@ describe('normalizeChatHistory semantic metadata', () => {
         });
     });
 
+    it('preserves camelCase action metadata from adapter history replay', () => {
+        const messages = normalizeChatHistory([
+            {
+                id: 'failed-check-1',
+                message_id: 'failed-check-1',
+                sender: 'system',
+                content: 'Last check failed.\nCommand: game-engine build\nOutput: Exit code 1',
+                type: 'text',
+                taskKind: 'last_check_failed',
+                nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+                requiresUserAction: true,
+                timestamp: '2026-06-21T00:00:00Z',
+            },
+        ]);
+
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({
+            taskKind: 'last_check_failed',
+            nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+            requiresUserAction: true,
+        });
+    });
+
     it('keeps backend message ids and deduplicates optimistic user history by client identity', () => {
         const messages = normalizeChatHistory([
             {
