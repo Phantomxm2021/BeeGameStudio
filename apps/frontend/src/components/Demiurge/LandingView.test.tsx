@@ -47,10 +47,12 @@ vi.mock('../../services/beeGameAdapter', () => ({
         workspacePath: '/tmp/beegame-projects',
         isDefault: true,
     }),
+    getBeeGameSubagentsEnabled: vi.fn().mockReturnValue(true),
     resetBeeGameWorkspaceRoot: vi.fn().mockResolvedValue({
         workspacePath: '/tmp/beegame-projects',
         isDefault: true,
     }),
+    setBeeGameSubagentsEnabled: vi.fn((enabled: boolean) => enabled),
     setBeeGameWorkspaceRoot: vi.fn().mockReturnValue({
         workspacePath: '/tmp/beegame-projects',
         isDefault: false,
@@ -488,5 +490,28 @@ describe('LandingView bootstrap submission', () => {
 
         expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
         expect(screen.getByText('No Projects Found')).toBeInTheDocument();
+    });
+
+    it('keeps the history modal content area stable for empty and populated project lists', () => {
+        const emptyRender = renderLanding({ lang: 'en' });
+
+        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+
+        const emptyDialog = screen.getByRole('dialog', { name: 'History Projects' });
+        const emptyContent = emptyDialog.querySelector('.scrollbar-premium');
+        expect(emptyContent).toHaveClass('min-h-48');
+
+        emptyRender.unmount();
+
+        mockProjects = [
+            { id: 'project-1', name: 'LLM Project', created_at: '2026-04-20T00:00:00.000Z' },
+        ];
+        renderLanding({ lang: 'en' });
+
+        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+
+        const populatedDialog = screen.getByRole('dialog', { name: 'History Projects' });
+        const populatedContent = populatedDialog.querySelector('.scrollbar-premium');
+        expect(populatedContent).toHaveClass('min-h-48');
     });
 });

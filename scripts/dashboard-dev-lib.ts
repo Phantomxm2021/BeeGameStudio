@@ -1,5 +1,8 @@
 import { resolve } from 'node:path'
 
+export const DEFAULT_DASHBOARD_API_PORT = 62174
+export const DEFAULT_DASHBOARD_FRONTEND_PORT = 62173
+
 export type DashboardDevOptions = {
   preferredApiPort: number
   preferredFrontendPort: number
@@ -29,11 +32,11 @@ export function resolveDashboardDevOptions(
   const values = parseArgs(argv)
   const preferredApiPort = parsePort(
     values['api-port'] || input.env.AGENT_WORKFLOW_PORT,
-    3040,
+    DEFAULT_DASHBOARD_API_PORT,
   )
   const preferredFrontendPort = parsePort(
     values['frontend-port'] || input.env.VITE_PORT || input.env.PORT,
-    5173,
+    DEFAULT_DASHBOARD_FRONTEND_PORT,
   )
   const workspacePath = resolve(
     input.cwd,

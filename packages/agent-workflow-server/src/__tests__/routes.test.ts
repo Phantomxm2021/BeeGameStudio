@@ -93,6 +93,44 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('persists BeeGame project metadata across app instances in SQLite', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-project-store-'))
+
+    try {
+      const firstApp = createAgentWorkflowApp({
+        defaultWorkspacePath: workspace,
+      })
+      const createRes = await firstApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_beegame_sqlite',
+          name: 'SQLite Project',
+          root_path: join(workspace, 'sqlite-project'),
+          created_at: 1710000000000,
+        }),
+      })
+      expect(createRes.status).toBe(200)
+
+      const secondApp = createAgentWorkflowApp({
+        defaultWorkspacePath: workspace,
+      })
+      const listRes = await secondApp.request('/api/projects')
+
+      expect(listRes.status).toBe(200)
+      expect(await listRes.json()).toEqual([
+        {
+          id: 'project_beegame_sqlite',
+          name: 'SQLite Project',
+          root_path: join(workspace, 'sqlite-project'),
+          created_at: 1710000000000,
+        },
+      ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('analyzes BeeGame intake and returns game-mode options from the default model config', async () => {
     const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
       method: 'POST',
@@ -213,6 +251,9 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('playablePrototype')
       expect(systemPrompt).toContain('validationTarget')
       expect(systemPrompt).toContain('game mode')
+      expect(systemPrompt).toContain('target briefs')
+      expect(systemPrompt).toContain('not full design documents')
+      expect(systemPrompt).toContain('Do not write full GDD')
       expect(systemPrompt).toContain('Do not output internal rubric names')
       expect(systemPrompt).toContain('maturity')
       expect(systemPrompt).toContain('needs_options')

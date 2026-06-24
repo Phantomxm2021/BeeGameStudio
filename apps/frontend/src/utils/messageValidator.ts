@@ -101,7 +101,7 @@ export class MessageValidator {
     'project_renamed'
   ];
 
-  private readonly VALID_STATUS_VALUES = ['queued', 'running', 'resuming', 'paused', 'finished', 'failed', 'stopped'] as const;
+  private readonly VALID_STATUS_VALUES = ['queued', 'running', 'resuming', 'paused', 'idle', 'finished', 'failed', 'stopped'] as const;
 
   /**
    * Validates a WebSocket message structure and content

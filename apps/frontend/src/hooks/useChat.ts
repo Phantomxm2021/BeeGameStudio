@@ -346,14 +346,16 @@ export const useChat = ({
       case 'status':
         // Task status update
         // Requirements: 6.2
-        if (message.status === 'finished' || message.status === 'stopped') {
+        if (message.status === 'finished' || message.status === 'stopped' || message.status === 'idle') {
           setIsLoading(false);
           setCurrentTaskId(null);
           setCurrentSender(null);
           setIsStreaming(false); // Mark streaming as complete
-          refs.onTaskComplete?.();
+          if (message.status === 'finished') {
+            refs.onTaskComplete?.();
+          }
           // Trigger event for UI refresh
-          refs.onTaskEvent?.('status_finished', message);
+          refs.onTaskEvent?.(message.status === 'idle' ? 'status_idle' : 'status_finished', message);
           console.log(`[useChat] Task ${message.status}`);
 
           // Final refresh to clear "working" status of agents
@@ -367,6 +369,17 @@ export const useChat = ({
           console.log(`[useChat] Task ${message.status} started`);
         } else if (message.status === 'paused' || message.status === 'failed') {
           setIsLoading(false);
+          if (message.content) {
+            addMessage({
+              id: `status-${message.status}-${message.task_id || 'na'}-${String(message.content).substring(0, 48)}`,
+              sender: 'system',
+              content: message.content,
+              timestamp: message.timestamp || Date.now(),
+              type: message.status === 'paused' ? 'system_status' : 'error',
+              taskKind: message.status === 'paused' ? 'workflow_paused' : 'workflow_failed',
+              canContinue: message.status === 'paused',
+            });
+          }
           setApprovalState((prev) => {
             if (message.status !== 'failed' || (prev.phase !== 'awaiting_runtime' && prev.phase !== 'submitting')) {
               return prev;

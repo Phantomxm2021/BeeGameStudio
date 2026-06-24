@@ -106,7 +106,7 @@ const deriveWebSocketBaseUrl = (apiBaseUrl: string): string => {
     url.pathname = url.pathname.replace(/\/$/, '');
     return url.toString().replace(/\/$/, '');
   } catch {
-    return 'ws://localhost:3040';
+    return 'ws://localhost:62174';
   }
 };
 

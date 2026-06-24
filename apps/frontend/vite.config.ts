@@ -12,17 +12,17 @@ export default defineConfig(({ mode }) => {
 
     // Server configuration for development
     server: {
-      port: 5173,
+      port: Number.parseInt(env.VITE_PORT || env.PORT || '62173', 10),
       host: true, // Listen on all addresses
       proxy: {
         // Proxy API requests to backend during development
         '/api': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:3040',
+          target: env.VITE_API_BASE_URL || 'http://localhost:62174',
           changeOrigin: true,
           secure: false,
         },
         '/ws': {
-          target: env.VITE_WS_BASE_URL || 'ws://localhost:3040',
+          target: env.VITE_WS_BASE_URL || 'ws://localhost:62174',
           ws: true,
           changeOrigin: true,
         },

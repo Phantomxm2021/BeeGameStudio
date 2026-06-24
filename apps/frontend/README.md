@@ -87,7 +87,7 @@ This will install all required packages listed in `package.json`.
 npm run dev
 ```
 
-The application will be available at **http://localhost:5173/**
+The application will be available at **http://localhost:62173/**
 
 The dev server features:
 - Hot Module Replacement (HMR) for instant updates
@@ -487,9 +487,9 @@ docker-compose up -d
 
 **1. Port already in use**
 ```bash
-# Error: Port 5173 is already in use
+# Error: Port 62173 is already in use
 # Solution: Kill the process or use a different port
-npx kill-port 5173
+npx kill-port 62173
 # Or specify a different port
 vite --port 3000
 ```

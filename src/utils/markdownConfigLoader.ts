@@ -45,7 +45,7 @@ export type MarkdownFile = {
   source: SettingSource
 }
 
-function getProjectConfigDirectoryNames(): string[] {
+export function getProjectConfigDirectoryNames(): string[] {
   const configured = process.env.BEEGAME_PROJECT_CONFIG_DIR_NAME?.trim()
   return configured ? [configured, '.claude'] : ['.claude']
 }

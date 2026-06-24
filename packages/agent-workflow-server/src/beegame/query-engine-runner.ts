@@ -101,6 +101,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       bootstrapModule,
       configModule,
       permissionsModule,
+      conversationRecoveryModule,
     ] = await Promise.all([
       loadRootModule('QueryEngine.js'),
       loadRootModule('Tool.js'),
@@ -112,6 +113,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       loadRootModule('bootstrap/state.js'),
       loadRootModule('utils/config.js'),
       loadRootModule('utils/permissions/permissions.js'),
+      loadRootModule('utils/conversationRecovery.js'),
     ])
 
     call(configModule, 'enableConfigs')
@@ -222,6 +224,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       'activeAgents',
       [],
     )
+    const resumedConversation = await loadInitialMessagesForResume(
+      conversationRecoveryModule,
+      this.input.resumeSessionId,
+    )
 
     this.engine = new QueryEngine({
       cwd: this.input.cwd,
@@ -244,11 +250,32 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         )
       },
       readFileCache: new FileStateCache(500, 50 * 1024 * 1024),
+      ...(resumedConversation.length > 0
+        ? { initialMessages: resumedConversation }
+        : {}),
       includePartialMessages: true,
       replayUserMessages: true,
     })
 
     return this.engine
+  }
+}
+
+async function loadInitialMessagesForResume(
+  conversationRecoveryModule: DynamicModule,
+  sessionId?: string,
+): Promise<unknown[]> {
+  if (!sessionId) return []
+  try {
+    const result = await callAsync(
+      conversationRecoveryModule,
+      'loadConversationForResume',
+      sessionId,
+      undefined,
+    ) as { messages?: unknown[] } | null
+    return Array.isArray(result?.messages) ? result.messages : []
+  } catch {
+    return []
   }
 }
 

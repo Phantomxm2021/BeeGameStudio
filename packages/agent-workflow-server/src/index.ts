@@ -2,7 +2,7 @@ import { createAgentWorkflowApp } from './app'
 
 export { createAgentWorkflowApp }
 
-const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '3020', 10)
+const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
 let activeServer: ReturnType<typeof Bun.serve> | null = null
 
 if (import.meta.main) {

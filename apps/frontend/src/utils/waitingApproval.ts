@@ -119,9 +119,12 @@ export const getWaitingApprovalState = (
   }
 
   if (projectStatus?.blocked && normalize(projectStatus.blocked_reason)) {
+    const approvalRequired = 'approval_required' in projectStatus
+      ? Boolean(projectStatus.approval_required)
+      : false;
     if (
       normalize(projectStatus.phase).toLowerCase() === 'paused' &&
-      !projectStatus.approval_required
+      !approvalRequired
     ) {
       return {
         kind: 'none',

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckCircle2, FolderOpen, FolderSearch, Globe, KeyRound, Moon, RotateCcw, Save, Sun } from 'lucide-react';
+import { Bot, CheckCircle2, FolderOpen, FolderSearch, Globe, KeyRound, Moon, RotateCcw, Save, Sun } from 'lucide-react';
 import { LANGUAGE_OPTIONS, translations, type Language } from '../AgentsConfig';
 import {
     getBeeGameWorkspaceSettings,
+    getBeeGameSubagentsEnabled,
     resetBeeGameWorkspaceRoot,
+    setBeeGameSubagentsEnabled,
     setBeeGameWorkspaceRoot,
 } from '../../../services/beeGameAdapter';
 import {
@@ -48,6 +50,7 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
     const [isDefaultWorkspace, setIsDefaultWorkspace] = useState(true);
     const [workspaceStatus, setWorkspaceStatus] = useState('');
     const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+    const [subagentsEnabled, setSubagentsEnabled] = useState(true);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -81,6 +84,7 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                     setWorkspaceStatus(error instanceof Error ? error.message : '工作路径读取失败');
                 }
             });
+        setSubagentsEnabled(getBeeGameSubagentsEnabled());
         return () => {
             cancelled = true;
         };
@@ -292,6 +296,28 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                                 </div>
                             </form>
 
+                            <label className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 px-3 py-3 dark:border-white/10">
+                                <span className="min-w-0">
+                                    <span className="flex items-center gap-3 text-sm font-semibold">
+                                        <Bot className="h-4 w-4" />
+                                        Enable subagents
+                                    </span>
+                                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                                        Let the runtime decide when delegation is useful. BeeGame will not force it.
+                                    </span>
+                                </span>
+                                <input
+                                    aria-label="Enable subagents"
+                                    type="checkbox"
+                                    checked={subagentsEnabled}
+                                    onChange={(event) => {
+                                        const enabled = setBeeGameSubagentsEnabled(event.target.checked);
+                                        setSubagentsEnabled(enabled);
+                                    }}
+                                    className="h-4 w-4 shrink-0 accent-zinc-900 dark:accent-white"
+                                />
+                            </label>
+
                             <form
                                 onSubmit={handleSaveModelConfig}
                                 className="space-y-3 rounded-2xl border border-zinc-200 px-3 py-3 dark:border-white/10"
@@ -326,7 +352,7 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                                             className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
                                         >
                                             <option value="openai-compatible">OpenAI Compatible</option>
-                                            <option value="anthropic-compatible">Anthropic Compatible</option>
+                                            <option value="anthropic-compatible">Anthropic API Compatible</option>
                                             <option value="gemini">Gemini</option>
                                             <option value="grok">Grok</option>
                                         </select>

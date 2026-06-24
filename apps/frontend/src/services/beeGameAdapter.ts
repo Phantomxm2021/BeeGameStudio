@@ -34,10 +34,6 @@ type BeeGameEvent = {
     | 'permission.requested'
     | 'permission.resolved'
     | 'runtime.observation'
-    | 'verification.required'
-    | 'workflow.phase'
-    | 'workflow.pipeline'
-    | 'workflow.blocked'
     | 'system.status'
     | 'result'
     | 'turn.completed'
@@ -64,6 +60,11 @@ type BeeGameSessionHandle = {
   session: BeeGameSession;
   recoveredEvents: BeeGameEvent[];
   previousSessionId?: string;
+};
+
+type BeeGameEventsResult = {
+  events: BeeGameEvent[];
+  recoveredFromTranscript: boolean;
 };
 
 type BeeGameArtifact = {
@@ -150,6 +151,7 @@ const PROJECTS_KEY = 'beegame-adapter-projects';
 const BINDINGS_KEY = 'beegame-adapter-bindings';
 const WORKSPACE_KEY = 'beegame-adapter-workspace-path';
 const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
+const SUBAGENTS_ENABLED_KEY = 'beegame-adapter-subagents-enabled';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const USER_QUESTION_TOOL = 'AskUserQuestion';
@@ -187,14 +189,35 @@ export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSetti
   return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
 }
 
+export function getBeeGameSubagentsEnabled(): boolean {
+  return localStorage.getItem(SUBAGENTS_ENABLED_KEY) !== '0';
+}
+
+export function setBeeGameSubagentsEnabled(enabled: boolean): boolean {
+  localStorage.setItem(SUBAGENTS_ENABLED_KEY, enabled ? '1' : '0');
+  return enabled;
+}
+
 export const beeGameAdapter = {
   async getProjects(): Promise<Project[]> {
-    return readProjects();
+    try {
+      const projects = await getJson<Project[]>('/api/projects');
+      const localProjects = readProjects();
+      if (projects.length === 0 && localProjects.length > 0) {
+        await Promise.all(localProjects.map(project => syncProjectMetadata(project)));
+        return localProjects;
+      }
+      saveProjects(projects);
+      return projects;
+    } catch {
+      return readProjects();
+    }
   },
 
   async createProject(data: { name: string; root_path?: string }): Promise<Project> {
     const project = createLocalProject(data.name, data.root_path);
     saveProjects(upsertProject(readProjects(), project));
+    await syncProjectMetadata(project);
     rememberWorkspace(data.root_path);
     return project;
   },
@@ -226,6 +249,7 @@ export const beeGameAdapter = {
     const session = await startBeeGameSession(workspacePath);
     const project = createLocalProject(title, workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
+    await syncProjectMetadata(project);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -253,6 +277,7 @@ export const beeGameAdapter = {
     const session = await startBeeGameSession(workspacePath);
     const project = createLocalProject(title, workspacePath, `project_${session.id}`);
     saveProjects(upsertProject(readProjects(), project));
+    await syncProjectMetadata(project);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -281,6 +306,7 @@ export const beeGameAdapter = {
       ...(data.root_path !== undefined ? { root_path: data.root_path } : {}),
     };
     saveProjects(upsertProject(projects, updated));
+    await syncProjectMetadata(updated);
     if (data.root_path) {
       const binding = getBinding(projectId);
       if (binding) saveBinding({ ...binding, workspacePath: data.root_path });
@@ -295,6 +321,7 @@ export const beeGameAdapter = {
       await deleteBeeGameSession(binding.sessionId, true, binding.workspacePath);
     }
     saveProjects(readProjects().filter(project => project.id !== projectId));
+    await deleteProjectMetadata(projectId);
     deleteBinding(projectId);
     return { ok: true };
   },
@@ -306,7 +333,7 @@ export const beeGameAdapter = {
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
-    const prompt = await buildBeeGameInputPrompt(handle, data.content);
+    const prompt = data.content;
     rememberSentDisplayText(session.id, prompt, data.content);
     await sendBeeGameInput(session.id, prompt);
     return {
@@ -320,7 +347,7 @@ export const beeGameAdapter = {
   async continueTask(data: { project_id: string; task_id?: string }): Promise<ContinueTaskResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
-    const prompt = await buildBeeGameContinuePrompt(handle);
+    const prompt = '继续任务';
     rememberSentDisplayText(session.id, prompt, '继续任务');
     await sendBeeGameInput(session.id, prompt);
     return {
@@ -361,31 +388,50 @@ export const beeGameAdapter = {
   }> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return { lastEventId: afterEventId, messages: [] };
-    const events = await fetchBeeGameEventsForBinding(binding, afterEventId);
+    const eventResult = await fetchBeeGameEventsResultForBinding(binding, afterEventId);
+    const events = eventResult.events;
     const lastEventId = events.length > 0 ? events[events.length - 1].id : afterEventId;
+    const contextEvents = eventResult.recoveredFromTranscript || shouldCheckCompactContinuation(events)
+      ? (await fetchBeeGameEventsResultForBinding(binding).catch(() => ({ events, recoveredFromTranscript: eventResult.recoveredFromTranscript }))).events
+      : events;
+    const compactNotice = buildCompactContinuationNotice(projectId, contextEvents, binding.workspacePath, afterEventId);
+    const recoveredIdleStatus = buildRecoveredTranscriptIdleStatus(
+      projectId,
+      binding.sessionId,
+      contextEvents,
+      eventResult.recoveredFromTranscript,
+    );
     return {
       lastEventId,
-      messages: normalizeLiveEvents(projectId, events).flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath)),
+      messages: [
+        ...normalizeLiveEvents(projectId, events).flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath)),
+        ...(compactNotice ? [compactNotice] : []),
+        ...(recoveredIdleStatus ? [recoveredIdleStatus] : []),
+      ],
     };
   },
 
   async getProjectStatus(projectId: string): Promise<ProjectBaselineStatusPayload> {
     const binding = await ensureProjectBinding(projectId);
-    const events = binding ? await fetchBeeGameEventsForBinding(binding) : [];
+    const eventResult = binding
+      ? await fetchBeeGameEventsResultForBinding(binding)
+      : { events: [], recoveredFromTranscript: false };
+    const events = eventResult.events;
     const pending = getPendingPermissionEvents(events);
-    const workflowBlock = pending.length === 0 ? getLatestActiveWorkflowBlock(events) : undefined;
-    const runtimeStatus = deriveRuntimeStatus(events, pending);
+    const runtimeStatus = deriveRuntimeStatus(events, pending, {
+      recoveredFromTranscript: eventResult.recoveredFromTranscript,
+    });
     return {
       project_id: projectId,
       phase: runtimeStatus.phase,
-      blocked: pending.length > 0 || Boolean(workflowBlock),
-      blocked_reason: pending[0]?.text ?? (workflowBlock ? describeWorkflowBlocked(workflowBlock) : null),
+      blocked: pending.length > 0 || runtimeStatus.agentStatus === 'failed',
+      blocked_reason: pending[0]?.text ?? (runtimeStatus.agentStatus === 'failed' ? runtimeStatus.nextAction : null),
       active_agents: runtimeStatus.activeAgents,
       updated_at: runtimeStatus.updatedAt,
       approval_required: pending.length > 0,
       next_action: runtimeStatus.nextAction,
       context: deriveContextVisibility(events),
-      build_report: deriveBuildReport(events),
+      build_report: null,
       review_status: pending.length > 0
         ? {
             workflow_id: 'beegame',
@@ -546,6 +592,22 @@ function readProjects(): Project[] {
 
 function saveProjects(projects: Project[]): void {
   writeJson(PROJECTS_KEY, projects);
+}
+
+async function syncProjectMetadata(project: Project): Promise<void> {
+  try {
+    await postJson<Project>('/api/projects', project);
+  } catch {
+    // Local storage remains the offline fallback when the dashboard API is down.
+  }
+}
+
+async function deleteProjectMetadata(projectId: string): Promise<void> {
+  try {
+    await deleteJson(`/api/projects/${encodeURIComponent(projectId)}`);
+  } catch {
+    // Local storage remains the offline fallback when the dashboard API is down.
+  }
 }
 
 function upsertProject(projects: Project[], project: Project): Project[] {
@@ -782,12 +844,25 @@ async function fetchBeeGameEventsForBinding(
   binding: ProjectSessionBinding,
   after = 0,
 ): Promise<BeeGameEvent[]> {
+  return (await fetchBeeGameEventsResultForBinding(binding, after)).events;
+}
+
+async function fetchBeeGameEventsResultForBinding(
+  binding: ProjectSessionBinding,
+  after = 0,
+): Promise<BeeGameEventsResult> {
   try {
-    return await fetchBeeGameEvents(binding.sessionId, after);
+    return {
+      events: await fetchBeeGameEvents(binding.sessionId, after),
+      recoveredFromTranscript: false,
+    };
   } catch (error) {
     if (!isSessionNotFoundError(error)) throw error;
     const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
-    return transcript.filter(event => event.id > after);
+    return {
+      events: transcript.filter(event => event.id > after),
+      recoveredFromTranscript: true,
+    };
   }
 }
 
@@ -801,95 +876,10 @@ async function fetchBeeGameTranscriptIfAvailable(
   }
 }
 
-async function buildBeeGameInputPrompt(
-  handle: BeeGameSessionHandle,
-  userPrompt: string,
-): Promise<string> {
-  if (handle.recoveredEvents.length > 0) {
-    return buildRestartRecoveryPrompt(
-      userPrompt,
-      handle.recoveredEvents,
-      handle.session.cwd,
-      handle.previousSessionId,
-    );
-  }
-  return userPrompt;
-}
-
-async function buildBeeGameContinuePrompt(handle: BeeGameSessionHandle): Promise<string> {
-  if (handle.recoveredEvents.length > 0) {
-    return buildRestartRecoveryPrompt(
-      '继续任务',
-      handle.recoveredEvents,
-      handle.session.cwd,
-      handle.previousSessionId,
-    );
-  }
-
-  const events = await fetchBeeGameEvents(handle.session.id).catch(() => []);
-  if (events.length === 0) return '继续任务';
-
-  const transcript = summarizeRecoveryTranscript(events);
-  return [
-    'BeeGame dashboard is resuming this project from the latest paused state.',
-    `Workspace: ${handle.session.cwd}.`,
-    'Continue the same project. Do not restart from scratch and do not say you lack task context.',
-    'First inspect the existing project docs and files in this workspace as needed, especially BEEGAME_PLAYABLE_SPEC.md, docs/*.md, traceability_matrix.json, playable_loop_review.md, and any older playable_loop_review.json if they exist.',
-    'If the project has an older invalid playable_loop_review.json, do not keep editing that JSON file. Write a fresh playable_loop_review.md with verdict: pass and pass lines for start, player_action, feedback, pressure, and terminal_state after verifying the build.',
-    transcript ? `Recent session excerpt:\n${transcript}` : '',
-    'User request now:\n继续任务',
-  ].filter(Boolean).join('\n\n');
-}
-
-function buildRestartRecoveryPrompt(
-  userPrompt: string,
-  events: BeeGameEvent[],
-  workspacePath: string,
-  previousSessionId?: string,
-): string {
-  const transcript = summarizeRecoveryTranscript(events);
-  return [
-    'BeeGame dashboard recovered this project after a backend restart.',
-    previousSessionId ? `Previous dashboard session: ${previousSessionId}.` : '',
-    `Workspace: ${workspacePath}.`,
-    'Continue the same project. Do not say you lack task context.',
-    'First inspect the project docs and files in this workspace as needed, especially BEEGAME_PLAYABLE_SPEC.md, docs/*.md, traceability_matrix.json, playable_loop_review.md, and any older playable_loop_review.json if they exist.',
-    'If the project has an older invalid playable_loop_review.json, do not keep editing that JSON file. Write a fresh playable_loop_review.md with verdict: pass and pass lines for start, player_action, feedback, pressure, and terminal_state after verifying the build.',
-    transcript ? `Recovered transcript excerpt:\n${transcript}` : 'Recovered transcript excerpt: unavailable.',
-    `User request now:\n${userPrompt}`,
-  ].filter(Boolean).join('\n\n');
-}
-
-function summarizeRecoveryTranscript(events: BeeGameEvent[]): string {
-  const lines = events
-    .filter(event => (
-      event.type === 'user.message' ||
-      event.type === 'assistant.message' ||
-      event.type === 'workflow.phase' ||
-      event.type === 'workflow.blocked' ||
-      event.type === 'turn.completed' ||
-      event.type === 'tool.completed'
-    ))
-    .slice(-40)
-    .map(event => {
-      const role = event.type === 'user.message'
-        ? 'User'
-        : event.type === 'assistant.message'
-          ? 'BeeGame'
-          : event.type;
-      return `${role}: ${event.text.trim()}`;
-    })
-    .filter(line => line.length > 0);
-  return truncateText(lines.join('\n'), 12000);
-}
-
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength)}\n[truncated]`;
-}
-
 function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePath = ''): unknown[] {
-  return normalizeDisplayEvents(events).flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath)).map(message => ({
+  const messages = normalizeDisplayEvents(events)
+    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath));
+  return messages.map(message => ({
     id: message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
     message_id: message.message_id,
     sender: message.sender || 'system',
@@ -898,6 +888,91 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
     timestamp: message.timestamp || Date.now(),
     type: message.type === 'agent_message' ? 'text' : message.type === 'tool_start' || message.type === 'tool_end' ? 'tool' : 'normal',
   }));
+}
+
+function shouldCheckCompactContinuation(events: BeeGameEvent[]): boolean {
+  return events.some(event => event.type === 'turn.completed' || isEndTurnResultEvent(event));
+}
+
+function buildCompactContinuationNotice(
+  projectId: string,
+  events: BeeGameEvent[],
+  workspacePath: string,
+  afterEventId = 0,
+): WebSocketMessage | null {
+  return buildCompactContinuationNotices(projectId, events, workspacePath, afterEventId)[0] || null;
+}
+
+function buildRecoveredTranscriptIdleStatus(
+  projectId: string,
+  sessionId: string,
+  events: BeeGameEvent[],
+  recoveredFromTranscript: boolean,
+): WebSocketMessage | null {
+  if (!recoveredFromTranscript || !getActiveTurn(events)) return null;
+  const latest = events.at(-1);
+  return {
+    type: 'status',
+    task_id: sessionId,
+    project_id: projectId,
+    status: 'idle',
+    content: 'Backend restarted during the previous turn. Send your next instruction to continue from the transcript.',
+    timestamp: latest ? Date.parse(latest.createdAt) || Date.now() : Date.now(),
+  } as WebSocketMessage;
+}
+
+function buildCompactContinuationNotices(
+  projectId: string,
+  events: BeeGameEvent[],
+  _workspacePath: string,
+  afterEventId = 0,
+): WebSocketMessage[] {
+  const notices: WebSocketMessage[] = [];
+  for (const completed of events) {
+    if (completed.type !== 'turn.completed' || completed.id <= afterEventId) continue;
+    const turnEvents = events.filter(event => event.turnId === completed.turnId && event.id <= completed.id);
+    const compact = turnEvents.find(isCompactBoundaryEvent);
+    if (!compact) continue;
+    const eventsAfterCompact = turnEvents.filter(event => event.id > compact.id);
+    if (!eventsAfterCompact.some(isEndTurnResultEvent)) continue;
+    if (eventsAfterCompact.some(isToolEvent)) continue;
+    const latestTool = getLatestToolBefore(turnEvents, compact.id);
+    if (!latestTool) continue;
+    notices.push({
+      type: 'status',
+      task_id: completed.sessionId,
+      project_id: projectId,
+      sender: 'system',
+      status: 'idle',
+      message_id: `beegame-compact-continuation-${completed.sessionId}-${completed.turnId || 'turn'}-${completed.id}`,
+      content: 'Context compaction ended the turn before tool work resumed. Send "continue" to resume from the recorded execution snapshot.',
+      timestamp: Date.parse(completed.createdAt) || Date.now(),
+      task_kind: 'runtime_notice',
+    } as WebSocketMessage);
+  }
+  return notices;
+}
+
+function isCompactBoundaryEvent(event: BeeGameEvent): boolean {
+  return event.type === 'system.status' &&
+    getPayloadString(event, 'type') === 'system' &&
+    getPayloadString(event, 'subtype') === 'compact_boundary';
+}
+
+function isEndTurnResultEvent(event: BeeGameEvent): boolean {
+  return event.type === 'result' && getPayloadString(event, 'stop_reason') === 'end_turn';
+}
+
+function getLatestToolBefore(events: BeeGameEvent[], beforeEventId: number): BeeGameEvent | null {
+  for (const event of [...events].reverse()) {
+    if (event.id >= beforeEventId) continue;
+    if (isToolEvent(event)) return event;
+  }
+  return null;
+}
+
+function isToolEvent(event: BeeGameEvent): boolean {
+  return event.type === 'tool.started' || event.type === 'tool.completed' || event.type === 'tool.failed' || event.type === 'tool.progress';
 }
 
 function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = ''): WebSocketMessage[] {
@@ -910,16 +985,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         { type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage,
       ];
     case 'system.status':
-      if (isWorkflowPausedEvent(event)) {
-        return [{
-          type: 'status',
-          task_id: taskId,
-          project_id: projectId,
-          status: 'paused',
-          content: describeWorkflowBlocked(event),
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as WebSocketMessage];
-      }
       return [];
     case 'assistant.partial':
       return [];
@@ -949,6 +1014,21 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         content: formatToolContent(startedTool, 'running', startedInput, workspacePath),
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
+    case 'tool.progress': {
+      const progressInput = getPayloadRecord(event, 'input');
+      const progressTool = getPayloadString(event, 'toolName') || event.text;
+      const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
+      return [{
+        type: 'tool_start',
+        task_id: taskId,
+        project_id: projectId,
+        message_id: getToolMessageId(event),
+        tool_use_id: getPayloadString(event, 'toolUseID'),
+        tool: progressTool,
+        content: formatToolContent(progressTool, 'running', progressInput, workspacePath, output),
+        timestamp: Date.parse(event.createdAt) || Date.now(),
+      } as WebSocketMessage];
+    }
     case 'tool.completed':
     case 'tool.failed': {
       const finishedInput = getPayloadRecord(event, 'input');
@@ -994,24 +1074,9 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     }
     case 'runtime.observation':
       return [];
-    case 'verification.required':
-      return [];
-    case 'workflow.phase':
-      return [];
-    case 'workflow.pipeline':
-      return [];
-    case 'workflow.blocked':
-      return [{
-        type: 'status',
-        task_id: taskId,
-        project_id: projectId,
-        status: 'paused',
-        content: describeWorkflowBlocked(event),
-        timestamp: Date.parse(event.createdAt) || Date.now(),
-      } as WebSocketMessage];
     case 'turn.completed':
     case 'session.stopped':
-      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'finished' } as WebSocketMessage];
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: event.type === 'turn.completed' ? 'idle' : 'stopped' } as WebSocketMessage];
     case 'turn.failed':
     case 'session.failed':
       return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as WebSocketMessage];
@@ -1020,58 +1085,18 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
   }
 }
 
-const BEEGAME_PHASE_ORDER = [
-  'idea_intake',
-  'brief',
-  'gdd',
-  'implementation',
-  'qa',
-  'build',
-] as const;
-
 function derivePhaseInfo(events: BeeGameEvent[]): {
   current_phase: number;
   phase_name: string;
   history: Array<{ phase: number; name: string; timestamp: number }>;
 } {
-  const pipelines = events.filter(event => event.type === 'workflow.pipeline');
-  if (pipelines.length === 0) {
-    const status = deriveRuntimeStatus(events, getPendingPermissionEvents(events));
-    const phaseName = status.phase === 'running' ? 'idea_intake' : '';
-    return {
-      current_phase: phaseName ? getBeeGamePhaseIndex(phaseName) : 0,
-      phase_name: phaseName,
-      history: [],
-    };
-  }
-
-  const historyByPhase = new Map<string, { phase: number; name: string; timestamp: number }>();
-  for (const event of pipelines) {
-    const timestamp = Date.parse(event.createdAt) || Date.now();
-    for (const stage of getPayloadArray(event, 'stages').filter(isRecord)) {
-      const name = String(stage.id || '').trim();
-      const status = String(stage.status || '').trim();
-      if (!name || (status !== 'completed' && status !== 'active')) continue;
-      historyByPhase.set(name, {
-        phase: getBeeGamePhaseIndex(name),
-        name,
-        timestamp,
-      });
-    }
-  }
-
-  const latest = pipelines[pipelines.length - 1];
-  const currentPhase = getPayloadString(latest, 'currentPhase') || '';
+  const status = deriveRuntimeStatus(events, getPendingPermissionEvents(events));
+  const currentPhase = status.phase === 'running' ? 'running' : '';
   return {
-    current_phase: currentPhase ? getBeeGamePhaseIndex(currentPhase) : 0,
+    current_phase: currentPhase ? 1 : 0,
     phase_name: currentPhase,
-    history: [...historyByPhase.values()].sort((left, right) => left.phase - right.phase),
+    history: [],
   };
-}
-
-function getBeeGamePhaseIndex(name: string): number {
-  const index = (BEEGAME_PHASE_ORDER as readonly string[]).indexOf(name);
-  return index >= 0 ? index : 0;
 }
 
 function deriveContextVisibility(events: BeeGameEvent[]) {
@@ -1093,7 +1118,7 @@ function deriveContextVisibility(events: BeeGameEvent[]) {
     summary,
     blackboard_record_count: Number(counters.eventCount ?? events.length),
     memory_hits: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
-    rag_sources: observation ? ['.beegame-dashboard/transcripts/<project-folder>__<session-hash>.jsonl'] : [],
+    rag_sources: observation ? ['transcripts/<project-folder>__<session-hash>.jsonl'] : [],
     selected_skills: labels,
     runtime_features: features,
     ...(usage ? {
@@ -1109,43 +1134,6 @@ function deriveContextVisibility(events: BeeGameEvent[]) {
       toolUseCount: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
       turnIndex: Number(counters.turnIndex ?? 0),
     },
-  };
-}
-
-function deriveBuildReport(events: BeeGameEvent[]) {
-  const verification = [...events].reverse().find(event => event.type === 'verification.required');
-  if (!verification) return null;
-  const artifactPath = getPayloadString(verification, 'artifactPath') || 'BEEGAME_PLAYABILITY_REVIEW.md';
-  const verificationStatus = getPayloadString(verification, 'status');
-  const generatedPaths = getPayloadArray(verification, 'generatedPaths')
-    .map(String)
-    .map(path => path.trim())
-    .filter(Boolean);
-  const checks = getPayloadArray(verification, 'checks')
-    .filter(isRecord)
-    .map(check => ({
-      name: String(check.label || check.id || '').trim() || 'Playability check',
-      status: String(check.status || '').trim() || (verificationStatus === 'pass' ? 'pass' : 'required'),
-      detail: String(check.detail || '').trim() || undefined,
-      path: artifactPath,
-    }));
-  if (verificationStatus === 'pass') {
-    return {
-      status: 'completed',
-      report_path: artifactPath,
-      agents: ['beegame'],
-      generated_paths: generatedPaths.length > 0 ? generatedPaths : [artifactPath],
-      checks,
-      summary: 'BeeGame completed structured BeeGame verifier checks for the playable loop.',
-    };
-  }
-  return {
-    status: 'verification_required',
-    report_path: artifactPath,
-    agents: ['beegame'],
-    generated_paths: [artifactPath],
-    checks,
-    summary: 'BeeGame must write a playability verification report after implementation.',
   };
 }
 
@@ -1251,7 +1239,11 @@ function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGam
   });
 }
 
-function deriveRuntimeStatus(events: BeeGameEvent[], pending: BeeGameEvent[]): {
+function deriveRuntimeStatus(
+  events: BeeGameEvent[],
+  pending: BeeGameEvent[],
+  options: { recoveredFromTranscript?: boolean } = {},
+): {
   phase: string;
   nextAction: string;
   updatedAt: string;
@@ -1272,26 +1264,22 @@ function deriveRuntimeStatus(events: BeeGameEvent[], pending: BeeGameEvent[]): {
 
   const activeTurn = getActiveTurn(events);
   if (activeTurn) {
-    const latestActiveEvent = [...events].reverse().find(event => event.turnId === activeTurn) || latest;
-    if (latestActiveEvent?.type !== 'workflow.blocked' && !isWorkflowPausedEvent(latestActiveEvent)) {
+    if (options.recoveredFromTranscript) {
       return {
-        phase: 'running',
-        nextAction: describeRuntimeAction(latestActiveEvent),
+        phase: 'idle',
+        nextAction: 'Backend restarted during the previous turn. Send your next instruction to continue from the transcript.',
         updatedAt,
-        activeAgents: ['beegame'],
-        agentStatus: 'working',
+        activeAgents: [],
+        agentStatus: 'idle',
       };
     }
-  }
-
-  const workflowBlock = getLatestActiveWorkflowBlock(events);
-  if (workflowBlock) {
+    const latestActiveEvent = [...events].reverse().find(event => event.turnId === activeTurn) || latest;
     return {
-      phase: 'paused',
-      nextAction: describeWorkflowBlocked(workflowBlock),
+      phase: 'running',
+      nextAction: describeRuntimeAction(latestActiveEvent),
       updatedAt,
-      activeAgents: [],
-      agentStatus: 'blocked',
+      activeAgents: ['beegame'],
+      agentStatus: 'working',
     };
   }
 
@@ -1306,7 +1294,7 @@ function deriveRuntimeStatus(events: BeeGameEvent[], pending: BeeGameEvent[]): {
   }
   if (latest?.type === 'turn.completed' || latest?.type === 'assistant.message' || latest?.type === 'result') {
     return {
-      phase: 'finished',
+      phase: 'idle',
       nextAction: 'Ready for next request',
       updatedAt,
       activeAgents: [],
@@ -1333,60 +1321,14 @@ function getActiveTurn(events: BeeGameEvent[]): string | null {
       openTurns.delete(getTurnDisplayId(event));
       continue;
     }
-    if (isWorkflowPausedEvent(event)) {
-      openTurns.delete(getTurnDisplayId(event));
-    }
   }
   return [...openTurns].at(-1) || null;
-}
-
-function getLatestActiveWorkflowBlock(events: BeeGameEvent[]): BeeGameEvent | undefined {
-  let hasLaterProgress = false;
-  for (const event of [...events].reverse()) {
-    if (
-      event.type === 'turn.completed' ||
-      event.type === 'turn.failed' ||
-      event.type === 'session.stopped' ||
-      event.type === 'session.failed'
-    ) {
-      return undefined;
-    }
-    if (isWorkflowPausedEvent(event)) return hasLaterProgress ? undefined : event;
-    if (event.type === 'workflow.blocked') return hasLaterProgress ? undefined : event;
-    if (isWorkflowBlockRetiringEvent(event)) {
-      hasLaterProgress = true;
-    }
-  }
-  return undefined;
-}
-
-function isWorkflowBlockRetiringEvent(event: BeeGameEvent): boolean {
-  if (event.type === 'workflow.pipeline' && getPayloadString(event, 'status') === 'failed') return false;
-  return (
-    event.type === 'tool.started' ||
-    event.type === 'tool.completed' ||
-    event.type === 'tool.progress' ||
-    event.type === 'permission.requested' ||
-    event.type === 'permission.resolved' ||
-    event.type === 'assistant.partial' ||
-    event.type === 'assistant.message' ||
-    event.type === 'workflow.phase' ||
-    event.type === 'workflow.pipeline' ||
-    event.type === 'runtime.observation' ||
-    event.type === 'turn.started'
-  );
-}
-
-function isWorkflowPausedEvent(event: BeeGameEvent): boolean {
-  return event.type === 'system.status' && getPayloadString(event, 'type') === 'workflow.paused';
 }
 
 function describeRuntimeAction(event?: BeeGameEvent): string {
   if (!event) return 'BeeGame is working';
   if (event.type === 'assistant.partial') return 'Streaming BeeGame response';
   if (event.type === 'assistant.message') return 'Finalizing BeeGame response';
-  if (event.type === 'workflow.phase') return describeWorkflowPhase(event);
-  if (event.type === 'workflow.blocked') return describeWorkflowBlocked(event);
   if (event.type === 'permission.resolved') {
     const decision = getPayloadString(event, 'decision');
     const toolName = getPayloadString(event, 'toolName') || 'tool';
@@ -1429,23 +1371,6 @@ function describePermissionResolution(event: BeeGameEvent): string {
   return reason ? `${toolName} denied: ${reason}` : `${toolName} denied.`;
 }
 
-function describeWorkflowPhase(event: BeeGameEvent): string {
-  const phase = getPayloadString(event, 'phase') || event.text;
-  if (phase === 'planning') return 'Designing Playable Spec';
-  if (phase === 'building') return 'Building the game';
-  if (phase === 'completed') return 'BeeGame workflow completed';
-  return event.text;
-}
-
-function describeWorkflowBlocked(event: BeeGameEvent): string {
-  const toolName = getPayloadString(event, 'blockedToolName');
-  const reason = getPayloadString(event, 'reason') || event.text;
-  if (!toolName || toolName === 'tool') {
-    return `BeeGame paused build: ${reason}`;
-  }
-  return `BeeGame paused build before ${toolName}: ${reason}`;
-}
-
 function getBeeGameAssistantMessageId(event: BeeGameEvent): string {
   const displayMessageId = getPayloadString(event, DISPLAY_MESSAGE_ID_KEY);
   if (displayMessageId) return displayMessageId;
@@ -1467,12 +1392,25 @@ function formatToolContent(
   workspacePath: string,
   output = '',
 ): string {
-  const lines = [`Tool: ${toolName}`, `Status: ${status}`];
+  const normalizedTool = toolName.toLowerCase();
+  const isSubagent = normalizedTool === 'agent' || normalizedTool === 'task';
+  const description = String(input.description || '').trim();
+  const subagentType = String(input.subagent_type || input.agent_type || '').trim();
+  const prompt = String(input.prompt || '').trim();
+  const lines = isSubagent
+    ? [`Subagent: ${description || toolName}`, `Status: ${status}`]
+    : [`Tool: ${toolName}`, `Status: ${status}`];
+  if (isSubagent && subagentType) {
+    lines.push(`Type: ${subagentType}`);
+  }
+  if (isSubagent && prompt) {
+    lines.push(`Prompt: ${prompt.length > 220 ? `${prompt.slice(0, 220)}...` : prompt}`);
+  }
   const command = String(input.command || '').trim();
   const targetPath = String(input.file_path || input.path || input.notebook_path || '').trim();
-  if (command) {
+  if (!isSubagent && command) {
     lines.push(`Command: ${command}`);
-  } else if (targetPath) {
+  } else if (!isSubagent && targetPath) {
     lines.push(`Target: ${formatWorkspaceRelativePath(targetPath, workspacePath)}`);
   }
   if (output) {
@@ -1614,6 +1552,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
   const settings = brief.settings;
   return [
     'Confirmed BeeGame build brief:',
+    'Goal: deliver a complete game project, not only a playable demo. The first delivery may use placeholder assets, but it must define a full game loop, win/fail rules, UI/UX flow, art/audio direction, and replaceable asset slots.',
     '',
     `Idea: ${brief.idea}`,
     `Selected game mode: ${brief.option.title}`,
@@ -1624,10 +1563,10 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     `Experience snapshot: ${brief.option.experienceSnapshot}`,
     `Player first minute: ${brief.option.playerFirstMinute}`,
     `Why this fits the user idea: ${brief.option.whyFitsIdea}`,
-    `First playable build for this mode: ${brief.option.playablePrototype}`,
+    `First playable slice for this mode: ${brief.option.playablePrototype}`,
     `Validation target: ${brief.option.validationTarget}`,
     `Core mechanic: ${brief.option.coreMechanic}`,
-    `First playable build: ${brief.option.firstBuild}`,
+    `Complete game delivery target: ${brief.option.firstBuild}`,
     `Validation goal: ${brief.option.validationGoal}`,
     `Main risk: ${brief.option.risk}`,
     `Platform: ${settings.platform}`,
@@ -1648,24 +1587,31 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     'Do not create, edit, or suggest using BeeGame dashboard or host application source paths.',
     'Do not modify the BeeGame dashboard source code unless the user explicitly asks to modify the dashboard itself.',
     '',
-    'First produce a mandatory BeeGame design pack as project files before implementation.',
-    'Use Write/Edit to create or update these files under ./docs/: PLAYABLE_SPEC.md, GDD.md, TECH_DESIGN.md, ART_AUDIO_DIRECTION.md, RESOURCE_PLACEHOLDERS.md, LEVEL_TUNING.md, and PLAYABILITY_ACCEPTANCE.md.',
-    'docs/PLAYABLE_SPEC.md is the source-of-truth playable spec. Do not rely on chat text as the playable spec.',
-    'docs/PLAYABLE_SPEC.md must include: Core Loop, Fun Hook, Skill Test, Risk/Reward, Failure Pressure, First 3 Minutes, MVP Acceptance, technical architecture, art direction, asset slots, level plan, and the exact marker PLAYABLE_SPEC_READY: yes.',
-    'docs/GDD.md must include: Player Promise, Core Loop, First Minute, and Win Lose Rules.',
-    'docs/TECH_DESIGN.md must include: Runtime Architecture, State Model, and Build Validation.',
-    'docs/ART_AUDIO_DIRECTION.md must include: Visual Language, Feedback VFX, and Audio Cues.',
-    'docs/RESOURCE_PLACEHOLDERS.md must include: Placeholder Assets, VFX Slots, and SFX Slots.',
-    'docs/LEVEL_TUNING.md must include: Level Layout, Difficulty Curve, and Replay Target.',
-    'docs/PLAYABILITY_ACCEPTANCE.md must include: Clarity 30s, Interesting Decision 60s, Responsive Input, Readable Feedback, Failure Pressure, and Replayable Challenge.',
-    'Use chat only for a short progress note or summary after the files are written.',
-    'Every proposed mechanic must explain why it improves player decisions, risk, skill, feedback, or replayability. Remove mechanics that do not serve one of those purposes.',
-    'Create a Playability Acceptance Checklist before implementation. It must cover clarity within 30 seconds, first interesting decision within 60 seconds, responsive input feel, readable feedback, failure pressure, and one replayable challenge.',
-    'When the Playable Spec and checklist are complete and internally checked, include this exact standalone line inside docs/PLAYABLE_SPEC.md before implementation: PLAYABLE_SPEC_READY: yes',
-    'Do not start implementation until the Playable Spec is internally checked against the checklist.',
-    'After implementation, run build checks and then self-review the playable result against the Playability Acceptance Checklist.',
-    'Only write PLAYABILITY_CHECKS_PASSED: yes in BEEGAME_PLAYABILITY_REVIEW.md if every required playability check passes; otherwise fix the game first.',
+    'Create useful project documents under ./docs/ as part of your normal implementation flow.',
+    'At minimum, include docs that cover: game design, technical design, art direction, audio direction, UI/UX flow, placeholder asset inventory, replaceable asset naming/slot rules, tuning notes, and acceptance notes.',
+    'Use docs as project resources, not as chat-only summaries.',
+    'Every proposed mechanic should improve player decisions, risk, skill, feedback, or replayability. Remove mechanics that do not serve one of those purposes.',
+    'Use placeholder assets when production art/audio is unavailable. Make placeholders intentionally named, visually readable, organized by purpose, and easy for the user to replace later.',
+    'Do not leave core art, audio, UI, HUD, menu, onboarding, feedback, win/fail, or progression decisions as vague future work when they are necessary for the game to feel complete.',
+    'Design and implement UI/UX states that a player needs to start, understand, play, win/fail, restart, and adjust basic settings when appropriate for the platform.',
+    'Design art/audio direction before implementation so the generated placeholders, colors, motion, VFX, and UI style feel coherent.',
+    'After implementation, run the relevant build/test/typecheck checks for the generated project and fix failures you find before summarizing validation results in chat.',
+    'Run project check commands directly without piping them through head, tail, sed, or similar filters so the command exit status remains visible. If output is too long, inspect focused files or rerun a narrower project command afterward.',
+    getTargetAppropriateDeliveryInstruction(),
+    getBeeGameSubagentsEnabled()
+      ? 'You may use available subagents when the task genuinely benefits from delegation, but critical acceptance, final review, and user-requested audits should be completed in the main session unless the user explicitly asks for background delegation. If you launch a background subagent, do not claim its work is complete until its final report is available. BeeGame does not require machine-readable verifier files.'
+      : 'Plan and implement directly in this session unless the user explicitly asks for subagents. BeeGame does not require machine-readable verifier files.',
   ].filter(Boolean).join('\n');
+}
+
+function getTargetAppropriateDeliveryInstruction(): string {
+  return [
+    'Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.',
+    'Before saying the project is complete, choose target-appropriate validation for the selected platform and engine yourself, run it, inspect failures, and fix them.',
+    'The validation should prove the core player loop from the brief actually works: a player can start, understand the objective, perform the main action, receive feedback, reach a clear win/fail/progression state, and restart or continue as appropriate.',
+    'Use the project\'s own tooling and conventions. Do not force a specific package manager, browser tool, engine, framework, or test runner unless the generated project already uses it.',
+    'If validation cannot be run in the current environment, clearly report the exact blocker and the next command or action needed instead of claiming completion.',
+  ].join(' ');
 }
 
 function getBeeGameBrandInstruction(): string {

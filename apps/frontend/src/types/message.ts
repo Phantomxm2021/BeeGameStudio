@@ -252,7 +252,7 @@ export interface WebSocketMessage {
   trace_id?: string;
 
   /** Structured status enum (optional, used for status type) */
-  status?: 'queued' | 'running' | 'resuming' | 'paused' | 'finished' | 'failed' | 'stopped';
+  status?: 'queued' | 'running' | 'resuming' | 'paused' | 'idle' | 'finished' | 'failed' | 'stopped';
 
   /** Pipeline stage value (optional, used for pipeline_update type) */
   stage?: string;

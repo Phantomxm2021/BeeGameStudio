@@ -26,7 +26,7 @@ const { createAgentWorkflowApp } = await import(
   '../packages/agent-workflow-server/src/app.ts'
 )
 
-const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '3020', 10)
+const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,

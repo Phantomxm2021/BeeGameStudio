@@ -112,7 +112,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             </button>
                         </div>
 
-                        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-premium">
+                        <div className="min-h-48 flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-premium">
                             {projects.length === 0 ? (
                                 <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-zinc-200 text-zinc-400 dark:border-white/10 dark:text-zinc-500">
                                     <Clock className="h-8 w-8 stroke-1" />

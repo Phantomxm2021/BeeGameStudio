@@ -1,6 +1,6 @@
 import { useState, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, MessageSquare, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, FileText, Terminal, Wrench, XCircle } from 'lucide-react';
+import { User, MessageSquare, ChevronDown, ChevronUp, AlertCircle, Bot, CheckCircle2, FileText, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -364,7 +364,7 @@ const isContextUseMessage = (message: ChatDisplayMessage): boolean => {
     return /\b\w+\s+phase\s+generated\s+\d+\s+artifact\(s\)\s+using\s+context\s+bundle\s+\S+/i.test(message.content);
 };
 
-const getToolInfo = (content: string): { name: string; status: 'running' | 'completed' | 'failed'; detail: string; output: string } => {
+const getToolInfo = (content: string): { name: string; status: 'running' | 'completed' | 'failed'; detail: string; output: string; isSubagent: boolean } => {
     const normalized = content.trim();
     const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
     const field = (label: string): string => {
@@ -377,19 +377,26 @@ const getToolInfo = (content: string): { name: string; status: 'running' | 'comp
         : explicitStatus === 'failed' || normalized.includes('failed') || normalized.includes('失败')
             ? 'failed'
             : 'running';
+    const subagent = field('Subagent');
     const nameMatch = normalized.match(/(?:调用工具|工具完成):\s*([^\n]+)/) || normalized.match(/Tool:\s*([^\n]+)/i);
     const name = (nameMatch?.[1] || normalized.split('\n')[0] || 'Tool').replace(/^✅|^🔧/g, '').trim();
     const target = field('Target');
     const command = field('Command');
-    const hasStructuredFields = Boolean(field('Tool') || explicitStatus || target || command);
+    const subagentType = field('Type');
+    const prompt = field('Prompt');
+    const hasStructuredFields = Boolean(field('Tool') || subagent || explicitStatus || target || command || subagentType || prompt);
     const output = field('Output') || (hasStructuredFields ? '' : normalized.split('\n').slice(1).join('\n').replace(/^输出:\s*/i, '').trim());
-    const detail = target ? `Target: ${target}` : command ? `Command: ${command}` : '';
-    return { name, status, detail, output };
+    const detail = subagent
+        ? [subagentType ? `Type: ${subagentType}` : '', prompt ? `Prompt: ${prompt}` : ''].filter(Boolean).join(' · ')
+        : target ? `Target: ${target}` : command ? `Command: ${command}` : '';
+    return { name: subagent || name, status, detail, output, isSubagent: Boolean(subagent) };
 };
 
 const ToolMessageCard = memo(({ message }: { message: ChatDisplayMessage }) => {
     const tool = getToolInfo(message.content);
-    const Icon = tool.name.toLowerCase().includes('bash')
+    const Icon = tool.isSubagent
+        ? Bot
+        : tool.name.toLowerCase().includes('bash')
         ? Terminal
         : tool.name.toLowerCase().includes('read') || tool.name.toLowerCase().includes('write') || tool.name.toLowerCase().includes('edit')
             ? FileText

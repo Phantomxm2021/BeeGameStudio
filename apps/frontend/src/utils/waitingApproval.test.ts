@@ -70,24 +70,24 @@ describe('waitingApproval helpers', () => {
     expect(state.isBlockingChat).toBe(false);
   });
 
-  it('allows chat input when a BeeGame workflow is paused without approval required', () => {
+  it('allows chat input when BeeGame is paused without approval required', () => {
     const state = getWaitingApprovalState(
       {
         project_id: 'proj_1',
         phase: 'paused',
         blocked: true,
-        blocked_reason: 'BeeGame paused build: docs/PLAYABLE_SPEC.md is missing',
+        blocked_reason: 'BeeGame paused after the runtime stopped.',
         approval_required: false,
       },
       [],
     );
 
     expect(state.isBlockingChat).toBe(false);
-    expect(state.message).toContain('docs/PLAYABLE_SPEC.md');
+    expect(state.message).toContain('BeeGame paused after the runtime stopped.');
     expect(state.placeholder).toBe('输入修复要求或继续任务...');
   });
 
-  it('keeps chat blocked when a paused workflow is waiting for approval', () => {
+  it('keeps chat blocked when a paused turn is waiting for approval', () => {
     const state = getWaitingApprovalState(
       {
         project_id: 'proj_1',

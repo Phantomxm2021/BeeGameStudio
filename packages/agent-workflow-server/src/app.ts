@@ -23,6 +23,11 @@ import {
   saveModelConfigsToStore,
   type ModelConfigStoreOptions,
 } from './model-config-store'
+import {
+  BeeGameProjectMetadataStore,
+  getBeeGameProjectDatabasePath,
+  type BeeGameProjectMetadata,
+} from './project-metadata-store'
 
 type JsonObject = Record<string, unknown>
 
@@ -91,6 +96,9 @@ export function createAgentWorkflowApp(
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
+  )
+  const projectStore = new BeeGameProjectMetadataStore(
+    getBeeGameProjectDatabasePath(dashboardDataRoot),
   )
   const modelConfigStore = options.modelConfigStore
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
@@ -170,6 +178,44 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects', c => {
+    return c.json(projectStore.listProjects())
+  })
+
+  app.post('/api/projects', async c => {
+    const body = await readJson(c.req.raw)
+    const error = requireFields(body, ['id', 'name', 'created_at'])
+    if (error) return c.json({ error }, 400)
+    try {
+      return c.json(projectStore.upsertProject(toProjectMetadata(body)))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.patch('/api/projects/:id', async c => {
+    const body = await readJson(c.req.raw)
+    const existing = projectStore
+      .listProjects()
+      .find(project => project.id === c.req.param('id'))
+    if (!existing) return c.json({ error: 'Project not found' }, 404)
+    try {
+      return c.json(projectStore.upsertProject({
+        ...existing,
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(typeof body.root_path === 'string'
+          ? { root_path: body.root_path }
+          : {}),
+      }))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.delete('/api/projects/:id', c => {
+    return c.json({ deleted: projectStore.deleteProject(c.req.param('id')) })
+  })
+
   app.post('/api/beegame-intake/options', async c => {
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['idea'])
@@ -243,7 +289,7 @@ async function generateBeeGameIntakeOptions(input: {
           role: 'system',
           content: [
             'You are BeeGame intake planner.',
-            'First understand the game request before proposing game modes. The options are playable game modes, not project management delivery strategies.',
+            'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
             'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
             'maturity must be one of vague, directional, concrete.',
             'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 3 directions.',
@@ -256,6 +302,8 @@ async function generateBeeGameIntakeOptions(input: {
             'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
             'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
             'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
+            'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
+            'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
             'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
             'Choose recommended metadata from these lists based on the full user request and game mode, not keyword matching.',
             'recommendedPlatform: Web, Unity, Godot, XR, Native',
@@ -268,10 +316,10 @@ async function generateBeeGameIntakeOptions(input: {
             'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
             'playerFirstMinute must describe exactly what the player does in the first 60 seconds.',
             'whyFitsIdea must explain how this game mode preserves the user request and constraints.',
-            'playablePrototype must describe the concrete first playable build for this mode, including scene/map, player actions, feedback, win/fail state, and what is omitted.',
+            'playablePrototype must describe the concrete first playable slice for this mode, including scene/map, player actions, feedback, win/fail state, and what is intentionally deferred until planning.',
             'validationTarget must describe what demand, fun, control feel, clarity, or risk this game mode validates.',
             'coreMechanic must name the main repeatable interaction or decision, not a production task.',
-            'firstBuild must describe the concrete first playable deliverable, including scene/map, player actions, feedback, win/fail state, and what is omitted.',
+            'firstBuild must describe the first target for this direction in a concise way. It should help the user choose the game mode, not replace the later design documents.',
             'validationGoal must describe what design assumption this playable validates.',
             'risk must describe the largest gameplay or delivery risk in plain language.',
             'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
@@ -884,6 +932,17 @@ function persistModelConfigs(
 ): void {
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     saveModelConfigsToStore(modelConfigStore)
+  }
+}
+
+function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
+  return {
+    id: String(body.id),
+    name: String(body.name),
+    ...(typeof body.root_path === 'string' && body.root_path
+      ? { root_path: body.root_path }
+      : {}),
+    created_at: Number(body.created_at),
   }
 }
 

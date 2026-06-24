@@ -239,6 +239,32 @@ describe('useChat clarification gate handling', () => {
     expect(projectStoreState.loadPendingReviews).toHaveBeenCalledWith('proj_1');
   });
 
+  it('renders paused workflow status as a chat-visible alert', () => {
+    const onTaskEvent = vi.fn();
+    renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'status',
+        status: 'paused',
+        task_id: 'beegame_1',
+        project_id: 'proj_1',
+        content: 'BeeGame paused build: traceability evidence is incomplete',
+        timestamp: 1710000000000,
+      });
+    });
+
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringContaining('status-paused-beegame_1'),
+      sender: 'system',
+      type: 'system_status',
+      taskKind: 'workflow_paused',
+      canContinue: true,
+      content: 'BeeGame paused build: traceability evidence is incomplete',
+    }));
+    expect(onTaskEvent).toHaveBeenCalledWith('status_failed', expect.any(Object));
+  });
+
   it('blocks sendMessage while waiting for gdd approval', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',

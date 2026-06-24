@@ -1,160 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { readFile, realpath, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
 } from '@claude-code-best/agent-workflow'
-import {
-  createFileJournalStore,
-  createHostHandle,
-  runWorkflow,
-  type AgentRunParams,
-  type AgentRunResult,
-  type ProgressEvent,
-  type WorkflowPorts,
-} from '@claude-code-best/workflow-engine'
-
-const PLAYABLE_SPEC_READY_MARKER = 'PLAYABLE_SPEC_READY: yes'
-const PLAYABILITY_CHECKS_PASSED_MARKER = 'PLAYABILITY_CHECKS_PASSED: yes'
-const TRACEABILITY_MATRIX_PATH = 'traceability_matrix.json'
-const PLAYABLE_LOOP_REVIEW_PATH = 'playable_loop_review.md'
-const LEGACY_PLAYABLE_LOOP_REVIEW_JSON_PATH = 'playable_loop_review.json'
-const GENERATED_PLAYABILITY_REVIEW_PATH = 'BEEGAME_PLAYABILITY_REVIEW.md'
-const PLAYABLE_LOOP_CHECKS = [
-  'start',
-  'player_action',
-  'feedback',
-  'pressure',
-  'terminal_state',
-] as const
-const REQUIRED_DESIGN_PACK = [
-  {
-    path: 'docs/PLAYABLE_SPEC.md',
-    sections: [
-      'Core Loop',
-      'Fun Hook',
-      'Skill Test',
-      'Risk/Reward',
-      'Failure Pressure',
-      'First 3 Minutes',
-      'MVP Acceptance',
-      PLAYABLE_SPEC_READY_MARKER,
-    ],
-  },
-  {
-    path: 'docs/GDD.md',
-    sections: [
-      'Player Promise',
-      'Core Loop',
-      'First Minute',
-      'Win Lose Rules',
-    ],
-  },
-  {
-    path: 'docs/TECH_DESIGN.md',
-    sections: ['Runtime Architecture', 'State Model', 'Build Validation'],
-  },
-  {
-    path: 'docs/ART_AUDIO_DIRECTION.md',
-    sections: ['Visual Language', 'Feedback VFX', 'Audio Cues'],
-  },
-  {
-    path: 'docs/RESOURCE_PLACEHOLDERS.md',
-    sections: ['Placeholder Assets', 'VFX Slots', 'SFX Slots'],
-  },
-  {
-    path: 'docs/LEVEL_TUNING.md',
-    sections: ['Level Layout', 'Difficulty Curve', 'Replay Target'],
-  },
-  {
-    path: 'docs/PLAYABILITY_ACCEPTANCE.md',
-    sections: [
-      'Clarity 30s',
-      'Interesting Decision 60s',
-      'Responsive Input',
-      'Readable Feedback',
-      'Failure Pressure',
-      'Replayable Challenge',
-    ],
-  },
-] as const
-const BUILD_REQUIRED_READ_DOCS = [
-  'BEEGAME_PLAYABLE_SPEC.md',
-  ...REQUIRED_DESIGN_PACK.map(doc => doc.path),
-] as const
-const BUILD_AFTER_PLAYABLE_SPEC_PROMPT = [
-  'Now implement the approved playable spec inside the active BeeGame workspace.',
-  'Before writing implementation files or running build commands, first read every mandatory design document in this workspace:',
-  ...BUILD_REQUIRED_READ_DOCS.map(path => `- ./${path}`),
-  'Treat those files as the source of truth instead of relying on previous conversation history.',
-  'The current working directory is already the project workspace. Do not create another top-level folder with the same project name.',
-  'Create implementation files under workspace-local implementation folders such as ./src, ./game, ./public, or another purpose-named folder only when needed.',
-  'Implement the playable MVP from those design docs, run build checks, and fix issues before declaring completion.',
-  `Before finishing, write ./${TRACEABILITY_MATRIX_PATH} mapping every docs/PLAYABILITY_ACCEPTANCE.md requirement to implementation files and verification evidence.`,
-  `Before finishing, write ./${PLAYABLE_LOOP_REVIEW_PATH} as a concise Markdown playable loop review.`,
-  'The review must include these exact machine-readable lines:',
-  'verdict: pass',
-  ...PLAYABLE_LOOP_CHECKS.map(check => `${check}: pass`),
-  'Then add short human-readable evidence for each check and the real command results.',
-  `Do not write ./${GENERATED_PLAYABILITY_REVIEW_PATH} yourself. BeeGame will generate it from the traceability matrix and playable loop review.`,
-  `Only structured verifier output may include "${PLAYABILITY_CHECKS_PASSED_MARKER}".`,
-].join('\n')
-const BEEGAME_BUILD_WORKFLOW_SCRIPT = `
-export const meta = {
-  name: 'beegame-build',
-  description: 'BeeGame deterministic design pack to playable build workflow',
-  phases: [
-    { title: 'Planning', detail: 'Write project design docs under ./docs' },
-    { title: 'Build', detail: 'Read docs, implement, and verify the playable build' },
-  ],
-}
-
-phase('Planning')
-const planning = await agent(args.prompt, {
-  label: 'Design Pack',
-  phase: 'Planning',
-  maxTokens: 32000,
-})
-if (!planning) {
-  throw new Error('BeeGame design pack did not complete')
-}
-
-phase('Build')
-const build = await agent(args.buildPrompt, {
-  label: 'Playable Build',
-  phase: 'Build',
-  maxTokens: 32000,
-})
-if (!build) {
-  throw new Error('BeeGame build did not complete')
-}
-
-return { planning, build }
-`
-const BEEGAME_BUILD_RECOVERY_WORKFLOW_SCRIPT = `
-export const meta = {
-  name: 'beegame-build-recovery',
-  description: 'BeeGame paused build recovery workflow',
-  phases: [
-    { title: 'Build', detail: 'Recover a paused playable build from existing docs' },
-  ],
-}
-
-phase('Build')
-const build = await agent(args.prompt, {
-  label: 'Playable Build Recovery',
-  phase: 'Build',
-  maxTokens: 32000,
-})
-if (!build) {
-  throw new Error('BeeGame build recovery did not complete')
-}
-
-return { build }
-`
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameSessionStatus = 'running' | 'stopped' | 'failed'
@@ -174,10 +26,6 @@ export type BeeGameEventType =
   | 'permission.requested'
   | 'permission.resolved'
   | 'runtime.observation'
-  | 'verification.required'
-  | 'workflow.phase'
-  | 'workflow.pipeline'
-  | 'workflow.blocked'
   | 'system.status'
   | 'result'
   | 'turn.completed'
@@ -222,6 +70,7 @@ export type DeleteBeeGameSessionResult = {
 
 export type BeeGameSessionRunnerStartInput = {
   sessionId: string
+  resumeSessionId?: string
   cwd: string
   env: Record<string, string>
 }
@@ -256,19 +105,9 @@ export type DashboardPermissionDecision = {
   message?: string
 }
 
-type WorkflowBlock = {
-  message: string
-  recoverable?: boolean
-  recoveryKind?: string
-  currentWorkspace?: string
-  targetPath?: string
-}
-
 type PendingPermission = DashboardPermissionRequest & {
   resolve(decision: DashboardPermissionDecision): void
 }
-
-type WorkflowPhase = 'planning' | 'building' | 'completed'
 
 type SessionRecord = {
   session: BeeGameSession
@@ -280,13 +119,12 @@ type SessionRecord = {
   trustedSession: boolean
   rememberedPermissions: Set<string>
   rememberedPermissionTools: Set<string>
+  monitoredSubagentOutputFiles: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
-  buildReadDocs: Set<string>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
-  workflowPhase: WorkflowPhase
 }
 
 export type StartBeeGameSessionInput = {
@@ -324,8 +162,10 @@ export class BeeGameSessionManager {
     }
 
     const now = new Date()
+    const sessionId = input.transcriptSessionId ||
+      `beegame_${randomUUID().replaceAll('-', '')}`
     const session: BeeGameSession = {
-      id: `beegame_${randomUUID().replaceAll('-', '')}`,
+      id: sessionId,
       cwd,
       ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
       status: 'running',
@@ -338,7 +178,6 @@ export class BeeGameSessionManager {
       ? readExistingTranscriptForResume(
           input.transcriptSessionId,
           cwd,
-          this.dashboardDataRoot,
         )
       : undefined
 
@@ -349,7 +188,6 @@ export class BeeGameSessionManager {
         getSessionTranscriptPath(
           session.id,
           session.cwd,
-          this.dashboardDataRoot,
         ),
       runner: null,
       abortController: null,
@@ -357,17 +195,17 @@ export class BeeGameSessionManager {
       trustedSession: false,
       rememberedPermissions: new Set(),
       rememberedPermissionTools: new Set(),
+      monitoredSubagentOutputFiles: new Set(),
       toolUses: new Map(),
-      buildReadDocs: new Set(),
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
         : 1,
       nextTurnIndex: 1,
       currentTurnId: null,
-      workflowPhase: 'planning',
     }
     this.sessions.set(session.id, record)
+    this.refreshCompletedSubagentOutputs(record)
     this.append(record, 'session.started', `Created BeeGame session in ${cwd}`)
     this.appendRuntimeObservation(record, 'initialized')
 
@@ -388,6 +226,7 @@ export class BeeGameSessionManager {
   events(sessionId: string, after = 0): BeeGameEvent[] {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
+    this.refreshCompletedSubagentOutputs(record)
     return record.events
       .filter(event => event.id > after)
       .map(event => ({ ...event }))
@@ -403,6 +242,7 @@ export class BeeGameSessionManager {
   }> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
+    this.refreshCompletedSubagentOutputs(record)
     return record.events.map(event => ({
       id: event.id,
       type: event.type,
@@ -423,7 +263,6 @@ export class BeeGameSessionManager {
       throw new Error('Session is already processing a prompt')
     }
 
-    const useBuildRecovery = await shouldRunBuildRecovery(record)
     record.session.turnStatus = 'running'
     record.abortController = new AbortController()
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
@@ -432,7 +271,7 @@ export class BeeGameSessionManager {
     this.append(record, 'user.message', text)
     this.append(record, 'system.status', 'BeeGame runtime is starting.')
 
-    void this.runWorkflowTurn(record, text, useBuildRecovery)
+    void this.runDirectTurn(record, text)
     return cloneSession(record.session)
   }
 
@@ -504,62 +343,29 @@ export class BeeGameSessionManager {
     }
   }
 
-  private async runWorkflowTurn(
+  private async runDirectTurn(
     record: SessionRecord,
     prompt: string,
-    useBuildRecovery: boolean,
   ): Promise<void> {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
-      if (useBuildRecovery) {
-        this.append(record, 'system.status', 'BeeGame build recovery is starting', {
-          type: 'workflow.recovery.started',
-          phase: 'building',
-        })
-      }
-      const workflowResult = await runWorkflow({
-        script: useBuildRecovery
-          ? BEEGAME_BUILD_RECOVERY_WORKFLOW_SCRIPT
-          : BEEGAME_BUILD_WORKFLOW_SCRIPT,
-        args: {
-          prompt: useBuildRecovery
-            ? buildBuildRecoveryPrompt(prompt)
-            : prompt,
-          buildPrompt: BUILD_AFTER_PLAYABLE_SPEC_PROMPT,
-        },
-        runId: record.currentTurnId ?? record.session.id,
-        workflowName: useBuildRecovery
-          ? 'beegame-build-recovery'
-          : 'beegame-build',
-        ports: this.createWorkflowPorts(record, signal),
-        host: createHostHandle({ sessionId: record.session.id }),
-        signal,
+      const runner = await this.runner.start({
+        sessionId: record.session.id,
+        resumeSessionId: record.session.id,
         cwd: record.session.cwd,
-        budgetTotal: null,
+        env: buildRuntimeEnv(record.runtime),
       })
-      if (
-        !signal.aborted &&
-        record.session.status === 'running' &&
-        workflowResult.status === 'completed'
-      ) {
-        this.setWorkflowPhase(record, 'completed')
+      record.runner = runner
+      try {
+        await this.submitToRunner(record, runner, prompt, signal)
+      } finally {
+        runner.stop()
+        if (record.runner === runner) record.runner = null
+      }
+      if (!signal.aborted && record.session.status === 'running') {
         this.appendRuntimeObservation(record, 'turn_completed')
         this.append(record, 'turn.completed', 'BeeGame turn completed')
-      } else if (
-        !signal.aborted &&
-        record.session.status === 'running' &&
-        workflowResult.status === 'failed'
-      ) {
-        const latestBlock = getLatestCurrentTurnWorkflowBlock(record)
-        if (latestBlock) {
-          this.append(record, 'system.status', 'BeeGame workflow paused', {
-            type: 'workflow.paused',
-            reason: latestBlock.text,
-          })
-          return
-        }
-        throw new Error(workflowResult.error || 'BeeGame workflow failed')
       }
     } catch (err) {
       if (record.session.status === 'running') {
@@ -590,246 +396,17 @@ export class BeeGameSessionManager {
           this.append(record, mapped.type, mapped.text, message)
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
-          recordBuildDocReadFromToolEvent(record, toolEvent.payload)
+          const appended = this.append(
+            record,
+            toolEvent.type,
+            toolEvent.text,
+            toolEvent.payload,
+          )
+          this.maybeStartSubagentOutputMonitor(record, appended)
         }
       },
       requestPermission: request => this.requestPermission(record, request),
     })
-  }
-
-  private createWorkflowPorts(
-    record: SessionRecord,
-    signal: AbortSignal,
-  ): WorkflowPorts {
-    return {
-      agentRunner: {
-        runAgentToResult: params => this.runWorkflowAgent(record, params, signal),
-      },
-      progressEmitter: {
-        emit: event => this.appendWorkflowProgress(record, event),
-      },
-      taskRegistrar: {
-        register: () => ({ runId: record.currentTurnId ?? record.session.id, signal }),
-        complete: () => {},
-        fail: () => {},
-        kill: () => {
-          record.abortController?.abort()
-        },
-        pendingAction: () => null,
-      },
-      journalStore: createFileJournalStore(resolve(this.dashboardDataRoot, 'workflow-runs')),
-      permissionGate: {
-        isAborted: () => signal.aborted,
-      },
-      logger: {
-        debug: () => {},
-        event: () => {},
-        warn: message => this.append(record, 'system.status', message, {
-          type: 'workflow.log',
-          level: 'warn',
-          message,
-        }),
-      },
-      hostFactory: () => ({
-        handle: createHostHandle({ sessionId: record.session.id }),
-        cwd: record.session.cwd,
-        budgetTotal: null,
-      }),
-    }
-  }
-
-  private appendWorkflowProgress(record: SessionRecord, event: ProgressEvent): void {
-    switch (event.type) {
-      case 'run_started':
-        this.append(record, 'workflow.pipeline', event.workflowName, {
-          type: 'workflow.pipeline',
-          workflowName: event.workflowName,
-          meta: event.meta ?? undefined,
-        })
-        return
-      case 'phase_started':
-        this.setWorkflowPhase(record, mapWorkflowEnginePhase(event.phase))
-        return
-      case 'agent_started':
-        this.append(record, 'system.status', `${event.label ?? 'Agent'} started`, {
-          type: 'workflow.agent.started',
-          agentId: event.agentId,
-          label: event.label,
-          phase: event.phase,
-        })
-        return
-      case 'agent_done':
-        this.append(record, 'system.status', `${event.label ?? 'Agent'} finished`, {
-          type: 'workflow.agent.done',
-          agentId: event.agentId,
-          label: event.label,
-          phase: event.phase,
-          result: event.result,
-        })
-        return
-      case 'agent_progress':
-        this.append(record, 'system.status', `${event.label ?? 'Agent'} is running`, {
-          type: 'workflow.agent.progress',
-          agentId: event.agentId,
-          label: event.label,
-          phase: event.phase,
-          tokenCount: event.tokenCount,
-          toolCount: event.toolCount,
-        })
-        return
-      case 'log':
-        this.append(record, 'system.status', event.message, {
-          type: 'workflow.log',
-          message: event.message,
-        })
-        return
-      case 'run_done':
-        this.append(record, 'workflow.pipeline', event.status, {
-          type: 'workflow.pipeline',
-          status: event.status,
-          ...(event.error ? { error: event.error } : {}),
-        })
-        return
-      case 'phase_done':
-        return
-    }
-  }
-
-  private async runWorkflowAgent(
-    record: SessionRecord,
-    params: AgentRunParams,
-    signal: AbortSignal,
-  ): Promise<AgentRunResult> {
-    record.workflowPhase = mapWorkflowEnginePhase(params.phase)
-    if (record.workflowPhase === 'building') {
-      this.appendVerificationRequired(record)
-    }
-
-    const runner = await this.runner.start({
-      sessionId: record.session.id,
-      cwd: record.session.cwd,
-      env: buildRuntimeEnv(record.runtime),
-    })
-    record.runner = runner
-    let output = ''
-    try {
-      await this.submitToRunner(record, runner, params.prompt, signal)
-      output = getLatestAgentOutput(record)
-    } finally {
-      runner.stop()
-      if (record.runner === runner) record.runner = null
-    }
-
-    if (signal.aborted || record.session.status !== 'running') {
-      return { kind: 'dead', reason: 'runagent-threw', detail: 'aborted' }
-    }
-
-    if (record.workflowPhase === 'planning') {
-      const violation = await this.validatePlanningAgent(record)
-      if (violation) {
-        return { kind: 'skipped' }
-      }
-      await persistPlayableSpec(record)
-    }
-
-    if (record.workflowPhase === 'building') {
-      const violation = await this.validateBuildAgent(record)
-      if (violation) {
-        return { kind: 'skipped' }
-      }
-    }
-
-    return {
-      kind: 'ok',
-      output,
-      usage: { outputTokens: 0 },
-      toolCount: record.toolUses.size,
-    }
-  }
-
-  private async validatePlanningAgent(
-    record: SessionRecord,
-  ): Promise<string | undefined> {
-    if (!(await hasPlayableSpecReadySignal(record))) {
-      const message = [
-        `BeeGame planning did not produce "${PLAYABLE_SPEC_READY_MARKER}".`,
-        'Write the playable spec and design pack under ./docs before implementation.',
-      ].join(' ')
-      this.append(record, 'workflow.blocked', message, {
-        type: 'workflow.blocked',
-        phase: record.workflowPhase,
-        reason: message,
-        recoverable: true,
-        recoveryKind: 'planning_docs_required',
-      })
-      return message
-    }
-
-    const designPackViolation = await getDesignPackViolation(record)
-    if (!designPackViolation) return undefined
-    this.append(record, 'workflow.blocked', designPackViolation, {
-      type: 'workflow.blocked',
-      phase: record.workflowPhase,
-      reason: designPackViolation,
-      recoverable: true,
-      recoveryKind: 'design_pack_repair',
-      requiredArtifacts: REQUIRED_DESIGN_PACK.map(doc => ({
-        path: doc.path,
-        sections: [...doc.sections],
-      })),
-    })
-    return designPackViolation
-  }
-
-  private async validateBuildAgent(record: SessionRecord): Promise<string | undefined> {
-    const missingReadDocs = getMissingBuildReadDocs(record)
-    if (missingReadDocs.length > 0) {
-      const message = [
-        'BeeGame build turn must read mandatory docs before completion.',
-        `Missing reads: ${missingReadDocs.join(', ')}.`,
-        'Start the build turn by reading those docs, then continue implementation from the documented design requirements.',
-      ].join(' ')
-      this.append(record, 'workflow.blocked', message, {
-        type: 'workflow.blocked',
-        phase: record.workflowPhase,
-        missingDocs: missingReadDocs,
-      })
-      return message
-    }
-    const qualityGateResult = await validateAndWritePlayableLoopReview(record)
-    if (qualityGateResult) {
-      this.append(record, 'workflow.blocked', qualityGateResult, {
-        type: 'workflow.blocked',
-        phase: record.workflowPhase,
-        reason: qualityGateResult,
-        recoverable: true,
-        recoveryKind: 'playable_loop_review_required',
-        requiredArtifacts: [
-          TRACEABILITY_MATRIX_PATH,
-          PLAYABLE_LOOP_REVIEW_PATH,
-        ],
-      })
-      return qualityGateResult
-    }
-    this.append(record, 'verification.required', 'BeeGame playability verification passed', {
-      type: 'verification.required',
-      artifactPath: GENERATED_PLAYABILITY_REVIEW_PATH,
-      status: 'pass',
-      generatedPaths: [
-        TRACEABILITY_MATRIX_PATH,
-        PLAYABLE_LOOP_REVIEW_PATH,
-        GENERATED_PLAYABILITY_REVIEW_PATH,
-      ],
-      checks: [
-        { id: 'start', label: 'Start playable loop', status: 'pass' },
-        { id: 'player_action', label: 'Player action changes state', status: 'pass' },
-        { id: 'feedback', label: 'Readable feedback appears', status: 'pass' },
-        { id: 'pressure', label: 'Failure pressure advances', status: 'pass' },
-        { id: 'terminal_state', label: 'Win or loss and restart are available', status: 'pass' },
-      ],
-    })
-    return undefined
   }
 
   resolvePermission(
@@ -903,67 +480,29 @@ export class BeeGameSessionManager {
         message: workspaceViolation,
       })
     }
-    if (
-      record.workflowPhase === 'planning' &&
-      isDesignPackMutationRequest(record, request)
-    ) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+    const policyDecision = getBeeGamePermissionPolicyDecision(
+      record,
+      this.dashboardDataRoot,
+      request,
+    )
+    if (policyDecision.behavior === 'auto_deny') {
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved',
         toolUseID: request.toolUseID,
         toolName: request.toolName,
-        decision: 'allow',
-        autoApproved: true,
-        reason: 'Required BeeGame design pack files may be written during planning.',
-        input: request.input,
-      })
-      return {
-        behavior: 'allow',
-        message: 'Allowed for required BeeGame design pack output.',
-      }
-    }
-    if (
-      record.workflowPhase === 'building' &&
-      isBuildQualityGateMutationRequest(record, request)
-    ) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        autoApproved: true,
-        reason: 'Structured BeeGame verification artifacts may be written during build.',
-        input: request.input,
-      })
-      return {
-        behavior: 'allow',
-        message: 'Allowed for structured BeeGame verification output.',
-      }
-    }
-    const workflowBlock =
-      record.workflowPhase === 'planning'
-        ? await getGameplayGateViolation(record, request)
-        : undefined
-    if (workflowBlock) {
-      this.append(record, 'workflow.blocked', workflowBlock.message, {
-        type: 'workflow.blocked',
-        phase: record.workflowPhase,
-        blockedToolName: request.toolName,
-        toolUseID: request.toolUseID,
-        reason: workflowBlock.message,
-        recoverable: workflowBlock.recoverable,
-        recoveryKind: workflowBlock.recoveryKind,
-        currentWorkspace: workflowBlock.currentWorkspace,
-        targetPath: workflowBlock.targetPath,
+        decision: 'deny',
+        autoDenied: true,
+        reason: policyDecision.message,
         input: request.input,
       })
       return Promise.resolve({
         behavior: 'deny',
-        message: workflowBlock.message,
+        message: policyDecision.message,
       })
     }
     const signature = permissionSignature(request)
     if (
-      getBeeGamePermissionPolicyDecision(record, request) === 'auto_allow' ||
+      policyDecision.behavior === 'auto_allow' ||
       (record.trustedSession && request.toolName !== 'Bash') ||
       record.rememberedPermissions.has(signature) ||
       (request.toolName !== 'Bash' &&
@@ -994,66 +533,6 @@ export class BeeGameSessionManager {
     })
   }
 
-  private setWorkflowPhase(record: SessionRecord, phase: WorkflowPhase): void {
-    record.workflowPhase = phase
-    this.append(record, 'workflow.phase', phase, {
-      type: 'workflow.phase',
-      phase,
-    })
-    this.appendWorkflowPipeline(record)
-  }
-
-  private appendWorkflowPipeline(record: SessionRecord): void {
-    const stages = getWorkflowPipelineStages(record.workflowPhase)
-    this.append(record, 'workflow.pipeline', getCurrentPipelinePhase(record.workflowPhase), {
-      type: 'workflow.pipeline',
-      currentPhase: getCurrentPipelinePhase(record.workflowPhase),
-      stages,
-    })
-  }
-
-  private appendVerificationRequired(record: SessionRecord): void {
-    if (record.events.some(event => event.type === 'verification.required')) {
-      return
-    }
-    this.append(record, 'verification.required', 'BeeGame playability verification is required', {
-      type: 'verification.required',
-      artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
-      checks: [
-        {
-          id: 'clarity_30s',
-          label: 'Clarity within 30 seconds',
-          detail: 'Player understands goal, controls, and feedback quickly.',
-        },
-        {
-          id: 'interesting_decision_60s',
-          label: 'First interesting decision within 60 seconds',
-          detail: 'The first minute contains a meaningful player decision.',
-        },
-        {
-          id: 'responsive_input',
-          label: 'Responsive input feel',
-          detail: 'Core controls respond immediately and consistently.',
-        },
-        {
-          id: 'readable_feedback',
-          label: 'Readable feedback',
-          detail: 'Scoring, damage, progress, and failure feedback are visible.',
-        },
-        {
-          id: 'failure_pressure',
-          label: 'Failure pressure',
-          detail: 'The game has pressure, fail state, or escalating challenge.',
-        },
-        {
-          id: 'replayable_challenge',
-          label: 'Replayable challenge',
-          detail: 'There is at least one reason to retry and improve.',
-        },
-      ],
-    })
-  }
-
   private appendRuntimeObservation(
     record: SessionRecord,
     status: 'initialized' | 'turn_completed',
@@ -1061,7 +540,6 @@ export class BeeGameSessionManager {
     this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
       type: 'runtime.observation',
       status,
-      phase: record.workflowPhase,
       features: [
         {
           id: 'CONTEXT_COLLAPSE',
@@ -1123,7 +601,7 @@ export class BeeGameSessionManager {
     type: BeeGameEventType,
     text: string,
     payload?: DashboardSDKMessage,
-  ): void {
+  ): BeeGameEvent {
     const sanitizedText = sanitizeBeeGameText(text)
     const sanitizedPayload = payload
       ? (sanitizeBeeGameVisibleValue(payload) as DashboardSDKMessage)
@@ -1141,6 +619,140 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     record.nextEventId += 1
     record.session.updatedAt = new Date()
+    return event
+  }
+
+  private maybeStartSubagentOutputMonitor(
+    record: SessionRecord,
+    event: BeeGameEvent,
+  ): void {
+    if (event.type !== 'tool.completed') return
+    const payload = event.payload
+    const toolName = getDashboardPayloadString(payload, 'toolName')
+    if (!isSubagentTool(toolName)) return
+    const output = getDashboardPayloadString(payload, 'output')
+    const launch = parseAsyncSubagentLaunch(output)
+    if (!launch || record.monitoredSubagentOutputFiles.has(launch.outputFile)) {
+      return
+    }
+
+    record.monitoredSubagentOutputFiles.add(launch.outputFile)
+    const toolUseID = getDashboardPayloadString(payload, 'toolUseID')
+    const input = getDashboardPayloadRecord(payload, 'input')
+    this.append(record, 'tool.progress', 'Subagent running', {
+      type: 'tool.progress',
+      toolUseID,
+      toolName,
+      input,
+      agentId: launch.agentId,
+      status: 'running',
+      output: 'Subagent is running in the background.',
+    })
+    void this.monitorSubagentOutput(record, {
+      toolUseID,
+      toolName,
+      input,
+      agentId: launch.agentId,
+      outputFile: launch.outputFile,
+    })
+  }
+
+  private async monitorSubagentOutput(
+    record: SessionRecord,
+    subagent: {
+      toolUseID: string
+      toolName: string
+      input: Record<string, unknown>
+      agentId: string
+      outputFile: string
+    },
+  ): Promise<void> {
+    const startedAt = Date.now()
+    const timeoutMs = getSubagentMonitorTimeoutMs()
+    let lastError = ''
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const raw = await readFile(subagent.outputFile, 'utf8')
+        const result = extractCompletedSubagentMessage(raw)
+        if (result) {
+          this.appendCompletedSubagentOutput(record, subagent, result)
+          return
+        }
+      } catch (err) {
+        lastError = toErrorMessage(err)
+      }
+      await sleep(getSubagentMonitorPollMs())
+    }
+    this.append(record, 'tool.failed', 'Subagent output unavailable', {
+      type: 'tool.failed',
+      toolUseID: subagent.toolUseID,
+      toolName: subagent.toolName,
+      input: subagent.input,
+      agentId: subagent.agentId,
+      output: lastError
+        ? `Subagent did not produce a final report before timeout. Last read error: ${lastError}`
+        : 'Subagent did not produce a final report before timeout.',
+    })
+  }
+
+  private refreshCompletedSubagentOutputs(record: SessionRecord): void {
+    for (const event of record.events) {
+      if (event.type !== 'tool.completed') continue
+      const payload = event.payload
+      const toolName = getDashboardPayloadString(payload, 'toolName')
+      if (!isSubagentTool(toolName)) continue
+      const output = getDashboardPayloadString(payload, 'output')
+      const launch = parseAsyncSubagentLaunch(output)
+      if (!launch) continue
+      if (hasCompletedSubagentOutput(record, launch.agentId)) continue
+      record.monitoredSubagentOutputFiles.add(launch.outputFile)
+      let raw = ''
+      try {
+        raw = readFileSync(launch.outputFile, 'utf8')
+      } catch {
+        continue
+      }
+      const result = extractCompletedSubagentMessage(raw)
+      if (!result) continue
+      this.appendCompletedSubagentOutput(record, {
+        toolUseID: getDashboardPayloadString(payload, 'toolUseID'),
+        toolName,
+        input: getDashboardPayloadRecord(payload, 'input'),
+        agentId: launch.agentId,
+        outputFile: launch.outputFile,
+      }, result)
+    }
+  }
+
+  private appendCompletedSubagentOutput(
+    record: SessionRecord,
+    subagent: {
+      toolUseID: string
+      toolName: string
+      input: Record<string, unknown>
+      agentId: string
+      outputFile?: string
+    },
+    result: string,
+  ): void {
+    if (hasCompletedSubagentOutput(record, subagent.agentId)) return
+    this.append(record, 'tool.completed', 'Subagent completed', {
+      type: 'tool.completed',
+      toolUseID: subagent.toolUseID,
+      toolName: subagent.toolName,
+      input: subagent.input,
+      agentId: subagent.agentId,
+      output: result,
+    })
+    this.append(record, 'assistant.message', result, {
+      type: 'assistant',
+      parent_tool_use_id: subagent.toolUseID,
+      subagent_id: subagent.agentId,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: result }],
+      },
+    })
   }
 }
 
@@ -1153,35 +765,65 @@ function resolveExistingPath(path: string): string {
   }
 }
 
-function getCurrentPipelinePhase(phase: WorkflowPhase): string {
-  if (phase === 'planning') return 'gdd'
-  if (phase === 'building') return 'implementation'
-  return 'build'
+function isSubagentTool(toolName: string): boolean {
+  return toolName === 'Agent' || toolName === 'Task'
 }
 
-function getWorkflowPipelineStages(phase: WorkflowPhase): Array<{
-  id: string
-  label: string
-  status: 'completed' | 'active' | 'pending'
-}> {
-  const current = getCurrentPipelinePhase(phase)
-  const order = [
-    { id: 'idea_intake', label: 'Idea Intake' },
-    { id: 'gdd', label: 'Playable Spec' },
-    { id: 'implementation', label: 'Implementation' },
-    { id: 'qa', label: 'Playability Review' },
-    { id: 'build', label: 'Build/Preview' },
-  ]
-  const currentIndex = order.findIndex(stage => stage.id === current)
-  return order.map((stage, index) => ({
-    ...stage,
-    status:
-      phase === 'completed' || index < currentIndex
-        ? 'completed'
-        : index === currentIndex
-          ? 'active'
-          : 'pending',
-  }))
+function hasCompletedSubagentOutput(
+  record: SessionRecord,
+  agentId: string,
+): boolean {
+  return record.events.some(event => {
+    if (event.type !== 'tool.completed') return false
+    if (event.text !== 'Subagent completed') return false
+    return getDashboardPayloadString(event.payload, 'agentId') === agentId
+  })
+}
+
+function parseAsyncSubagentLaunch(
+  output: string,
+): { agentId: string; outputFile: string } | null {
+  if (!output.includes('Async agent launched successfully.')) return null
+  const agentIdMatch = output.match(/\bagentId:\s*([^\s(]+)/)
+  const outputFileMatch = output.match(/\boutput_file:\s*(\S+)/)
+  const agentId = agentIdMatch?.[1]?.trim()
+  const outputFile = outputFileMatch?.[1]?.trim()
+  if (!agentId || !outputFile || !isAbsolute(outputFile)) return null
+  return { agentId, outputFile }
+}
+
+function extractCompletedSubagentMessage(raw: string): string {
+  const lines = raw
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+  for (const line of [...lines].reverse()) {
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>
+      if (entry.type !== 'assistant') continue
+      const message = isObject(entry.message) ? entry.message : undefined
+      if (!message || message.stop_reason !== 'end_turn') continue
+      const text = extractVisibleTextFromContent(message.content)
+      if (text.trim()) return text.trim()
+    } catch {
+      continue
+    }
+  }
+  return ''
+}
+
+function getSubagentMonitorTimeoutMs(): number {
+  const raw = Number(process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000
+}
+
+function getSubagentMonitorPollMs(): number {
+  const raw = Number(process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : 1000
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function deleteSessionArtifactRoots(
@@ -1243,14 +885,14 @@ export async function readSessionTranscriptFromDisk(
   const transcriptPath = await resolveReadableTranscriptPath(
     sessionId,
     cwd,
-    dashboardDataRoot,
   )
   const raw = await readFile(transcriptPath, 'utf8')
-  return raw
+  const events = raw
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
     .map(line => JSON.parse(line) as {
+      sessionId?: string
       id: number
       type: BeeGameEventType
       text: string
@@ -1258,36 +900,28 @@ export async function readSessionTranscriptFromDisk(
       payload?: DashboardSDKMessage
       createdAt: string
     })
+  return appendCompletedSubagentOutputsFromDisk(transcriptPath, sessionId, events)
 }
 
 async function resolveReadableTranscriptPath(
   sessionId: string,
   cwd: string,
-  dashboardDataRoot?: string,
 ): Promise<string> {
   const primary = getSessionTranscriptPath(
     sessionId,
     cwd,
-    resolve(dashboardDataRoot || cwd),
   )
-  try {
-    await readFile(primary, 'utf8')
-    return primary
-  } catch {
-    await readFile(primary, 'utf8')
-    return primary
-  }
+  await readFile(primary, 'utf8')
+  return primary
 }
 
 function readExistingTranscriptForResume(
   sessionId: string,
   cwd: string,
-  dashboardDataRoot: string,
 ): { path: string; events: BeeGameEvent[] } | undefined {
   const transcriptPath = resolveReadableTranscriptPathSync(
     sessionId,
     cwd,
-    dashboardDataRoot,
   )
   if (!transcriptPath) return undefined
   const raw = readFileSync(transcriptPath, 'utf8')
@@ -1300,9 +934,8 @@ function readExistingTranscriptForResume(
 function resolveReadableTranscriptPathSync(
   sessionId: string,
   cwd: string,
-  dashboardDataRoot: string,
 ): string | undefined {
-  const primary = getSessionTranscriptPath(sessionId, cwd, resolve(dashboardDataRoot))
+  const primary = getSessionTranscriptPath(sessionId, cwd)
   try {
     readFileSync(primary, 'utf8')
     return primary
@@ -1338,6 +971,124 @@ function parseTranscriptEvents(raw: string): BeeGameEvent[] {
     })
 }
 
+function appendCompletedSubagentOutputsFromDisk(
+  transcriptPath: string,
+  fallbackSessionId: string,
+  events: Array<{
+    id: number
+    sessionId?: string
+    turnId?: string
+    type: BeeGameEventType
+    text: string
+    payload?: DashboardSDKMessage
+    createdAt: string
+  }>,
+): Array<{
+  id: number
+  sessionId?: string
+  turnId?: string
+  type: BeeGameEventType
+  text: string
+  payload?: DashboardSDKMessage
+  createdAt: string
+}> {
+  let nextEventId = events.reduce((max, event) => Math.max(max, event.id), 0) + 1
+  for (const event of [...events]) {
+    if (event.type !== 'tool.completed') continue
+    const payload = event.payload
+    const toolName = getDashboardPayloadString(payload, 'toolName')
+    if (!isSubagentTool(toolName)) continue
+    const launch = parseAsyncSubagentLaunch(
+      getDashboardPayloadString(payload, 'output'),
+    )
+    if (!launch || hasCompletedSubagentOutputInEvents(events, launch.agentId)) {
+      continue
+    }
+    let raw = ''
+    try {
+      raw = readFileSync(launch.outputFile, 'utf8')
+    } catch {
+      continue
+    }
+    const result = extractCompletedSubagentMessage(raw)
+    if (!result) continue
+
+    const sessionId = event.sessionId || fallbackSessionId
+    const toolUseID = getDashboardPayloadString(payload, 'toolUseID')
+    const input = getDashboardPayloadRecord(payload, 'input')
+    const completedEvent: BeeGameEvent = {
+      id: nextEventId,
+      sessionId,
+      ...(event.turnId ? { turnId: event.turnId } : {}),
+      type: 'tool.completed',
+      text: 'Subagent completed',
+      payload: {
+        type: 'tool.completed',
+        toolUseID,
+        toolName,
+        input,
+        agentId: launch.agentId,
+        output: result,
+      },
+      createdAt: new Date(),
+    }
+    nextEventId += 1
+    const messageEvent: BeeGameEvent = {
+      id: nextEventId,
+      sessionId,
+      ...(event.turnId ? { turnId: event.turnId } : {}),
+      type: 'assistant.message',
+      text: result,
+      payload: {
+        type: 'assistant',
+        parent_tool_use_id: toolUseID,
+        subagent_id: launch.agentId,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: result }],
+        },
+      },
+      createdAt: new Date(),
+    }
+    nextEventId += 1
+    appendTranscriptEvent(transcriptPath, completedEvent)
+    appendTranscriptEvent(transcriptPath, messageEvent)
+    events.push(toDiskTranscriptEvent(completedEvent), toDiskTranscriptEvent(messageEvent))
+  }
+  return events
+}
+
+function hasCompletedSubagentOutputInEvents(
+  events: Array<{ type: BeeGameEventType; text: string; payload?: DashboardSDKMessage }>,
+  agentId: string,
+): boolean {
+  return events.some(event =>
+    event.type === 'tool.completed' &&
+    event.text === 'Subagent completed' &&
+    getDashboardPayloadString(event.payload, 'agentId') === agentId,
+  )
+}
+
+function toDiskTranscriptEvent(event: BeeGameEvent): {
+  id: number
+  sessionId: string
+  turnId?: string
+  type: BeeGameEventType
+  text: string
+  payload?: DashboardSDKMessage
+  createdAt: string
+} {
+  return {
+    id: event.id,
+    sessionId: event.sessionId,
+    ...(event.turnId ? { turnId: event.turnId } : {}),
+    type: event.type,
+    text: event.text,
+    ...(event.payload ? { payload: event.payload } : {}),
+    createdAt: event.createdAt.toISOString(),
+  }
+}
+
 function getNextTranscriptEventId(events: BeeGameEvent[]): number {
   const maxId = events.reduce((max, event) => Math.max(max, event.id), 0)
   return maxId + 1
@@ -1346,13 +1097,10 @@ function getNextTranscriptEventId(events: BeeGameEvent[]): number {
 function getSessionTranscriptPath(
   sessionId: string,
   cwd: string,
-  root: string,
 ): string {
   return resolve(
-    root,
-    '.beegame-dashboard',
+    cwd,
     'transcripts',
-    getTranscriptProjectPrefix(cwd, sessionId),
     `${getTranscriptProjectPrefix(cwd, sessionId)}__${getShortSessionHash(sessionId)}.jsonl`,
   )
 }
@@ -1400,129 +1148,47 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-async function getGameplayGateViolation(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): Promise<WorkflowBlock | undefined> {
-  if (!isImplementationTool(request.toolName)) return undefined
-  if (isDesignPackMutationRequest(record, request)) return undefined
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (isFileMutationTool(request.toolName) && artifactPath) {
-    if (!isPathInside(record.session.cwd, record.session.cwd, artifactPath)) {
-      return {
-        message: [
-          `${request.toolName} targets another project folder during planning: ${artifactPath}.`,
-          `The current BeeGame project workspace is ${record.session.cwd}.`,
-          'During planning, write design documents with relative paths under ./docs, for example ./docs/PLAYABLE_SPEC.md.',
-          'Do not use absolute paths from another project.',
-        ].join(' '),
-        recoverable: true,
-        recoveryKind: 'planning_path_rewrite',
-        currentWorkspace: record.session.cwd,
-        targetPath: artifactPath,
-      }
-    }
-  }
-  return {
-    message: [
-      `Planning phase is docs-only before ${request.toolName}.`,
-      `First produce the Playable Spec and required design pack under ./docs, including docs/PLAYABLE_SPEC.md and docs/PLAYABILITY_ACCEPTANCE.md, with the exact marker "${PLAYABLE_SPEC_READY_MARKER}".`,
-      'After the planning turn finishes, BeeGame will validate those docs and start a separate build turn.',
-    ].join(' '),
-    recoverable: true,
-    recoveryKind: 'planning_docs_required',
-    currentWorkspace: record.session.cwd,
-    targetPath: artifactPath,
-  }
-}
-
-function isImplementationTool(toolName: string): boolean {
-  return toolName === 'Bash' || isFileMutationTool(toolName)
-}
-
-async function hasPlayableSpecReady(record: SessionRecord): Promise<boolean> {
-  for (const path of ['BEEGAME_PLAYABLE_SPEC.md', 'docs/PLAYABLE_SPEC.md']) {
-    try {
-      const content = await readFile(resolve(record.session.cwd, path), 'utf8')
-      if (content.includes(PLAYABLE_SPEC_READY_MARKER)) return true
-    } catch {
-      // Absence means the gate is still pending.
-    }
-  }
-  return false
-}
-
-async function hasPlayableSpecReadySignal(record: SessionRecord): Promise<boolean> {
-  if (await hasPlayableSpecReady(record)) return true
-  return record.events.some(event =>
-    (event.type === 'assistant.message' || event.type === 'assistant.partial') &&
-    event.text.includes(PLAYABLE_SPEC_READY_MARKER),
-  )
-}
-
-function isDesignPackMutationRequest(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): boolean {
-  if (!isFileMutationTool(request.toolName)) return false
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return false
-  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
-  return (
-    REQUIRED_DESIGN_PACK.some(doc => normalized === doc.path) ||
-    isProjectDocsMarkdownPath(normalized)
-  )
-}
-
-function isBuildQualityGateMutationRequest(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): boolean {
-  if (!isFileMutationTool(request.toolName)) return false
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return false
-  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
-  return getQualityGateArtifactAliases().includes(normalized)
-}
-
-function getQualityGateArtifactAliases(): string[] {
-  return [
-    TRACEABILITY_MATRIX_PATH,
-    PLAYABLE_LOOP_REVIEW_PATH,
-    `docs/${basename(TRACEABILITY_MATRIX_PATH)}`,
-    `docs/${basename(PLAYABLE_LOOP_REVIEW_PATH)}`,
-  ]
-}
-
-function isProjectDocsMarkdownPath(path: string): boolean {
-  return path.startsWith('docs/') && path.endsWith('.md')
-}
-
 function getBeeGamePermissionPolicyDecision(
   record: SessionRecord,
+  allowedRoot: string,
   request: DashboardPermissionRequest,
-): 'auto_allow' | 'ask_user' {
-  if (isReadOnlyTool(request.toolName)) return 'auto_allow'
+): { behavior: 'auto_allow' | 'auto_deny' | 'ask_user'; message?: string } {
+  if (isReadOnlyTool(request.toolName)) return { behavior: 'auto_allow' }
   if (isFileMutationTool(request.toolName)) {
-    return isSafeProjectLocalMutation(record, request) ? 'auto_allow' : 'ask_user'
+    return {
+      behavior: isSafeWorkspaceMutation(record, allowedRoot, request)
+        ? 'auto_allow'
+        : 'ask_user',
+    }
   }
   if (request.toolName === 'Bash') {
-    return isSafeBeeGameBashCommand(request.input) ? 'auto_allow' : 'ask_user'
+    return {
+      behavior: isSafeBeeGameBashCommand(
+        request.input,
+        record.session.cwd,
+        allowedRoot,
+      ) ? 'auto_allow' : 'ask_user',
+    }
   }
-  return 'ask_user'
+  return { behavior: 'ask_user' }
 }
 
 function isReadOnlyTool(toolName: string): boolean {
   return toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep'
 }
 
-function isSafeProjectLocalMutation(
+function isSafeWorkspaceMutation(
   record: SessionRecord,
+  allowedRoot: string,
   request: DashboardPermissionRequest,
 ): boolean {
   const artifactPath = getMutationArtifactPath(request.input)
   if (!artifactPath) return false
-  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
+  const normalized = getWorkspaceRelativeMutationPath(
+    record.session.cwd,
+    allowedRoot,
+    artifactPath,
+  )
   if (!normalized) return false
   return !isSensitiveProjectMutationPath(normalized)
 }
@@ -1532,6 +1198,7 @@ function isSensitiveProjectMutationPath(path: string): boolean {
   const sensitiveFileNames = new Set([
     '.env',
     '.env.local',
+    '.env.production',
     '.npmrc',
     '.yarnrc',
     '.pypirc',
@@ -1541,32 +1208,69 @@ function isSensitiveProjectMutationPath(path: string): boolean {
     'credentials.json',
     'service-account.json',
   ])
+  const sensitiveDirectoryNames = new Set([
+    '.aws',
+    '.azure',
+    '.beegame',
+    '.config',
+    '.git',
+    '.gnupg',
+    '.ssh',
+  ])
   return segments.some(segment =>
-    segment.startsWith('.') ||
+    sensitiveDirectoryNames.has(segment.toLowerCase()) ||
     sensitiveFileNames.has(segment.toLowerCase()),
   )
 }
 
-function isSafeBeeGameBashCommand(input: Record<string, unknown>): boolean {
+function isSafeBeeGameBashCommand(
+  input: Record<string, unknown>,
+  cwd: string,
+  allowedRoot: string,
+): boolean {
   const command = typeof input.command === 'string' ? input.command.trim() : ''
-  if (!command || hasShellControlSyntax(command)) return false
-  const tokens = splitShellLike(command).map(cleanShellToken).filter(Boolean)
-  if (tokens.length === 0) return false
-  if (tokens.some(token => isDangerousShellToken(token))) return false
-  return isSafeReadOnlyShellCommand(tokens) || isSafeProjectValidationCommand(tokens)
+  if (!command || hasUnsafeShellControlSyntax(command)) return false
+  const commandParts = splitShellCommandChain(command)
+  if (commandParts.length === 0) return false
+  let commandCwd = cwd
+  for (const part of commandParts) {
+    const tokens = splitShellLike(part).map(cleanShellToken).filter(Boolean)
+    if (tokens.length === 0) return false
+    if (tokens.some(token => isDangerousShellToken(token))) return false
+    if (isSafeChangeDirectoryCommand(tokens, commandCwd, allowedRoot)) {
+      commandCwd = resolveCommandDirectory(commandCwd, tokens[1] || '.')
+      continue
+    }
+    if (
+      isSafeReadOnlyShellCommand(tokens) ||
+      isSafeProjectPackageCommand(tokens) ||
+      isSafeProjectToolchainCommand(tokens) ||
+      isSafeProjectFilesystemSetupCommand(tokens, commandCwd, allowedRoot)
+    ) {
+      continue
+    }
+    return false
+  }
+  return true
 }
 
-function hasShellControlSyntax(command: string): boolean {
+function hasUnsafeShellControlSyntax(command: string): boolean {
   return (
     command.includes('|') ||
     command.includes(';') ||
-    command.includes('&&') ||
     command.includes('||') ||
     command.includes('>') ||
     command.includes('<') ||
     command.includes('`') ||
     command.includes('$(')
   )
+}
+
+function splitShellCommandChain(command: string): string[] {
+  return command
+    .split('&&')
+    .map(part => part.trim())
+    .filter(Boolean)
 }
 
 function isDangerousShellToken(token: string): boolean {
@@ -1592,350 +1296,96 @@ function isSafeReadOnlyShellCommand(tokens: string[]): boolean {
   return ['ls', 'cat', 'find', 'grep', 'rg'].includes(command)
 }
 
-function isSafeProjectValidationCommand(tokens: string[]): boolean {
-  const [command, firstArg, secondArg] = tokens
-  if (command === 'npm') {
-    return firstArg === 'test' || (firstArg === 'run' && secondArg === 'build' && tokens.length === 3)
+function isSafeProjectPackageCommand(tokens: string[]): boolean {
+  const [command, firstArg] = tokens
+  if (!command || !isProjectPackageManager(command)) return false
+  if (!firstArg) return false
+  if (isGlobalPackageManagerInvocation(tokens)) return false
+  return [
+    'add',
+    'build',
+    'check',
+    'ci',
+    'create',
+    'exec',
+    'install',
+    'run',
+    'test',
+  ].includes(firstArg)
+}
+
+function isProjectPackageManager(command: string): boolean {
+  return ['bun', 'npm', 'npx', 'pnpm', 'yarn'].includes(command)
+}
+
+function isGlobalPackageManagerInvocation(tokens: string[]): boolean {
+  return tokens.some(token =>
+    token === '-g' ||
+    token === '--global' ||
+    token.startsWith('--prefix=') ||
+    token.startsWith('--location=global'),
+  )
+}
+
+function isSafeProjectToolchainCommand(tokens: string[]): boolean {
+  const [command, firstArg] = tokens
+  if (!command) return false
+  if (['pytest', 'tsc', 'vite', 'vitest'].includes(command)) return true
+  if (command === 'python' || command === 'python3') {
+    return firstArg === '-m'
   }
-  if (command === 'bun') {
-    return firstArg === 'test' ||
-      (firstArg === 'run' && (secondArg === 'build' || secondArg === 'test') && tokens.length === 3)
+  if (command === 'cargo') {
+    return ['build', 'check', 'test'].includes(firstArg || '')
+  }
+  if (command === 'go') {
+    return ['build', 'test'].includes(firstArg || '')
+  }
+  if (command === 'dotnet') {
+    return ['build', 'test'].includes(firstArg || '')
   }
   return false
 }
 
-function recordBuildDocReadFromToolEvent(
-  record: SessionRecord,
-  payload: DashboardSDKMessage,
-): void {
-  if (record.workflowPhase !== 'building') return
-  if (getDashboardPayloadString(payload, 'toolName') !== 'Read') return
-  const input = getDashboardPayloadRecord(payload, 'input')
-  const artifactPath = getMutationArtifactPath(input)
-  if (!artifactPath) return
-  const normalized = getWorkspaceRelativeMutationPath(record.session.cwd, artifactPath)
-  if (isBuildRequiredReadDoc(normalized)) {
-    record.buildReadDocs.add(normalized)
-  }
+function isSafeChangeDirectoryCommand(
+  tokens: string[],
+  cwd: string,
+  allowedRoot: string,
+): boolean {
+  if (tokens[0] !== 'cd' || tokens.length !== 2) return false
+  return isPathInside(cwd, allowedRoot, tokens[1] || '.')
 }
 
-function getMissingBuildReadDocs(record: SessionRecord): string[] {
-  return BUILD_REQUIRED_READ_DOCS.filter(path => !record.buildReadDocs.has(path))
+function resolveCommandDirectory(cwd: string, path: string): string {
+  return isAbsolute(path) ? resolve(path) : resolve(cwd, path)
 }
 
-function isBuildRequiredReadDoc(path: string): path is typeof BUILD_REQUIRED_READ_DOCS[number] {
-  return BUILD_REQUIRED_READ_DOCS.some(requiredPath => requiredPath === path)
-}
-
-function mapWorkflowEnginePhase(phase: unknown): WorkflowPhase {
-  if (phase === 'Build') return 'building'
-  if (phase === 'Delivery') return 'completed'
-  return 'planning'
-}
-
-function getLatestAgentOutput(record: SessionRecord): string {
-  const currentTurnId = record.currentTurnId
-  const outputEvent = [...record.events]
-    .reverse()
-    .find(event =>
-      (!currentTurnId || event.turnId === currentTurnId) &&
-      (event.type === 'result' || event.type === 'assistant.message'),
-    )
-  return outputEvent?.text ?? ''
-}
-
-function getLatestCurrentTurnWorkflowBlock(record: SessionRecord): BeeGameEvent | undefined {
-  const currentTurnId = record.currentTurnId
-  return [...record.events]
-    .reverse()
-    .find(event =>
-      event.type === 'workflow.blocked' &&
-      (!currentTurnId || event.turnId === currentTurnId),
-    )
-}
-
-async function getDesignPackViolation(
-  record: SessionRecord,
-): Promise<string | undefined> {
-  const missing: string[] = []
-  const empty: string[] = []
-  for (const doc of REQUIRED_DESIGN_PACK) {
-    let content = ''
-    try {
-      content = await readFile(resolve(record.session.cwd, doc.path), 'utf8')
-    } catch {
-      missing.push(doc.path)
-      continue
-    }
-    if (content.trim().length === 0) empty.push(doc.path)
-  }
-  if (!(await hasPlayableSpecReady(record))) {
-    empty.push('docs/PLAYABLE_SPEC.md missing playable spec ready marker')
-  }
-  if (missing.length === 0 && empty.length === 0) return undefined
-  const details = [...missing, ...empty].join('; ')
-  return `BeeGame required design pack is incomplete before implementation: ${details}`
-}
-
-async function shouldRunBuildRecovery(record: SessionRecord): Promise<boolean> {
-  if (record.workflowPhase === 'building') return true
-  if (!(await getDesignPackViolation(record))) return true
-  return record.events.some(event => {
-    if (event.type !== 'workflow.blocked') return false
-    const payload = getPayloadRecordFromEvent(event)
-    const phase = typeof payload.phase === 'string' ? payload.phase : ''
-    const recoveryKind = typeof payload.recoveryKind === 'string' ? payload.recoveryKind : ''
-    return phase === 'building' || recoveryKind === 'playable_loop_review_required'
-  })
-}
-
-function getPayloadRecordFromEvent(event: BeeGameEvent): Record<string, unknown> {
-  const payload = event.payload
-  return payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : {}
-}
-
-function buildBuildRecoveryPrompt(userPrompt: string): string {
-  return [
-    'Recover the paused BeeGame build from the existing project workspace.',
-    'Do not restart planning and do not create a new project.',
-    'First read the existing design docs and verification artifacts:',
-    ...BUILD_REQUIRED_READ_DOCS.map(path => `- ./${path}`),
-    `- ./${TRACEABILITY_MATRIX_PATH}`,
-    `- ./${PLAYABLE_LOOP_REVIEW_PATH}`,
-    `- ./${LEGACY_PLAYABLE_LOOP_REVIEW_JSON_PATH} if it exists`,
-    `If ${LEGACY_PLAYABLE_LOOP_REVIEW_JSON_PATH} is invalid, do not keep editing that JSON file.`,
-    `Write a fresh ./${PLAYABLE_LOOP_REVIEW_PATH} with verdict: pass and pass lines for ${PLAYABLE_LOOP_CHECKS.join(', ')} after verifying the build.`,
-    'Then finish the build validation so BeeGame can generate the final playability review.',
-    '',
-    `User request now:\n${userPrompt}`,
-  ].join('\n')
-}
-
-async function validateAndWritePlayableLoopReview(record: SessionRecord): Promise<string | undefined> {
-  const traceability = await readJsonArtifact(record, TRACEABILITY_MATRIX_PATH)
-  if (!traceability.ok) return `BeeGame traceability matrix is incomplete: ${TRACEABILITY_MATRIX_PATH} ${traceability.message}`
-
-  const mappings = getTraceabilityMappings(traceability.value)
-  if (mappings.length === 0) return 'BeeGame traceability matrix has no implementation mappings'
-
-  const implementedIds = new Set(
-    mappings
-      .filter(item => getStringValue(item, 'status') === 'implemented')
-      .map(item =>
-        getStringValue(item, 'requirementId') ||
-        getStringValue(item, 'requirement') ||
-        getStringValue(item, 'id') ||
-        getStringValue(item, 'description')
-      )
-      .filter(Boolean),
-  )
-  if (implementedIds.size === 0) {
-    return 'BeeGame traceability matrix has no implemented requirement evidence'
-  }
-
-  const loopReview = await readPlayableLoopReviewArtifact(record)
-  if (!loopReview.ok) return `BeeGame playable loop review is incomplete: ${loopReview.message}`
-
-  const missingChecks = PLAYABLE_LOOP_CHECKS
-    .filter(check => !loopReview.passedChecks.has(check))
-  if (missingChecks.length > 0) {
-    return `BeeGame playable loop review missing passing checks: ${missingChecks.join(', ')}`
-  }
-
-  const review = [
-    '# BeeGame Playability Review',
-    '',
-    'Generated by BeeGame playable loop verifier.',
-    '',
-    `- Traceability: ${TRACEABILITY_MATRIX_PATH}`,
-    `- Playable loop review: ${loopReview.path}`,
-    `- Requirements mapped: ${implementedIds.size}`,
-    `- Loop checks passed: ${[...loopReview.passedChecks].join(', ')}`,
-    '',
-    PLAYABILITY_CHECKS_PASSED_MARKER,
-    '',
-  ].join('\n')
-  await writeFile(resolve(record.session.cwd, GENERATED_PLAYABILITY_REVIEW_PATH), review, 'utf8')
-  return undefined
-}
-
-function getTraceabilityMappings(value: Record<string, unknown>): Array<Record<string, unknown>> {
-  const mappings = getRecordArray(value, 'mappings')
-  if (mappings.length > 0) return mappings
-  return getRecordArray(value, 'requirements')
-}
-
-async function readPlayableLoopReviewArtifact(
-  record: SessionRecord,
-): Promise<
-  | { ok: true; path: string; passedChecks: Set<string> }
-  | { ok: false; message: string }
-> {
-  const candidates = [
-    PLAYABLE_LOOP_REVIEW_PATH,
-    `docs/${PLAYABLE_LOOP_REVIEW_PATH}`,
-    LEGACY_PLAYABLE_LOOP_REVIEW_JSON_PATH,
-    `docs/${LEGACY_PLAYABLE_LOOP_REVIEW_JSON_PATH}`,
-  ]
-  const errors: string[] = []
-  for (const path of candidates) {
-    const canonicalPath = resolve(record.session.cwd, path)
-    try {
-      const content = await readFile(canonicalPath, 'utf8')
-      const parsed = parsePlayableLoopReviewContent(content)
-      if (!parsed.ok) {
-        errors.push(`${path} ${parsed.message}`)
-        continue
-      }
-      if (path !== PLAYABLE_LOOP_REVIEW_PATH) {
-        await writeFile(resolve(record.session.cwd, PLAYABLE_LOOP_REVIEW_PATH), content, 'utf8')
-      }
-      return { ok: true, path, passedChecks: parsed.passedChecks }
-    } catch {
-      errors.push(`${path} is missing`)
-    }
-  }
-  return { ok: false, message: errors[0] ?? `${PLAYABLE_LOOP_REVIEW_PATH} is missing` }
-}
-
-function parsePlayableLoopReviewContent(
-  content: string,
-): { ok: true; passedChecks: Set<string> } | { ok: false; message: string } {
-  try {
-    const json = parseJsonArtifactContent(content)
-    if (json.ok) return parsePlayableLoopReviewRecord(json.value)
-  } catch {}
-  return parsePlayableLoopReviewMarkdown(content)
-}
-
-function parsePlayableLoopReviewRecord(
-  value: Record<string, unknown>,
-): { ok: true; passedChecks: Set<string> } | { ok: false; message: string } {
-  if (getStringValue(value, 'verdict') !== 'pass') {
-    return { ok: false, message: 'verdict is not pass' }
-  }
-  const evidence = getRecordArray(value, 'evidence')
-  const passedChecks = new Set(
-    evidence
-      .filter(item => getStringValue(item, 'status') === 'pass')
-      .map(item => getStringValue(item, 'check'))
-      .filter(Boolean),
-  )
-  return { ok: true, passedChecks }
-}
-
-function parsePlayableLoopReviewMarkdown(
-  content: string,
-): { ok: true; passedChecks: Set<string> } | { ok: false; message: string } {
-  const lines = content
-    .split('\n')
-    .map(normalizePlayableLoopReviewLine)
-    .filter(Boolean)
-  if (!lines.some(line => line === 'verdict: pass' || line === '- verdict: pass')) {
-    return { ok: false, message: 'verdict is not pass' }
-  }
-  const passedChecks = new Set<string>()
-  for (const check of PLAYABLE_LOOP_CHECKS) {
-    if (lines.some(line => line === `${check}: pass` || line.startsWith(`${check}: pass `) || line.startsWith(`- ${check}: pass`))) {
-      passedChecks.add(check)
-    }
-  }
-  return { ok: true, passedChecks }
-}
-
-function normalizePlayableLoopReviewLine(line: string): string {
-  return line
-    .trim()
-    .toLowerCase()
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/^\*\*(.+)\*\*$/, '$1')
-}
-
-async function readJsonArtifact(
-  record: SessionRecord,
-  path: string,
-): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; message: string }> {
-  const canonicalPath = resolve(record.session.cwd, path)
-  try {
-    const content = await readFile(canonicalPath, 'utf8')
-    return parseJsonArtifactContent(content)
-  } catch (error) {
-    if (error instanceof SyntaxError) return { ok: false, message: 'contains invalid JSON' }
-  }
-
-  const fallbackRelativePath = path.startsWith('docs/')
-    ? basename(path)
-    : `docs/${basename(path)}`
-  const fallbackPath = resolve(record.session.cwd, fallbackRelativePath)
-  try {
-    const content = await readFile(fallbackPath, 'utf8')
-    const parsed = parseJsonArtifactContent(content)
-    if (!parsed.ok) return parsed
-    mkdirSync(dirname(canonicalPath), { recursive: true })
-    await writeFile(canonicalPath, content, 'utf8')
-    return parsed
-  } catch (error) {
-    if (error instanceof SyntaxError) return { ok: false, message: 'contains invalid JSON' }
-    return { ok: false, message: 'is missing' }
-  }
-}
-
-function parseJsonArtifactContent(
-  content: string,
-): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
-  const parsed = JSON.parse(content) as unknown
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, message: 'must be a JSON object' }
-  }
-  return { ok: true, value: parsed as Record<string, unknown> }
-}
-
-function getRecordArray(value: Record<string, unknown>, key: string): Array<Record<string, unknown>> {
-  const item = value[key]
-  if (!Array.isArray(item)) return []
-  return item.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)) as Array<Record<string, unknown>>
-}
-
-function getStringValue(value: Record<string, unknown>, key: string): string {
-  const item = value[key]
-  return typeof item === 'string' ? item.trim() : ''
-}
-
-async function persistPlayableSpec(record: SessionRecord): Promise<void> {
-  try {
-    const docContent = await readFile(resolve(record.session.cwd, 'docs/PLAYABLE_SPEC.md'), 'utf8')
-    if (docContent.includes(PLAYABLE_SPEC_READY_MARKER)) {
-      await writeFile(resolve(record.session.cwd, 'BEEGAME_PLAYABLE_SPEC.md'), `${docContent.trim()}\n`, 'utf8')
-      return
-    }
-  } catch {
-    // Fall back to the current turn transcript when no spec document exists yet.
-  }
-  const currentTurnId = record.currentTurnId
-  const content = record.events
-    .filter(event =>
-      event.type === 'assistant.message' &&
-      (!currentTurnId || event.turnId === currentTurnId),
-    )
-    .map(event => event.text.trim())
-    .filter(Boolean)
-    .join('\n\n---\n\n')
-    .trim()
-  if (!content || !content.includes(PLAYABLE_SPEC_READY_MARKER)) return
-  await writeFile(resolve(record.session.cwd, 'BEEGAME_PLAYABLE_SPEC.md'), `${content}\n`, 'utf8')
+function isSafeProjectFilesystemSetupCommand(
+  tokens: string[],
+  cwd: string,
+  allowedRoot: string,
+): boolean {
+  const [command] = tokens
+  if (!command || !['mkdir', 'touch'].includes(command)) return false
+  const pathArgs = tokens
+    .slice(1)
+    .filter(token => !token.startsWith('-'))
+  return pathArgs.length > 0 &&
+    pathArgs.every(path => isPathInside(cwd, allowedRoot, path))
 }
 
 function getMutationArtifactPath(input: Record<string, unknown>): string {
   return String(input.file_path || input.path || input.notebook_path || '').trim()
 }
 
-function getWorkspaceRelativeMutationPath(cwd: string, artifactPath: string): string {
+function getWorkspaceRelativeMutationPath(
+  cwd: string,
+  allowedRoot: string,
+  artifactPath: string,
+): string {
   const targetPath = isAbsolute(artifactPath)
     ? resolve(artifactPath)
     : resolve(cwd, artifactPath)
-  const rel = relative(cwd, targetPath)
+  const rel = relative(resolve(allowedRoot), targetPath)
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return ''
   return rel.split('\\').join('/')
 }
@@ -2182,7 +1632,9 @@ function mapSDKMessageToToolEvents(
       if (!toolUseID) continue
       const toolName = getStringField(block, 'name') || 'Tool'
       const input = getObjectField(block, 'input')
+      const existingToolUse = record.toolUses.get(toolUseID)
       record.toolUses.set(toolUseID, { toolName, input })
+      if (existingToolUse) continue
       events.push({
         type: 'tool.started',
         text: toolName,
@@ -2339,7 +1791,6 @@ function buildRuntimeEnv(
   const beegameConfigDir =
     process.env.BEEGAME_CONFIG_DIR ?? resolve(homedir(), '.beegame')
   return {
-    CLAUDE_CONFIG_DIR: beegameConfigDir,
     BEEGAME_CONFIG_DIR: beegameConfigDir,
     BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
     ...(runtime?.env ?? {}),

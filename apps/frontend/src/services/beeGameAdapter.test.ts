@@ -39,6 +39,80 @@ describe('beeGameAdapter prompt rules', () => {
     vi.restoreAllMocks();
   });
 
+  it('loads projects from the BeeGame metadata API when available', async () => {
+    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
+      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
+    ]));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/projects') {
+        return jsonResponse([
+          {
+            id: 'project_sqlite',
+            name: 'SQLite Project',
+            root_path: '/tmp/beegame-projects/sqlite-project',
+            created_at: 1710000000000,
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
+      {
+        id: 'project_sqlite',
+        name: 'SQLite Project',
+        root_path: '/tmp/beegame-projects/sqlite-project',
+        created_at: 1710000000000,
+      },
+    ]);
+  });
+
+  it('migrates existing local projects into the BeeGame metadata API when the remote list is empty', async () => {
+    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
+      {
+        id: 'project_local',
+        name: 'Local Only',
+        root_path: '/tmp/beegame-projects/local-only',
+        created_at: 1700000000000,
+      },
+    ]));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/projects' && !init?.method) {
+        return jsonResponse([]);
+      }
+      if (String(input) === '/api/projects' && init?.method === 'POST') {
+        return jsonResponse(JSON.parse(String(init.body)));
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
+      {
+        id: 'project_local',
+        name: 'Local Only',
+        root_path: '/tmp/beegame-projects/local-only',
+        created_at: 1700000000000,
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+      method: 'POST',
+    }));
+  });
+
+  it('falls back to local project storage when the BeeGame metadata API is unavailable', async () => {
+    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
+      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
+    ]));
+    const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
+      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
+    ]);
+  });
+
   it('does not synthesize local game mode options when LLM intake fails', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'intake unavailable' }, 500));
     vi.stubGlobal('fetch', fetchMock);
@@ -501,6 +575,50 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
+  it('does not keep a transcript-only interrupted turn running after the backend restarts', async () => {
+    const transcript = [
+      turnStartedEvent(1, 'beegame_restart', 'turn-1'),
+      assistantMessageEvent(2, 'beegame_restart', 'turn-1', 'Running final build.'),
+      bashCompletedEvent(3, 'beegame_restart', 'turn-1', 'bun run build', 'Build completed.'),
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
+        return jsonResponse({ error: 'Session not found' }, 404);
+      }
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+        return jsonResponse(transcript);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.createProject({
+      name: 'snake-web',
+      root_path: '/tmp/beegame-projects/snake-web',
+    });
+    const project = (await beeGameAdapter.getProjects())[0];
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: project.id,
+      sessionId: 'beegame_restart',
+      workspacePath: '/tmp/beegame-projects/snake-web',
+    }]));
+
+    const status = await beeGameAdapter.getProjectStatus(project.id);
+    const polled = await beeGameAdapter.pollMessages(project.id, 0);
+
+    expect(status.phase).toBe('idle');
+    expect(status.active_agents).toEqual([]);
+    expect(status.next_action).toContain('Backend restarted');
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'status',
+        status: 'idle',
+        content: expect.stringContaining('Backend restarted'),
+      }),
+    ]));
+  });
+
   it('sends recovered transcript context when a message recreates a missing backend session', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -584,13 +702,26 @@ describe('beeGameAdapter prompt rules', () => {
     const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { transcriptSessionId?: string };
     expect(startBody.transcriptSessionId).toBe('beegame_restart');
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toContain('BeeGame dashboard recovered this project after a backend restart');
+    expect(body.text).toContain('This session is being continued from a previous conversation that ran out of context.');
+    expect(body.text).toContain('The summary below covers the earlier portion of the conversation.');
+    expect(body.text).toContain('If you need specific details from before recovery');
+    expect(body.text).toContain('read the project transcript at:');
+    expect(body.text).toContain('transcripts/');
+    expect(body.text).toContain('Execution snapshot:');
+    expect(body.text).toContain('Recent tools:');
+    expect(body.text).toContain('Continue the conversation from where it left off');
+    expect(body.text).toContain('do not acknowledge the summary');
+    expect(body.text).toContain('Do not ask what to do next when the snapshot contains an unfinished tool or failed tool');
+    expect(body.text).toContain('Do not pipe validation commands through head, tail, sed, or similar filters');
+    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
+    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
+    expect(body.text).toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
     expect(body.text).toContain('Make a tactical puzzle game.');
     expect(body.text).toContain('docs/GDD.md');
     expect(body.text).toContain('继续任务');
   });
 
-  it('sends continue input for an existing paused session without backend restart recovery', async () => {
+  it('sends continue input for an existing idle session with transcript context', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/beegame-sessions/beegame_paused') {
@@ -605,22 +736,9 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/beegame-sessions/beegame_paused/events?after=0') {
         return jsonResponse([
-          {
-            id: 1,
-            type: 'workflow.blocked',
-            text: 'BeeGame paused build before implementation.',
-            createdAt: '2026-06-21T00:00:01.000Z',
-          },
-          {
-            id: 2,
-            type: 'system.status',
-            text: 'BeeGame workflow paused',
-            payload: {
-              type: 'workflow.paused',
-              reason: 'BeeGame paused build before implementation.',
-            },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
+          turnStartedEvent(1, 'beegame_paused', 'turn-1'),
+          assistantMessageEvent(2, 'beegame_paused', 'turn-1', 'Continue from the current project files.'),
+          turnCompletedEvent(3, 'beegame_paused', 'turn-1'),
         ]);
       }
       if (path === '/api/beegame-sessions/beegame_paused/input' && init?.method === 'POST') {
@@ -654,8 +772,11 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     expect(inputCall).toBeTruthy();
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toContain('BeeGame dashboard is resuming this project from the latest paused state');
-    expect(body.text).toContain('BeeGame paused build before implementation.');
+    expect(body.text).toContain('This session is being continued from a previous conversation that ran out of context.');
+    expect(body.text).toContain('Continue the conversation from where it left off');
+    expect(body.text).toContain('Continue from the current project files.');
+    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
+    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
   });
 
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
@@ -713,23 +834,29 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('Confirmed BeeGame build brief');
     expect(body.text).toContain('Platform: Web');
     expect(body.text).toContain('Inputs: Keyboard/mouse, Touch');
-    expect(body.text).toContain('First produce a mandatory BeeGame design pack as project files before implementation.');
-    expect(body.text).toContain('docs/PLAYABLE_SPEC.md');
-    expect(body.text).toContain('source-of-truth playable spec');
-    expect(body.text).toContain('docs/GDD.md');
-    expect(body.text).toContain('docs/TECH_DESIGN.md');
-    expect(body.text).toContain('docs/ART_AUDIO_DIRECTION.md');
-    expect(body.text).toContain('docs/RESOURCE_PLACEHOLDERS.md');
-    expect(body.text).toContain('docs/LEVEL_TUNING.md');
-    expect(body.text).toContain('docs/PLAYABILITY_ACCEPTANCE.md');
-    expect(body.text).toContain('Use chat only for a short progress note or summary after the files are written.');
-    expect(body.text).toContain('Core Loop');
-    expect(body.text).toContain('Fun Hook');
-    expect(body.text).toContain('Risk/Reward');
-    expect(body.text).toContain('First 3 Minutes');
-    expect(body.text).toContain('Playability Acceptance Checklist');
-    expect(body.text).toContain('Do not start implementation until the Playable Spec is internally checked against the checklist.');
-    expect(body.text).toContain('PLAYABILITY_CHECKS_PASSED: yes');
+    expect(body.text).toContain('complete game');
+    expect(body.text).toContain('art direction');
+    expect(body.text).toContain('UI/UX');
+    expect(body.text).toContain('placeholder asset');
+    expect(body.text).toContain('replaceable');
+    expect(body.text).toContain('Create useful project documents under ./docs/');
+    expect(body.text).toContain('Use docs as project resources, not as chat-only summaries.');
+    expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
+    expect(body.text).not.toContain('Core Loop');
+    expect(body.text).not.toContain('Fun Hook');
+    expect(body.text).not.toContain('Risk/Reward');
+    expect(body.text).not.toContain('First 3 Minutes');
+    expect(body.text).not.toContain('Playability Acceptance Checklist');
+    expect(body.text).toContain('BeeGame does not require machine-readable verifier files.');
+    expect(body.text).toContain('You may use available subagents when the task genuinely benefits from delegation');
+    expect(body.text).not.toContain('Use the runtime agent planning and review flow during implementation.');
+    expect(body.text).not.toContain("Use BeeGame's own planning");
+    expect(body.text).toContain('run the relevant build/test/typecheck checks for the generated project');
+    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
+    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
+    expect(body.text).toContain('prove the core player loop from the brief actually works');
+    expect(body.text).toContain('Use the project\'s own tooling and conventions.');
+    expect(body.text).toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
     expect(body.text).toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
     expect(body.text).not.toContain('apps/frontend');
     expect(body.text).not.toContain('apps/dashboard');
@@ -738,6 +865,54 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('Do not create another top-level folder')
     expect(body.text).not.toContain('./snake-game');
     expect(body.text).not.toContain('./games/snake');
+  });
+
+  it('does not encourage subagents when the BeeGame subagent setting is disabled', async () => {
+    localStorage.setItem('beegame-adapter-subagents-enabled', '0');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_brief',
+          cwd: '/tmp/beegame-projects/snake-game',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_brief/input' && init?.method === 'POST') {
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: '做一个贪吃蛇',
+      title: '贪吃蛇',
+      option: makeLlmOption(),
+      settings: {
+        platform: 'Web',
+        visualStyle: 'Pixel',
+        dimension: '2D',
+        genre: 'Arcade',
+        inputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+      },
+      root_path: '/tmp/beegame-projects',
+    });
+
+    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_brief/input' &&
+      init?.method === 'POST'
+    ));
+    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
+    expect(body.text).toContain('Plan and implement directly in this session unless the user explicitly asks for subagents.');
+    expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
   });
 
   it('keeps BeeGame branding out of package names and code identifiers', async () => {
@@ -1065,6 +1240,122 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
+  it('maps BeeGame turn completion to idle instead of finished project status', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_idle',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_idle/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_idle',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_idle/events?after=0') {
+        return jsonResponse([
+          assistantMessageEvent(30, 'beegame_idle', 'turn-1', '这一轮处理完了，可以继续反馈。'),
+          turnCompletedEvent(31, 'beegame_idle', 'turn-1'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    const status = polled.messages.find(message => message.type === 'status');
+    expect(status).toEqual(expect.objectContaining({ status: 'idle' }));
+    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
+  });
+
+  it('surfaces a status alert when compact ends before resuming tool work', async () => {
+    const compactEvents = [
+      turnStartedEvent(40, 'beegame_compact', 'turn-1'),
+      bashFailedEvent(
+        41,
+        'beegame_compact',
+        'turn-1',
+        'bun run typecheck',
+        'src/main.ts(12,1): error TS2304: Cannot find name.',
+      ),
+      compactBoundaryEvent(42, 'beegame_compact', 'turn-1'),
+      assistantMessageEvent(43, 'beegame_compact', 'turn-1', '我会继续运行 typecheck。'),
+      endTurnResultEvent(44, 'beegame_compact', 'turn-1'),
+      turnCompletedEvent(45, 'beegame_compact', 'turn-1'),
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_compact',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_compact/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_compact',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_compact/events?after=0') {
+        return jsonResponse(compactEvents);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'status', status: 'idle' }),
+      expect.objectContaining({
+        type: 'status',
+        sender: 'system',
+        task_kind: 'runtime_notice',
+        content: expect.stringContaining('Context compaction ended the turn before tool work resumed'),
+      }),
+    ]));
+    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(false);
+    expect(polled.messages.some(message => message.type === 'status' && message.status === 'paused')).toBe(false);
+
+    const history = await beeGameAdapter.getChatHistory(result.project.id);
+    expect(history.some(message => message.sender === 'system' && message.content.includes('context compaction'))).toBe(false);
+  });
+
   it('hides streaming partials and shows only the final assistant message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -1209,6 +1500,97 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages[3].content).toContain('Target: snake-game/src/main.ts');
   });
 
+  it('formats Agent tool events as subagent cards', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_subagent',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_subagent/input' && init?.method === 'POST') {
+        return jsonResponse({ ok: true });
+      }
+      if (path === '/api/beegame-sessions/beegame_subagent') {
+        return jsonResponse({
+          id: 'beegame_subagent',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_subagent/events?after=0') {
+        return jsonResponse([
+          {
+            id: 50,
+            sessionId: 'beegame_subagent',
+            turnId: 'turn-1',
+            type: 'tool.started',
+            text: 'Agent',
+            payload: {
+              type: 'tool.started',
+              toolUseID: 'tool_agent',
+              toolName: 'Agent',
+              input: {
+                description: 'Review game feel',
+                prompt: 'Review the prototype controls and feedback.',
+                subagent_type: 'general-purpose',
+              },
+            },
+            createdAt: '2026-06-21T00:00:50.000Z',
+          },
+          {
+            id: 51,
+            sessionId: 'beegame_subagent',
+            turnId: 'turn-1',
+            type: 'tool.failed',
+            text: 'Agent failed',
+            payload: {
+              type: 'tool.failed',
+              toolUseID: 'tool_agent_empty',
+              toolName: 'Agent',
+              input: {},
+              output: '<tool_use_error>InputValidationError</tool_use_error>',
+            },
+            createdAt: '2026-06-21T00:00:51.000Z',
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages[0]).toEqual(expect.objectContaining({
+      type: 'tool_start',
+      tool: 'Agent',
+      content: expect.stringContaining('Subagent: Review game feel'),
+    }));
+    expect(polled.messages[0].content).toContain('Type: general-purpose');
+    expect(polled.messages[0].content).toContain('Prompt: Review the prototype controls and feedback.');
+    expect(polled.messages[1]).toEqual(expect.objectContaining({
+      type: 'tool_end',
+      tool: 'Agent',
+      content: expect.stringContaining('Subagent: Agent'),
+    }));
+    expect(polled.messages[1].content).toContain('Status: failed');
+  });
+
   it('maps BeeGame result usage into token usage messages', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -1344,203 +1726,7 @@ describe('beeGameAdapter prompt rules', () => {
     }));
   });
 
-  it('maps BeeGame playability verification requirements into build report checks', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_verify',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_verify/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_verify',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_verify') {
-        return jsonResponse({
-          id: 'beegame_verify',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_verify/events?after=0') {
-        return jsonResponse([
-          verificationRequiredEvent(80, 'beegame_verify'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages).toEqual([]);
-    expect(status.build_report).toEqual(expect.objectContaining({
-      status: 'verification_required',
-      report_path: 'BEEGAME_PLAYABILITY_REVIEW.md',
-      checks: expect.arrayContaining([
-        expect.objectContaining({
-          name: 'Clarity within 30 seconds',
-          status: 'required',
-        }),
-        expect.objectContaining({
-          name: 'First interesting decision within 60 seconds',
-          status: 'required',
-        }),
-      ]),
-    }));
-  });
-
-  it('exposes verifier-passed BeeGame build reports from structured evidence events', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_verified',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_verified/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_verified',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_verified/events?after=0') {
-        return jsonResponse([
-          verificationRequiredEvent(80, 'beegame_verified'),
-          verificationPassedEvent(81, 'beegame_verified'),
-          turnCompletedEvent(82, 'beegame_verified', 'turn-1'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(status.phase).toBe('finished');
-    expect(status.build_report).toEqual(expect.objectContaining({
-      status: 'completed',
-      report_path: 'BEEGAME_PLAYABILITY_REVIEW.md',
-      generated_paths: expect.arrayContaining([
-        'traceability_matrix.json',
-        'playable_loop_review.md',
-        'BEEGAME_PLAYABILITY_REVIEW.md',
-      ]),
-      summary: expect.stringContaining('structured BeeGame verifier'),
-    }));
-  });
-
-  it('maps BeeGame workflow pipeline events into dashboard phase info', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_pipeline',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_pipeline/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_pipeline',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_pipeline') {
-        return jsonResponse({
-          id: 'beegame_pipeline',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_pipeline/events?after=0') {
-        return jsonResponse([
-          workflowPipelineEvent(90, 'beegame_pipeline', 'gdd', [
-            { id: 'idea_intake', status: 'completed' },
-            { id: 'gdd', status: 'active' },
-            { id: 'implementation', status: 'pending' },
-          ]),
-          workflowPipelineEvent(91, 'beegame_pipeline', 'implementation', [
-            { id: 'idea_intake', status: 'completed' },
-            { id: 'gdd', status: 'completed' },
-            { id: 'implementation', status: 'active' },
-          ]),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const phases = await beeGameAdapter.getWorkflowPhases(result.project.id);
-
-    expect(phases).toEqual({
-      current_phase: 3,
-      phase_name: 'implementation',
-      history: [
-        { phase: 0, name: 'idea_intake', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
-        { phase: 2, name: 'gdd', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
-        { phase: 3, name: 'implementation', timestamp: Date.parse('2026-06-21T00:00:31.000Z') },
-      ],
-    });
-  });
-
-  it('shows workflow blocks separately from real permission requests', async () => {
+  it('shows real permission requests without synthetic runtime gates', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs?ownerId=dashboard-local') {
@@ -1579,15 +1765,6 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_gate/events?after=0') {
         return jsonResponse([
           turnStartedEvent(49, 'beegame_gate', 'turn-1'),
-          workflowPhaseEvent(50, 'beegame_gate', 'turn-1', 'planning'),
-          workflowBlockedEvent(
-            51,
-            'beegame_gate',
-            'turn-1',
-            'Bash',
-            'Playable Spec is not ready.',
-          ),
-          workflowPhaseEvent(52, 'beegame_gate', 'turn-1', 'building'),
           permissionRequestedEvent(53, 'beegame_gate', 'turn-1', 'Write'),
         ]);
       }
@@ -1609,260 +1786,9 @@ describe('beeGameAdapter prompt rules', () => {
       }),
     ]));
     expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
-    expect(polled.messages.some(message => message.content === 'Designing Playable Spec')).toBe(false);
-    expect(polled.messages.some(message => message.content === 'Building the game')).toBe(false);
     expect(status.phase).toBe('waiting_approval');
     expect(status.next_action).toBe('Review BeeGame permission request');
     expect(status.approval_required).toBe(true);
-  });
-
-  it('surfaces workflow blocks as project status alerts instead of chat messages', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_blocked',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_blocked/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_blocked',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_blocked/events?after=0') {
-        return jsonResponse([
-          turnStartedEvent(61, 'beegame_blocked', 'turn-1'),
-          workflowBlockedEvent(
-            62,
-            'beegame_blocked',
-            'turn-1',
-            'tool',
-            'BeeGame required design pack is incomplete before implementation: docs/PLAYABLE_SPEC.md',
-          ),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'status',
-        status: 'paused',
-      }),
-    ]));
-    expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
-    expect(status.phase).toBe('paused');
-    expect(status.blocked).toBe(true);
-    expect(status.blocked_reason).toContain('docs/PLAYABLE_SPEC.md');
-    expect(status.next_action).toContain('docs/PLAYABLE_SPEC.md');
-  });
-
-  it('keeps workflow paused visible after the pipeline reports failed', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_paused_after_failed',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:04.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_paused_after_failed/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_paused_after_failed',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_paused_after_failed/events?after=0') {
-        return jsonResponse([
-          turnStartedEvent(91, 'beegame_paused_after_failed', 'turn-1'),
-          workflowBlockedEvent(
-            92,
-            'beegame_paused_after_failed',
-            'turn-1',
-            'tool',
-            'BeeGame traceability matrix is incomplete: traceability_matrix.json is missing',
-            { phase: 'building', recoveryKind: 'playable_loop_review_required' },
-          ),
-          workflowFailedEvent(93, 'beegame_paused_after_failed', 'turn-1', 'BeeGame build did not complete'),
-          workflowPausedEvent(
-            94,
-            'beegame_paused_after_failed',
-            'turn-1',
-            'BeeGame traceability matrix is incomplete: traceability_matrix.json is missing',
-          ),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'status',
-        status: 'paused',
-        content: expect.stringContaining('traceability_matrix.json'),
-      }),
-    ]));
-    expect(status.phase).toBe('paused');
-    expect(status.blocked).toBe(true);
-    expect(status.blocked_reason).toContain('traceability_matrix.json');
-  });
-
-  it('retires stale workflow blocks when the same turn continues running tools', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_resumed_after_block',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:07.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_resumed_after_block/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_resumed_after_block',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:07.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_resumed_after_block/events?after=0') {
-        return jsonResponse([
-          turnStartedEvent(71, 'beegame_resumed_after_block', 'turn-1'),
-          workflowBlockedEvent(
-            72,
-            'beegame_resumed_after_block',
-            'turn-1',
-            'Bash',
-            'Playable Spec is not ready.',
-          ),
-          toolStartedEvent(73, 'beegame_resumed_after_block', 'tool_bash_retry', 'Bash', 'Bash'),
-          toolCompletedEvent(74, 'beegame_resumed_after_block', 'tool_bash_retry', 'Bash', 'Bash completed'),
-          toolStartedEvent(75, 'beegame_resumed_after_block', 'tool_edit', 'Edit', 'Edit'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(status.phase).toBe('running');
-    expect(status.blocked).toBe(false);
-    expect(status.next_action).toBe('Running Edit');
-  });
-
-  it('shows running when a new turn starts after an earlier workflow pause', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_continue_after_pause',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:10.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_continue_after_pause/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_continue_after_pause',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:10.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_continue_after_pause/events?after=0') {
-        return jsonResponse([
-          turnStartedEvent(81, 'beegame_continue_after_pause', 'turn-1'),
-          workflowBlockedEvent(
-            82,
-            'beegame_continue_after_pause',
-            'turn-1',
-            'tool',
-            'BeeGame playable loop review is incomplete: playable_loop_review.json contains invalid JSON',
-            { phase: 'building', recoveryKind: 'playable_loop_review_required' },
-          ),
-          workflowPausedEvent(
-            83,
-            'beegame_continue_after_pause',
-            'turn-1',
-            'BeeGame playable loop review is incomplete: playable_loop_review.json contains invalid JSON',
-          ),
-          turnStartedEvent(84, 'beegame_continue_after_pause', 'turn-2'),
-          toolStartedEvent(85, 'beegame_continue_after_pause', 'tool_write_review', 'Write', 'Write', 'turn-2'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(status.phase).toBe('running');
-    expect(status.blocked).toBe(false);
-    expect(status.next_action).toBe('Running Write');
   });
 
   it('deletes the backing BeeGame session artifacts when deleting a project', async () => {
@@ -2073,6 +1999,76 @@ function resultEvent(id: number, sessionId: string, turnId: string, inputTokens:
   };
 }
 
+function endTurnResultEvent(id: number, sessionId: string, turnId: string) {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'result',
+    text: 'Done',
+    payload: {
+      type: 'result',
+      stop_reason: 'end_turn',
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function compactBoundaryEvent(id: number, sessionId: string, turnId: string) {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'system.status',
+    text: 'system',
+    payload: {
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: {
+        trigger: 'auto',
+        pre_tokens: 87354,
+      },
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function bashCompletedEvent(id: number, sessionId: string, turnId: string, command: string, output: string) {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'tool.completed',
+    text: output,
+    payload: {
+      type: 'tool.completed',
+      toolUseID: `tool_${id}`,
+      toolName: 'Bash',
+      input: { command },
+      output,
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
+function bashFailedEvent(id: number, sessionId: string, turnId: string, command: string, output: string) {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'tool.failed',
+    text: output,
+    payload: {
+      type: 'tool.failed',
+      toolUseID: `tool_${id}`,
+      toolName: 'Bash',
+      input: { command },
+      output,
+    },
+    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
+  };
+}
+
 function runtimeObservationEvent(id: number, sessionId: string, status: string) {
   return {
     id,
@@ -2099,49 +2095,6 @@ function runtimeObservationEvent(id: number, sessionId: string, status: string) 
   };
 }
 
-function verificationRequiredEvent(id: number, sessionId: string) {
-  return {
-    id,
-    sessionId,
-    turnId: 'turn-1',
-    type: 'verification.required',
-    text: 'BeeGame playability verification is required',
-    payload: {
-      type: 'verification.required',
-      artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
-      checks: [
-        { id: 'clarity_30s', label: 'Clarity within 30 seconds', detail: 'Player understands goal, controls, and feedback quickly.' },
-        { id: 'interesting_decision_60s', label: 'First interesting decision within 60 seconds', detail: 'The first minute contains a meaningful player decision.' },
-      ],
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function verificationPassedEvent(id: number, sessionId: string) {
-  return {
-    id,
-    sessionId,
-    turnId: 'turn-1',
-    type: 'verification.required',
-    text: 'BeeGame playability verification passed',
-    payload: {
-      type: 'verification.required',
-      artifactPath: 'BEEGAME_PLAYABILITY_REVIEW.md',
-      status: 'pass',
-      generatedPaths: [
-        'traceability_matrix.json',
-        'playable_loop_review.md',
-        'BEEGAME_PLAYABILITY_REVIEW.md',
-      ],
-      checks: [
-        { id: 'start', label: 'Start playable loop', status: 'pass' },
-        { id: 'player_action', label: 'Player action changes state', status: 'pass' },
-      ],
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
 
 function turnCompletedEvent(id: number, sessionId: string, turnId: string) {
   return {
@@ -2152,27 +2105,6 @@ function turnCompletedEvent(id: number, sessionId: string, turnId: string) {
     text: 'BeeGame turn completed',
     payload: { type: 'turn.completed' },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function workflowPipelineEvent(
-  id: number,
-  sessionId: string,
-  currentPhase: string,
-  stages: Array<{ id: string; status: string }>,
-) {
-  return {
-    id,
-    sessionId,
-    turnId: 'turn-1',
-    type: 'workflow.pipeline',
-    text: currentPhase,
-    payload: {
-      type: 'workflow.pipeline',
-      currentPhase,
-      stages,
-    },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }
 
@@ -2198,78 +2130,6 @@ function permissionResolvedEvent(
       decision,
       ...(autoDenied ? { autoDenied: true } : {}),
       ...(reason ? { reason } : {}),
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function workflowPhaseEvent(id: number, sessionId: string, turnId: string, phase: 'planning' | 'building' | 'completed') {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'workflow.phase',
-    text: phase,
-    payload: {
-      type: 'workflow.phase',
-      phase,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function workflowBlockedEvent(
-  id: number,
-  sessionId: string,
-  turnId: string,
-  toolName: string,
-  reason: string,
-  payload: Record<string, unknown> = {},
-) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'workflow.blocked',
-    text: reason,
-    payload: {
-      type: 'workflow.blocked',
-      phase: 'planning',
-      blockedToolName: toolName,
-      toolUseID: `tool_${id}`,
-      reason,
-      ...payload,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function workflowFailedEvent(id: number, sessionId: string, turnId: string, error: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'workflow.pipeline',
-    text: 'failed',
-    payload: {
-      type: 'workflow.pipeline',
-      status: 'failed',
-      error,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function workflowPausedEvent(id: number, sessionId: string, turnId: string, reason: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'system.status',
-    text: 'BeeGame workflow paused',
-    payload: {
-      type: 'workflow.paused',
-      reason,
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
   };

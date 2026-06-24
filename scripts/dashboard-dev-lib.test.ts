@@ -13,8 +13,8 @@ describe('dashboard dev launcher helpers', () => {
       env: {},
     })
 
-    expect(options.preferredApiPort).toBe(3040)
-    expect(options.preferredFrontendPort).toBe(5173)
+    expect(options.preferredApiPort).toBe(62174)
+    expect(options.preferredFrontendPort).toBe(62173)
     expect(options.workspacePath).toBe(resolve('/repo', 'Projects'))
     expect(options.frontendDir).toBe(resolve('/repo', 'apps/frontend'))
   })
