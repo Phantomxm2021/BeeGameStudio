@@ -184,4 +184,30 @@ describe('MessageItem semantic rendering', () => {
         expect(screen.getByText('revise')).not.toBeNull();
         expect(screen.getByText('请先修订后继续。')).not.toBeNull();
     });
+
+    it('renders last failed check as a recoverable alert action', async () => {
+        const onContinueFixing = vi.fn();
+        render(
+            <MessageItem
+                m={{
+                    id: 'failed-check-1',
+                    sender: 'system',
+                    content: 'Last check failed.\nCommand: game-engine build\nOutput: Exit code 1',
+                    timestamp: Date.now(),
+                    type: 'system_status',
+                    taskKind: 'last_check_failed',
+                    requiresUserAction: true,
+                    nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+                }}
+                onContinueFixing={onContinueFixing}
+            />
+        );
+
+        expect(screen.getByText('Last check failed')).not.toBeNull();
+        await userEvent.setup().click(screen.getByRole('button', { name: /continue fixing/i }));
+
+        expect(onContinueFixing).toHaveBeenCalledWith(
+            'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+        );
+    });
 });

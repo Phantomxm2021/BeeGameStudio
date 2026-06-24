@@ -14,6 +14,7 @@ interface ChatPanelProps {
     chatInput: string;
     onChatInputChange: (val: string) => void;
     onSend: () => void;
+    onSendMessage?: (message: string) => void;
     onPreviewArtifact: (id: string, title: string, content?: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -54,6 +55,7 @@ export const ChatPanel = memo(({
     chatInput,
     onChatInputChange,
     onSend,
+    onSendMessage,
     onPreviewArtifact,
     textareaRef,
     scrollContainerRef,
@@ -111,6 +113,10 @@ export const ChatPanel = memo(({
     const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || gddReview);
     const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview);
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
+    const handleContinueFixing = (message: string) => {
+        if (isComposerLocked || waitingApproval.isBlockingChat) return;
+        onSendMessage?.(message);
+    };
 
     return (
         <div className="flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl">
@@ -135,6 +141,7 @@ export const ChatPanel = memo(({
                                 key={m.id}
                                 m={m}
                                 onPreviewArtifact={onPreviewArtifact}
+                                onContinueFixing={onSendMessage ? handleContinueFixing : undefined}
                             />
                         ))
                     )}

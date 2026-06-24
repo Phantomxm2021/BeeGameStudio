@@ -1268,6 +1268,67 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 
+  it('shows a recoverable alert when a turn ends after a failed validation command', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_failed_check',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_failed_check/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_failed_check',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_failed_check/events?after=0') {
+        return jsonResponse([
+          bashFailedEvent(
+            40,
+            'beegame_failed_check',
+            'turn-1',
+            'game-engine build',
+            'Exit code 1\nCould not resolve entry module "index.html".',
+          ),
+          turnCompletedEvent(41, 'beegame_failed_check', 'turn-1'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent_message',
+        sender: 'system',
+        task_kind: 'last_check_failed',
+        requires_user_action: true,
+        next_action: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+        content: expect.stringContaining('Last check failed'),
+      }),
+      expect.objectContaining({ type: 'status', status: 'idle' }),
+    ]));
+  });
+
   it('hides streaming partials and shows only the final assistant message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

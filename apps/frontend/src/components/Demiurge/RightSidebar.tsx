@@ -267,6 +267,7 @@ export function RightSidebar({
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}
                                 onSend={handleSend}
+                                onSendMessage={onSendMessage}
                                 onPreviewArtifact={handlePreviewArtifact}
                                 textareaRef={textareaRef}
                                 scrollContainerRef={scrollContainerRef}

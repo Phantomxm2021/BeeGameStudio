@@ -11,6 +11,8 @@ import { ArtifactCard } from './ArtifactCard';
 import { getSystemStatusLabel, normalizeCanonicalMessageType } from '../../../utils/messageSemantics';
 import type { ChatDisplayMessage, GovernanceDisplaySnapshot } from '../../../viewModels/displayModels';
 
+const CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT = 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
+
 const normalizeEscapedNewlines = (input: string): string => {
     if (!input) return '';
     return input.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
@@ -483,7 +485,15 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
 });
 EvidenceDivider.displayName = 'EvidenceDivider';
 
-export const MessageItem = memo(({ m, onPreviewArtifact }: { m: ChatDisplayMessage, onPreviewArtifact?: (artifactId: string, title: string, content?: string) => void }) => {
+export const MessageItem = memo(({
+    m,
+    onPreviewArtifact,
+    onContinueFixing,
+}: {
+    m: ChatDisplayMessage,
+    onPreviewArtifact?: (artifactId: string, title: string, content?: string) => void,
+    onContinueFixing?: (content: string) => void,
+}) => {
     const agent = AGENT_UI_MAP[m.sender];
     const isUser = m.sender === 'user';
     const semanticType = normalizeCanonicalMessageType({
@@ -508,6 +518,36 @@ export const MessageItem = memo(({ m, onPreviewArtifact }: { m: ChatDisplayMessa
 
     if (!isUser && isContextUseMessage(m)) {
         return <EvidenceDivider label="Use Context" content={m.content} messageId={m.id} />;
+    }
+
+    if (!isUser && m.taskKind === 'last_check_failed') {
+        const continueMessage = m.nextAction || CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT;
+        return (
+            <motion.div
+                key={m.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-start space-x-3"
+            >
+                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-1">
+                        Last check failed
+                    </div>
+                    <div className="text-sm text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+                        {m.content}
+                    </div>
+                    <button
+                        type="button"
+                        disabled={!onContinueFixing}
+                        onClick={() => onContinueFixing?.(continueMessage)}
+                        className="mt-3 inline-flex items-center justify-center rounded-full bg-zinc-950 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                    >
+                        Continue fixing
+                    </button>
+                </div>
+            </motion.div>
+        );
     }
 
     if (isError) {
