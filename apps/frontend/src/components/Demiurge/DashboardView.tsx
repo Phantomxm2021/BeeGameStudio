@@ -13,7 +13,7 @@ import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
 import type { PendingUserReviewItem } from '../../services/api';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
-import { deriveGlobalWorkflowProgress, GLOBAL_WORKFLOW_PHASES } from '../../utils/workflowProgress';
+import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
 import { isBeeGameAdapterEnabled } from '../../services/beeGameAdapter';
 
@@ -282,7 +282,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         const nextAction = String(projectStatus?.next_action || '').toLowerCase();
         const phase = String(projectStatus?.phase || '').toLowerCase();
         return ['pending', 'running', 'clarification_required'].includes(nextAction)
-            || nextAction.includes('pipeline_running')
             || phase === 'running'
             || phase === 'waiting_approval';
     }, [projectStatus?.next_action, projectStatus?.phase]);
@@ -360,14 +359,18 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         };
     }, [projectId, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive]);
 
-    // Calculate progress across the full idea-to-playable workflow.
+    // BeeGame follows the live runtime turn, not the legacy multi-stage workflow.
     const progressPercent = useMemo(() => {
+        if (isBeeGameMode) {
+            if (currentStatus === 'running' || currentStatus === 'waiting_approval') return 50;
+            return 0;
+        }
         return deriveGlobalWorkflowProgress({
             phaseInfo,
             currentStatus,
             messages,
         });
-    }, [phaseInfo, currentStatus, messages]);
+    }, [isBeeGameMode, currentStatus, phaseInfo, messages]);
 
     const phaseLabel = useMemo(() => {
         const phaseName = String(phaseInfo?.phase_name || '').trim();
@@ -429,7 +432,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
         console.log(`[DashboardView] Project: ${projectId} | Token Usage:`, projectTokenUsage);
-        console.log(`[DashboardView] Project Progress: ${progressPercent.toFixed(2)}% (Phase: ${phaseInfo?.phase_name || 'idea_intake'}/${GLOBAL_WORKFLOW_PHASES.length})`);
+        console.log(`[DashboardView] Project Progress: ${progressPercent.toFixed(2)}% (Phase: ${phaseInfo?.phase_name || 'idle'})`);
     }, [projectId, tokenUsage, progressPercent, phaseInfo]);
 
     const handleToggleStatus = async () => {

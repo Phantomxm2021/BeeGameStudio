@@ -29,6 +29,7 @@ export type BeeGameEventType =
   | 'system.status'
   | 'result'
   | 'turn.completed'
+  | 'turn.empty'
   | 'turn.failed'
   | 'session.stopped'
   | 'session.failed'
@@ -269,7 +270,6 @@ export class BeeGameSessionManager {
     record.nextTurnIndex += 1
     this.append(record, 'turn.started', text)
     this.append(record, 'user.message', text)
-    this.append(record, 'system.status', 'BeeGame runtime is starting.')
 
     void this.runDirectTurn(record, text)
     return cloneSession(record.session)
@@ -358,14 +358,32 @@ export class BeeGameSessionManager {
       })
       record.runner = runner
       try {
+        const eventCountBeforeTurn = record.events.length
+        const toolUseCountBeforeTurn = record.toolUses.size
         await this.submitToRunner(record, runner, prompt, signal)
+        const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
+        const hadRuntimeActivity = hadToolUse || record.events
+          .slice(eventCountBeforeTurn)
+          .some(event => (
+            event.type.startsWith('tool.') ||
+            event.type.startsWith('permission.')
+          ))
+        if (!signal.aborted && record.session.status === 'running') {
+          if (!hadRuntimeActivity) {
+            this.appendRuntimeObservation(record, 'empty_turn')
+            this.append(
+              record,
+              'turn.empty',
+              'Agent ended this turn without using tools. Send continue or retry to start implementation.',
+            )
+          } else {
+            this.appendRuntimeObservation(record, 'turn_completed')
+            this.append(record, 'turn.completed', 'Turn ended')
+          }
+        }
       } finally {
         runner.stop()
         if (record.runner === runner) record.runner = null
-      }
-      if (!signal.aborted && record.session.status === 'running') {
-        this.appendRuntimeObservation(record, 'turn_completed')
-        this.append(record, 'turn.completed', 'BeeGame turn completed')
       }
     } catch (err) {
       if (record.session.status === 'running') {
@@ -535,7 +553,7 @@ export class BeeGameSessionManager {
 
   private appendRuntimeObservation(
     record: SessionRecord,
-    status: 'initialized' | 'turn_completed',
+    status: 'initialized' | 'turn_completed' | 'empty_turn',
   ): void {
     this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
       type: 'runtime.observation',
@@ -1234,33 +1252,32 @@ function isSafeBeeGameBashCommand(
   if (commandParts.length === 0) return false
   let commandCwd = cwd
   for (const part of commandParts) {
-    const tokens = splitShellLike(part).map(cleanShellToken).filter(Boolean)
+    const tokens = splitShellLike(part)
+      .map(cleanShellToken)
+      .filter(token => token && !isHarmlessShellRedirectionToken(token))
     if (tokens.length === 0) return false
-    if (tokens.some(token => isDangerousShellToken(token))) return false
     if (isSafeChangeDirectoryCommand(tokens, commandCwd, allowedRoot)) {
       commandCwd = resolveCommandDirectory(commandCwd, tokens[1] || '.')
       continue
     }
     if (
       isSafeReadOnlyShellCommand(tokens) ||
-      isSafeProjectPackageCommand(tokens) ||
-      isSafeProjectToolchainCommand(tokens) ||
+      isSafeProjectFilesystemMutationCommand(tokens, commandCwd, allowedRoot) ||
       isSafeProjectFilesystemSetupCommand(tokens, commandCwd, allowedRoot)
     ) {
       continue
     }
-    return false
+    if (tokens.some(token => isDangerousShellToken(token))) return false
+    if (tokens.some(token => isSensitiveShellPathToken(commandCwd, allowedRoot, token))) {
+      return false
+    }
   }
   return true
 }
 
 function hasUnsafeShellControlSyntax(command: string): boolean {
   return (
-    command.includes('|') ||
     command.includes(';') ||
-    command.includes('||') ||
-    command.includes('>') ||
-    command.includes('<') ||
     command.includes('`') ||
     command.includes('$(')
   )
@@ -1268,18 +1285,32 @@ function hasUnsafeShellControlSyntax(command: string): boolean {
 
 function splitShellCommandChain(command: string): string[] {
   return command
-    .split('&&')
+    .split(/&&|\|\||\|/)
     .map(part => part.trim())
     .filter(Boolean)
 }
 
+function isHarmlessShellRedirectionToken(token: string): boolean {
+  return /^([12])?>&1$/.test(token) ||
+    /^([12])?>\/dev\/null$/.test(token) ||
+    /^([12])?<\/dev\/null$/.test(token)
+}
+
 function isDangerousShellToken(token: string): boolean {
   const normalized = token.toLowerCase()
+  if (
+    normalized.startsWith('--prefix=') ||
+    normalized.startsWith('--location=global')
+  ) {
+    return true
+  }
   return [
-    'rm',
-    'mv',
+    '-g',
+    '--global',
     'chmod',
     'chown',
+    'mv',
+    'rm',
     'sudo',
     'curl',
     'wget',
@@ -1289,61 +1320,35 @@ function isDangerousShellToken(token: string): boolean {
   ].includes(normalized)
 }
 
+function isSensitiveShellPathToken(
+  cwd: string,
+  allowedRoot: string,
+  token: string,
+): boolean {
+  if (!isPathLikeShellToken(token)) return false
+  const resolvedPath = isAbsolute(token) ? resolve(token) : resolve(cwd, token)
+  const rel = relative(resolve(allowedRoot), resolvedPath).split('\\').join('/')
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return true
+  return isSensitiveProjectMutationPath(rel)
+}
+
+function isPathLikeShellToken(token: string): boolean {
+  if (!token || token.startsWith('-')) return false
+  return (
+    token.startsWith('/') ||
+    token.startsWith('./') ||
+    token.startsWith('../') ||
+    token === '.' ||
+    token === '..' ||
+    token.includes('/')
+  )
+}
+
 function isSafeReadOnlyShellCommand(tokens: string[]): boolean {
   const [command, firstArg] = tokens
   if (command === 'pwd') return tokens.length === 1
   if (command === 'sed') return firstArg === '-n'
-  return ['ls', 'cat', 'find', 'grep', 'rg'].includes(command)
-}
-
-function isSafeProjectPackageCommand(tokens: string[]): boolean {
-  const [command, firstArg] = tokens
-  if (!command || !isProjectPackageManager(command)) return false
-  if (!firstArg) return false
-  if (isGlobalPackageManagerInvocation(tokens)) return false
-  return [
-    'add',
-    'build',
-    'check',
-    'ci',
-    'create',
-    'exec',
-    'install',
-    'run',
-    'test',
-  ].includes(firstArg)
-}
-
-function isProjectPackageManager(command: string): boolean {
-  return ['bun', 'npm', 'npx', 'pnpm', 'yarn'].includes(command)
-}
-
-function isGlobalPackageManagerInvocation(tokens: string[]): boolean {
-  return tokens.some(token =>
-    token === '-g' ||
-    token === '--global' ||
-    token.startsWith('--prefix=') ||
-    token.startsWith('--location=global'),
-  )
-}
-
-function isSafeProjectToolchainCommand(tokens: string[]): boolean {
-  const [command, firstArg] = tokens
-  if (!command) return false
-  if (['pytest', 'tsc', 'vite', 'vitest'].includes(command)) return true
-  if (command === 'python' || command === 'python3') {
-    return firstArg === '-m'
-  }
-  if (command === 'cargo') {
-    return ['build', 'check', 'test'].includes(firstArg || '')
-  }
-  if (command === 'go') {
-    return ['build', 'test'].includes(firstArg || '')
-  }
-  if (command === 'dotnet') {
-    return ['build', 'test'].includes(firstArg || '')
-  }
-  return false
+  return ['ls', 'cat', 'find', 'grep', 'rg', 'head', 'tail', 'wc'].includes(command)
 }
 
 function isSafeChangeDirectoryCommand(
@@ -1357,6 +1362,47 @@ function isSafeChangeDirectoryCommand(
 
 function resolveCommandDirectory(cwd: string, path: string): string {
   return isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+}
+
+function isSafeProjectFilesystemMutationCommand(
+  tokens: string[],
+  cwd: string,
+  allowedRoot: string,
+): boolean {
+  const [command] = tokens
+  if (command === 'rm') {
+    const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
+    return pathArgs.length > 0 &&
+      pathArgs.every(path => isSafeDependencyCleanupPath(cwd, allowedRoot, path))
+  }
+  return false
+}
+
+function isSafeDependencyCleanupPath(
+  cwd: string,
+  allowedRoot: string,
+  path: string,
+): boolean {
+  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+  const workspaceRoot = resolve(allowedRoot)
+  const rel = relative(workspaceRoot, resolvedPath).split('\\').join('/')
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return false
+  if (resolvedPath === resolve(cwd)) return false
+  if (path === '.' || path === './' || path === '..') return false
+  if (isSensitiveProjectMutationPath(rel)) return false
+  const projectRel = relative(resolve(cwd), resolvedPath).split('\\').join('/')
+  if (projectRel === '' || projectRel.startsWith('..') || isAbsolute(projectRel)) {
+    return false
+  }
+  const normalized = projectRel.toLowerCase()
+  return [
+    'node_modules',
+    'package-lock.json',
+    'pnpm-lock.yaml',
+    'yarn.lock',
+    'bun.lock',
+    'bun.lockb',
+  ].includes(normalized)
 }
 
 function isSafeProjectFilesystemSetupCommand(

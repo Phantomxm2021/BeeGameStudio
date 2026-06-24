@@ -251,7 +251,7 @@ export const RuntimePanel = memo(({
                             </div>
                         ) : null}
                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                            {projectStatus?.next_action || 'document_pipeline'}
+                            {projectStatus?.next_action || 'idle'}
                         </div>
                     </div>
                 ) : null}
@@ -449,7 +449,7 @@ export const RuntimePanel = memo(({
                         ) : null}
                         {hasGovernanceBlock && (projectStatus?.governance?.blocked_phase || projectStatus?.phase) ? (
                             <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                                Blocked phase: {projectStatus?.governance?.blocked_phase || projectStatus?.phase}
+                                Blocked scope: {projectStatus?.governance?.blocked_phase || projectStatus?.phase}
                             </div>
                         ) : null}
                         {projectStatus?.blocked_reason ? (
@@ -653,7 +653,7 @@ export const RuntimePanel = memo(({
                                 const affectedModules = Array.isArray(rollback.affected_modules) ? rollback.affected_modules : [];
                                 const phaseSequence = Array.isArray(execution.phase_sequence) ? execution.phase_sequence : [];
                                 const isIterationReview = review?.type === 'ITERATION_REAPPROVAL_REVIEW';
-                                const isGddApproval = review?.review_status?.workflow_id === 'gdd_v2' || review?.type === 'GDD_APPROVAL_REVIEW';
+                                const isGddApproval = review?.type === 'GDD_APPROVAL_REVIEW';
                                 const isBeeGamePermission = isBeeGamePermissionReview(review);
                                 const isClarificationReview = review?.type === 'INTENT_CLARIFICATION';
                                 const isDocumentApproval = isStructuredDocumentApprovalReview(review);

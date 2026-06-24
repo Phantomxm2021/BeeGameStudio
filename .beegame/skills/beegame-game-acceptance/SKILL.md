@@ -13,6 +13,8 @@ Do not treat an API `end_turn`, a summary message, a typecheck pass, or a build 
 
 Completion requires evidence that the project can be used in its own workspace and that the core player loop from the confirmed brief works.
 
+If runtime interaction is available, do not substitute a compile/build pass or static code inspection for actually exercising the player path. If runtime interaction is unavailable, inspect the code path from input to state change to rendering/output and mark any unverified runtime behavior explicitly.
+
 ## Acceptance Workflow
 
 1. Identify the project type from its files, manifests, engine config, README, and docs.
@@ -22,7 +24,8 @@ Completion requires evidence that the project can be used in its own workspace a
 5. Run validation commands directly from the project directory. Do not pipe them through `head`, `tail`, `sed`, or similar filters when the exit status matters.
 6. Verify the core player loop with runtime interaction, engine/editor checks, project tests, or direct code-level evidence when runtime execution is unavailable.
 7. Compare docs and README claims against implemented files and behavior.
-8. Return `PASS`, `FAIL`, or `BLOCKED` with evidence.
+8. Check that the implemented code actually wires core systems together. A class, service, prefab, scene, script, asset, or handler being present is not enough if it is not connected to the runtime path.
+9. Return `PASS`, `FAIL`, or `BLOCKED` with evidence.
 
 ## Tooling Rule
 
@@ -54,6 +57,7 @@ Return `PASS` only when all applicable items are true:
 - The project can be installed, opened, or run using its own documented setup.
 - Declared check/build/test commands pass, or unsupported commands are removed from docs/scripts instead of being advertised.
 - The core player loop is verified: start, objective clarity, main action, feedback, win/fail/progression, and restart/continue/replay as appropriate.
+- The main input/action path is wired from player input through game state update to visible/audio/haptic feedback or the engine equivalent.
 - README run instructions match the actual project.
 - Docs do not claim implemented features that are absent from code.
 - UI/UX flow is implemented enough for a player to start, understand, play, fail or win, and recover.
@@ -73,6 +77,7 @@ Common fail cases:
 - README commands are wrong.
 - Declared scripts or dependencies are missing.
 - Docs claim features that code does not implement.
+- A core system is written but not wired into the playable runtime path.
 - Placeholder assets are absent despite being required by the brief.
 
 Return `BLOCKED` only when the environment prevents a required verification step and there is not enough evidence to decide pass or fail.

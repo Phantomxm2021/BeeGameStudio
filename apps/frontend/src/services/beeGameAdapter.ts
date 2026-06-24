@@ -37,6 +37,7 @@ type BeeGameEvent = {
     | 'system.status'
     | 'result'
     | 'turn.completed'
+    | 'turn.empty'
     | 'turn.failed'
     | 'session.stopped'
     | 'session.failed';
@@ -391,23 +392,10 @@ export const beeGameAdapter = {
     const eventResult = await fetchBeeGameEventsResultForBinding(binding, afterEventId);
     const events = eventResult.events;
     const lastEventId = events.length > 0 ? events[events.length - 1].id : afterEventId;
-    const contextEvents = eventResult.recoveredFromTranscript || shouldCheckCompactContinuation(events)
-      ? (await fetchBeeGameEventsResultForBinding(binding).catch(() => ({ events, recoveredFromTranscript: eventResult.recoveredFromTranscript }))).events
-      : events;
-    const compactNotice = buildCompactContinuationNotice(projectId, contextEvents, binding.workspacePath, afterEventId);
-    const recoveredIdleStatus = buildRecoveredTranscriptIdleStatus(
-      projectId,
-      binding.sessionId,
-      contextEvents,
-      eventResult.recoveredFromTranscript,
-    );
     return {
       lastEventId,
-      messages: [
-        ...normalizeLiveEvents(projectId, events).flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath)),
-        ...(compactNotice ? [compactNotice] : []),
-        ...(recoveredIdleStatus ? [recoveredIdleStatus] : []),
-      ],
+      messages: normalizeLiveEvents(projectId, events)
+        .flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath)),
     };
   },
 
@@ -417,10 +405,8 @@ export const beeGameAdapter = {
       ? await fetchBeeGameEventsResultForBinding(binding)
       : { events: [], recoveredFromTranscript: false };
     const events = eventResult.events;
-    const pending = getPendingPermissionEvents(events);
-    const runtimeStatus = deriveRuntimeStatus(events, pending, {
-      recoveredFromTranscript: eventResult.recoveredFromTranscript,
-    });
+    const pending = eventResult.recoveredFromTranscript ? [] : getPendingPermissionEvents(events);
+    const runtimeStatus = deriveRuntimeStatus(events, pending, eventResult.recoveredFromTranscript);
     return {
       project_id: projectId,
       phase: runtimeStatus.phase,
@@ -432,28 +418,17 @@ export const beeGameAdapter = {
       next_action: runtimeStatus.nextAction,
       context: deriveContextVisibility(events),
       build_report: null,
-      review_status: pending.length > 0
-        ? {
-            workflow_id: 'beegame',
-            lane_id: 'permission',
-            lane_status: 'awaiting_approval',
-            decision_status: 'awaiting_user',
-            reason_codes: ['beegame_permission_request'],
-            requires_user_action: true,
-            user_action_kind: 'approve',
-            pending_issue_count: pending.length,
-            blocking_issue_count: pending.length,
-          }
-        : null,
+      review_status: null,
     };
   },
 
   async getPendingUserReviews(projectId: string): Promise<{ items: PendingUserReviewItem[] }> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return { items: [] };
-    const events = await fetchBeeGameEventsForBinding(binding);
+    const eventResult = await fetchBeeGameEventsResultForBinding(binding);
+    if (eventResult.recoveredFromTranscript) return { items: [] };
     return {
-      items: getPendingPermissionEvents(events).map(event => permissionEventToReview(event, binding)),
+      items: getPendingPermissionEvents(eventResult.events).map(event => permissionEventToReview(event, binding)),
     };
   },
 
@@ -890,91 +865,6 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
   }));
 }
 
-function shouldCheckCompactContinuation(events: BeeGameEvent[]): boolean {
-  return events.some(event => event.type === 'turn.completed' || isEndTurnResultEvent(event));
-}
-
-function buildCompactContinuationNotice(
-  projectId: string,
-  events: BeeGameEvent[],
-  workspacePath: string,
-  afterEventId = 0,
-): WebSocketMessage | null {
-  return buildCompactContinuationNotices(projectId, events, workspacePath, afterEventId)[0] || null;
-}
-
-function buildRecoveredTranscriptIdleStatus(
-  projectId: string,
-  sessionId: string,
-  events: BeeGameEvent[],
-  recoveredFromTranscript: boolean,
-): WebSocketMessage | null {
-  if (!recoveredFromTranscript || !getActiveTurn(events)) return null;
-  const latest = events.at(-1);
-  return {
-    type: 'status',
-    task_id: sessionId,
-    project_id: projectId,
-    status: 'idle',
-    content: 'Backend restarted during the previous turn. Send your next instruction to continue from the transcript.',
-    timestamp: latest ? Date.parse(latest.createdAt) || Date.now() : Date.now(),
-  } as WebSocketMessage;
-}
-
-function buildCompactContinuationNotices(
-  projectId: string,
-  events: BeeGameEvent[],
-  _workspacePath: string,
-  afterEventId = 0,
-): WebSocketMessage[] {
-  const notices: WebSocketMessage[] = [];
-  for (const completed of events) {
-    if (completed.type !== 'turn.completed' || completed.id <= afterEventId) continue;
-    const turnEvents = events.filter(event => event.turnId === completed.turnId && event.id <= completed.id);
-    const compact = turnEvents.find(isCompactBoundaryEvent);
-    if (!compact) continue;
-    const eventsAfterCompact = turnEvents.filter(event => event.id > compact.id);
-    if (!eventsAfterCompact.some(isEndTurnResultEvent)) continue;
-    if (eventsAfterCompact.some(isToolEvent)) continue;
-    const latestTool = getLatestToolBefore(turnEvents, compact.id);
-    if (!latestTool) continue;
-    notices.push({
-      type: 'status',
-      task_id: completed.sessionId,
-      project_id: projectId,
-      sender: 'system',
-      status: 'idle',
-      message_id: `beegame-compact-continuation-${completed.sessionId}-${completed.turnId || 'turn'}-${completed.id}`,
-      content: 'Context compaction ended the turn before tool work resumed. Send "continue" to resume from the recorded execution snapshot.',
-      timestamp: Date.parse(completed.createdAt) || Date.now(),
-      task_kind: 'runtime_notice',
-    } as WebSocketMessage);
-  }
-  return notices;
-}
-
-function isCompactBoundaryEvent(event: BeeGameEvent): boolean {
-  return event.type === 'system.status' &&
-    getPayloadString(event, 'type') === 'system' &&
-    getPayloadString(event, 'subtype') === 'compact_boundary';
-}
-
-function isEndTurnResultEvent(event: BeeGameEvent): boolean {
-  return event.type === 'result' && getPayloadString(event, 'stop_reason') === 'end_turn';
-}
-
-function getLatestToolBefore(events: BeeGameEvent[], beforeEventId: number): BeeGameEvent | null {
-  for (const event of [...events].reverse()) {
-    if (event.id >= beforeEventId) continue;
-    if (isToolEvent(event)) return event;
-  }
-  return null;
-}
-
-function isToolEvent(event: BeeGameEvent): boolean {
-  return event.type === 'tool.started' || event.type === 'tool.completed' || event.type === 'tool.failed' || event.type === 'tool.progress';
-}
-
 function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = ''): WebSocketMessage[] {
   const taskId = event.sessionId;
   switch (event.type) {
@@ -1075,8 +965,14 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'runtime.observation':
       return [];
     case 'turn.completed':
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
+    case 'turn.empty':
+      return [
+        baseMessage('agent_message', event, projectId, 'system'),
+        { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
+      ];
     case 'session.stopped':
-      return [{ type: 'status', task_id: taskId, project_id: projectId, status: event.type === 'turn.completed' ? 'idle' : 'stopped' } as WebSocketMessage];
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'stopped' } as WebSocketMessage];
     case 'turn.failed':
     case 'session.failed':
       return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as WebSocketMessage];
@@ -1242,7 +1138,7 @@ function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGam
 function deriveRuntimeStatus(
   events: BeeGameEvent[],
   pending: BeeGameEvent[],
-  options: { recoveredFromTranscript?: boolean } = {},
+  recoveredFromTranscript = false,
 ): {
   phase: string;
   nextAction: string;
@@ -1264,10 +1160,10 @@ function deriveRuntimeStatus(
 
   const activeTurn = getActiveTurn(events);
   if (activeTurn) {
-    if (options.recoveredFromTranscript) {
+    if (recoveredFromTranscript) {
       return {
         phase: 'idle',
-        nextAction: 'Backend restarted during the previous turn. Send your next instruction to continue from the transcript.',
+        nextAction: 'Ready for next request',
         updatedAt,
         activeAgents: [],
         agentStatus: 'idle',
@@ -1292,7 +1188,7 @@ function deriveRuntimeStatus(
       agentStatus: 'failed',
     };
   }
-  if (latest?.type === 'turn.completed' || latest?.type === 'assistant.message' || latest?.type === 'result') {
+  if (latest?.type === 'turn.completed' || latest?.type === 'turn.empty' || latest?.type === 'assistant.message' || latest?.type === 'result') {
     return {
       phase: 'idle',
       nextAction: 'Ready for next request',
@@ -1317,7 +1213,7 @@ function getActiveTurn(events: BeeGameEvent[]): string | null {
       openTurns.add(getTurnDisplayId(event));
       continue;
     }
-    if (event.type === 'turn.completed' || event.type === 'turn.failed') {
+    if (event.type === 'turn.completed' || event.type === 'turn.empty' || event.type === 'turn.failed') {
       openTurns.delete(getTurnDisplayId(event));
       continue;
     }
@@ -1538,10 +1434,6 @@ function buildIdeaIntakePrompt(idea: string): string {
     '',
     getResponseLanguageInstruction(idea),
     '',
-    getBeeGameBrandInstruction(),
-    '',
-    'Workspace rule: use only the current working directory for all project files. Do not create, read, edit, or cd into paths outside the current working directory. If you create a game, place it inside this workspace.',
-    '',
     'Before implementing or modifying files, first help the user choose a direction.',
     'Return 2-3 concise options that clarify gameplay, scope, tech approach, and visual style.',
     'Ask the user to pick one option or describe changes. Do not write code, create files, or run implementation commands until the user chooses.',
@@ -1550,24 +1442,49 @@ function buildIdeaIntakePrompt(idea: string): string {
 
 function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
   const settings = brief.settings;
+  const languageSource = [
+    brief.idea,
+    brief.option.title,
+    brief.option.pitch,
+    brief.option.gameplay,
+    settings.notes ?? '',
+  ].join('\n');
+  if (containsCjk(languageSource)) {
+    return [
+      '我要做一个完整游戏项目。',
+      '',
+      `原始想法：${brief.idea}`,
+      `已选择的游戏方向：${brief.option.title}`,
+      `方向简介：${brief.option.pitch}`,
+      `玩法：${brief.option.gameplay}`,
+      `核心机制：${brief.option.coreMechanic}`,
+      `第一分钟体验：${brief.option.playerFirstMinute}`,
+      `第一版目标：${brief.option.firstBuild}`,
+      `主要风险：${brief.option.risk}`,
+      `Platform: ${settings.platform}`,
+      `Visual style: ${settings.visualStyle}`,
+      `Dimension: ${settings.dimension}`,
+      `Genre: ${settings.genre}`,
+      `Inputs: ${settings.inputs.join(', ')}`,
+      `Scope: ${settings.scope}`,
+      settings.notes ? `补充说明：${settings.notes}` : '',
+      '',
+      '请先在 docs/ 下完成游戏策划、GDD、技术方案、art direction、美术资源占位说明、audio direction、UI/UX、调参与验收说明。',
+      '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder asset，并说明 replaceable 规则。',
+      '实现后请运行你认为适合当前项目的检查和验证，发现问题就继续修复。',
+      '最终请总结已完成内容、验证结果和仍然遗留的问题。',
+    ].filter(Boolean).join('\n');
+  }
   return [
-    'Confirmed BeeGame build brief:',
-    'Goal: deliver a complete game project, not only a playable demo. The first delivery may use placeholder assets, but it must define a full game loop, win/fail rules, UI/UX flow, art/audio direction, and replaceable asset slots.',
+    'I want to build a complete game project.',
     '',
-    `Idea: ${brief.idea}`,
-    `Selected game mode: ${brief.option.title}`,
-    `Project folder name: ${getBriefFolderName(brief, getBriefDisplayTitle(brief))}`,
-    `Mode pitch: ${brief.option.pitch}`,
+    `Original idea: ${brief.idea}`,
+    `Selected game direction: ${brief.option.title}`,
+    `Direction pitch: ${brief.option.pitch}`,
     `Gameplay: ${brief.option.gameplay}`,
-    `Core gameplay hypothesis: ${brief.option.coreGameplayHypothesis}`,
-    `Experience snapshot: ${brief.option.experienceSnapshot}`,
-    `Player first minute: ${brief.option.playerFirstMinute}`,
-    `Why this fits the user idea: ${brief.option.whyFitsIdea}`,
-    `First playable slice for this mode: ${brief.option.playablePrototype}`,
-    `Validation target: ${brief.option.validationTarget}`,
     `Core mechanic: ${brief.option.coreMechanic}`,
-    `Complete game delivery target: ${brief.option.firstBuild}`,
-    `Validation goal: ${brief.option.validationGoal}`,
+    `Player first minute: ${brief.option.playerFirstMinute}`,
+    `First build target: ${brief.option.firstBuild}`,
     `Main risk: ${brief.option.risk}`,
     `Platform: ${settings.platform}`,
     `Visual style: ${settings.visualStyle}`,
@@ -1577,50 +1494,11 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     `Scope: ${settings.scope}`,
     settings.notes ? `Notes: ${settings.notes}` : '',
     '',
-    getResponseLanguageInstruction(brief.idea),
-    '',
-    getBeeGameBrandInstruction(),
-    '',
-    'Workspace rule: create game files only inside the active BeeGame workspace.',
-    'The current working directory is already the project directory. Do not create another top-level folder named after the project or selected game mode.',
-    'Write project documents under ./docs/ and implementation files under workspace-local implementation folders such as ./src, ./game, or ./public.',
-    'Do not create, edit, or suggest using BeeGame dashboard or host application source paths.',
-    'Do not modify the BeeGame dashboard source code unless the user explicitly asks to modify the dashboard itself.',
-    '',
-    'Create useful project documents under ./docs/ as part of your normal implementation flow.',
-    'At minimum, include docs that cover: game design, technical design, art direction, audio direction, UI/UX flow, placeholder asset inventory, replaceable asset naming/slot rules, tuning notes, and acceptance notes.',
-    'Use docs as project resources, not as chat-only summaries.',
-    'Every proposed mechanic should improve player decisions, risk, skill, feedback, or replayability. Remove mechanics that do not serve one of those purposes.',
-    'Use placeholder assets when production art/audio is unavailable. Make placeholders intentionally named, visually readable, organized by purpose, and easy for the user to replace later.',
-    'Do not leave core art, audio, UI, HUD, menu, onboarding, feedback, win/fail, or progression decisions as vague future work when they are necessary for the game to feel complete.',
-    'Design and implement UI/UX states that a player needs to start, understand, play, win/fail, restart, and adjust basic settings when appropriate for the platform.',
-    'Design art/audio direction before implementation so the generated placeholders, colors, motion, VFX, and UI style feel coherent.',
-    'After implementation, run the relevant build/test/typecheck checks for the generated project and fix failures you find before summarizing validation results in chat.',
-    'Run project check commands directly without piping them through head, tail, sed, or similar filters so the command exit status remains visible. If output is too long, inspect focused files or rerun a narrower project command afterward.',
-    getTargetAppropriateDeliveryInstruction(),
-    getBeeGameSubagentsEnabled()
-      ? 'You may use available subagents when the task genuinely benefits from delegation, but critical acceptance, final review, and user-requested audits should be completed in the main session unless the user explicitly asks for background delegation. If you launch a background subagent, do not claim its work is complete until its final report is available. BeeGame does not require machine-readable verifier files.'
-      : 'Plan and implement directly in this session unless the user explicitly asks for subagents. BeeGame does not require machine-readable verifier files.',
+    'First create project documents under docs/: game design, GDD, technical design, art direction, placeholder asset inventory, audio direction, UI/UX, tuning, and acceptance notes.',
+    'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder asset files that are easy to replace and document the replaceable rules.',
+    'After implementation, run the checks and validation you think fit this project. If you find problems, keep fixing them.',
+    'Finally summarize what was completed, what was validated, and what remains.',
   ].filter(Boolean).join('\n');
-}
-
-function getTargetAppropriateDeliveryInstruction(): string {
-  return [
-    'Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.',
-    'Before saying the project is complete, choose target-appropriate validation for the selected platform and engine yourself, run it, inspect failures, and fix them.',
-    'The validation should prove the core player loop from the brief actually works: a player can start, understand the objective, perform the main action, receive feedback, reach a clear win/fail/progression state, and restart or continue as appropriate.',
-    'Use the project\'s own tooling and conventions. Do not force a specific package manager, browser tool, engine, framework, or test runner unless the generated project already uses it.',
-    'If validation cannot be run in the current environment, clearly report the exact blocker and the next command or action needed instead of claiming completion.',
-  ].join(' ');
-}
-
-function getBeeGameBrandInstruction(): string {
-  return [
-    'Branding rule: use BeeGame only for user-facing product wording, UI copy, README prose, and legacy runtime/dot-config labels.',
-    'Do not apply BeeGame branding to code identifiers, import paths, package names, dependency scopes, commands, file paths, API identifiers, or tool inputs.',
-    'Use real existing package names exactly as they are. Never invent or rewrite package scopes such as @beegame/*.',
-    'For Ink UI code in this repository, use the real package name @ant/ink.',
-  ].join(' ');
 }
 
 function getResponseLanguageInstruction(text: string): string {

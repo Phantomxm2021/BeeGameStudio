@@ -75,9 +75,8 @@ export const formatReviewTitle = (review: ReviewLike): string => {
     if (isBeeGamePermissionReview(review)) return review.title || 'BeeGame permission';
     if (isBlockerResolutionReview(review)) return 'Resolve blockers';
     if (review.type === 'ITERATION_REAPPROVAL_REVIEW') return 'Iteration reapproval';
-    if (review.type === 'GDD_APPROVAL_REVIEW') return 'GDD approval';
+    if (review.type === 'GDD_APPROVAL_REVIEW') return 'Design approval';
     if (review.type === 'ASSET_MANIFEST_REVIEW') return 'Asset delivery approval';
-    if (review.review_status?.workflow_id === 'gdd_v2') return 'GDD approval';
     return review.title || review.task_id || review.artifact_id || 'Pending review';
 };
 
@@ -92,7 +91,7 @@ export const formatBeeGamePermissionSummary = (review: ReviewLike): string => {
     const path = String(input.path || input.file_path || input.notebook_path || '').trim();
     const target = command || compactPermissionPath(path, getReviewWorkspaceRef(review));
     if (content.includes('was blocked') && content.includes('allowed working directories')) {
-        return `${content} This is a workspace boundary, not a normal GDD approval. Change the session workspace if BeeGame should operate there.`;
+        return `${content} This is a workspace boundary. Change the session workspace if BeeGame should operate there.`;
     }
     if (target) {
         return `BeeGame requests ${review.title || 'tool access'}:\n${target}`;

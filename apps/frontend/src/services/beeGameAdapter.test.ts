@@ -609,14 +609,10 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(status.phase).toBe('idle');
     expect(status.active_agents).toEqual([]);
-    expect(status.next_action).toContain('Backend restarted');
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'status',
-        status: 'idle',
-        content: expect.stringContaining('Backend restarted'),
-      }),
-    ]));
+    expect(status.next_action).toBe('Ready for next request');
+    expect(polled.messages.some(message => (
+      message.type === 'status' && String(message.content || '').includes('Backend restarted')
+    ))).toBe(false);
   });
 
   it('sends recovered transcript context when a message recreates a missing backend session', async () => {
@@ -702,23 +698,7 @@ describe('beeGameAdapter prompt rules', () => {
     const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { transcriptSessionId?: string };
     expect(startBody.transcriptSessionId).toBe('beegame_restart');
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toContain('This session is being continued from a previous conversation that ran out of context.');
-    expect(body.text).toContain('The summary below covers the earlier portion of the conversation.');
-    expect(body.text).toContain('If you need specific details from before recovery');
-    expect(body.text).toContain('read the project transcript at:');
-    expect(body.text).toContain('transcripts/');
-    expect(body.text).toContain('Execution snapshot:');
-    expect(body.text).toContain('Recent tools:');
-    expect(body.text).toContain('Continue the conversation from where it left off');
-    expect(body.text).toContain('do not acknowledge the summary');
-    expect(body.text).toContain('Do not ask what to do next when the snapshot contains an unfinished tool or failed tool');
-    expect(body.text).toContain('Do not pipe validation commands through head, tail, sed, or similar filters');
-    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
-    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
-    expect(body.text).toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
-    expect(body.text).toContain('Make a tactical puzzle game.');
-    expect(body.text).toContain('docs/GDD.md');
-    expect(body.text).toContain('继续任务');
+    expect(body.text).toBe('继续任务');
   });
 
   it('sends continue input for an existing idle session with transcript context', async () => {
@@ -772,11 +752,7 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     expect(inputCall).toBeTruthy();
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toContain('This session is being continued from a previous conversation that ran out of context.');
-    expect(body.text).toContain('Continue the conversation from where it left off');
-    expect(body.text).toContain('Continue from the current project files.');
-    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
-    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
+    expect(body.text).toBe('继续任务');
   });
 
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
@@ -831,38 +807,44 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
 
-    expect(body.text).toContain('Confirmed BeeGame build brief');
+    expect(body.text).toContain('我要做一个完整游戏项目。');
+    expect(body.text).not.toContain('Confirmed BeeGame build brief');
+    expect(body.text).not.toContain('Completion contract');
+    expect(body.text).not.toContain('Workspace rule:');
+    expect(body.text).not.toContain('Branding rule:');
     expect(body.text).toContain('Platform: Web');
     expect(body.text).toContain('Inputs: Keyboard/mouse, Touch');
-    expect(body.text).toContain('complete game');
+    expect(body.text).toContain('先在 docs/ 下完成');
     expect(body.text).toContain('art direction');
     expect(body.text).toContain('UI/UX');
     expect(body.text).toContain('placeholder asset');
     expect(body.text).toContain('replaceable');
-    expect(body.text).toContain('Create useful project documents under ./docs/');
-    expect(body.text).toContain('Use docs as project resources, not as chat-only summaries.');
+    expect(body.text).not.toContain('Create useful project documents under ./docs/');
+    expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
     expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
     expect(body.text).not.toContain('Core Loop');
     expect(body.text).not.toContain('Fun Hook');
     expect(body.text).not.toContain('Risk/Reward');
     expect(body.text).not.toContain('First 3 Minutes');
     expect(body.text).not.toContain('Playability Acceptance Checklist');
-    expect(body.text).toContain('BeeGame does not require machine-readable verifier files.');
-    expect(body.text).toContain('You may use available subagents when the task genuinely benefits from delegation');
+    expect(body.text).not.toContain('machine-readable verifier');
+    expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
     expect(body.text).not.toContain('Use the runtime agent planning and review flow during implementation.');
     expect(body.text).not.toContain("Use BeeGame's own planning");
-    expect(body.text).toContain('run the relevant build/test/typecheck checks for the generated project');
-    expect(body.text).toContain('Completion contract: do not treat an API end_turn, a summary message, or a build/typecheck command alone as project completion.');
-    expect(body.text).toContain('choose target-appropriate validation for the selected platform and engine yourself');
-    expect(body.text).toContain('prove the core player loop from the brief actually works');
-    expect(body.text).toContain('Use the project\'s own tooling and conventions.');
-    expect(body.text).toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
-    expect(body.text).toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
+    expect(body.text).not.toContain('Plan, implement, check, and fix the project using your own normal workflow.');
+    expect(body.text).not.toContain('invoke the beegame-game-acceptance skill');
+    expect(body.text).not.toContain('If the skill returns FAIL');
+    expect(body.text).not.toContain('If it returns BLOCKED');
+    expect(body.text).not.toContain('Do not treat a normal assistant turn ending');
+    expect(body.text).toContain('实现后请运行你认为适合当前项目的检查和验证');
+    expect(body.text).not.toContain('Run the project with its own tooling when possible');
+    expect(body.text).not.toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
+    expect(body.text).not.toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
     expect(body.text).not.toContain('apps/frontend');
     expect(body.text).not.toContain('apps/dashboard');
-    expect(body.text).not.toContain('packages');
-    expect(body.text).toContain('current working directory is already the project directory')
-    expect(body.text).toContain('Do not create another top-level folder')
+    expect(body.text).not.toContain('/packages/');
+    expect(body.text).not.toContain('current working directory is already the project directory')
+    expect(body.text).not.toContain('Do not create another top-level folder')
     expect(body.text).not.toContain('./snake-game');
     expect(body.text).not.toContain('./games/snake');
   });
@@ -911,11 +893,11 @@ describe('beeGameAdapter prompt rules', () => {
       init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
-    expect(body.text).toContain('Plan and implement directly in this session unless the user explicitly asks for subagents.');
+    expect(body.text).not.toContain('Plan and implement directly in this session unless the user explicitly asks for subagents.');
     expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
   });
 
-  it('keeps BeeGame branding out of package names and code identifiers', async () => {
+  it('keeps intake prompts free of package-name branding policy blocks', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs?ownerId=dashboard-local') {
@@ -956,10 +938,9 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
 
-    expect(body.text).toContain('Do not apply BeeGame branding to code identifiers');
-    expect(body.text).toContain('package names');
-    expect(body.text).toContain('Never invent or rewrite package scopes such as @beegame/*');
-    expect(body.text).toContain('use the real package name @ant/ink');
+    expect(body.text).not.toContain('Do not apply BeeGame branding to code identifiers');
+    expect(body.text).not.toContain('Never invent or rewrite package scopes such as @beegame/*');
+    expect(body.text).not.toContain('use the real package name @ant/ink');
   });
 
   it('sends follow-up messages without repeating session policy blocks', async () => {
@@ -1285,75 +1266,6 @@ describe('beeGameAdapter prompt rules', () => {
     const status = polled.messages.find(message => message.type === 'status');
     expect(status).toEqual(expect.objectContaining({ status: 'idle' }));
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
-  });
-
-  it('surfaces a status alert when compact ends before resuming tool work', async () => {
-    const compactEvents = [
-      turnStartedEvent(40, 'beegame_compact', 'turn-1'),
-      bashFailedEvent(
-        41,
-        'beegame_compact',
-        'turn-1',
-        'bun run typecheck',
-        'src/main.ts(12,1): error TS2304: Cannot find name.',
-      ),
-      compactBoundaryEvent(42, 'beegame_compact', 'turn-1'),
-      assistantMessageEvent(43, 'beegame_compact', 'turn-1', '我会继续运行 typecheck。'),
-      endTurnResultEvent(44, 'beegame_compact', 'turn-1'),
-      turnCompletedEvent(45, 'beegame_compact', 'turn-1'),
-    ];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_compact',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_compact/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_compact',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_compact/events?after=0') {
-        return jsonResponse(compactEvents);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromIdea({
-      idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
-    });
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'status', status: 'idle' }),
-      expect.objectContaining({
-        type: 'status',
-        sender: 'system',
-        task_kind: 'runtime_notice',
-        content: expect.stringContaining('Context compaction ended the turn before tool work resumed'),
-      }),
-    ]));
-    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(false);
-    expect(polled.messages.some(message => message.type === 'status' && message.status === 'paused')).toBe(false);
-
-    const history = await beeGameAdapter.getChatHistory(result.project.id);
-    expect(history.some(message => message.sender === 'system' && message.content.includes('context compaction'))).toBe(false);
   });
 
   it('hides streaming partials and shows only the final assistant message', async () => {
@@ -2102,7 +2014,7 @@ function turnCompletedEvent(id: number, sessionId: string, turnId: string) {
     sessionId,
     turnId,
     type: 'turn.completed',
-    text: 'BeeGame turn completed',
+    text: 'Turn ended',
     payload: { type: 'turn.completed' },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
   };

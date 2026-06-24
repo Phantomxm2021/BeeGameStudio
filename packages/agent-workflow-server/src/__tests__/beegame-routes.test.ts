@@ -22,6 +22,9 @@ type FakeRuntimeMode =
   | 'permission_different_tool'
   | 'dangerous_bash_permission'
   | 'dangerous_bash_twice'
+  | 'workspace_bash_pipeline'
+  | 'workspace_bash_cleanup'
+  | 'workspace_unknown_bash'
   | 'outside_permission'
   | 'workspace_root_permission'
   | 'outside_bash_permission'
@@ -143,7 +146,7 @@ class FakeBeeGameRuntime {
           role: 'user',
           content: [{
             type: 'text',
-            text: 'This session is being continued from a previous conversation that ran out of context.',
+            text: 'internal runtime resume marker',
           }],
         },
       })
@@ -270,6 +273,49 @@ class FakeBeeGameRuntime {
         this.permissionResults.push(secondDecision.behavior)
       }
       input.onMessage({ type: 'result', result: `permission ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'workspace_bash_pipeline') {
+      for (const [index, command] of [
+        'npm run typecheck 2>&1 | head -30',
+        'npm run build 2>&1 | head -80',
+        'cat package.json | grep -A 30 "dependencies"',
+      ].entries()) {
+        const decision = await input.requestPermission({
+          toolUseID: `tool_pipeline_${index + 1}`,
+          toolName: 'Bash',
+          message: 'Run workspace validation command?',
+          input: { command },
+        })
+        this.permissionResults.push(decision.behavior)
+      }
+      input.onMessage({ type: 'result', result: 'pipeline validation done' })
+      return
+    }
+    if (this.mode === 'workspace_bash_cleanup') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_cleanup',
+        toolName: 'Bash',
+        message: 'Clean project dependencies?',
+        input: {
+          command: 'rm -rf node_modules package-lock.json && npm install 2>&1',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: 'cleanup done' })
+      return
+    }
+    if (this.mode === 'workspace_unknown_bash') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_unknown_workspace_command',
+        toolName: 'Bash',
+        message: 'Run project-local validation?',
+        input: {
+          command: 'node scripts/local-validate.js --quick',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: 'unknown workspace command done' })
       return
     }
     if (this.mode === 'outside_permission') {
@@ -664,7 +710,6 @@ describe('beegame session routes', () => {
           'runtime.observation',
           'turn.started',
           'user.message',
-          'system.status',
           'assistant.message',
           'result',
           'turn.completed',
@@ -742,6 +787,71 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('marks text-only end turns as empty so the dashboard does not treat them as progress', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'empty-turn-game')
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'text',
+            text: 'I understand the task and will inspect the project next.',
+          }],
+          stop_reason: 'end_turn',
+        },
+      },
+      {
+        type: 'result',
+        result: 'I understand the task and will inspect the project next.',
+      },
+    ])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build the game now.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.empty')
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(events.some((event: { type: string }) => event.type === 'turn.completed')).toBe(false)
+      expect(events.find((event: { type: string }) => event.type === 'turn.empty')).toEqual(
+        expect.objectContaining({
+          type: 'turn.empty',
+          text: 'Agent ended this turn without using tools. Send continue or retry to start implementation.',
+        }),
+      )
+      expect([...events].reverse().find((event: { type: string }) => event.type === 'runtime.observation')).toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            status: 'empty_turn',
+            counters: expect.objectContaining({ toolUseCount: 0 }),
+          }),
+        }),
+      )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('supports beegame-sessions routes while keeping console routes compatible', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner()
@@ -769,7 +879,7 @@ describe('beegame session routes', () => {
           `/api/beegame-sessions/${session.id}/events`,
         )
         const events = await eventsRes.json()
-        return events.some((event: { type: string }) => event.type === 'turn.completed')
+        return events.some((event: { type: string }) => event.type === 'turn.empty')
       })
 
       const eventsRes = await app.request(
@@ -1458,6 +1568,102 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('auto-approves workspace validation Bash pipelines without permission prompts', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'workspace_bash_pipeline')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Run project validation.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length === 3)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['allow', 'allow', 'allow'])
+      expect(events.filter((event: { type: string }) => event.type === 'permission.requested')).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-approves workspace-local dependency cleanup Bash commands', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'workspace_bash_cleanup')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Repair dependencies.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length === 1)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(events.filter((event: { type: string }) => event.type === 'permission.requested')).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-approves unknown workspace-local Bash commands without package manager keywords', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'workspace_unknown_bash')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Run the project-local checker.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults.length === 1)
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(events.filter((event: { type: string }) => event.type === 'permission.requested')).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('auto-approves project-local implementation writes during build', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'project_write')
@@ -1764,7 +1970,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('allows the runtime agent to complete a turn without BeeGame read-doc gating', async () => {
+  test('does not apply read-doc gating to result-only turns but marks them as empty', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'result_only')
     const app = createAgentWorkflowApp({
@@ -1790,13 +1996,14 @@ describe('beegame session routes', () => {
         const events = await eventsRes.json()
         return events.some(
           (event: { type: string; text: string }) =>
-            event.type === 'turn.completed',
+            event.type === 'turn.empty',
         )
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(events.some((event: { type: string }) => event.type === 'turn.completed')).toBe(true)
+      expect(events.some((event: { type: string }) => event.type === 'turn.completed')).toBe(false)
+      expect(events.some((event: { type: string }) => event.type === 'turn.empty')).toBe(true)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -2462,7 +2669,7 @@ describe('beegame session routes', () => {
       await waitFor(async () => {
         const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
         const events = await eventsRes.json()
-        return events.some((event: { type: string }) => event.type === 'turn.completed')
+        return events.some((event: { type: string }) => event.type === 'turn.empty')
       })
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
@@ -2473,7 +2680,7 @@ describe('beegame session routes', () => {
           text: 'Create match game.',
         }),
       ])
-      expect(JSON.stringify(events)).not.toContain('continued from a previous conversation')
+      expect(JSON.stringify(events)).not.toContain('internal runtime resume marker')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

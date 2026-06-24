@@ -40,6 +40,15 @@ const COMPACT_DISABLE_ENV_KEYS = [
   'DISABLE_COMPACT',
   'DISABLE_AUTO_COMPACT',
 ] as const
+const PRODUCTION_INSTALL_ENV_KEYS = [
+  'NPM_CONFIG_PRODUCTION',
+  'npm_config_production',
+  'NPM_CONFIG_OMIT',
+  'npm_config_omit',
+  'YARN_PRODUCTION',
+  'PNPM_CONFIG_PROD',
+  'pnpm_config_prod',
+] as const
 
 let runtimeQueue: Promise<void> = Promise.resolve()
 
@@ -325,7 +334,10 @@ async function withRuntimeEnvironment(
   const previousEnv = new Map<string, string | undefined>()
 
   const runtimeEnv = getBeeGameRuntimeEnvironment(env)
-  for (const key of COMPACT_DISABLE_ENV_KEYS) {
+  for (const key of [
+    ...COMPACT_DISABLE_ENV_KEYS,
+    ...PRODUCTION_INSTALL_ENV_KEYS,
+  ]) {
     previousEnv.set(key, process.env[key])
     delete process.env[key]
   }
@@ -358,6 +370,16 @@ function getBeeGameRuntimeEnvironment(
   }
   return {
     ...runtimeEnv,
+    NODE_ENV: runtimeEnv.NODE_ENV === 'production'
+      ? 'development'
+      : (runtimeEnv.NODE_ENV ?? 'development'),
+    NPM_CONFIG_PRODUCTION: 'false',
+    npm_config_production: 'false',
+    NPM_CONFIG_OMIT: '',
+    npm_config_omit: '',
+    YARN_PRODUCTION: 'false',
+    PNPM_CONFIG_PROD: 'false',
+    pnpm_config_prod: 'false',
     CLAUDE_CODE_AUTO_COMPACT_WINDOW:
       env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ??
       process.env.BEEGAME_AUTO_COMPACT_WINDOW ??

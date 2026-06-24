@@ -78,10 +78,9 @@ export function RightSidebar({
     const isComposerLocked = isLoading || isRuntimeBusy;
 
     // Derived Data
-    const gddReview = useMemo(() => 
+    const structuredDocumentReview = useMemo(() =>
         pendingReviews.find((review: ReviewDisplayModel) => (
             isStructuredDocumentApprovalReview(review) &&
-            review?.review_status?.workflow_id === 'gdd_v2' &&
             isReviewAwaitingUserAction(review) &&
             Boolean(review?.gate_id) &&
             !review?.history_only
@@ -275,7 +274,7 @@ export function RightSidebar({
                                 setIsComposing={setIsComposing}
                                 onApprovePlan={onApprovePlan}
                 approvalState={approvalState}
-                gddReview={beeGamePermissionReview || gddReview}
+                gddReview={beeGamePermissionReview || structuredDocumentReview}
                             pendingReviews={pendingReviews}
                             onUploadManifestCsv={onUploadManifestCsv}
                             onApproveManifest={onApproveManifest}
