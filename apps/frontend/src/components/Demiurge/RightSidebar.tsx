@@ -39,6 +39,7 @@ interface RightSidebarProps {
     onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
     onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
     waitingApproval: WaitingApprovalState;
+    variant?: 'legacy' | 'beegame';
 }
 
 export function RightSidebar({
@@ -55,6 +56,7 @@ export function RightSidebar({
     onUploadManifestCsv,
     onApproveManifest,
     waitingApproval,
+    variant = 'legacy',
 }: RightSidebarProps) {
 
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts'>('chat');
@@ -215,6 +217,16 @@ export function RightSidebar({
         }
     }, [activeTab, projectId, artifacts.length]);
 
+    const dockClassName = variant === 'beegame'
+        ? 'absolute right-4 top-24 bottom-4 w-[420px] z-40 pointer-events-auto'
+        : 'absolute right-12 top-28 bottom-12 w-[440px] z-40 pointer-events-auto';
+    const panelClassName = variant === 'beegame'
+        ? 'h-full flex flex-col bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] overflow-hidden'
+        : 'h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200 dark:border-zinc-800 rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden';
+    const headerClassName = variant === 'beegame'
+        ? 'flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800'
+        : 'flex items-center justify-between px-8 pt-8 pb-4';
+
     return (
         <>
             <motion.div
@@ -224,12 +236,12 @@ export function RightSidebar({
                     pointerEvents: isChatMinimized ? 'none' : 'auto'
                 }}
                 transition={springTransition}
-                className="absolute right-12 top-28 bottom-12 w-[440px] z-40 pointer-events-auto"
+                className={dockClassName}
             >
-                <div className="h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200 dark:border-zinc-800 rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden">
+                <div className={panelClassName}>
                     
                     {/* Header Tabs */}
-                    <div className="flex items-center justify-between px-8 pt-8 pb-4">
+                    <div className={headerClassName}>
                         <div className="flex space-x-6">
                             {(['chat', 'artifacts'] as const).map(tab => (
                                 <button

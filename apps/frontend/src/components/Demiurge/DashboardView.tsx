@@ -446,17 +446,19 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 />
             ) : null}
 
-            <SideMenu
-                status={currentStatus === 'offline' ? 'stopped' : currentStatus}
-                lang={lang}
-                isDark={isDark}
-                onToggleStatus={handleToggleStatus}
-                onSetLang={onSetLang}
-                onToggleTheme={toggleTheme}
-                onNewProject={handleNewProject}
-                canOpenOperatorControls={canOpenOperatorControls}
-                onOpenOperatorControls={handleOpenOperatorControls}
-            />
+            {!isBeeGameMode ? (
+                <SideMenu
+                    status={currentStatus === 'offline' ? 'stopped' : currentStatus}
+                    lang={lang}
+                    isDark={isDark}
+                    onToggleStatus={handleToggleStatus}
+                    onSetLang={onSetLang}
+                    onToggleTheme={toggleTheme}
+                    onNewProject={handleNewProject}
+                    canOpenOperatorControls={canOpenOperatorControls}
+                    onOpenOperatorControls={handleOpenOperatorControls}
+                />
+            ) : null}
 
             <BeeGameLivePreviewPage
                 lang={lang}
@@ -475,6 +477,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 }}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onStop={stopTask}
+                onSetLang={onSetLang}
+                onToggleTheme={toggleTheme}
             />
 
             <RightSidebar
@@ -493,6 +497,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 onUploadManifestCsv={uploadManifestCsv}
                 onApproveManifest={approveManifest}
                 waitingApproval={waitingApproval}
+                variant={isBeeGameMode ? 'beegame' : 'legacy'}
             />
         </div>
     );

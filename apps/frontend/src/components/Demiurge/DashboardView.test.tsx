@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
 import type { ProjectBaselineStatusPayload } from '../../services/api';
@@ -271,7 +270,11 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
         expect(screen.queryByTestId('canvas-view')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('side-menu')).not.toBeInTheDocument();
         expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-shell-top-nav')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument();
+        expect(capturedRightSidebarProps?.variant).toBe('beegame');
     });
 
     it('renders the built game URL inside the BeeGame live preview frame', async () => {
@@ -308,29 +311,24 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('lightweight-web-challenge')).toBeInTheDocument();
     });
 
-    it('opens OperatorControls in a new browser tab when test operations are enabled', async () => {
-        const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    it('does not mount the legacy SideMenu in BeeGame mode when test operations are enabled', async () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedSideMenuProps?.canOpenOperatorControls).toBe(true));
-        await userEvent.setup().click(screen.getByRole('button', { name: 'OperatorControls' }));
+        await waitFor(() => expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument());
 
-        expect(openSpy).toHaveBeenCalledWith(
-            expect.stringContaining('/operator-controls?project_id=proj_1'),
-            '_blank',
-            'noopener,noreferrer',
-        );
-        expect(openSpy.mock.calls[0]?.[0]).toContain('project_name=Project+One');
+        expect(capturedSideMenuProps).toBeNull();
+        expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();
     });
 
-    it('does not expose the OperatorControls entry when test operations are disabled', async () => {
+    it('keeps the BeeGame shell independent from legacy OperatorControls capability flags', async () => {
         status.capabilities.operator_controls_enabled = false;
         status.capabilities.stage_control_enabled = false;
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedSideMenuProps).not.toBeNull());
-        expect(capturedSideMenuProps?.canOpenOperatorControls).toBe(false);
+        await waitFor(() => expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument());
+
+        expect(capturedSideMenuProps).toBeNull();
         expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();
     });
 });

@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, MonitorPlay, RefreshCw, Square } from 'lucide-react';
+import { AlertTriangle, Box, ChevronLeft, CircleHelp, ExternalLink, Folder, FolderOpen, Globe2, MonitorPlay, Network, PlayCircle, RefreshCw, Settings, Square } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import type { BuildReportPayload } from '../../services/api';
 
@@ -17,6 +17,8 @@ interface BeeGameLivePreviewPageProps {
     onReload?: () => void;
     onOpenExternal?: (url: string) => void;
     onStop?: () => void;
+    onSetLang: (lang: Language) => void;
+    onToggleTheme: () => void;
 }
 
 const LABELS: Record<Language, {
@@ -237,6 +239,8 @@ export function BeeGameLivePreviewPage({
     onReload,
     onOpenExternal,
     onStop,
+    onSetLang,
+    onToggleTheme,
 }: BeeGameLivePreviewPageProps) {
     const labels = LABELS[lang] || LABELS.en;
     const previewUrl = normalizeUrl(buildReport?.build_url);
@@ -255,57 +259,119 @@ export function BeeGameLivePreviewPage({
     return (
         <main
             data-testid="beegame-live-preview-page"
-            className="relative h-full flex-1 overflow-hidden bg-zinc-100 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50"
+            className="relative h-full flex-1 overflow-hidden bg-[#07090c] text-zinc-50"
         >
-            <div className="absolute left-28 top-8 right-[32rem] bottom-8 flex flex-col gap-4">
-                <header className="flex h-20 shrink-0 items-center justify-between rounded-[2rem] border border-zinc-200 bg-white/90 px-6 shadow-[0_24px_70px_-50px_rgba(0,0,0,0.65)] backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-900/90">
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-3">
-                            <h1 className="truncate text-2xl font-black uppercase text-zinc-900 dark:text-zinc-100">
-                                {projectName}
-                            </h1>
-                            <div className="flex shrink-0 items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-800">
-                                <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
-                                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600 dark:text-zinc-300">
-                                    {statusText}
-                                </span>
-                            </div>
-                            {isSyncing ? (
-                                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500 dark:bg-zinc-800">
-                                    Syncing
-                                </span>
-                            ) : null}
-                        </div>
+            <header
+                data-testid="beegame-shell-top-nav"
+                className="absolute left-0 right-0 top-0 z-30 flex h-20 items-center border-b border-zinc-800/80 bg-[#080c10]/95 px-7 backdrop-blur-xl"
+            >
+                <div className="flex w-36 items-center gap-3">
+                    <div className="grid h-8 w-8 place-items-center rounded-xl border border-orange-500/50 text-orange-400">
+                        <Box className="h-4 w-4" />
                     </div>
-                    <div className="flex shrink-0 items-center gap-8">
-                        <HeaderMetric label={labels.health} value={`${phaseLabel} · ${Math.floor(progress)}%`} />
-                        <HeaderMetric label={labels.tokens} value={tokens.toLocaleString()} />
-                    </div>
-                </header>
+                    <div className="text-lg font-black tracking-tight">BeeGame</div>
+                </div>
 
-                <section className="min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_32px_80px_-48px_rgba(0,0,0,0.5)] dark:border-zinc-800 dark:bg-zinc-900">
-                    <div className="flex h-16 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
-                        <div className="min-w-0">
-                            <div className="flex items-center gap-3">
-                                <span className={`h-2.5 w-2.5 rounded-full ${canShowPreview ? 'bg-emerald-400' : previewState === 'failed' ? 'bg-red-400' : 'bg-amber-400'}`} />
-                                <h1 className="truncate text-sm font-black uppercase tracking-[0.22em] text-zinc-900 dark:text-zinc-100">
-                                    {labels.title}
-                                </h1>
-                            </div>
-                            <p className="mt-1 truncate text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-500">
-                                {statusText}
-                            </p>
+                <div className="flex h-12 min-w-0 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4">
+                    <ChevronLeft className="h-4 w-4 text-zinc-500" />
+                    <div className="truncate text-lg font-black text-zinc-100">{projectName}</div>
+                    <div className="flex items-center gap-2 rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-300">
+                        <Globe2 className="h-3.5 w-3.5" />
+                        Web
+                    </div>
+                    <div className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
+                        <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
+                        {statusText}
+                    </div>
+                    {isSyncing ? (
+                        <div className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-400">
+                            Syncing
                         </div>
-                        <div className="flex items-center gap-2">
+                    ) : null}
+                </div>
+
+                <div className="ml-6 flex items-center divide-x divide-zinc-800">
+                    <HeaderMetric label={labels.tokens} value={tokens.toLocaleString()} />
+                    <HeaderMetric label="Phase" value={`${phaseLabel} · ${Math.floor(progress)}%`} />
+                    <HeaderMetric label="Model" value="Claude Sonnet 4" />
+                </div>
+
+                <div className="ml-auto flex items-center gap-3">
+                    <select
+                        aria-label="Language"
+                        value={lang}
+                        onChange={(event) => onSetLang(event.target.value as Language)}
+                        className="h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm font-bold text-zinc-200 outline-none"
+                    >
+                        <option value="zh">简体中文</option>
+                        <option value="zh-TW">繁體中文</option>
+                        <option value="en">English</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                    </select>
+                    <button
+                        type="button"
+                        aria-label="Theme"
+                        onClick={onToggleTheme}
+                        className="grid h-10 w-10 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300"
+                    >
+                        <Settings className="h-4 w-4" />
+                    </button>
+                    <div className="grid h-11 w-11 place-items-center rounded-full border border-zinc-800 bg-zinc-900 text-sm font-black text-zinc-200">
+                        N
+                    </div>
+                </div>
+            </header>
+
+            <nav
+                data-testid="beegame-shell-side-nav"
+                className="absolute bottom-0 left-0 top-20 z-20 flex w-28 flex-col items-center border-r border-zinc-800/80 bg-[#080c10]/90 py-6"
+            >
+                <SideNavItem icon={Folder} label="项目" active />
+                <SideNavItem icon={PlayCircle} label="运行" />
+                <SideNavItem icon={FolderOpen} label="工作区" />
+                <SideNavItem icon={Box} label="模型" />
+                <SideNavItem icon={Network} label="MCP" />
+                <SideNavItem icon={Settings} label="设置" />
+                <SideNavItem icon={CircleHelp} label="帮助" />
+                <button
+                    type="button"
+                    aria-label="Collapse"
+                    className="mt-auto grid h-12 w-12 place-items-center rounded-xl border border-zinc-800 bg-zinc-900/80 text-zinc-500"
+                >
+                    <ChevronLeft className="h-5 w-5" />
+                </button>
+            </nav>
+
+            <div className="absolute bottom-4 left-32 right-[29rem] top-24 flex flex-col">
+                <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
+                    <div className="flex h-[7.5rem] items-center justify-between px-9">
+                        <div className="min-w-0">
+                            <div className="flex items-baseline gap-3">
+                                <h1 className="text-2xl font-black text-zinc-100">
+                                    {labels.title.replace('游戏画面', '预览')}
+                                </h1>
+                                <span className="text-sm font-bold text-zinc-500">Live Preview</span>
+                            </div>
+                            <div className="mt-4 flex items-center gap-4">
+                                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-bold ${canShowPreview ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>
+                                    <span className={`h-2 w-2 rounded-full ${canShowPreview ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                    {canShowPreview ? 'Preview live' : statusText}
+                                </span>
+                                <span className="font-mono text-sm text-zinc-500">{previewUrl ? previewUrl.replace(/^https?:\/\//, '') : labels.unavailable}</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
                             <button
                                 type="button"
                                 aria-label={labels.reload}
                                 title={labels.reload}
                                 onClick={onReload}
                                 disabled={!canShowPreview}
-                                className="grid h-10 w-10 place-items-center rounded-full border border-zinc-200 text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
                                 <RefreshCw className="h-4 w-4" />
+                                {labels.reload}
                             </button>
                             <button
                                 type="button"
@@ -313,9 +379,10 @@ export function BeeGameLivePreviewPage({
                                 title={labels.open}
                                 onClick={() => previewUrl && onOpenExternal?.(previewUrl)}
                                 disabled={!canShowPreview}
-                                className="grid h-10 w-10 place-items-center rounded-full border border-zinc-200 text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
                                 <ExternalLink className="h-4 w-4" />
+                                {labels.open}
                             </button>
                             <button
                                 type="button"
@@ -323,14 +390,15 @@ export function BeeGameLivePreviewPage({
                                 title={labels.stop}
                                 onClick={onStop}
                                 disabled={status !== 'running'}
-                                className="grid h-10 w-10 place-items-center rounded-full border border-zinc-200 text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
-                                <Square className="h-4 w-4" />
+                                <Square className="h-4 w-4 fill-red-500 text-red-500" />
+                                {labels.stop}
                             </button>
                         </div>
                     </div>
 
-                    <div className="h-[calc(100%-4rem)] bg-zinc-950">
+                    <div className="mx-9 mb-9 h-[calc(100%-10.5rem)] rounded-xl border border-zinc-800 bg-black p-4">
                         {canShowPreview ? (
                             <iframe
                                 key={previewUrl}
@@ -338,7 +406,7 @@ export function BeeGameLivePreviewPage({
                                 data-testid="beegame-live-preview-frame"
                                 src={previewUrl}
                                 sandbox="allow-forms allow-pointer-lock allow-popups allow-same-origin allow-scripts"
-                                className="h-full w-full border-0 bg-white"
+                                className="h-full w-full rounded-lg border-0 bg-white"
                             />
                         ) : (
                             <div className="flex h-full items-center justify-center px-8 text-center">
@@ -370,24 +438,37 @@ export function BeeGameLivePreviewPage({
 
 function HeaderMetric({ label, value }: { label: string; value: string }) {
     return (
-        <div className="min-w-0 text-right">
-            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+        <div className="min-w-0 px-5">
+            <div className="text-xs font-medium text-zinc-500">
                 {label}
             </div>
-            <div className="mt-1 truncate font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            <div className="mt-1 truncate text-sm font-bold text-zinc-100">
                 {value}
             </div>
         </div>
     );
 }
 
+function SideNavItem({ icon: Icon, label, active = false }: { icon: typeof Folder; label: string; active?: boolean }) {
+    return (
+        <button
+            type="button"
+            className={`relative mb-5 flex h-16 w-20 flex-col items-center justify-center gap-2 rounded-xl text-xs font-bold transition ${active ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-300'}`}
+        >
+            {active ? <span className="absolute -left-4 top-2 h-12 w-1 rounded-full bg-orange-500" /> : null}
+            <Icon className={`h-5 w-5 ${active ? 'text-orange-400' : ''}`} />
+            {label}
+        </button>
+    );
+}
+
 function PreviewMetric({ label, value }: { label: string; value: string }) {
     return (
-        <div className="min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3">
             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
                 {label}
             </div>
-            <div className="mt-1 truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            <div className="mt-1 truncate text-sm font-bold text-zinc-300">
                 {value}
             </div>
         </div>
