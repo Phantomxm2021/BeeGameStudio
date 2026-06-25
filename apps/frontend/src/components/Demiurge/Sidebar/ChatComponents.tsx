@@ -504,7 +504,7 @@ const DeliveryReviewAlert = memo(({ message }: { message: ChatDisplayMessage }) 
     >
         <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-300">
             <CheckCircle2 className="h-4 w-4" />
-            Ready for review
+            Evidence for review
         </div>
         <div className="text-sm leading-6 opacity-85 [overflow-wrap:anywhere]">
             <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} />

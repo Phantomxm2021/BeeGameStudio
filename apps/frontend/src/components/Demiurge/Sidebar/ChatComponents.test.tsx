@@ -217,7 +217,7 @@ describe('MessageItem semantic rendering', () => {
                 m={{
                     id: 'delivery-review-1',
                     sender: 'system',
-                    content: 'Ready for review.\n\nRecent evidence:\n- Bash completed: game-engine verify',
+                    content: 'Evidence for review.\n\nObserved evidence:\n- Bash completed: game-engine verify',
                     timestamp: Date.now(),
                     type: 'system_status',
                     taskKind: 'delivery_review',
@@ -225,7 +225,7 @@ describe('MessageItem semantic rendering', () => {
             />
         );
 
-        expect(screen.getByText('Ready for review')).not.toBeNull();
+        expect(screen.getAllByText(/Evidence for review/).length).toBeGreaterThan(0);
         expect(screen.getByText(/game-engine verify/)).not.toBeNull();
         expect(screen.queryByRole('button', { name: /continue fixing/i })).toBeNull();
     });

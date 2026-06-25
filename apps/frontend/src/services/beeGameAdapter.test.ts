@@ -911,11 +911,17 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('placeholder/asset slots');
     expect(body.text).toContain('必须区分“本次交付已实现”和“后续路线图”');
     expect(body.text).toContain('不要把 roadmap 写成已交付能力');
+    expect(body.text).toContain('docs 里的 acceptance/checklist 只能作为验收标准');
+    expect(body.text).toContain('不要预先打勾或写成已通过');
     expect(body.text).toContain('方便替换的 placeholder 或 asset slot');
     expect(body.text).toContain('不要强行使用某个固定平台、包管理器、测试框架或浏览器');
     expect(body.text).toContain('不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成');
     expect(body.text).toContain('启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复');
-    expect(body.text).toContain('最终总结只能声明你实际验证过的内容');
+    expect(body.text).toContain('交付前请使用可用的游戏验收指导或自检清单');
+    expect(body.text).toContain('Implemented');
+    expect(body.text).toContain('Verified with evidence');
+    expect(body.text).toContain('Not verified / Known gaps');
+    expect(body.text).toContain('最终总结必须分为');
     expect(body.text).not.toContain('Create useful project documents under ./docs/');
     expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
     expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
@@ -1367,7 +1373,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 
-  it('shows a review reminder with tool evidence when a turn ends successfully', async () => {
+  it('shows an evidence review reminder with tool evidence when a turn ends successfully', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs?ownerId=dashboard-local') {
@@ -1414,12 +1420,14 @@ describe('beeGameAdapter prompt rules', () => {
         type: 'agent_message',
         sender: 'system',
         task_kind: 'delivery_review',
-        content: expect.stringContaining('Ready for review.'),
+        content: expect.stringContaining('Evidence for review.'),
       }),
       expect.objectContaining({ type: 'status', status: 'idle' }),
     ]));
     expect(polled.messages.find(message => message.task_kind === 'delivery_review')?.content)
       .toContain('game-engine verify');
+    expect(polled.messages.find(message => message.task_kind === 'delivery_review')?.content)
+      .toContain('Agent claims without matching evidence should be treated as unverified');
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 

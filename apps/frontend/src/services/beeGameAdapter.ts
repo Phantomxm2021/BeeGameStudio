@@ -1067,13 +1067,14 @@ function buildDeliveryReviewAlert(projectId: string, completedEvent: BeeGameEven
   const evidence = summarizeTurnEvidence(turnEvents);
   if (evidence.length === 0) return null;
   const content = [
-    'Ready for review.',
+    'Evidence for review.',
     'The agent ended this turn. BeeGame is idle and has not marked the project delivered.',
+    'Use the observed evidence below to compare against the agent final summary.',
     '',
-    'Recent evidence:',
+    'Observed evidence:',
     ...evidence.map(item => `- ${item}`),
     '',
-    'Review the actual project and continue with fixes if the game is not ready.',
+    'Agent claims without matching evidence should be treated as unverified. Continue with fixes if the game is not ready.',
   ].join('\n');
   return {
     type: 'agent_message',
@@ -1098,9 +1099,24 @@ function summarizeTurnEvidence(events: BeeGameEvent[]): string[] {
     const filePath = typeof input.file_path === 'string' ? input.file_path.trim() : '';
     const path = typeof input.path === 'string' ? input.path.trim() : '';
     const detail = command || filePath || path;
-    items.push(`${toolName} ${status}${detail ? `: ${truncateEvidenceDetail(detail)}` : ''}`);
+    const outputHint = summarizeEvidenceOutput(getEventOutput(event));
+    const suffix = [
+      detail ? truncateEvidenceDetail(detail) : '',
+      outputHint,
+    ].filter(Boolean).join(' | ');
+    items.push(`${toolName} ${status}${suffix ? `: ${suffix}` : ''}`);
   }
   return items.slice(-8);
+}
+
+function summarizeEvidenceOutput(output: string): string {
+  const compact = output.replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  const urlMatch = compact.match(/https?:\/\/(?:localhost|127\.0\.0\.1|\[[^\]]+\]|[^\s/]+)(?::\d+)?\/?[^\s]*/i);
+  if (urlMatch) return `observed URL ${urlMatch[0]}`;
+  if (/\b(error|failed|failure|exception)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
+  if (/\b(pass(?:ed)?|success(?:ful)?|built|compiled|ready)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
+  return '';
 }
 
 function truncateEvidenceDetail(value: string): string {
@@ -1672,11 +1688,12 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       '',
       '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
       '这些文档必须区分“本次交付已实现”和“后续路线图”。不要把 roadmap 写成已交付能力。',
+      'docs 里的 acceptance/checklist 只能作为验收标准，不要预先打勾或写成已通过；只有最终验证报告可以基于真实证据记录 pass/fail/untested。',
       '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder 或 asset slot，并说明替换规则。',
       '实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式；不要强行使用某个固定平台、包管理器、测试框架或浏览器。',
       '不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成。发现问题就继续修复。',
       '请验证真实玩家路径：启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复。',
-      '最终总结只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
+      '交付前请使用可用的游戏验收指导或自检清单。最终总结必须分为：Implemented、Verified with evidence、Not verified / Known gaps。只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
     ].filter(Boolean).join('\n');
   }
   return [
@@ -1700,11 +1717,12 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     '',
     'First create project documents under docs/: GDD, technical design, art direction, UI/UX, audio direction, placeholder/asset slots, tuning, and acceptance notes.',
     'Those docs must separate what is implemented in this delivery from roadmap/future work. Do not present roadmap items as delivered features.',
+    'Acceptance criteria or checklists in docs are requirements only. Do not pre-check them or mark them as passed there; only a final verification report may record pass/fail/untested based on real evidence.',
     'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder assets or asset slots that are easy to replace and document the replacement rules.',
     'After implementation, choose checks and validation that fit this project, its target platform, and its own tooling. Do not force a specific platform, package manager, test framework, or browser.',
     'Do not use typecheck, lint, build success, empty tests, or model self-review alone as proof that the game is complete. If you find problems, keep fixing them.',
     'Validate the real player path: start or enter the experience, understand the objective, perform the core action, receive feedback, reach win/fail/progression, and restart, continue, or recover.',
-    'In the final summary, only claim what you actually verified. Include validation method, command or action evidence, issues found and fixed, and any remaining gaps.',
+    'Before delivery, use available game acceptance guidance or your own checklist. In the final summary, use exactly these sections: Implemented, Verified with evidence, Not verified / Known gaps. Only claim what you actually verified and include validation method, command or action evidence, issues found and fixed, and any remaining gaps.',
   ].filter(Boolean).join('\n');
 }
 

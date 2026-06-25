@@ -30,11 +30,12 @@ Only claim what you actually verified.
 5. Verify that docs distinguish:
    - implemented in this delivery
    - roadmap or future work
-6. If production art/audio is not available, make placeholder assets or asset slots intentional, named, documented, and replaceable.
-7. Run the checks that fit this project.
-8. Exercise the real player path when the environment allows it.
-9. Fix discovered problems and rerun the relevant checks.
-10. Report evidence and known gaps honestly.
+6. Keep acceptance criteria in docs as requirements. Do not pre-check or mark them as passed inside planning docs.
+7. If production art/audio is not available, make placeholder assets or asset slots intentional, named, documented, and replaceable.
+8. Run the checks that fit this project.
+9. Exercise the real player path when the environment allows it.
+10. Fix discovered problems and rerun the relevant checks.
+11. Report evidence and known gaps honestly.
 
 ## Player Path
 
@@ -73,17 +74,22 @@ For each command, runtime action, editor check, or manual verification you use a
 
 Prefer unfiltered command output when exit status matters. If you summarize output, keep enough detail for the user to understand what passed or failed.
 
+Do not write `Working`, `Complete`, `Passed`, `Fixed`, or equivalent language for a claim unless it has matching evidence from this delivery. If evidence is missing, mark it as unverified or a known gap.
+
 ## Report Format
 
-When reporting readiness, use this structure:
+When reporting readiness, use these sections:
 
 ```text
 Status: Ready for review | Needs more work | Blocked
 
-Evidence:
+Implemented:
+- ...
+
+Verified with evidence:
 - cwd=... command/action=... result=... conclusion=...
 
-Player Path:
+Player path:
 - Start:
 - Objective:
 - Core action:
@@ -91,13 +97,13 @@ Player Path:
 - Win/fail/progression:
 - Restart/continue:
 
-Docs And Assets:
+Docs and assets:
 - Implemented in this delivery:
 - Roadmap/future work:
 - Placeholder assets or slots:
 - Material mismatches:
 
-Known Gaps:
+Not verified / Known gaps:
 - ...
 
 Next Step:
