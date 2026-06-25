@@ -345,20 +345,13 @@ export function BeeGameLivePreviewPage({
 
             <div className="absolute bottom-4 left-32 right-[29rem] top-24 flex flex-col">
                 <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
-                    <div className="flex h-[7.5rem] items-center justify-between px-9">
+                    <div className="flex h-20 items-center justify-between px-9">
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
                                 <h1 className="text-2xl font-black text-zinc-100">
                                     {labels.title.replace('游戏画面', '预览')}
                                 </h1>
                                 <span className="text-sm font-bold text-zinc-500">Live Preview</span>
-                            </div>
-                            <div className="mt-4 flex items-center gap-4">
-                                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-bold ${canShowPreview ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>
-                                    <span className={`h-2 w-2 rounded-full ${canShowPreview ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                                    {canShowPreview ? 'Preview live' : statusText}
-                                </span>
-                                <span className="font-mono text-sm text-zinc-500">{previewUrl ? previewUrl.replace(/^https?:\/\//, '') : labels.unavailable}</span>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
@@ -368,10 +361,9 @@ export function BeeGameLivePreviewPage({
                                 title={labels.reload}
                                 onClick={onReload}
                                 disabled={!canShowPreview}
-                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
                                 <RefreshCw className="h-4 w-4" />
-                                {labels.reload}
                             </button>
                             <button
                                 type="button"
@@ -379,10 +371,9 @@ export function BeeGameLivePreviewPage({
                                 title={labels.open}
                                 onClick={() => previewUrl && onOpenExternal?.(previewUrl)}
                                 disabled={!canShowPreview}
-                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
                                 <ExternalLink className="h-4 w-4" />
-                                {labels.open}
                             </button>
                             <button
                                 type="button"
@@ -390,15 +381,14 @@ export function BeeGameLivePreviewPage({
                                 title={labels.stop}
                                 onClick={onStop}
                                 disabled={status !== 'running'}
-                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                             >
                                 <Square className="h-4 w-4 fill-red-500 text-red-500" />
-                                {labels.stop}
                             </button>
                         </div>
                     </div>
 
-                    <div className="mx-9 mb-9 h-[calc(100%-10.5rem)] rounded-xl border border-zinc-800 bg-black p-4">
+                    <div className="mx-9 h-[calc(100%-8.75rem)] rounded-xl border border-zinc-800 bg-black p-4">
                         {canShowPreview ? (
                             <iframe
                                 key={previewUrl}
@@ -424,12 +414,15 @@ export function BeeGameLivePreviewPage({
                             </div>
                         )}
                     </div>
-                </section>
 
-                <section className="mt-4 grid grid-cols-3 gap-3">
-                    <PreviewMetric label={labels.health} value={statusText} />
-                    <PreviewMetric label={labels.build} value={buildReport?.status || labels.unavailable} />
-                    <PreviewMetric label={labels.entrypoint} value={buildReport?.entrypoint || labels.unavailable} />
+                    <div
+                        data-testid="beegame-preview-runtime-strip"
+                        className="mx-9 mt-3 flex h-12 items-center gap-5 rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 text-sm text-zinc-400"
+                    >
+                        <RuntimeStripItem dotClassName={canShowPreview ? 'bg-emerald-400' : 'bg-amber-400'} label={labels.health} value={statusText} />
+                        <RuntimeStripItem label={labels.build} value={buildReport?.status || labels.unavailable} />
+                        <RuntimeStripItem label={labels.entrypoint} value={buildReport?.entrypoint || labels.unavailable} />
+                    </div>
                 </section>
             </div>
         </main>
@@ -462,15 +455,12 @@ function SideNavItem({ icon: Icon, label, active = false }: { icon: typeof Folde
     );
 }
 
-function PreviewMetric({ label, value }: { label: string; value: string }) {
+function RuntimeStripItem({ label, value, dotClassName }: { label: string; value: string; dotClassName?: string }) {
     return (
-        <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3">
-            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
-                {label}
-            </div>
-            <div className="mt-1 truncate text-sm font-bold text-zinc-300">
-                {value}
-            </div>
+        <div className="flex min-w-0 items-center gap-2 border-r border-zinc-800 pr-5 last:border-r-0">
+            {dotClassName ? <span className={`h-2 w-2 shrink-0 rounded-full ${dotClassName}`} /> : null}
+            <span className="shrink-0 text-xs font-bold text-zinc-600">{label}</span>
+            <span className="truncate font-bold text-zinc-300">{value}</span>
         </div>
     );
 }
