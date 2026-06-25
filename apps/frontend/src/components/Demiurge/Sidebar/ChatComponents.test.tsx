@@ -271,4 +271,27 @@ describe('MessageItem semantic rendering', () => {
 
         expect(screen.getByTestId('beegame-message-card')).toBeInTheDocument();
     });
+
+    it('uses compact BeeGame tool cards when requested', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'beegame-tool-1',
+                    sender: 'system',
+                    content: 'legacy content should not drive this card',
+                    timestamp: Date.now(),
+                    type: 'tool',
+                    taskKind: 'tool_execution',
+                    toolName: 'Bash',
+                    toolStatus: 'completed',
+                    toolDetail: 'npm run build',
+                    toolOutput: 'Build passed',
+                }}
+                variant="beegame"
+            />
+        );
+
+        expect(screen.getByTestId('beegame-tool-card')).toBeInTheDocument();
+        expect(screen.getByText('Bash completed')).toBeInTheDocument();
+    });
 });

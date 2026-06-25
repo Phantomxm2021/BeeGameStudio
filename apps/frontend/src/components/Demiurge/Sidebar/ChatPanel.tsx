@@ -267,6 +267,7 @@ export const ChatPanel = memo(({
                             }
                             approvalState={approvalState}
                             layout="bottom-bar"
+                            className={isBeeGameVariant ? 'rounded-xl border-zinc-800 bg-zinc-900/80 px-3 py-3 text-zinc-100' : undefined}
                             actions={[
                                 ...(activeComposerReview.type === 'INTENT_CLARIFICATION'
                                     ? [{

@@ -206,8 +206,9 @@ const structuredJsonToMarkdown = (value: unknown): string | null => {
 
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
-export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown' }: { content: string, isUser: boolean, messageId?: string }) => {
-    const textColor = isUser ? 'text-white dark:text-zinc-900' : 'text-zinc-800 dark:text-zinc-100';
+export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', variant = 'legacy' }: { content: string, isUser: boolean, messageId?: string; variant?: 'legacy' | 'beegame' }) => {
+    const isBeeGameVariant = variant === 'beegame';
+    const textColor = isBeeGameVariant ? 'text-zinc-200' : isUser ? 'text-white dark:text-zinc-900' : 'text-zinc-800 dark:text-zinc-100';
     const [isThoughtExpanded, setIsThoughtExpanded] = useState(false);
 
     const { thoughtContent, formattedMainContent, renderAsCsv } = useMemo(() => {
@@ -324,7 +325,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown' }
                                     );
                                 },
                                 pre: (props) => (
-                                    <pre className="bg-zinc-800 text-zinc-100 rounded-lg p-4 overflow-x-auto my-4 text-xs font-mono leading-relaxed border border-zinc-700/50">
+                                    <pre className={`${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} text-zinc-100 rounded-lg p-4 overflow-x-auto my-4 text-xs font-mono leading-relaxed border`}>
                                         {props.children}
                                     </pre>
                                 ),
@@ -336,7 +337,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown' }
                                     if (isInline) {
                                       const color = typeof children === 'string' ? detectColor(children) : null;
                                       return (
-                                        <code className="bg-zinc-200 dark:bg-zinc-700 rounded px-1.5 py-0.5 text-[0.85em] font-mono break-words" {...props}>
+                                        <code className={`${isBeeGameVariant ? 'bg-zinc-950 text-zinc-300' : 'bg-zinc-200 dark:bg-zinc-700'} rounded px-1.5 py-0.5 text-[0.85em] font-mono break-words`} {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </code>
@@ -404,8 +405,9 @@ const getToolInfo = (message: ChatDisplayMessage): { name: string; status: 'runn
     return { name: subagent || name, status, detail, output, isSubagent: Boolean(subagent) };
 };
 
-const ToolMessageCard = memo(({ message }: { message: ChatDisplayMessage }) => {
+const ToolMessageCard = memo(({ message, variant = 'legacy' }: { message: ChatDisplayMessage; variant?: 'legacy' | 'beegame' }) => {
     const tool = getToolInfo(message);
+    const isBeeGameVariant = variant === 'beegame';
     const Icon = tool.isSubagent
         ? Bot
         : tool.name.toLowerCase().includes('bash')
@@ -425,25 +427,35 @@ const ToolMessageCard = memo(({ message }: { message: ChatDisplayMessage }) => {
             key={message.id}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200"
+            data-testid={isBeeGameVariant ? 'beegame-tool-card' : undefined}
+            className={isBeeGameVariant
+                ? 'flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-3 text-zinc-200 shadow-sm'
+                : 'flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200'
+            }
         >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-zinc-700 shadow-sm dark:bg-zinc-800 dark:text-zinc-100">
+            <div className={isBeeGameVariant
+                ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-950 text-cyan-300'
+                : 'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-zinc-700 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
+            }>
                 <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                     <StatusIcon className={`h-4 w-4 shrink-0 ${statusClass}`} />
-                    <div className="truncate text-[11px] font-black uppercase tracking-[0.18em]">
+                    <div className={isBeeGameVariant ? 'truncate text-sm font-bold text-zinc-100' : 'truncate text-[11px] font-black uppercase tracking-[0.18em]'}>
                         {tool.name} {tool.status}
                     </div>
                 </div>
                 {tool.detail ? (
-                    <div className="mt-1 line-clamp-2 font-mono text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere] dark:text-zinc-400">
+                    <div className={isBeeGameVariant
+                        ? 'mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]'
+                        : 'mt-1 line-clamp-2 font-mono text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere] dark:text-zinc-400'
+                    }>
                         {tool.detail}
                     </div>
                 ) : null}
                 {tool.output ? (
-                    <div className="mt-1 line-clamp-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere] dark:text-zinc-500">
+                    <div className={isBeeGameVariant ? 'mt-2 line-clamp-2 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]' : 'mt-1 line-clamp-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere] dark:text-zinc-500'}>
                         {tool.output}
                     </div>
                 ) : null}
@@ -495,19 +507,22 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
 });
 EvidenceDivider.displayName = 'EvidenceDivider';
 
-const DeliveryReviewAlert = memo(({ message }: { message: ChatDisplayMessage }) => (
+const DeliveryReviewAlert = memo(({ message, variant = 'legacy' }: { message: ChatDisplayMessage; variant?: 'legacy' | 'beegame' }) => (
     <motion.div
         key={message.id}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100"
+        className={variant === 'beegame'
+            ? 'w-full rounded-xl border border-sky-900/60 bg-sky-950/20 p-3 text-sky-100'
+            : 'w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100'
+        }
     >
         <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-300">
             <CheckCircle2 className="h-4 w-4" />
             Evidence for review
         </div>
         <div className="text-sm leading-6 opacity-85 [overflow-wrap:anywhere]">
-            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} />
+            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} variant={variant} />
         </div>
     </motion.div>
 ));
@@ -541,7 +556,7 @@ export const MessageItem = memo(({
     const governance = m.governanceSnapshot as GovernanceDisplaySnapshot | undefined;
     const isBeeGameVariant = variant === 'beegame';
 
-    if (semanticType === 'tool') return <ToolMessageCard message={m} />;
+    if (semanticType === 'tool') return <ToolMessageCard message={m} variant={variant} />;
 
     if (!isUser && m.taskKind === 'context_update') {
         return <EvidenceDivider label="Context update" content={m.content} messageId={m.id} />;
@@ -582,7 +597,7 @@ export const MessageItem = memo(({
     }
 
     if (!isUser && m.taskKind === 'delivery_review') {
-        return <DeliveryReviewAlert message={m} />;
+        return <DeliveryReviewAlert message={m} variant={variant} />;
     }
 
     if (isError) {
@@ -685,7 +700,7 @@ export const MessageItem = memo(({
                                 <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400 mb-1">
                                     {getSystemStatusLabel(m)}
                                 </div>
-                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} />
+                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />
                             </div>
                         );
                     }
@@ -707,11 +722,11 @@ export const MessageItem = memo(({
                                         </div>
                                     ) : null}
                                 </div>
-                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} />
+                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />
                             </div>
                         );
                     }
-                    return <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} />;
+                    return <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />;
                 })()}
 
                 {m.thought && !isUser && (

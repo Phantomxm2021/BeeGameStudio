@@ -224,8 +224,14 @@ export function RightSidebar({
         ? 'h-full flex flex-col bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-[0_32px_80px_-40px_rgba(0,0,0,0.75)] overflow-hidden'
         : 'h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200 dark:border-zinc-800 rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden';
     const headerClassName = variant === 'beegame'
-        ? 'flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800'
+        ? 'flex h-14 items-center justify-between border-b border-zinc-800 px-4'
         : 'flex items-center justify-between px-8 pt-8 pb-4';
+    const tabButtonClassName = (isActive: boolean) => variant === 'beegame'
+        ? `relative pb-3 text-sm font-bold transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`
+        : `text-xs font-black uppercase tracking-[0.2em] transition-all relative pb-2 ${isActive
+            ? 'text-zinc-900 dark:text-zinc-100'
+            : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
+        }`;
 
     return (
         <>
@@ -242,19 +248,19 @@ export function RightSidebar({
                     
                     {/* Header Tabs */}
                     <div className={headerClassName}>
-                        <div className="flex space-x-6">
+                        <div className={variant === 'beegame' ? 'flex items-center gap-6' : 'flex space-x-6'}>
                             {(['chat', 'artifacts'] as const).map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`text-xs font-black uppercase tracking-[0.2em] transition-all relative pb-2 ${activeTab === tab
-                                        ? 'text-zinc-900 dark:text-zinc-100'
-                                        : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
-                                        }`}
+                                    className={tabButtonClassName(activeTab === tab)}
                                 >
                                     {t[tab]}
+                                    {variant === 'beegame' && tab === 'artifacts' ? (
+                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">7</span>
+                                    ) : null}
                                     {activeTab === tab && (
-                                        <motion.div layoutId="tabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100" />
+                                        <motion.div layoutId="tabUnderline" className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
                                     )}
                                 </button>
                             ))}
