@@ -211,6 +211,25 @@ describe('MessageItem semantic rendering', () => {
         );
     });
 
+    it('renders delivery review messages as neutral review alerts', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'delivery-review-1',
+                    sender: 'system',
+                    content: 'Ready for review.\n\nRecent evidence:\n- Bash completed: game-engine verify',
+                    timestamp: Date.now(),
+                    type: 'system_status',
+                    taskKind: 'delivery_review',
+                }}
+            />
+        );
+
+        expect(screen.getByText('Ready for review')).not.toBeNull();
+        expect(screen.getByText(/game-engine verify/)).not.toBeNull();
+        expect(screen.queryByRole('button', { name: /continue fixing/i })).toBeNull();
+    });
+
     it('renders tool cards from structured metadata instead of parsing content', () => {
         render(
             <MessageItem

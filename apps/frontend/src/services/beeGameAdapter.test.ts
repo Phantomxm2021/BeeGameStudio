@@ -898,22 +898,24 @@ describe('beeGameAdapter prompt rules', () => {
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
 
     expect(body.text).toContain('我要做一个完整游戏项目。');
+    expect(body.text).toContain('请像在终端里协作一样');
     expect(body.text).not.toContain('Confirmed BeeGame build brief');
     expect(body.text).not.toContain('Completion contract');
     expect(body.text).not.toContain('Workspace rule:');
     expect(body.text).not.toContain('Branding rule:');
     expect(body.text).toContain('Platform: Web');
     expect(body.text).toContain('Inputs: Keyboard/mouse, Touch');
-    expect(body.text).toContain('先在 docs/ 下完成');
-    expect(body.text).toContain('art direction');
+    expect(body.text).toContain('请先在 docs/ 下写清项目资源');
+    expect(body.text).toContain('美术方向');
     expect(body.text).toContain('UI/UX');
-    expect(body.text).toContain('placeholder asset');
-    expect(body.text).toContain('replaceable');
-    expect(body.text).toContain('不能把没有真实测试用例的测试命令或空测试通过当作完成依据');
-    expect(body.text).toContain('不要为了让测试通过而加入 pass-with-no-tests、passWithNoTests 或同类配置');
-    expect(body.text).toContain('玩家能启动游戏、进入关卡或主场景、执行核心操作、看到反馈、达到胜负或进度变化、并能重开或继续');
-    expect(body.text).toContain('不能只用 TypeScript、lint 或构建命令通过来证明游戏已完成');
-    expect(body.text).toContain('最终总结必须列出你实际验证过的玩家路径');
+    expect(body.text).toContain('placeholder/asset slots');
+    expect(body.text).toContain('必须区分“本次交付已实现”和“后续路线图”');
+    expect(body.text).toContain('不要把 roadmap 写成已交付能力');
+    expect(body.text).toContain('方便替换的 placeholder 或 asset slot');
+    expect(body.text).toContain('不要强行使用某个固定平台、包管理器、测试框架或浏览器');
+    expect(body.text).toContain('不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成');
+    expect(body.text).toContain('启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复');
+    expect(body.text).toContain('最终总结只能声明你实际验证过的内容');
     expect(body.text).not.toContain('Create useful project documents under ./docs/');
     expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
     expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
@@ -931,7 +933,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('If the skill returns FAIL');
     expect(body.text).not.toContain('If it returns BLOCKED');
     expect(body.text).not.toContain('Do not treat a normal assistant turn ending');
-    expect(body.text).toContain('实现后请运行你认为适合当前项目的检查和验证');
+    expect(body.text).toContain('实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式');
     expect(body.text).not.toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
     expect(body.text).not.toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
     expect(body.text).not.toContain('apps/frontend');
@@ -1362,6 +1364,62 @@ describe('beeGameAdapter prompt rules', () => {
 
     const status = polled.messages.find(message => message.type === 'status');
     expect(status).toEqual(expect.objectContaining({ status: 'idle' }));
+    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
+  });
+
+  it('shows a review reminder with tool evidence when a turn ends successfully', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_review',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_review/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_review',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_review/events?after=0') {
+        return jsonResponse([
+          bashCompletedEvent(40, 'beegame_review', 'turn-1', 'game-engine verify', 'Verified.'),
+          turnCompletedEvent(41, 'beegame_review', 'turn-1'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent_message',
+        sender: 'system',
+        task_kind: 'delivery_review',
+        content: expect.stringContaining('Ready for review.'),
+      }),
+      expect.objectContaining({ type: 'status', status: 'idle' }),
+    ]));
+    expect(polled.messages.find(message => message.task_kind === 'delivery_review')?.content)
+      .toContain('game-engine verify');
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 

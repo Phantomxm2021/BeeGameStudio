@@ -1012,8 +1012,10 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       return [];
     case 'turn.completed': {
       const failedCheckAlert = buildLastFailedCheckAlert(projectId, event, events);
+      const reviewAlert = failedCheckAlert ? null : buildDeliveryReviewAlert(projectId, event, events);
       return [
         ...(failedCheckAlert ? [failedCheckAlert] : []),
+        ...(reviewAlert ? [reviewAlert] : []),
         { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
       ];
     }
@@ -1054,6 +1056,57 @@ function buildLastFailedCheckAlert(projectId: string, completedEvent: BeeGameEve
     next_action: CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT,
     requires_user_action: true,
   } as WebSocketMessage;
+}
+
+function buildDeliveryReviewAlert(projectId: string, completedEvent: BeeGameEvent, events: BeeGameEvent[]): WebSocketMessage | null {
+  const turnEvents = events.filter(event => (
+    event.sessionId === completedEvent.sessionId &&
+    (!completedEvent.turnId || event.turnId === completedEvent.turnId) &&
+    event.id <= completedEvent.id
+  ));
+  const evidence = summarizeTurnEvidence(turnEvents);
+  if (evidence.length === 0) return null;
+  const content = [
+    'Ready for review.',
+    'The agent ended this turn. BeeGame is idle and has not marked the project delivered.',
+    '',
+    'Recent evidence:',
+    ...evidence.map(item => `- ${item}`),
+    '',
+    'Review the actual project and continue with fixes if the game is not ready.',
+  ].join('\n');
+  return {
+    type: 'agent_message',
+    task_id: completedEvent.sessionId,
+    project_id: projectId,
+    sender: 'system',
+    content,
+    message_id: `beegame-delivery-review-${completedEvent.sessionId}-${completedEvent.turnId || completedEvent.id}`,
+    timestamp: Date.parse(completedEvent.createdAt) || Date.now(),
+    task_kind: 'delivery_review',
+  } as WebSocketMessage;
+}
+
+function summarizeTurnEvidence(events: BeeGameEvent[]): string[] {
+  const items: string[] = [];
+  for (const event of events) {
+    if (event.type !== 'tool.completed' && event.type !== 'tool.failed') continue;
+    const toolName = getPayloadString(event, 'toolName') || 'Tool';
+    const status = event.type === 'tool.failed' ? 'failed' : 'completed';
+    const input = getPayloadRecord(event, 'input');
+    const command = typeof input.command === 'string' ? input.command.trim() : '';
+    const filePath = typeof input.file_path === 'string' ? input.file_path.trim() : '';
+    const path = typeof input.path === 'string' ? input.path.trim() : '';
+    const detail = command || filePath || path;
+    items.push(`${toolName} ${status}${detail ? `: ${truncateEvidenceDetail(detail)}` : ''}`);
+  }
+  return items.slice(-8);
+}
+
+function truncateEvidenceDetail(value: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length <= 180) return compact;
+  return `${compact.slice(0, 180)}...`;
 }
 
 function findUnresolvedValidationFailure(completedEvent: BeeGameEvent, events: BeeGameEvent[]): BeeGameEvent | null {
@@ -1599,7 +1652,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
   ].join('\n');
   if (containsCjk(languageSource)) {
     return [
-      '我要做一个完整游戏项目。',
+      '我要做一个完整游戏项目。请像在终端里协作一样，自主规划、实现、运行检查、修复问题，并在需要我决策时提问。',
       '',
       `原始想法：${brief.idea}`,
       `已选择的游戏方向：${brief.option.title}`,
@@ -1617,16 +1670,17 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       `Scope: ${settings.scope}`,
       settings.notes ? `补充说明：${settings.notes}` : '',
       '',
-      '请先在 docs/ 下完成游戏策划、GDD、技术方案、art direction、美术资源占位说明、audio direction、UI/UX、调参与验收说明。',
-      '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder asset，并说明 replaceable 规则。',
-      '实现后请运行你认为适合当前项目的检查和验证，发现问题就继续修复。不能只用 TypeScript、lint 或构建命令通过来证明游戏已完成。',
-      '不能把没有真实测试用例的测试命令或空测试通过当作完成依据。不要为了让测试通过而加入 pass-with-no-tests、passWithNoTests 或同类配置。',
-      '请自己选择合适方式验证真实玩家路径：玩家能启动游戏、进入关卡或主场景、执行核心操作、看到反馈、达到胜负或进度变化、并能重开或继续。',
-      '最终总结必须列出你实际验证过的玩家路径、验证方式、发现并修复的问题，以及仍然遗留的问题。',
+      '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
+      '这些文档必须区分“本次交付已实现”和“后续路线图”。不要把 roadmap 写成已交付能力。',
+      '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder 或 asset slot，并说明替换规则。',
+      '实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式；不要强行使用某个固定平台、包管理器、测试框架或浏览器。',
+      '不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成。发现问题就继续修复。',
+      '请验证真实玩家路径：启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复。',
+      '最终总结只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
     ].filter(Boolean).join('\n');
   }
   return [
-    'I want to build a complete game project.',
+    'I want to build a complete game project. Work like an interactive terminal session: plan, implement, run checks, fix issues, and ask me when a decision is needed.',
     '',
     `Original idea: ${brief.idea}`,
     `Selected game direction: ${brief.option.title}`,
@@ -1644,12 +1698,13 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     `Scope: ${settings.scope}`,
     settings.notes ? `Notes: ${settings.notes}` : '',
     '',
-    'First create project documents under docs/: game design, GDD, technical design, art direction, placeholder asset inventory, audio direction, UI/UX, tuning, and acceptance notes.',
-    'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder asset files that are easy to replace and document the replaceable rules.',
-    'After implementation, run the checks and validation you think fit this project. If you find problems, keep fixing them. Do not use TypeScript, lint, or build success alone as proof that the game is complete.',
-    'Do not treat a test command with no real test cases, empty-test success, pass-with-no-tests, passWithNoTests, or similar configuration as completion evidence.',
-    'Choose an appropriate way to validate the real player path: the player can start the game, enter a level or main scene, perform the core action, receive feedback, reach a win/fail or progression state, and restart or continue.',
-    'Finally summarize the actual player paths you validated, the validation method, issues found and fixed, and anything still remaining.',
+    'First create project documents under docs/: GDD, technical design, art direction, UI/UX, audio direction, placeholder/asset slots, tuning, and acceptance notes.',
+    'Those docs must separate what is implemented in this delivery from roadmap/future work. Do not present roadmap items as delivered features.',
+    'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder assets or asset slots that are easy to replace and document the replacement rules.',
+    'After implementation, choose checks and validation that fit this project, its target platform, and its own tooling. Do not force a specific platform, package manager, test framework, or browser.',
+    'Do not use typecheck, lint, build success, empty tests, or model self-review alone as proof that the game is complete. If you find problems, keep fixing them.',
+    'Validate the real player path: start or enter the experience, understand the objective, perform the core action, receive feedback, reach win/fail/progression, and restart, continue, or recover.',
+    'In the final summary, only claim what you actually verified. Include validation method, command or action evidence, issues found and fixed, and any remaining gaps.',
   ].filter(Boolean).join('\n');
 }
 

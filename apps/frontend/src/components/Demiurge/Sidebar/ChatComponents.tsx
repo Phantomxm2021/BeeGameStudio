@@ -495,6 +495,24 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
 });
 EvidenceDivider.displayName = 'EvidenceDivider';
 
+const DeliveryReviewAlert = memo(({ message }: { message: ChatDisplayMessage }) => (
+    <motion.div
+        key={message.id}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100"
+    >
+        <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-300">
+            <CheckCircle2 className="h-4 w-4" />
+            Ready for review
+        </div>
+        <div className="text-sm leading-6 opacity-85 [overflow-wrap:anywhere]">
+            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} />
+        </div>
+    </motion.div>
+));
+DeliveryReviewAlert.displayName = 'DeliveryReviewAlert';
+
 export const MessageItem = memo(({
     m,
     onPreviewArtifact,
@@ -558,6 +576,10 @@ export const MessageItem = memo(({
                 </div>
             </motion.div>
         );
+    }
+
+    if (!isUser && m.taskKind === 'delivery_review') {
+        return <DeliveryReviewAlert message={m} />;
     }
 
     if (isError) {
