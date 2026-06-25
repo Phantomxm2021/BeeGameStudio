@@ -517,10 +517,12 @@ export const MessageItem = memo(({
     m,
     onPreviewArtifact,
     onContinueFixing,
+    variant = 'legacy',
 }: {
     m: ChatDisplayMessage,
     onPreviewArtifact?: (artifactId: string, title: string, content?: string) => void,
     onContinueFixing?: (content: string) => void,
+    variant?: 'legacy' | 'beegame',
 }) => {
     const agent = AGENT_UI_MAP[m.sender];
     const isUser = m.sender === 'user';
@@ -537,6 +539,7 @@ export const MessageItem = memo(({
     const isError = semanticType === 'error';
     const [isHovered, setIsHovered] = useState(false);
     const governance = m.governanceSnapshot as GovernanceDisplaySnapshot | undefined;
+    const isBeeGameVariant = variant === 'beegame';
 
     if (semanticType === 'tool') return <ToolMessageCard message={m} />;
 
@@ -604,19 +607,22 @@ export const MessageItem = memo(({
             key={m.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`flex items-start space-x-4 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
+            className={isBeeGameVariant ? 'flex items-start gap-3' : `flex items-start space-x-4 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
         >
             <div className="relative">
                 <motion.div
                     onMouseEnter={() => !isUser && setIsHovered(true)}
                     onMouseLeave={() => !isUser && setIsHovered(false)}
                     whileHover={{ scale: 1.1 }}
-                    className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
-                        ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
-                        : (agent?.color || 'bg-zinc-500') + ' text-white'
-                        }`}
+                    className={isBeeGameVariant
+                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'bg-purple-500 text-white' : 'bg-orange-500 text-white'}`
+                        : `w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
+                            ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
+                            : (agent?.color || 'bg-zinc-500') + ' text-white'
+                            }`
+                    }
                 >
-                    {isUser ? <User className="w-6 h-6" /> : (agent && <agent.icon className="w-6 h-6" />)}
+                    {isUser ? <User className={isBeeGameVariant ? 'h-4 w-4' : 'w-6 h-6'} /> : (agent && <agent.icon className={isBeeGameVariant ? 'h-4 w-4' : 'w-6 h-6'} />)}
                 </motion.div>
 
                 <AnimatePresence>
@@ -635,12 +641,18 @@ export const MessageItem = memo(({
                 </AnimatePresence>
             </div>
 
-            <div className={`max-w-[82%] p-5 rounded-[1.8rem] shadow-sm border break-words [overflow-wrap:anywhere] ${isUser
-                ? 'bg-zinc-900 text-white border-transparent dark:bg-zinc-100 dark:text-zinc-900'
-                : `bg-white dark:bg-zinc-800/40 dark:border-zinc-700/50 ${agent?.border || ''}`
-                }`}>
+            <div
+                data-testid={isBeeGameVariant ? 'beegame-message-card' : undefined}
+                className={isBeeGameVariant
+                    ? 'min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-zinc-200 shadow-sm break-words [overflow-wrap:anywhere]'
+                    : `max-w-[82%] p-5 rounded-[1.8rem] shadow-sm border break-words [overflow-wrap:anywhere] ${isUser
+                        ? 'bg-zinc-900 text-white border-transparent dark:bg-zinc-100 dark:text-zinc-900'
+                        : `bg-white dark:bg-zinc-800/40 dark:border-zinc-700/50 ${agent?.border || ''}`
+                        }`
+                }
+            >
                 {m.sender !== 'user' && agent && (
-                    <div className={`text-[10px] font-black mb-2 flex items-center space-x-2 ${agent.text}`}>
+                    <div className={`text-[10px] font-black mb-2 flex items-center space-x-2 ${isBeeGameVariant ? 'text-orange-300' : agent.text}`}>
                         <span>{agent.role}</span>
                         <span className="opacity-30">•</span>
                         <span>{agent.name}</span>

@@ -254,4 +254,21 @@ describe('MessageItem semantic rendering', () => {
         expect(screen.getByText('Build passed')).not.toBeNull();
         expect(screen.queryByText('legacy content should not drive this card')).toBeNull();
     });
+
+    it('uses compact BeeGame message cards when requested', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'beegame-message-1',
+                    sender: 'beegame',
+                    content: 'Preview server started.',
+                    timestamp: Date.now(),
+                    type: 'text',
+                }}
+                variant="beegame"
+            />
+        );
+
+        expect(screen.getByTestId('beegame-message-card')).toBeInTheDocument();
+    });
 });

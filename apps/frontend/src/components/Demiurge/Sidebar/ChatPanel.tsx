@@ -40,6 +40,7 @@ interface ChatPanelProps {
     waitingApproval: WaitingApprovalState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
+    variant?: 'legacy' | 'beegame';
 }
 
 const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
@@ -70,6 +71,7 @@ export const ChatPanel = memo(({
     waitingApproval,
     projectStatus,
     isComposerLocked = false,
+    variant = 'legacy',
 }: ChatPanelProps) => {
     const reviewActionLabel = (
         review: ReviewDisplayModel,
@@ -118,11 +120,28 @@ export const ChatPanel = memo(({
         onSendMessage?.(message);
     };
 
+    const isBeeGameVariant = variant === 'beegame';
+    const panelClassName = isBeeGameVariant
+        ? 'flex h-full flex-col bg-transparent'
+        : 'flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl';
+    const scrollClassName = isBeeGameVariant
+        ? 'flex-1 overflow-y-auto px-4 pt-4 space-y-3 relative pb-4'
+        : 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
+    const composerShellClassName = isBeeGameVariant
+        ? 'border-t border-zinc-800 bg-zinc-950/70 px-4 pb-4 pt-4'
+        : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
+    const textareaClassName = isBeeGameVariant
+        ? 'w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 pr-14 outline-none focus:border-orange-500/70 transition-all text-sm text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto'
+        : 'w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
+    const sendButtonClassName = isBeeGameVariant
+        ? 'absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-700 text-zinc-100 shadow-lg transition-transform group-active:scale-95 disabled:bg-zinc-800 disabled:text-zinc-600'
+        : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
+
     return (
-        <div className="flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl">
+        <div className={panelClassName} data-testid={isBeeGameVariant ? 'beegame-chat-panel' : undefined}>
             <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8"
+                className={scrollClassName}
             >
                 <AnimatePresence initial={false}>
                     {messages.length === 0 ? (
@@ -142,6 +161,7 @@ export const ChatPanel = memo(({
                                 m={m}
                                 onPreviewArtifact={onPreviewArtifact}
                                 onContinueFixing={onSendMessage ? handleContinueFixing : undefined}
+                                variant={variant}
                             />
                         ))
                     )}
@@ -207,7 +227,7 @@ export const ChatPanel = memo(({
                 </AnimatePresence>
             </div>
 
-            <div className="pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8">
+            <div className={composerShellClassName}>
                 {shouldShowWaitingBanner && (
                     <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
                         {waitingApproval.message}
@@ -284,10 +304,10 @@ export const ChatPanel = memo(({
                         />
                     </motion.div>
                 ) : (
-                    <div className="relative group flex items-end">
+                    <div className="relative group flex items-end" data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
                         <textarea
                             ref={textareaRef}
-                            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto"
+                            className={textareaClassName}
                             placeholder={isComposerLocked || isLoading ? "AI is processing..." : waitingApproval.placeholder}
                             value={chatInput}
                             onChange={(e) => onChatInputChange(e.target.value)}
@@ -304,7 +324,7 @@ export const ChatPanel = memo(({
                         <button
                             onClick={onSend}
                             disabled={!chatInput.trim() || isComposerLocked || isLoading || waitingApproval.isBlockingChat}
-                            className="absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400"
+                            className={sendButtonClassName}
                         >
                             <Send className="w-5 h-5 -ml-0.5" />
                         </button>

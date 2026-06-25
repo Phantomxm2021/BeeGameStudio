@@ -158,6 +158,17 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
     });
 
+    it('uses the BeeGame dock styling for the normal composer', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+        });
+
+        expect(screen.getByTestId('beegame-chat-panel')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-chat-composer')).toBeInTheDocument();
+    });
+
     it('restores the normal composer after approval state idles and the pending review is removed', () => {
         renderChatPanel({
             gddReview: undefined,

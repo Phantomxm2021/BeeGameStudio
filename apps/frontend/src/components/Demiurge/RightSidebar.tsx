@@ -293,6 +293,7 @@ export function RightSidebar({
                             onApproveManifest={onApproveManifest}
                                 waitingApproval={waitingApproval}
                                 projectStatus={projectStatus}
+                                variant={variant}
                             />
                         ) : (
                             <ArtifactsPanel 
