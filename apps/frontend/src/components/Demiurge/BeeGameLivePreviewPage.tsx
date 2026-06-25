@@ -368,7 +368,7 @@ export function BeeGameLivePreviewPage({
                         </div>
                     </div>
 
-                    <div className="mx-9 h-[calc(100%-8.75rem)] rounded-xl border border-zinc-800 bg-black p-4">
+                    <div className="mx-9 mb-9 h-[calc(100%-7.25rem)] rounded-xl border border-zinc-800 bg-black p-4">
                         {canShowPreview ? (
                             <iframe
                                 key={previewUrl}
@@ -395,14 +395,6 @@ export function BeeGameLivePreviewPage({
                         )}
                     </div>
 
-                    <div
-                        data-testid="beegame-preview-runtime-strip"
-                        className="mx-9 mt-3 flex h-12 items-center gap-5 rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 text-sm text-zinc-400"
-                    >
-                        <RuntimeStripItem dotClassName={canShowPreview ? 'bg-emerald-400' : 'bg-amber-400'} label={labels.health} value={statusText} />
-                        <RuntimeStripItem label={labels.build} value={buildReport?.status || labels.unavailable} />
-                        <RuntimeStripItem label={labels.entrypoint} value={buildReport?.entrypoint || labels.unavailable} />
-                    </div>
                 </section>
             </div>
         </main>
@@ -418,16 +410,6 @@ function HeaderMetric({ label, value }: { label: string; value: string }) {
             <div className="mt-1 truncate text-sm font-bold text-zinc-100">
                 {value}
             </div>
-        </div>
-    );
-}
-
-function RuntimeStripItem({ label, value, dotClassName }: { label: string; value: string; dotClassName?: string }) {
-    return (
-        <div className="flex min-w-0 items-center gap-2 border-r border-zinc-800 pr-5 last:border-r-0">
-            {dotClassName ? <span className={`h-2 w-2 shrink-0 rounded-full ${dotClassName}`} /> : null}
-            <span className="shrink-0 text-xs font-bold text-zinc-600">{label}</span>
-            <span className="truncate font-bold text-zinc-300">{value}</span>
         </div>
     );
 }

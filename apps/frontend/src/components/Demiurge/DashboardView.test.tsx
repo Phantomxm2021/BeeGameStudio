@@ -277,15 +277,16 @@ describe('DashboardView runtime loading', () => {
         expect(capturedRightSidebarProps?.variant).toBe('beegame');
     });
 
-    it('keeps live preview controls icon-only and uses a compact runtime strip', async () => {
+    it('keeps live preview controls icon-only and removes the bottom runtime strip', async () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(screen.getByTestId('beegame-preview-runtime-strip')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(screen.getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
         expect(screen.queryByText('刷新预览')).not.toBeInTheDocument();
         expect(screen.queryByText('在新窗口打开')).not.toBeInTheDocument();
         expect(screen.queryByText('停止运行')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-preview-runtime-strip')).not.toBeInTheDocument();
         expect(screen.queryByTestId('beegame-preview-metric-grid')).not.toBeInTheDocument();
     });
 
