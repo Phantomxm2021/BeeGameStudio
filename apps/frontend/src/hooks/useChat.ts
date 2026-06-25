@@ -519,7 +519,12 @@ export const useChat = ({
             content: message.content || `Tool: ${message.tool}\nStatus: running`,
             timestamp: message.timestamp || Date.now(),
             type: 'tool',
-            taskKind: 'tool_execution'
+            taskKind: 'tool_execution',
+            toolName: message.tool,
+            toolStatus: message.tool_status || 'running',
+            toolDetail: message.tool_detail,
+            toolOutput: message.tool_output,
+            isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_start', message);
           refs.refreshProjectVisibility().catch(err => console.error('[useChat] Tool start visibility refresh failed:', err));
@@ -547,7 +552,12 @@ export const useChat = ({
             content: message.content || `Tool: ${message.tool}\nStatus: ${status}\nOutput: ${outputSummary}`,
             timestamp: message.timestamp || Date.now(),
             type: 'tool',
-            taskKind: 'tool_execution'
+            taskKind: 'tool_execution',
+            toolName: message.tool,
+            toolStatus: message.tool_status || status,
+            toolDetail: message.tool_detail,
+            toolOutput: message.tool_output || outputSummary,
+            isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_end', message);
           console.log('[useChat] Tool completed:', message.tool);

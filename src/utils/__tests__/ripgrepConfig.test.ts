@@ -6,6 +6,8 @@ import { join } from 'path'
 // so this test cannot pollute other tests in the same Bun process.
 // See CLAUDE.md "Mock 使用规范" for why we avoid business-module mocking.
 const {
+  getBuiltinRipgrepCandidates,
+  resolveRipgrepConfigAfterSpawnError,
   resolveBuiltinWithFallback,
   resolveRipgrepConfigAtRuntime,
 } = await import('../ripgrep.js')
@@ -90,6 +92,37 @@ describe('resolveBuiltinWithFallback', () => {
     expect(result.mode).toBe('system')
     expect(result.command).toBe('rg')
     expect(result.note).toContain('fallback')
+    writeFileSync(rgPath, '')
+  })
+
+  test('source root candidates prefer src/utils vendor before root vendor', () => {
+    const projectRoot = join(tmpDir, 'project-root')
+    const candidates = getBuiltinRipgrepCandidates(projectRoot)
+    expect(candidates[0]).toContain(join('src', 'utils', 'vendor', 'ripgrep'))
+    expect(candidates[1]).toContain(join('vendor', 'ripgrep'))
+  })
+
+  test('dist root candidates prefer dist vendor before source vendor', () => {
+    const distRoot = join(tmpDir, 'project-root', 'dist')
+    const candidates = getBuiltinRipgrepCandidates(distRoot)
+    expect(candidates[0]).toContain(join('dist', 'vendor', 'ripgrep'))
+  })
+
+  test('spawn ENOENT recovers missing builtin config when system rg becomes available', () => {
+    rmSync(rgPath)
+    const result = resolveRipgrepConfigAfterSpawnError(
+      {
+        mode: 'builtin',
+        command: rgPath,
+        args: [],
+      },
+      Object.assign(new Error('spawn failed'), { code: 'ENOENT' }),
+      '/usr/local/bin/rg',
+      'testplatform',
+    )
+    expect(result?.mode).toBe('system')
+    expect(result?.command).toBe('rg')
+    expect(result?.note).toContain('fallback')
     writeFileSync(rgPath, '')
   })
 })

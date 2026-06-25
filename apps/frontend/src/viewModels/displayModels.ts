@@ -45,6 +45,11 @@ export interface ChatDisplayMessage
     | 'nextAction'
     | 'requiresUserAction'
     | 'errorDetails'
+    | 'toolName'
+    | 'toolStatus'
+    | 'toolDetail'
+    | 'toolOutput'
+    | 'isSubagentTool'
   > {
   governanceSnapshot?: GovernanceDisplaySnapshot;
   diagnostic?: {
@@ -338,6 +343,11 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   nextAction: message.nextAction,
   requiresUserAction: message.requiresUserAction,
   errorDetails: message.errorDetails,
+  toolName: message.toolName,
+  toolStatus: message.toolStatus,
+  toolDetail: message.toolDetail,
+  toolOutput: message.toolOutput,
+  isSubagentTool: message.isSubagentTool,
   governanceSnapshot: normalizeGovernanceDisplaySnapshot(message.governanceSnapshot),
   diagnostic: message.governanceSnapshot
     ? {

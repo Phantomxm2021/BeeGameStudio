@@ -755,6 +755,96 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toBe('继续任务');
   });
 
+  it('syncs an existing session to the current default model before continuing', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_model_old') {
+        return jsonResponse({
+          id: 'beegame_model_old',
+          cwd: '/tmp/beegame-projects/model-sync-game',
+          modelConfigId: 'llm_old',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([
+          {
+            id: 'llm_new',
+            ownerId: 'dashboard-local',
+            name: 'New Model',
+            provider: 'openai-compatible',
+            apiKeyPreview: 'sk-...',
+            models: { balanced: 'new-balanced-model' },
+            isDefault: true,
+            createdAt: '2026-06-21T00:00:00.000Z',
+            updatedAt: '2026-06-21T00:00:00.000Z',
+          },
+        ]);
+      }
+      if (
+        path === '/api/beegame-sessions/beegame_model_old/model' &&
+        init?.method === 'PATCH'
+      ) {
+        return jsonResponse({
+          id: 'beegame_model_old',
+          cwd: '/tmp/beegame-projects/model-sync-game',
+          modelConfigId: 'llm_new',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:02.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_model_old/input' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_model_old',
+          cwd: '/tmp/beegame-projects/model-sync-game',
+          modelConfigId: 'llm_new',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:03.000Z',
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const project = await beeGameAdapter.createProject({
+      name: 'Model Sync Game',
+      root_path: '/tmp/beegame-projects/model-sync-game',
+    });
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: project.id,
+      sessionId: 'beegame_model_old',
+      workspacePath: '/tmp/beegame-projects/model-sync-game',
+    }]));
+
+    await beeGameAdapter.continueTask({ project_id: project.id });
+
+    const patchCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
+      init?.method === 'PATCH'
+    ));
+    expect(patchCall).toBeTruthy();
+    expect(JSON.parse(String(patchCall?.[1]?.body || '{}'))).toEqual({
+      modelConfigId: 'llm_new',
+    });
+    const inputCallIndex = fetchMock.mock.calls.findIndex(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_model_old/input' &&
+      init?.method === 'POST'
+    ));
+    const patchCallIndex = fetchMock.mock.calls.findIndex(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
+      init?.method === 'PATCH'
+    ));
+    expect(patchCallIndex).toBeGreaterThan(-1);
+    expect(inputCallIndex).toBeGreaterThan(patchCallIndex);
+  });
+
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -956,7 +1046,8 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects',
+          cwd: '/tmp/beegame-projects/followup',
+          modelConfigId: 'model_default',
           status: 'running',
           turnStatus: 'idle',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -966,7 +1057,8 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_followup/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects',
+          cwd: '/tmp/beegame-projects/followup',
+          modelConfigId: 'model_default',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -976,7 +1068,8 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_followup') {
         return jsonResponse({
           id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects',
+          cwd: '/tmp/beegame-projects/followup',
+          modelConfigId: 'model_default',
           status: 'running',
           turnStatus: 'idle',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -989,7 +1082,7 @@ describe('beeGameAdapter prompt rules', () => {
 
     const result = await beeGameAdapter.bootstrapProjectFromIdea({
       idea: 'LLM generated idea',
-      root_path: '/tmp/beegame-projects',
+      root_path: '/tmp/beegame-projects/followup',
     });
     await beeGameAdapter.sendMessage({
       project_id: result.project.id,
@@ -1472,8 +1565,19 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages[0].content).toContain('Tool: Read');
     expect(polled.messages[0].content).toContain('Status: running');
     expect(polled.messages[0].content).toContain('Target: snake-game/src/main.ts');
+    expect(polled.messages[0]).toEqual(expect.objectContaining({
+      tool: 'Read',
+      tool_status: 'running',
+      tool_detail: 'Target: snake-game/src/main.ts',
+      is_subagent_tool: false,
+    }));
     expect(polled.messages[1].content).toContain('Status: completed');
     expect(polled.messages[1].content).toContain('Target: snake-game/src/main.ts');
+    expect(polled.messages[1]).toEqual(expect.objectContaining({
+      tool: 'Read',
+      tool_status: 'completed',
+      tool_detail: 'Target: snake-game/src/main.ts',
+    }));
     expect(polled.messages[3].content).toContain('Target: snake-game/src/main.ts');
   });
 

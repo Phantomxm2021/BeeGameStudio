@@ -55,14 +55,43 @@ export const getRipgrepConfig = memoize((): RipgrepConfig => {
     }
   }
 
-  const rgRoot = path.resolve(__dirname, 'vendor', 'ripgrep')
-  const command =
-    process.platform === 'win32'
-      ? path.resolve(rgRoot, `${process.arch}-win32`, 'rg.exe')
-      : path.resolve(rgRoot, `${process.arch}-${process.platform}`, 'rg')
+  const command = getPreferredBuiltinRipgrepPath(__dirname)
 
   return resolveBuiltinWithFallback(command)
 })
+
+export function getBuiltinRipgrepCandidates(root: string = __dirname): string[] {
+  const resolvedRoot = path.resolve(root)
+  const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const vendorPath = (...segments: string[]) =>
+    path.resolve(
+      ...segments,
+      'vendor',
+      'ripgrep',
+      `${process.arch}-${process.platform}`,
+      binaryName,
+    )
+
+  if (path.basename(resolvedRoot) === 'dist') {
+    const projectRoot = path.resolve(resolvedRoot, '..')
+    return [
+      vendorPath(resolvedRoot),
+      vendorPath(projectRoot, 'src', 'utils'),
+      vendorPath(projectRoot),
+    ]
+  }
+
+  return [
+    vendorPath(resolvedRoot, 'src', 'utils'),
+    vendorPath(resolvedRoot),
+    vendorPath(resolvedRoot, 'dist'),
+  ]
+}
+
+function getPreferredBuiltinRipgrepPath(root: string): string {
+  const candidates = getBuiltinRipgrepCandidates(root)
+  return candidates.find(candidate => existsSync(candidate)) ?? candidates[0]
+}
 
 /**
  * Pure function: decide what to do when the builtin rg binary may be missing.
@@ -127,12 +156,39 @@ export function resolveRipgrepConfigAtRuntime(
   return resolveBuiltinWithFallback(config.command, systemRgPath, platform)
 }
 
+export function resolveRipgrepConfigAfterSpawnError(
+  config: RipgrepConfig,
+  error: NodeJS.ErrnoException,
+  systemRgPath?: string | null,
+  platform?: string,
+): RipgrepConfig | null {
+  if (config.mode !== 'builtin' || error.code !== 'ENOENT') return null
+  const recovered = resolveBuiltinWithFallback(
+    config.command,
+    systemRgPath,
+    platform,
+  )
+  if (recovered.mode === 'system') return recovered
+  if (recovered.command !== config.command && existsSync(recovered.command)) {
+    return recovered
+  }
+  return null
+}
+
 export function ripgrepCommand(): {
   rgPath: string
   rgArgs: string[]
   argv0?: string
 } {
   const config = resolveRipgrepConfigAtRuntime(getRipgrepConfig())
+  return ripgrepCommandFromConfig(config)
+}
+
+function ripgrepCommandFromConfig(config: RipgrepConfig): {
+  rgPath: string
+  rgArgs: string[]
+  argv0?: string
+} {
   return {
     rgPath: config.command,
     rgArgs: config.args,
@@ -178,12 +234,15 @@ function ripGrepRaw(
     stderr: string,
   ) => void,
   singleThread = false,
+  configOverride?: RipgrepConfig,
 ): ChildProcess {
   // NB: When running interactively, ripgrep does not require a path as its last
   // argument, but when run non-interactively, it will hang unless a path or file
   // pattern is provided
 
-  const { rgPath, rgArgs, argv0 } = ripgrepCommand()
+  const commandConfig =
+    configOverride ?? resolveRipgrepConfigAtRuntime(getRipgrepConfig())
+  const { rgPath, rgArgs, argv0 } = ripgrepCommandFromConfig(commandConfig)
 
   // Use single-threaded mode only if explicitly requested for this call's retry
   const threadArgs = singleThread ? ['-j', '1'] : []
@@ -445,6 +504,32 @@ export async function ripGrep(
       // Critical errors that indicate ripgrep is broken, not "no matches"
       // These should be surfaced to the user rather than silently returning empty results
       const CRITICAL_ERROR_CODES = ['ENOENT', 'EACCES', 'EPERM']
+      if (!isRetry && error.code === 'ENOENT') {
+        const recoveredConfig = resolveRipgrepConfigAfterSpawnError(
+          {
+            mode: 'builtin',
+            command:
+              typeof (error as NodeJS.ErrnoException).path === 'string'
+                ? String((error as NodeJS.ErrnoException).path)
+                : ripgrepCommand().rgPath,
+            args: [],
+          },
+          error as NodeJS.ErrnoException,
+        )
+        if (recoveredConfig) {
+          ripGrepRaw(
+            args,
+            target,
+            abortSignal,
+            (retryError, retryStdout, retryStderr) => {
+              handleResult(retryError, retryStdout, retryStderr, true)
+            },
+            false,
+            recoveredConfig,
+          )
+          return
+        }
+      }
       if (CRITICAL_ERROR_CODES.includes(error.code as string)) {
         reject(error)
         return

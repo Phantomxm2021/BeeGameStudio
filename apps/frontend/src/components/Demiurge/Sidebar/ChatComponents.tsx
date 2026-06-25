@@ -366,7 +366,17 @@ const isContextUseMessage = (message: ChatDisplayMessage): boolean => {
     return /\b\w+\s+phase\s+generated\s+\d+\s+artifact\(s\)\s+using\s+context\s+bundle\s+\S+/i.test(message.content);
 };
 
-const getToolInfo = (content: string): { name: string; status: 'running' | 'completed' | 'failed'; detail: string; output: string; isSubagent: boolean } => {
+const getToolInfo = (message: ChatDisplayMessage): { name: string; status: 'running' | 'completed' | 'failed'; detail: string; output: string; isSubagent: boolean } => {
+    if (message.toolName || message.toolStatus || message.toolDetail || message.toolOutput) {
+        return {
+            name: message.toolName || 'Tool',
+            status: message.toolStatus || 'running',
+            detail: message.toolDetail || '',
+            output: message.toolOutput || '',
+            isSubagent: Boolean(message.isSubagentTool),
+        };
+    }
+    const content = message.content;
     const normalized = content.trim();
     const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
     const field = (label: string): string => {
@@ -395,7 +405,7 @@ const getToolInfo = (content: string): { name: string; status: 'running' | 'comp
 };
 
 const ToolMessageCard = memo(({ message }: { message: ChatDisplayMessage }) => {
-    const tool = getToolInfo(message.content);
+    const tool = getToolInfo(message);
     const Icon = tool.isSubagent
         ? Bot
         : tool.name.toLowerCase().includes('bash')

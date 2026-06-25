@@ -122,6 +122,7 @@ type SessionRecord = {
   rememberedPermissionTools: Set<string>
   monitoredSubagentOutputFiles: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
+  assistantPartialTextByTurn: Map<string, string>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
@@ -198,11 +199,14 @@ export class BeeGameSessionManager {
       rememberedPermissionTools: new Set(),
       monitoredSubagentOutputFiles: new Set(),
       toolUses: new Map(),
+      assistantPartialTextByTurn: new Map(),
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
         : 1,
-      nextTurnIndex: 1,
+      nextTurnIndex: recoveredTranscript
+        ? getNextTurnIndex(session.id, recoveredTranscript.events)
+        : 1,
       currentTurnId: null,
     }
     this.sessions.set(session.id, record)
@@ -222,6 +226,22 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
+  }
+
+  updateModel(sessionId: string, modelConfigId: string): BeeGameSession {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    if (record.session.turnStatus !== 'idle') {
+      throw new Error('Session is already processing a prompt')
+    }
+    const runtime = mapModelConfigToRuntime(modelConfigId)
+    if (!runtime) throw new Error('Model config not found')
+
+    record.runtime = runtime
+    record.session.modelConfigId = modelConfigId
+    record.session.updatedAt = new Date()
+    this.appendRuntimeObservation(record, 'model_updated')
+    return cloneSession(record.session)
   }
 
   events(sessionId: string, after = 0): BeeGameEvent[] {
@@ -411,7 +431,17 @@ export class BeeGameSessionManager {
       onMessage: message => {
         const mapped = mapSDKMessageToEvent(message)
         if (mapped) {
-          this.append(record, mapped.type, mapped.text, message)
+          if (mapped.type === 'assistant.partial') {
+            this.append(record, mapped.type, mapped.text, message)
+            this.appendAssistantPartialText(record, message)
+          } else if (mapped.type === 'assistant.message') {
+            this.append(record, mapped.type, this.reconcileAssistantText(
+              record,
+              mapped.text,
+            ), message)
+          } else {
+            this.append(record, mapped.type, mapped.text, message)
+          }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
           const appended = this.append(
@@ -425,6 +455,32 @@ export class BeeGameSessionManager {
       },
       requestPermission: request => this.requestPermission(record, request),
     })
+  }
+
+  private appendAssistantPartialText(
+    record: SessionRecord,
+    message: DashboardSDKMessage,
+  ): void {
+    const turnId = record.currentTurnId
+    if (!turnId) return
+    const text = extractAssistantPartialText(message)
+    if (!text) return
+    record.assistantPartialTextByTurn.set(
+      turnId,
+      `${record.assistantPartialTextByTurn.get(turnId) ?? ''}${text}`,
+    )
+  }
+
+  private reconcileAssistantText(record: SessionRecord, finalText: string): string {
+    const turnId = record.currentTurnId
+    if (!turnId) return finalText
+    const partialText = record.assistantPartialTextByTurn.get(turnId)
+    record.assistantPartialTextByTurn.delete(turnId)
+    const normalizedPartial = partialText?.trim()
+    if (!normalizedPartial) return finalText
+    return normalizedPartial.length > finalText.trim().length + 24
+      ? normalizedPartial
+      : finalText
   }
 
   resolvePermission(
@@ -553,7 +609,7 @@ export class BeeGameSessionManager {
 
   private appendRuntimeObservation(
     record: SessionRecord,
-    status: 'initialized' | 'turn_completed' | 'empty_turn',
+    status: 'initialized' | 'turn_completed' | 'empty_turn' | 'model_updated',
   ): void {
     this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
       type: 'runtime.observation',
@@ -1110,6 +1166,21 @@ function toDiskTranscriptEvent(event: BeeGameEvent): {
 function getNextTranscriptEventId(events: BeeGameEvent[]): number {
   const maxId = events.reduce((max, event) => Math.max(max, event.id), 0)
   return maxId + 1
+}
+
+function getNextTurnIndex(sessionId: string, events: BeeGameEvent[]): number {
+  const turnPrefix = `beegame-turn-${sessionId}-`
+  let maxTurnIndex = 0
+  for (const event of events) {
+    const turnId = event.turnId
+    if (!turnId?.startsWith(turnPrefix)) continue
+    const rawIndex = turnId.slice(turnPrefix.length)
+    const index = Number.parseInt(rawIndex, 10)
+    if (Number.isFinite(index) && index > maxTurnIndex) {
+      maxTurnIndex = index
+    }
+  }
+  return maxTurnIndex + 1
 }
 
 function getSessionTranscriptPath(
@@ -1804,6 +1875,14 @@ function extractStreamTextDelta(message: DashboardSDKMessage): string {
   const delta = getObjectField(event, 'delta')
   if (!delta || getStringField(delta, 'type') !== 'text_delta') return ''
   return getStringField(delta, 'text')
+}
+
+function extractAssistantPartialText(message: DashboardSDKMessage): string {
+  if (message.type === 'stream_event') return extractStreamTextDelta(message)
+  if (message.type === 'partial_assistant') {
+    return extractVisibleTextFromContent(getMessageContent(message) ?? message)
+  }
+  return ''
 }
 
 function getStringField(

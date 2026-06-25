@@ -152,6 +152,13 @@ export interface Message {
 
   /** Whether the task currently requires user action */
   requiresUserAction?: boolean;
+
+  /** Structured tool display metadata for tool cards */
+  toolName?: string;
+  toolStatus?: 'running' | 'completed' | 'failed';
+  toolDetail?: string;
+  toolOutput?: string;
+  isSubagentTool?: boolean;
 }
 
 
@@ -232,6 +239,18 @@ export interface WebSocketMessage {
 
   /** Tool result (backend protocol field, used for tool_end type) */
   result?: string;
+
+  /** Structured tool card status */
+  tool_status?: 'running' | 'completed' | 'failed';
+
+  /** Structured tool card detail, such as command or target path */
+  tool_detail?: string;
+
+  /** Structured tool card output summary */
+  tool_output?: string;
+
+  /** Whether this tool event represents a subagent */
+  is_subagent_tool?: boolean;
 
   /** Token usage statistics (optional, used for usage type) */
   usage?: TokenUsage;

@@ -239,6 +239,38 @@ describe('useChat clarification gate handling', () => {
     expect(projectStoreState.loadPendingReviews).toHaveBeenCalledWith('proj_1');
   });
 
+  it('stores structured tool card metadata from tool events', async () => {
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'tool_end',
+        task_id: 'beegame_1',
+        project_id: 'proj_1',
+        tool: 'Bash',
+        tool_use_id: 'tool_1',
+        message_id: 'tool-card-1',
+        tool_status: 'completed',
+        tool_detail: 'Command: game-engine build',
+        tool_output: 'Build passed',
+        is_subagent_tool: false,
+        timestamp: Date.now(),
+      });
+    });
+
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'tool-card-1',
+      messageId: 'tool-card-1',
+      type: 'tool',
+      taskKind: 'tool_execution',
+      toolName: 'Bash',
+      toolStatus: 'completed',
+      toolDetail: 'Command: game-engine build',
+      toolOutput: 'Build passed',
+      isSubagentTool: false,
+    }));
+  });
+
   it('renders paused workflow status as a chat-visible alert', () => {
     const onTaskEvent = vi.fn();
     renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));

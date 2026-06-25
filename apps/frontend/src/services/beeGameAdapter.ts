@@ -11,6 +11,7 @@ import type { WebSocketMessage } from '../types/message';
 type BeeGameSession = {
   id: string;
   cwd: string;
+  modelConfigId?: string;
   status: 'running' | 'stopped' | 'failed';
   turnStatus: 'idle' | 'running';
   createdAt: string;
@@ -614,8 +615,11 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
   const project = readProjects().find(item => item.id === projectId);
   if (binding) {
     try {
+      const session = await syncBeeGameSessionModel(
+        await fetchBeeGameSession(binding.sessionId),
+      );
       return {
-        session: await fetchBeeGameSession(binding.sessionId),
+        session,
         recoveredEvents: [],
       };
     } catch (error) {
@@ -788,6 +792,23 @@ async function fetchBeeGameSession(sessionId: string): Promise<BeeGameSession> {
   return getJson(`/api/beegame-sessions/${sessionId}`);
 }
 
+async function updateBeeGameSessionModel(
+  sessionId: string,
+  modelConfigId: string,
+): Promise<BeeGameSession> {
+  return patchJson(`/api/beegame-sessions/${sessionId}/model`, {
+    modelConfigId,
+  });
+}
+
+async function syncBeeGameSessionModel(session: BeeGameSession): Promise<BeeGameSession> {
+  const modelConfigId = await getDefaultModelConfigId();
+  if (!modelConfigId || session.modelConfigId === modelConfigId) {
+    return session;
+  }
+  return updateBeeGameSessionModel(session.id, modelConfigId);
+}
+
 async function sendBeeGameInput(sessionId: string, text: string): Promise<BeeGameSession> {
   return postJson(`/api/beegame-sessions/${sessionId}/input`, { text });
 }
@@ -868,6 +889,11 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
     taskKind: message.task_kind,
     nextAction: message.next_action,
     requiresUserAction: message.requires_user_action,
+    toolName: message.tool,
+    toolStatus: message.tool_status,
+    toolDetail: message.tool_detail,
+    toolOutput: message.tool_output,
+    isSubagentTool: message.is_subagent_tool,
   }));
 }
 
@@ -900,6 +926,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return [];
       const startedInput = getPayloadRecord(event, 'input');
       const startedTool = getPayloadString(event, 'toolName') || event.text;
+      const startedInfo = getToolDisplayInfo(startedTool, 'running', startedInput, workspacePath);
       return [{
         type: 'tool_start',
         task_id: taskId,
@@ -907,13 +934,17 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         message_id: getToolMessageId(event),
         tool_use_id: getPayloadString(event, 'toolUseID'),
         tool: startedTool,
-        content: formatToolContent(startedTool, 'running', startedInput, workspacePath),
+        content: formatToolContent(startedInfo),
+        tool_status: startedInfo.status,
+        tool_detail: startedInfo.detail,
+        is_subagent_tool: startedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
     case 'tool.progress': {
       const progressInput = getPayloadRecord(event, 'input');
       const progressTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
+      const progressInfo = getToolDisplayInfo(progressTool, 'running', progressInput, workspacePath, output);
       return [{
         type: 'tool_start',
         task_id: taskId,
@@ -921,7 +952,11 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         message_id: getToolMessageId(event),
         tool_use_id: getPayloadString(event, 'toolUseID'),
         tool: progressTool,
-        content: formatToolContent(progressTool, 'running', progressInput, workspacePath, output),
+        content: formatToolContent(progressInfo),
+        tool_status: progressInfo.status,
+        tool_detail: progressInfo.detail,
+        tool_output: progressInfo.output,
+        is_subagent_tool: progressInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
     }
@@ -930,6 +965,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       const finishedInput = getPayloadRecord(event, 'input');
       const finishedTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
+      const finishedInfo = getToolDisplayInfo(finishedTool, event.type === 'tool.failed' ? 'failed' : 'completed', finishedInput, workspacePath, output);
       return [{
         type: 'tool_end',
         task_id: taskId,
@@ -938,7 +974,11 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_use_id: getPayloadString(event, 'toolUseID'),
         tool: finishedTool,
         output,
-        content: formatToolContent(finishedTool, event.type === 'tool.failed' ? 'failed' : 'completed', finishedInput, workspacePath, output),
+        content: formatToolContent(finishedInfo),
+        tool_status: finishedInfo.status,
+        tool_detail: finishedInfo.detail,
+        tool_output: finishedInfo.output,
+        is_subagent_tool: finishedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
     }
@@ -1366,37 +1406,60 @@ function getToolMessageId(event: BeeGameEvent): string {
   return `beegame-event-${event.id}`;
 }
 
-function formatToolContent(
+type ToolDisplayInfo = {
+  name: string;
+  status: 'running' | 'completed' | 'failed';
+  detail: string;
+  output: string;
+  isSubagent: boolean;
+};
+
+function getToolDisplayInfo(
   toolName: string,
   status: 'running' | 'completed' | 'failed',
   input: Record<string, unknown>,
   workspacePath: string,
   output = '',
-): string {
+): ToolDisplayInfo {
   const normalizedTool = toolName.toLowerCase();
   const isSubagent = normalizedTool === 'agent' || normalizedTool === 'task';
   const description = String(input.description || '').trim();
   const subagentType = String(input.subagent_type || input.agent_type || '').trim();
   const prompt = String(input.prompt || '').trim();
-  const lines = isSubagent
-    ? [`Subagent: ${description || toolName}`, `Status: ${status}`]
-    : [`Tool: ${toolName}`, `Status: ${status}`];
+  const name = isSubagent ? (description || toolName) : toolName;
+  const details: string[] = [];
   if (isSubagent && subagentType) {
-    lines.push(`Type: ${subagentType}`);
+    details.push(`Type: ${subagentType}`);
   }
   if (isSubagent && prompt) {
-    lines.push(`Prompt: ${prompt.length > 220 ? `${prompt.slice(0, 220)}...` : prompt}`);
+    details.push(`Prompt: ${prompt.length > 220 ? `${prompt.slice(0, 220)}...` : prompt}`);
   }
   const command = String(input.command || '').trim();
   const targetPath = String(input.file_path || input.path || input.notebook_path || '').trim();
   if (!isSubagent && command) {
-    lines.push(`Command: ${command}`);
+    details.push(`Command: ${command}`);
   } else if (!isSubagent && targetPath) {
-    lines.push(`Target: ${formatWorkspaceRelativePath(targetPath, workspacePath)}`);
+    details.push(`Target: ${formatWorkspaceRelativePath(targetPath, workspacePath)}`);
   }
-  if (output) {
-    const summary = output.length > 160 ? `${output.slice(0, 160)}...` : output;
-    lines.push(`Output: ${summary}`);
+  const outputSummary = output.length > 160 ? `${output.slice(0, 160)}...` : output;
+  return {
+    name,
+    status,
+    detail: details.join(' · '),
+    output: outputSummary,
+    isSubagent,
+  };
+}
+
+function formatToolContent(info: ToolDisplayInfo): string {
+  const lines = info.isSubagent
+    ? [`Subagent: ${info.name}`, `Status: ${info.status}`]
+    : [`Tool: ${info.name}`, `Status: ${info.status}`];
+  if (info.detail) {
+    lines.push(info.detail);
+  }
+  if (info.output) {
+    lines.push(`Output: ${info.output}`);
   }
   return lines.join('\n');
 }
@@ -1819,6 +1882,15 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return readResponse<T>(response);
+}
+
+async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });

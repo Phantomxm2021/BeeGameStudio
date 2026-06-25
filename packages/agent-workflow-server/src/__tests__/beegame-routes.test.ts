@@ -40,6 +40,7 @@ type FakeRuntimeMode =
   | 'synthetic_user_message'
   | 'sibling_project_doc_write'
   | 'async_agent_complete'
+  | 'short_final_after_partials'
   | 'result_only'
 
 class FakeBeeGameRuntime {
@@ -208,6 +209,30 @@ class FakeBeeGameRuntime {
         message: { content: [{ type: 'text', text: 'Waiting for the background audit.' }] },
       })
       input.onMessage({ type: 'result', result: 'waiting' })
+      return
+    }
+    if (this.mode === 'short_final_after_partials') {
+      input.onMessage({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'First complete sentence. ' },
+        },
+      })
+      input.onMessage({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'Second complete sentence.' },
+        },
+      })
+      input.onMessage({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'First' }],
+          stop_reason: 'end_turn',
+        },
+      })
       return
     }
     if (this.mode === 'sibling_project_doc_write') {
@@ -787,6 +812,89 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('updates an existing BeeGame session model before the next turn', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'model-switch-game')
+    const fake = createFakeRunner(undefined, 'build_write_complete')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    const oldModel = createModelConfig('dashboard-local', {
+      name: 'Old LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://old-llm.example.invalid/v1',
+      apiKey: 'sk-old-secret',
+      models: { balanced: 'old-balanced-model' },
+    })
+    const newModel = createModelConfig('dashboard-local', {
+      name: 'New LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://new-llm.example.invalid/v1',
+      apiKey: 'sk-new-secret',
+      models: { balanced: 'new-balanced-model' },
+    })
+
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: oldModel.id,
+        }),
+      })
+      const session = await sessionRes.json()
+
+      const updateRes = await app.request(
+        `/api/beegame-sessions/${session.id}/model`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ modelConfigId: newModel.id }),
+        },
+      )
+      expect(updateRes.status).toBe(200)
+      expect(await updateRes.json()).toEqual(
+        expect.objectContaining({
+          id: session.id,
+          modelConfigId: newModel.id,
+        }),
+      )
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue with the new model.' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      expect(fake.starts).toEqual([
+        expect.objectContaining({
+          sessionId: session.id,
+          env: expect.objectContaining({
+            OPENAI_BASE_URL: 'https://new-llm.example.invalid/v1',
+            OPENAI_API_KEY: 'sk-new-secret',
+            OPENAI_DEFAULT_SONNET_MODEL: 'new-balanced-model',
+          }),
+        }),
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('marks text-only end turns as empty so the dashboard does not treat them as progress', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'empty-turn-game')
@@ -1093,6 +1201,51 @@ describe('beegame session routes', () => {
           expect.objectContaining({
             type: 'tool.started',
             text: 'Write',
+          }),
+        ]),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('uses accumulated assistant stream text when the final assistant message is shorter', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner(undefined, 'short_final_after_partials')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Respond cleanly.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) =>
+          event.type === 'turn.completed' || event.type === 'turn.empty'
+        )
+      })
+
+      const eventsRes = await app.request(
+        `/api/beegame-sessions/${session.id}/events`,
+      )
+      const events = await eventsRes.json()
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'assistant.message',
+            text: 'First complete sentence. Second complete sentence.',
           }),
         ]),
       )
@@ -2606,6 +2759,20 @@ describe('beegame session routes', () => {
         headers: { 'content-type': 'application/json' },
       })
       const firstSession = await startRes.json() as { id: string }
+      await app.request(`/api/beegame-sessions/${firstSession.id}/input`, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'Start the project.' }),
+        headers: { 'content-type': 'application/json' },
+      })
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${firstSession.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) =>
+          event.type === 'turn.completed' || event.type === 'turn.empty'
+        )
+      })
       const projectTranscriptDir = join(workspace, 'transcripts')
       const initialFiles = await readdir(projectTranscriptDir)
       expect(initialFiles).toHaveLength(1)
@@ -2643,6 +2810,38 @@ describe('beegame session routes', () => {
         sessionId: resumedSession.id,
         type: 'runtime.observation',
       }))
+
+      await restartedApp.request(`/api/beegame-sessions/${resumedSession.id}/input`, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'Continue the same project.' }),
+        headers: { 'content-type': 'application/json' },
+      })
+      await waitFor(async () => {
+        const eventsRes = await restartedApp.request(
+          `/api/beegame-sessions/${resumedSession.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) =>
+          event.type === 'turn.completed' || event.type === 'turn.empty'
+        )
+      })
+      const finalTranscript = await readFile(transcriptPath, 'utf8')
+      const finalEvents = finalTranscript
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line) as { type: string; turnId?: string })
+      expect(finalEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'turn.started',
+            turnId: `beegame-turn-${resumedSession.id}-1`,
+          }),
+          expect.objectContaining({
+            type: 'turn.started',
+            turnId: `beegame-turn-${resumedSession.id}-2`,
+          }),
+        ]),
+      )
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

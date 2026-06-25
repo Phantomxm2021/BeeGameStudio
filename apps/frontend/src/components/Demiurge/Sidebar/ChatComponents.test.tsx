@@ -210,4 +210,29 @@ describe('MessageItem semantic rendering', () => {
             'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
         );
     });
+
+    it('renders tool cards from structured metadata instead of parsing content', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'tool-1',
+                    messageId: 'tool-1',
+                    sender: 'system',
+                    content: 'legacy content should not drive this card',
+                    timestamp: Date.now(),
+                    type: 'tool',
+                    taskKind: 'tool_execution',
+                    toolName: 'Bash',
+                    toolStatus: 'completed',
+                    toolDetail: 'Command: game-engine build',
+                    toolOutput: 'Build passed',
+                }}
+            />
+        );
+
+        expect(screen.getByText('Bash completed')).not.toBeNull();
+        expect(screen.getByText('Command: game-engine build')).not.toBeNull();
+        expect(screen.getByText('Build passed')).not.toBeNull();
+        expect(screen.queryByText('legacy content should not drive this card')).toBeNull();
+    });
 });

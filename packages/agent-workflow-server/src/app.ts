@@ -685,6 +685,26 @@ function registerBeeGameSessionRoutes(
     }
   })
 
+  app.patch(`${basePath}/:id/model`, async c => {
+    const body = await readJson(c.req.raw)
+    const error = requireFields(body, ['modelConfigId'])
+    if (error) return c.json({ error }, 400)
+    try {
+      return c.json(
+        beeGameSessions.updateModel(
+          c.req.param('id'),
+          String(body.modelConfigId),
+        ),
+      )
+    } catch (err) {
+      const message = toErrorMessage(err)
+      return c.json(
+        { error: message },
+        message === 'Session not found' ? 404 : 400,
+      )
+    }
+  })
+
   app.get(`${basePath}/:id/artifacts`, async c => {
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
