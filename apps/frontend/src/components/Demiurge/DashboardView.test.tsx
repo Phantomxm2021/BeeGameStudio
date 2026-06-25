@@ -216,6 +216,10 @@ describe('DashboardView runtime loading', () => {
                 { phase: 3, name: 'implementation', timestamp: 3_000 },
             ],
         };
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'running',
+        };
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
@@ -260,6 +264,32 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
 
         expect(capturedTopBarProps?.tokens).toBe(150);
+    });
+
+    it('replaces the legacy status-node canvas with the BeeGame live preview surface', async () => {
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
+
+        expect(screen.queryByTestId('canvas-view')).not.toBeInTheDocument();
+        expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument();
+    });
+
+    it('renders the built game URL inside the BeeGame live preview frame', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: {
+                status: 'passed',
+                build_url: 'http://127.0.0.1:5178',
+                entrypoint: 'dist/index.html',
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const frame = await screen.findByTestId('beegame-live-preview-frame');
+
+        expect(frame).toHaveAttribute('src', 'http://127.0.0.1:5178');
     });
 
     it('shows the workspace folder name as the dashboard project title without renaming the project', async () => {

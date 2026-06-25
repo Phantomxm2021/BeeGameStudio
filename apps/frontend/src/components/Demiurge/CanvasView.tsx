@@ -4,6 +4,12 @@ import { CheckCircle, FileText, MessageSquare, ShieldAlert, Wrench } from 'lucid
 import { AGENT_UI_MAP, BeeIcon, CONNECTIONS, LAYER_CONFIG } from './AgentsConfig';
 import type { AgentLayer } from './AgentsConfig';
 
+/**
+ * @legacy
+ * Historical node-graph dashboard surface. The active BeeGame dashboard now
+ * enters through BeeGameLivePreviewPage so this file is kept only for reference
+ * and possible rollback.
+ */
 interface CanvasViewProps {
     isDark: boolean;
     activeAgentId: string | null;

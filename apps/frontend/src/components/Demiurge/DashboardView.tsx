@@ -8,7 +8,7 @@ import type { Language } from './AgentsConfig';
 
 import { TopBar } from './TopBar';
 import { SideMenu } from './SideMenu';
-import { CanvasView } from './CanvasView';
+import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
 import type { PendingUserReviewItem } from '../../services/api';
@@ -184,18 +184,16 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         phaseInfo,
         loadPhases,
         loadTokenUsage,
-        agents,
         loadAgents,
         tasks,
         loadTasks,
-        lastP2PRoute,
         isSyncing,
         status,
         isDark,
         toggleTheme
     } = useSystemStore();
     const { projects, pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
-    const { messages, currentSender, isStreaming } = useChatStore();
+    const { messages } = useChatStore();
     const { showSuccess, showError } = useToast();
 
     // Custom Hook for WebSocket & REST
@@ -390,44 +388,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         return Math.max(storedTotal, runtimeTotal);
     }, [projectId, projectStatus?.context?.token_budget?.total_tokens, tokenUsage]);
 
-    // Derive agent active states
-    const agentStatuses = useMemo(() => {
-        const statuses: Record<string, string> = {};
-        agents.forEach(a => {
-            statuses[a.id.toLowerCase()] = a.status;
-        });
-
-        const normalizedActiveAgentId = currentSender?.toLowerCase() || null;
-        if (normalizedActiveAgentId && isStreaming) {
-            statuses[normalizedActiveAgentId] = 'working';
-        }
-        return statuses;
-    }, [agents, currentSender, isStreaming]);
-
-    const normalizedActiveAgentId = currentSender?.toLowerCase() || null;
-
-    const commFlow = useMemo(() => {
-        const flow = [];
-        if (messages.length > 0 && normalizedActiveAgentId) {
-            const lastDifferentMessage = [...messages].reverse().find(m => m.sender.toLowerCase() !== normalizedActiveAgentId);
-            const from = lastDifferentMessage ? lastDifferentMessage.sender.toLowerCase() : 'user';
-
-            if (from !== normalizedActiveAgentId) {
-                const isP2P = lastP2PRoute &&
-                    lastP2PRoute.source_agent.toLowerCase() === from &&
-                    lastP2PRoute.target_agent.toLowerCase() === normalizedActiveAgentId;
-
-                flow.push({
-                    from,
-                    to: normalizedActiveAgentId,
-                    id: messages[messages.length - 1].timestamp || Date.now(),
-                    isP2P: !!isP2P
-                });
-            }
-        }
-        return flow;
-    }, [messages, normalizedActiveAgentId, lastP2PRoute]);
-
     // Logging Token Usage and Progress
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -498,14 +458,18 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 onOpenOperatorControls={handleOpenOperatorControls}
             />
 
-            <CanvasView
-                isDark={isDark}
-                activeAgentId={normalizedActiveAgentId}
-                agentStatuses={agentStatuses}
-                commFlow={commFlow}
-                mode={isBeeGameMode ? 'beegame' : 'demiurge'}
+            <BeeGameLivePreviewPage
+                lang={lang}
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
-                hasPendingPermission={hasPendingPlanReview}
+                buildReport={projectStatus?.build_report || null}
+                onReload={() => {
+                    const frames = document.querySelectorAll<HTMLIFrameElement>('[data-testid="beegame-live-preview-frame"]');
+                    frames.forEach((frame) => {
+                        frame.src = frame.src;
+                    });
+                }}
+                onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
+                onStop={stopTask}
             />
 
             <RightSidebar
