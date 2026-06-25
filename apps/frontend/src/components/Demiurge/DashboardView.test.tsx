@@ -200,13 +200,13 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(capturedTopBarProps?.progress).toBeLessThan(20);
-        expect(capturedRightSidebarProps?.progress).toBe(capturedTopBarProps?.progress);
+        expect(capturedRightSidebarProps?.progress).toBeLessThan(20);
+        expect(screen.getByText('构建方案 · 0%')).toBeInTheDocument();
     });
 
-    it('passes BeeGame pipeline phase labels to the top bar', async () => {
+    it('passes BeeGame pipeline phase labels to the live preview header', async () => {
         mockedPhaseInfo = {
             current_phase: 3,
             phase_name: 'implementation',
@@ -223,14 +223,13 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(capturedTopBarProps?.mode).toBe('beegame');
-        expect(capturedTopBarProps?.phaseLabel).toBe('实现构建');
-        expect(capturedTopBarProps?.progress).toBeGreaterThan(0);
+        expect(screen.queryByTestId('top-bar')).not.toBeInTheDocument();
+        expect(screen.getByText('实现构建 · 50%')).toBeInTheDocument();
     });
 
-    it('passes localized BeeGame phase labels to the top bar', async () => {
+    it('passes localized BeeGame phase labels to the live preview header', async () => {
         mockedPhaseInfo = {
             current_phase: 3,
             phase_name: 'implementation',
@@ -239,9 +238,9 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(capturedTopBarProps?.phaseLabel).toBe('实现构建');
+        expect(screen.getByText('实现构建 · 0%')).toBeInTheDocument();
     });
 
     it('uses live runtime token budget when persisted token usage has not caught up', async () => {
@@ -261,9 +260,9 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(capturedTopBarProps?.tokens).toBe(150);
+        expect(screen.getByText('150')).toBeInTheDocument();
     });
 
     it('replaces the legacy status-node canvas with the BeeGame live preview surface', async () => {
@@ -304,9 +303,9 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="RPG 融合模式" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(capturedTopBarProps).not.toBeNull());
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(capturedTopBarProps?.projectName).toBe('lightweight-web-challenge');
+        expect(screen.getByText('lightweight-web-challenge')).toBeInTheDocument();
     });
 
     it('opens OperatorControls in a new browser tab when test operations are enabled', async () => {

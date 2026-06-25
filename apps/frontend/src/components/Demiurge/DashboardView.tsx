@@ -434,17 +434,17 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
 
     return (
         <div className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}>
-            <TopBar
-                projectName={displayProjectName}
-                lang={lang}
-                status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
-                progress={progressPercent}
-                tokens={displayedTokenTotal}
-                isSyncing={isSyncing}
-                onRename={handleRename}
-                mode={isBeeGameMode ? 'beegame' : 'demiurge'}
-                phaseLabel={isBeeGameMode ? phaseLabel : undefined}
-            />
+            {!isBeeGameMode ? (
+                <TopBar
+                    projectName={displayProjectName}
+                    lang={lang}
+                    status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
+                    progress={progressPercent}
+                    tokens={displayedTokenTotal}
+                    isSyncing={isSyncing}
+                    onRename={handleRename}
+                />
+            ) : null}
 
             <SideMenu
                 status={currentStatus === 'offline' ? 'stopped' : currentStatus}
@@ -460,7 +460,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
 
             <BeeGameLivePreviewPage
                 lang={lang}
+                projectName={displayProjectName}
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
+                phaseLabel={phaseLabel}
+                progress={progressPercent}
+                tokens={displayedTokenTotal}
+                isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}
                 onReload={() => {
                     const frames = document.querySelectorAll<HTMLIFrameElement>('[data-testid="beegame-live-preview-frame"]');

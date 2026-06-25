@@ -7,7 +7,12 @@ type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
 
 interface BeeGameLivePreviewPageProps {
     lang: Language;
+    projectName: string;
     status: DashboardStatus;
+    phaseLabel: string;
+    progress: number;
+    tokens: number;
+    isSyncing: boolean;
     buildReport?: BuildReportPayload | null;
     onReload?: () => void;
     onOpenExternal?: (url: string) => void;
@@ -29,6 +34,7 @@ const LABELS: Record<Language, {
     health: string;
     entrypoint: string;
     unavailable: string;
+    tokens: string;
 }> = {
     zh: {
         title: '实时游戏画面',
@@ -45,6 +51,7 @@ const LABELS: Record<Language, {
         health: '健康状态',
         entrypoint: '入口',
         unavailable: '未提供',
+        tokens: '消耗',
     },
     'zh-TW': {
         title: '即時遊戲畫面',
@@ -61,6 +68,7 @@ const LABELS: Record<Language, {
         health: '健康狀態',
         entrypoint: '入口',
         unavailable: '未提供',
+        tokens: '消耗',
     },
     en: {
         title: 'Live Game Preview',
@@ -77,6 +85,7 @@ const LABELS: Record<Language, {
         health: 'Health',
         entrypoint: 'Entrypoint',
         unavailable: 'Unavailable',
+        tokens: 'Tokens',
     },
     ja: {
         title: 'ライブゲームプレビュー',
@@ -93,6 +102,7 @@ const LABELS: Record<Language, {
         health: '状態',
         entrypoint: '入口',
         unavailable: '未提供',
+        tokens: '消費',
     },
     ko: {
         title: '실시간 게임 화면',
@@ -109,6 +119,7 @@ const LABELS: Record<Language, {
         health: '상태',
         entrypoint: '진입점',
         unavailable: '없음',
+        tokens: '토큰',
     },
     fr: {
         title: 'Aperçu du jeu en direct',
@@ -125,6 +136,7 @@ const LABELS: Record<Language, {
         health: 'Santé',
         entrypoint: 'Entrée',
         unavailable: 'Indisponible',
+        tokens: 'Tokens',
     },
     de: {
         title: 'Live-Spielvorschau',
@@ -141,6 +153,7 @@ const LABELS: Record<Language, {
         health: 'Status',
         entrypoint: 'Einstieg',
         unavailable: 'Nicht verfügbar',
+        tokens: 'Tokens',
     },
     es: {
         title: 'Vista previa del juego',
@@ -157,6 +170,7 @@ const LABELS: Record<Language, {
         health: 'Estado',
         entrypoint: 'Entrada',
         unavailable: 'No disponible',
+        tokens: 'Tokens',
     },
     it: {
         title: 'Anteprima gioco live',
@@ -173,6 +187,7 @@ const LABELS: Record<Language, {
         health: 'Stato',
         entrypoint: 'Entrypoint',
         unavailable: 'Non disponibile',
+        tokens: 'Token',
     },
     pt: {
         title: 'Prévia do jogo ao vivo',
@@ -189,6 +204,7 @@ const LABELS: Record<Language, {
         health: 'Saúde',
         entrypoint: 'Entrada',
         unavailable: 'Indisponível',
+        tokens: 'Tokens',
     },
 };
 
@@ -211,7 +227,12 @@ const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPaylo
 
 export function BeeGameLivePreviewPage({
     lang,
+    projectName,
     status,
+    phaseLabel,
+    progress,
+    tokens,
+    isSyncing,
     buildReport,
     onReload,
     onOpenExternal,
@@ -236,7 +257,32 @@ export function BeeGameLivePreviewPage({
             data-testid="beegame-live-preview-page"
             className="relative h-full flex-1 overflow-hidden bg-zinc-100 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50"
         >
-            <div className="absolute inset-0 flex flex-col pt-24 pl-24 pr-[30rem] pb-8">
+            <div className="absolute left-28 top-8 right-[32rem] bottom-8 flex flex-col gap-4">
+                <header className="flex h-20 shrink-0 items-center justify-between rounded-[2rem] border border-zinc-200 bg-white/90 px-6 shadow-[0_24px_70px_-50px_rgba(0,0,0,0.65)] backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-900/90">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-3">
+                            <h1 className="truncate text-2xl font-black uppercase text-zinc-900 dark:text-zinc-100">
+                                {projectName}
+                            </h1>
+                            <div className="flex shrink-0 items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-800">
+                                <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
+                                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600 dark:text-zinc-300">
+                                    {statusText}
+                                </span>
+                            </div>
+                            {isSyncing ? (
+                                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500 dark:bg-zinc-800">
+                                    Syncing
+                                </span>
+                            ) : null}
+                        </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-8">
+                        <HeaderMetric label={labels.health} value={`${phaseLabel} · ${Math.floor(progress)}%`} />
+                        <HeaderMetric label={labels.tokens} value={tokens.toLocaleString()} />
+                    </div>
+                </header>
+
                 <section className="min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_32px_80px_-48px_rgba(0,0,0,0.5)] dark:border-zinc-800 dark:bg-zinc-900">
                     <div className="flex h-16 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
                         <div className="min-w-0">
@@ -319,6 +365,19 @@ export function BeeGameLivePreviewPage({
                 </section>
             </div>
         </main>
+    );
+}
+
+function HeaderMetric({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="min-w-0 text-right">
+            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                {label}
+            </div>
+            <div className="mt-1 truncate font-mono text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                {value}
+            </div>
+        </div>
     );
 }
 
