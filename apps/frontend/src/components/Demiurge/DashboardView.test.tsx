@@ -273,7 +273,7 @@ describe('DashboardView runtime loading', () => {
         expect(screen.queryByTestId('side-menu')).not.toBeInTheDocument();
         expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-shell-top-nav')).toBeInTheDocument();
-        expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-shell-side-nav')).not.toBeInTheDocument();
         expect(capturedRightSidebarProps?.variant).toBe('beegame');
     });
 
@@ -326,7 +326,7 @@ describe('DashboardView runtime loading', () => {
     it('does not mount the legacy SideMenu in BeeGame mode when test operations are enabled', async () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(capturedSideMenuProps).toBeNull();
         expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();
@@ -338,7 +338,7 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        await waitFor(() => expect(screen.getByTestId('beegame-shell-side-nav')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(capturedSideMenuProps).toBeNull();
         expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();

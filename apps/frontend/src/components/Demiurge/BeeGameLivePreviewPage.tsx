@@ -1,4 +1,4 @@
-import { AlertTriangle, Box, ChevronLeft, CircleHelp, ExternalLink, Folder, FolderOpen, Globe2, MonitorPlay, Network, PlayCircle, RefreshCw, Settings, Square } from 'lucide-react';
+import { AlertTriangle, Box, ChevronLeft, ExternalLink, Globe2, MonitorPlay, RefreshCw, Settings, Square } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import type { BuildReportPayload } from '../../services/api';
 
@@ -323,27 +323,7 @@ export function BeeGameLivePreviewPage({
                 </div>
             </header>
 
-            <nav
-                data-testid="beegame-shell-side-nav"
-                className="absolute bottom-0 left-0 top-20 z-20 flex w-28 flex-col items-center border-r border-zinc-800/80 bg-[#080c10]/90 py-6"
-            >
-                <SideNavItem icon={Folder} label="项目" active />
-                <SideNavItem icon={PlayCircle} label="运行" />
-                <SideNavItem icon={FolderOpen} label="工作区" />
-                <SideNavItem icon={Box} label="模型" />
-                <SideNavItem icon={Network} label="MCP" />
-                <SideNavItem icon={Settings} label="设置" />
-                <SideNavItem icon={CircleHelp} label="帮助" />
-                <button
-                    type="button"
-                    aria-label="Collapse"
-                    className="mt-auto grid h-12 w-12 place-items-center rounded-xl border border-zinc-800 bg-zinc-900/80 text-zinc-500"
-                >
-                    <ChevronLeft className="h-5 w-5" />
-                </button>
-            </nav>
-
-            <div className="absolute bottom-4 left-32 right-[29rem] top-24 flex flex-col">
+            <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
                 <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
                     <div className="flex h-20 items-center justify-between px-9">
                         <div className="min-w-0">
@@ -439,19 +419,6 @@ function HeaderMetric({ label, value }: { label: string; value: string }) {
                 {value}
             </div>
         </div>
-    );
-}
-
-function SideNavItem({ icon: Icon, label, active = false }: { icon: typeof Folder; label: string; active?: boolean }) {
-    return (
-        <button
-            type="button"
-            className={`relative mb-5 flex h-16 w-20 flex-col items-center justify-center gap-2 rounded-xl text-xs font-bold transition ${active ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-300'}`}
-        >
-            {active ? <span className="absolute -left-4 top-2 h-12 w-1 rounded-full bg-orange-500" /> : null}
-            <Icon className={`h-5 w-5 ${active ? 'text-orange-400' : ''}`} />
-            {label}
-        </button>
     );
 }
 
