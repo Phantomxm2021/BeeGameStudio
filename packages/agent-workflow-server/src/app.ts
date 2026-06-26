@@ -390,6 +390,9 @@ export function createAgentWorkflowApp(
         ...(typeof body.root_path === 'string'
           ? { root_path: body.root_path }
           : {}),
+        ...(isObject(body.runtime_snapshot)
+          ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
+          : {}),
       }))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -1283,6 +1286,34 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
       ? { root_path: body.root_path }
       : {}),
     created_at: Number(body.created_at),
+    ...(isObject(body.runtime_snapshot)
+      ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
+      : {}),
+  }
+}
+
+function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectMetadata['runtime_snapshot']> {
+  const usage = isObject(body.usage)
+    ? {
+        prompt_tokens: Math.max(0, Number(body.usage.prompt_tokens) || 0),
+        completion_tokens: Math.max(0, Number(body.usage.completion_tokens) || 0),
+        total_tokens: Math.max(0, Number(body.usage.total_tokens) || 0),
+      }
+    : undefined
+  return {
+    ...(usage ? { usage } : {}),
+    ...(typeof body.phase_name === 'string' && body.phase_name.trim()
+      ? { phase_name: body.phase_name.trim() }
+      : {}),
+    ...(typeof body.model_config_id === 'string' && body.model_config_id.trim()
+      ? { model_config_id: body.model_config_id.trim() }
+      : {}),
+    ...(typeof body.model_name === 'string' && body.model_name.trim()
+      ? { model_name: body.model_name.trim() }
+      : {}),
+    ...(Number.isFinite(Number(body.updated_at))
+      ? { updated_at: Number(body.updated_at) }
+      : {}),
   }
 }
 

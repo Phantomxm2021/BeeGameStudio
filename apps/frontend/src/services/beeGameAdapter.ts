@@ -329,7 +329,7 @@ export const beeGameAdapter = {
     return { opened: true };
   },
 
-  async updateProject(projectId: string, data: { name?: string; root_path?: string }): Promise<Project> {
+  async updateProject(projectId: string, data: { name?: string; root_path?: string; runtime_snapshot?: Project['runtime_snapshot'] }): Promise<Project> {
     const projects = readProjects();
     const existing = projects.find(project => project.id === projectId);
     if (!existing) throw new Error('Project not found');
@@ -337,6 +337,7 @@ export const beeGameAdapter = {
       ...existing,
       ...(data.name !== undefined ? { name: data.name.trim() || existing.name } : {}),
       ...(data.root_path !== undefined ? { root_path: data.root_path } : {}),
+      ...(data.runtime_snapshot !== undefined ? { runtime_snapshot: data.runtime_snapshot } : {}),
     };
     saveProjects(upsertProject(projects, updated));
     await syncProjectMetadata(updated);

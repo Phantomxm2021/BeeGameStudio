@@ -802,10 +802,10 @@ export const api = {
    * @param data - 包含要更新的字段（名称和/或根路径）
    * @returns 返回更新后的项目对象
    */
-  updateProject: (projectId: string, data: { name?: string; root_path?: string }) =>
+  updateProject: (projectId: string, data: { name?: string; root_path?: string; runtime_snapshot?: import('../types/project').ProjectRuntimeSnapshot }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.updateProject(projectId, data)
-      : apiClient.put(`/api/projects/${projectId}`, data),
+      : apiClient.patch(`/api/projects/${projectId}`, data),
 
   /**
    * 获取项目当前状态与项目级 baseline 元数据

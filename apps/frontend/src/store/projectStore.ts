@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { Project, CreateProjectRequest, StartProjectResult, UpdateProjectRequest } from '../types/project';
+import type { Project, CreateProjectRequest, ProjectRuntimeSnapshot, StartProjectResult, UpdateProjectRequest } from '../types/project';
 import {
   api,
   normalizeProjectBaselineStatusPayload,
@@ -151,6 +151,11 @@ interface ProjectState {
    * Requirements: 3.5
    */
   updateProject: (projectId: string, data: UpdateProjectRequest) => Promise<void>;
+
+  /**
+   * Persist project runtime summary without user-facing update chrome.
+   */
+  persistProjectRuntimeSnapshot: (projectId: string, snapshot: ProjectRuntimeSnapshot) => Promise<void>;
 
   /**
    * Delete a project
@@ -488,6 +493,18 @@ export const useProjectStore = create<ProjectState>()(
           set({ isLoading: false });
           throw error;
         }
+      },
+
+      persistProjectRuntimeSnapshot: async (projectId, snapshot) => {
+        if (!projectId) return;
+        await api.updateProject(projectId, { runtime_snapshot: snapshot });
+        set((state) => ({
+          projects: state.projects.map((project) => (
+            project.id === projectId
+              ? { ...project, runtime_snapshot: snapshot }
+              : project
+          )),
+        }));
       },
 
       deleteProject: async (projectId) => {

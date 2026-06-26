@@ -463,6 +463,17 @@ describe('agent workflow server routes', () => {
           name: 'SQLite Project',
           root_path: join(workspace, 'sqlite-project'),
           created_at: 1710000000000,
+          runtime_snapshot: {
+            usage: {
+              prompt_tokens: 120,
+              completion_tokens: 34,
+              total_tokens: 154,
+            },
+            phase_name: 'implementation',
+            model_config_id: 'model-balanced',
+            model_name: 'balanced-model',
+            updated_at: 1710000001000,
+          },
         }),
       })
       expect(createRes.status).toBe(200)
@@ -479,6 +490,17 @@ describe('agent workflow server routes', () => {
           name: 'SQLite Project',
           root_path: join(workspace, 'sqlite-project'),
           created_at: 1710000000000,
+          runtime_snapshot: {
+            usage: {
+              prompt_tokens: 120,
+              completion_tokens: 34,
+              total_tokens: 154,
+            },
+            phase_name: 'implementation',
+            model_config_id: 'model-balanced',
+            model_name: 'balanced-model',
+            updated_at: 1710000001000,
+          },
         },
       ])
     } finally {

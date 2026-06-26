@@ -7,6 +7,18 @@
 
 import type { IdeaIntakeAnalysisPayload } from '../services/api';
 
+export interface ProjectRuntimeSnapshot {
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  phase_name?: string;
+  model_config_id?: string;
+  model_name?: string;
+  updated_at?: number;
+}
+
 /**
  * Project interface
  * Represents a game development project in the system
@@ -23,6 +35,9 @@ export interface Project {
   
   /** Timestamp when the project was created (Unix timestamp in milliseconds) */
   created_at: number;
+
+  /** Last dashboard runtime summary persisted for quick restoration */
+  runtime_snapshot?: ProjectRuntimeSnapshot;
 }
 
 /**
@@ -47,6 +62,9 @@ export interface UpdateProjectRequest {
   
   /** Updated root path for the project files (optional) */
   root_path?: string;
+
+  /** Updated dashboard runtime summary (optional) */
+  runtime_snapshot?: ProjectRuntimeSnapshot;
 }
 
 export type StartProjectResult =
