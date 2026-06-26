@@ -4,10 +4,10 @@ import {
     ChevronDown,
     ChevronRight,
     CheckCircle2,
-    CircleDotDashed,
     FileText,
     FolderOpen,
     GitCompare,
+    LoaderCircle,
     Terminal,
     User,
     XCircle,
@@ -206,11 +206,11 @@ function UserMessageCard({ message }: { message: ChatDisplayMessage }) {
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
-            className="ml-auto max-w-[88%] rounded-xl border border-zinc-700 bg-zinc-100 px-4 py-3 text-zinc-950 shadow-sm"
+            className="ml-auto max-w-[88%] rounded-xl border border-sky-500/20 bg-sky-950/20 px-4 py-3 text-sky-50 shadow-sm"
         >
             <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="text-[11px] font-black uppercase tracking-widest text-zinc-500">You</span>
-                <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-950 text-zinc-100">
+                <span className="text-[11px] font-black uppercase tracking-widest text-sky-300/70">You</span>
+                <span className="grid h-7 w-7 place-items-center rounded-lg border border-sky-500/25 bg-sky-950/50 text-sky-200">
                     <User className="h-4 w-4" />
                 </span>
             </div>
@@ -263,52 +263,49 @@ function AgentSummaryCard({
     const content = isExpanded ? message.content : preview.preview;
 
     return (
-        <section data-testid={`beegame-agent-message-${message.id}`} className="rounded-xl border border-zinc-800 bg-zinc-900/55 p-3">
-            <div className="flex items-start gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-orange-500/30 bg-orange-500/15 text-orange-300">
-                    <Bot className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
+        <section data-testid={`beegame-agent-message-${message.id}`} className="rounded-xl border border-orange-500/20 bg-orange-950/15 px-4 py-3 text-zinc-100 shadow-sm">
+            <div className="min-w-0">
+                <div className="mb-2 flex items-center gap-2">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-orange-500/30 bg-orange-500/15 text-orange-300">
+                        <Bot className="h-4 w-4" />
+                    </span>
                     <button
                         type="button"
                         aria-expanded={!isCollapsed}
                         aria-label={isCollapsed ? 'Expand BeeGame message' : 'Collapse BeeGame message'}
                         onClick={onToggleCollapsed}
-                        className="flex w-full items-start justify-between gap-3 text-left"
+                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                     >
-                        <span className="min-w-0">
-                            <span className="block text-sm font-black text-orange-400">BeeGame</span>
-                            <span className="mt-0.5 block text-[11px] font-bold text-zinc-500">游戏构建代理 · Harness Engineer</span>
+                        <span className="min-w-0 truncate text-[11px] font-black uppercase tracking-widest text-orange-300">
+                            BeeGame
                         </span>
                         {isCollapsed ? (
-                            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+                            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
                         ) : (
-                            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+                            <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
                         )}
                     </button>
-                    {!isCollapsed ? (
-                        <>
-                            <div className="mt-3">
-                                <MarkdownRenderer
-                                    content={content}
-                                    isUser={false}
-                                    messageId={message.id}
-                                    variant="beegame"
-                                />
-                            </div>
-                            {preview.isTruncated ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setIsExpanded((value) => !value)}
-                                    className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-orange-300 hover:text-orange-200"
-                                >
-                                    {isExpanded ? 'Hide summary details' : 'View summary details'}
-                                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                </button>
-                            ) : null}
-                        </>
-                    ) : null}
                 </div>
+                {!isCollapsed ? (
+                    <>
+                        <MarkdownRenderer
+                            content={content}
+                            isUser={false}
+                            messageId={message.id}
+                            variant="beegame"
+                        />
+                        {preview.isTruncated ? (
+                            <button
+                                type="button"
+                                onClick={() => setIsExpanded((value) => !value)}
+                                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-orange-300 hover:text-orange-200"
+                            >
+                                {isExpanded ? 'Hide summary details' : 'View summary details'}
+                                {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                        ) : null}
+                    </>
+                ) : null}
             </div>
         </section>
     );
@@ -350,7 +347,9 @@ function ToolTimelineCard({
     const Icon = getToolIcon(message.name);
     const isCompleted = message.status === 'completed';
     const isFailed = message.status === 'failed';
-    const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : CircleDotDashed;
+    const isRunning = !isCompleted && !isFailed;
+    const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : LoaderCircle;
+    const statusClassName = isCompleted ? 'text-emerald-400' : isFailed ? 'text-red-400' : 'text-orange-400';
     const detail = message.detail;
     const output = message.output;
     const title = getToolTitle(message);
@@ -372,8 +371,11 @@ function ToolTimelineCard({
                     className="absolute -left-[1.1rem] top-10 h-[calc(100%+0.75rem)] w-px bg-zinc-800"
                 />
             ) : null}
-            <div className={`absolute -left-[1.85rem] top-4 grid h-6 w-6 place-items-center rounded-full border bg-zinc-950 ${isCompleted ? 'border-emerald-500 text-emerald-400' : isFailed ? 'border-red-500 text-red-400' : 'border-orange-500 text-orange-400'}`}>
-                <StatusIcon className="h-4 w-4" />
+            <div
+                data-testid="beegame-tool-status-icon"
+                className={`absolute -left-[1.55rem] top-5 flex h-4 w-4 items-center justify-center ${statusClassName}`}
+            >
+                <StatusIcon className={`h-4 w-4 ${isRunning ? 'animate-spin' : ''}`} />
             </div>
             <div className="flex items-start gap-3">
                 <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-950 text-zinc-300 ring-1 ring-zinc-800">

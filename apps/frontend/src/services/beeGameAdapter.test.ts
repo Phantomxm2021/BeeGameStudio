@@ -557,6 +557,78 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
+  it('prefers persisted transcript history over incomplete runtime events after refresh', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_refresh/events?after=0') {
+        return jsonResponse([
+          {
+            id: 2,
+            sessionId: 'beegame_refresh',
+            turnId: 'turn-1',
+            type: 'assistant.message',
+            text: 'Runtime only assistant message.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          },
+        ]);
+      }
+      if (path === '/api/beegame-sessions/beegame_refresh/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Frefresh-game') {
+        return jsonResponse([
+          {
+            id: 1,
+            sessionId: 'beegame_refresh',
+            turnId: 'turn-1',
+            type: 'user.message',
+            text: 'Fix the input lag.',
+            payload: { type: 'user.message' },
+            createdAt: '2026-06-21T00:00:01.000Z',
+          },
+          {
+            id: 2,
+            sessionId: 'beegame_refresh',
+            turnId: 'turn-1',
+            type: 'assistant.message',
+            text: 'Transcript assistant message.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.createProject({
+      name: 'refresh-game',
+      root_path: '/tmp/beegame-projects/refresh-game',
+    });
+    const project = (await beeGameAdapter.getProjects())[0];
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: project.id,
+      sessionId: 'beegame_refresh',
+      workspacePath: '/tmp/beegame-projects/refresh-game',
+    }]));
+
+    const history = await beeGameAdapter.getChatHistory(project.id);
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sender: 'user',
+        content: 'Fix the input lag.',
+      }),
+      expect.objectContaining({
+        sender: 'beegame',
+        content: 'Transcript assistant message.',
+      }),
+    ]));
+    expect(history).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: 'Runtime only assistant message.',
+      }),
+    ]));
+  });
+
   it('does not replace the persisted binding during read-only status sync after the backend restarts', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);

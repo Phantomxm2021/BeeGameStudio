@@ -395,13 +395,11 @@ export const beeGameAdapter = {
   async getChatHistory(projectId: string): Promise<unknown[]> {
     const binding = getBinding(projectId);
     if (!binding) return [];
-    let events: BeeGameEvent[];
-    try {
-      events = await fetchBeeGameEvents(binding.sessionId);
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      events = await fetchBeeGameTranscript(binding.sessionId, binding.workspacePath);
+    const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
+    if (transcript.length > 0) {
+      return eventsToHistory(projectId, transcript, binding.workspacePath);
     }
+    const events = await fetchBeeGameEvents(binding.sessionId);
     return eventsToHistory(projectId, events, binding.workspacePath);
   },
 

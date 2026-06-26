@@ -630,7 +630,7 @@ export const MessageItem = memo(({
                     onMouseLeave={() => !isUser && setIsHovered(false)}
                     whileHover={{ scale: 1.1 }}
                     className={isBeeGameVariant
-                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'bg-purple-500 text-white' : 'bg-orange-500 text-white'}`
+                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'bg-orange-500 text-white'}`
                         : `w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
                             ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
                             : (agent?.color || 'bg-zinc-500') + ' text-white'

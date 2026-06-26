@@ -90,11 +90,20 @@ describe('SettingsMenu model settings', () => {
         expect(dialog.className).toContain('bg-zinc-950/55');
         expect(dialog.className).not.toContain('right-4');
         expect(dialog.className).not.toContain('top-20');
+        expect(screen.getByTestId('settings-modal-sidebar')).toBeInTheDocument();
+        const settingsShell = screen.getByTestId('settings-modal-shell');
+        const settingsContent = screen.getByTestId('settings-modal-content');
+        const settingsScrollArea = screen.getByTestId('settings-modal-scroll-area');
+        expect(settingsShell).toHaveClass('h-[min(620px,calc(100vh-2rem))]');
+        expect(settingsShell).toHaveClass('w-[min(820px,calc(100vw-2rem))]');
+        expect(settingsContent).toBeInTheDocument();
+        expect(settingsScrollArea).toHaveClass('overflow-y-auto');
+        expect(settingsScrollArea).toHaveClass('min-h-0');
         expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
         expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('Enable subagents')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('Enable subagents')).toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
         expect(screen.getByLabelText('工作路径')).toBeInTheDocument();
@@ -103,6 +112,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('button', { name: '保存工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存网页配置' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
@@ -171,6 +181,7 @@ describe('SettingsMenu model settings', () => {
         await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
             webSearchAdapter: 'tavily',
         }));
+        expect(setBeeGameSubagentsEnabled).toHaveBeenCalledWith(true);
         expect(screen.queryByText('工作路径已保存')).not.toBeInTheDocument();
 
         await userEvent.click(screen.getByRole('button', { name: '恢复默认' }));

@@ -221,7 +221,10 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByTestId('beegame-collaboration-feed')).toBeInTheDocument();
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
-        expect(screen.getByTestId('beegame-user-message-m_user')).toBeInTheDocument();
+        const userMessage = screen.getByTestId('beegame-user-message-m_user');
+        expect(userMessage).toBeInTheDocument();
+        expect(userMessage).toHaveClass('bg-sky-950/20');
+        expect(userMessage).not.toHaveClass('bg-zinc-100');
         expect(screen.getByText('请构建首个可玩版本')).toBeInTheDocument();
         expect(screen.getByText('BeeGame')).toBeInTheDocument();
         expect(screen.getByText('我会先完成可运行闭环，然后验证构建入口。')).toBeInTheDocument();
@@ -230,6 +233,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
 
         const agentCard = screen.getByTestId('beegame-agent-message-m_agent');
+        expect(agentCard).toHaveClass('bg-orange-950/15');
+        expect(agentCard).not.toHaveClass('bg-sky-950/20');
         const writeCard = document.querySelector('[data-tool-id="m_write"]')!;
         const bashCard = document.querySelector('[data-tool-id="m_bash"]')!;
         expect(agentCard.compareDocumentPosition(writeCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -483,6 +488,56 @@ describe('ChatPanel approval bar', () => {
         const toolCards = screen.getAllByTestId('beegame-tool-timeline-card');
         expect(toolCards[0].querySelector('[data-testid="beegame-tool-connector"]')).not.toBeNull();
         expect(toolCards[1].querySelector('[data-testid="beegame-tool-connector"]')).toBeNull();
+    });
+
+    it('uses plain BeeGame tool status icons without circular badges', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_running',
+                    sender: 'system',
+                    content: 'Bash running\nCommand: bun run build',
+                    timestamp: 1,
+                    type: 'tool',
+                    toolName: 'Bash',
+                    toolStatus: 'running',
+                    toolDetail: 'bun run build',
+                },
+                {
+                    id: 'm_completed',
+                    sender: 'system',
+                    content: 'Write completed\nTarget: docs/GDD.md',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Write',
+                    toolStatus: 'completed',
+                    toolDetail: 'docs/GDD.md',
+                },
+                {
+                    id: 'm_failed',
+                    sender: 'system',
+                    content: 'Bash failed\nCommand: bun test',
+                    timestamp: 3,
+                    type: 'tool',
+                    toolName: 'Bash',
+                    toolStatus: 'failed',
+                    toolDetail: 'bun test',
+                },
+            ],
+        });
+
+        const statusIcons = screen.getAllByTestId('beegame-tool-status-icon');
+        expect(statusIcons).toHaveLength(3);
+        statusIcons.forEach((statusIcon) => {
+            expect(statusIcon).not.toHaveClass('rounded-full');
+            expect(statusIcon).not.toHaveClass('border');
+        });
+        expect(statusIcons[0].querySelector('svg')).toHaveClass('animate-spin');
+        expect(statusIcons[1]).toHaveClass('text-emerald-400');
+        expect(statusIcons[2]).toHaveClass('text-red-400');
     });
 
     it('keeps the legacy message rendering path outside BeeGame mode', () => {
