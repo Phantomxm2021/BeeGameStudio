@@ -19,6 +19,7 @@ import {
 import {
   BeeGamePreviewManager,
   type BeeGamePreviewPortAllocator,
+  type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
 import { listDirectories } from './filesystem/directories'
@@ -97,6 +98,7 @@ export type AgentWorkflowAppOptions = {
   sessionRunner?: BeeGameSessionRunner
   previewRunner?: BeeGamePreviewRunner
   previewPortAllocator?: BeeGamePreviewPortAllocator
+  previewReadinessProbe?: BeeGamePreviewReadinessProbe
   modelConfigStore?: ModelConfigStoreOptions | false
   defaultWorkspacePath?: string
 }
@@ -117,6 +119,7 @@ export function createAgentWorkflowApp(
     options.previewRunner,
     undefined,
     options.previewPortAllocator,
+    options.previewReadinessProbe,
   )
   const projectStore = new BeeGameProjectMetadataStore(
     getBeeGameProjectDatabasePath(dashboardDataRoot),

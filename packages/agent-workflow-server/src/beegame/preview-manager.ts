@@ -44,6 +44,8 @@ export type BeeGamePreviewRunner = (
 
 export type BeeGamePreviewPortAllocator = (start: number) => Promise<number>
 
+export type BeeGamePreviewReadinessProbe = (url: string) => Promise<boolean>
+
 type PreviewRecord = {
   snapshot: BeeGamePreviewSnapshot
   process?: BeeGamePreviewProcess
@@ -66,6 +68,7 @@ export class BeeGamePreviewManager {
     private readonly portStart = Number.parseInt(process.env.BEEGAME_PREVIEW_PORT_START || '', 10) ||
       DEFAULT_PREVIEW_PORT_START,
     private readonly allocatePort: BeeGamePreviewPortAllocator = findAvailablePort,
+    private readonly readinessProbe: BeeGamePreviewReadinessProbe = waitForPreviewReady,
   ) {}
 
   status(sessionId: string, workspacePath: string): BeeGamePreviewSnapshot {
@@ -105,13 +108,13 @@ export class BeeGamePreviewManager {
     }
 
     const startedAt = new Date().toISOString()
-    const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'running', {
-      url: plan.url,
+    const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
+      url: '',
       port: plan.port,
       command: plan.command.join(' '),
       script: plan.script,
       entrypoint: basename(join(workspacePath, 'package.json')),
-      message: `Preview running at ${plan.url}`,
+      message: `Preview starting at ${plan.url}`,
       updatedAt: startedAt,
     })
     const process = this.runner(plan.command, {
@@ -130,7 +133,7 @@ export class BeeGamePreviewManager {
         record.snapshot = {
           ...record.snapshot,
           url,
-          status: 'running',
+          status: record.snapshot.status === 'running' ? 'running' : 'starting',
           message: text.trim().slice(0, 500) || record.snapshot.message,
           updatedAt: new Date().toISOString(),
         }
@@ -158,7 +161,29 @@ export class BeeGamePreviewManager {
       }
       delete record.process
     })
-    return { ...snapshot }
+    const ready = await this.readinessProbe(plan.url)
+    const record = this.records.get(options.sessionId)
+    if (!record || record.process !== process) return { ...snapshot }
+    if (!ready) {
+      process.kill()
+      delete record.process
+      record.snapshot = {
+        ...record.snapshot,
+        status: 'failed',
+        url: '',
+        message: `Preview process started but ${plan.url} did not become reachable. ${record.snapshot.message || ''}`.trim(),
+        updatedAt: new Date().toISOString(),
+      }
+      return { ...record.snapshot }
+    }
+    record.snapshot = {
+      ...record.snapshot,
+      status: 'running',
+      url: plan.url,
+      message: `Preview running at ${plan.url}`,
+      updatedAt: new Date().toISOString(),
+    }
+    return { ...record.snapshot }
   }
 
   async restart(options: BeeGamePreviewStartOptions): Promise<BeeGamePreviewSnapshot> {
@@ -367,4 +392,36 @@ function findAvailablePort(start: number): Promise<number> {
     }
     tryPort(start)
   })
+}
+
+async function waitForPreviewReady(url: string): Promise<boolean> {
+  const deadline = Date.now() + getPreviewReadyTimeoutMs()
+  while (Date.now() < deadline) {
+    if (await canReachPreview(url)) return true
+    await sleep(getPreviewReadyPollMs())
+  }
+  return false
+}
+
+async function canReachPreview(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'GET' })
+    return response.status < 500
+  } catch {
+    return false
+  }
+}
+
+function getPreviewReadyTimeoutMs(): number {
+  const raw = Number(process.env.BEEGAME_PREVIEW_READY_TIMEOUT_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : 15_000
+}
+
+function getPreviewReadyPollMs(): number {
+  const raw = Number(process.env.BEEGAME_PREVIEW_READY_POLL_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : 250
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolveSleep => setTimeout(resolveSleep, ms))
 }

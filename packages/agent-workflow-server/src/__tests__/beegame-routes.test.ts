@@ -2676,6 +2676,7 @@ describe('beegame session routes', () => {
       sessionRunner: createFakeRunner().runner,
       previewRunner,
       previewPortAllocator: async () => 63100,
+      previewReadinessProbe: async () => true,
     })
     try {
       await writeFile(
@@ -2729,6 +2730,53 @@ describe('beegame session routes', () => {
         '63100',
       ])
       expect(starts[0].env.PORT).toBe('63100')
+      expect(kills).toHaveLength(1)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('does not expose a preview URL until the managed preview is reachable', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const kills: string[] = []
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      options.onOutput('Local: http://127.0.0.1:63100/\n')
+      return {
+        kill: () => kills.push(command.join(' ')),
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => 63100,
+      previewReadinessProbe: async () => false,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { preview: 'vite preview' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_preview_unready/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'failed',
+        url: '',
+      }))
+      expect(started.message).toContain('did not become reachable')
       expect(kills).toHaveLength(1)
     } finally {
       await rm(workspace, { recursive: true, force: true })
