@@ -280,7 +280,10 @@ export const beeGameAdapter = {
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
     rememberSentDisplayText(session.id, prompt, data.idea);
-    await sendBeeGameInput(session.id, prompt);
+    await sendBeeGameInput(session.id, prompt, {
+      displayText: data.idea,
+      displayKind: 'confirmed_brief',
+    });
     return {
       project,
       task_id: session.id,
@@ -308,7 +311,10 @@ export const beeGameAdapter = {
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
     rememberSentDisplayText(session.id, prompt, data.idea);
-    await sendBeeGameInput(session.id, prompt);
+    await sendBeeGameInput(session.id, prompt, {
+      displayText: data.idea,
+      displayKind: 'initial_idea',
+    });
     return {
       project,
       task_id: session.id,
@@ -999,8 +1005,16 @@ async function syncBeeGameSessionModel(session: BeeGameSession): Promise<BeeGame
   return updateBeeGameSessionModel(session.id, modelConfigId);
 }
 
-async function sendBeeGameInput(sessionId: string, text: string): Promise<BeeGameSession> {
-  return postJson(`/api/beegame-sessions/${sessionId}/input`, { text });
+async function sendBeeGameInput(
+  sessionId: string,
+  text: string,
+  display?: { displayText?: string; displayKind?: string },
+): Promise<BeeGameSession> {
+  return postJson(`/api/beegame-sessions/${sessionId}/input`, {
+    text,
+    ...(display?.displayText ? { displayText: display.displayText } : {}),
+    ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
+  });
 }
 
 async function deleteBeeGameSession(
@@ -1142,7 +1156,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
   const taskId = event.sessionId;
   switch (event.type) {
     case 'user.message':
-      return [baseMessage('agent_message', { ...event, text: resolveSentDisplayText(event.sessionId, event.text) }, projectId, 'user')];
+      return [baseMessage('agent_message', { ...event, text: resolveUserMessageDisplayText(event) }, projectId, 'user')];
     case 'turn.started':
       return [
         { type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage,
@@ -1566,7 +1580,7 @@ function normalizeBeeGameEvents(
     }
     if (event.type === 'user.message') {
       if (!options.includeUserMessages) continue;
-      const displayText = resolveSentDisplayText(event.sessionId, event.text);
+      const displayText = resolveUserMessageDisplayText(event);
       if (seenUserTexts.has(displayText)) continue;
       seenUserTexts.add(displayText);
       visible.push(event);
@@ -2050,6 +2064,13 @@ function rememberSentDisplayText(sessionId: string, transportText: string, displ
 function resolveSentDisplayText(sessionId: string, transportText: string): string {
   const values = readJson<Record<string, string>>(SENT_DISPLAY_KEY, {});
   return values[`${sessionId}:${stableTextHash(transportText)}`] || transportText;
+}
+
+function resolveUserMessageDisplayText(event: BeeGameEvent): string {
+  const displayText = typeof event.payload?.displayText === 'string'
+    ? event.payload.displayText.trim()
+    : '';
+  return displayText || resolveSentDisplayText(event.sessionId, event.text);
 }
 
 function stableTextHash(value: string): string {

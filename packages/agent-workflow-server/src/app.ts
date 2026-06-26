@@ -916,8 +916,17 @@ function registerBeeGameSessionRoutes(
     const error = requireFields(body, ['text'])
     if (error) return c.json({ error }, 400)
     try {
+      const displayText = typeof body.displayText === 'string'
+        ? body.displayText
+        : undefined
+      const displayKind = typeof body.displayKind === 'string'
+        ? body.displayKind
+        : undefined
       return c.json(
-        await beeGameSessions.send(c.req.param('id'), String(body.text)),
+        await beeGameSessions.sendWithDisplay(c.req.param('id'), String(body.text), {
+          displayText,
+          displayKind,
+        }),
       )
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)

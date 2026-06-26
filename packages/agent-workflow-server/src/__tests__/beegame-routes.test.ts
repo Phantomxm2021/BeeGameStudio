@@ -692,7 +692,11 @@ describe('beegame session routes', () => {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: 'Build a tiny puzzle game.' }),
+          body: JSON.stringify({
+            text: 'Build a tiny puzzle game.',
+            displayText: 'Tiny puzzle game',
+            displayKind: 'initial_idea',
+          }),
         },
       )
 
@@ -779,12 +783,20 @@ describe('beegame session routes', () => {
       const transcriptEvents = transcript
         .trim()
         .split('\n')
-        .map(line => JSON.parse(line) as { type: string; text: string })
+        .map(line => JSON.parse(line) as {
+          type: string
+          text: string
+          payload?: Record<string, unknown>
+        })
       expect(transcriptEvents).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             type: 'user.message',
             text: 'Build a tiny puzzle game.',
+            payload: expect.objectContaining({
+              displayText: 'Tiny puzzle game',
+              displayKind: 'initial_idea',
+            }),
           }),
           expect.objectContaining({
             type: 'assistant.message',

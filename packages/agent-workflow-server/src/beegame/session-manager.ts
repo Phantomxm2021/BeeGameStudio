@@ -325,6 +325,14 @@ export class BeeGameSessionManager {
   }
 
   async send(sessionId: string, text: string): Promise<BeeGameSession> {
+    return this.sendWithDisplay(sessionId, text)
+  }
+
+  async sendWithDisplay(
+    sessionId: string,
+    text: string,
+    display?: { displayText?: string; displayKind?: string },
+  ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status !== 'running') {
@@ -339,7 +347,16 @@ export class BeeGameSessionManager {
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     record.nextTurnIndex += 1
     this.append(record, 'turn.started', text)
-    this.append(record, 'user.message', text)
+    this.append(
+      record,
+      'user.message',
+      text,
+      {
+        type: 'user.message',
+        ...(display?.displayText ? { displayText: display.displayText } : {}),
+        ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
+      },
+    )
 
     void this.runDirectTurn(record, text)
     return cloneSession(record.session)

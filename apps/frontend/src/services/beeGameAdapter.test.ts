@@ -1186,9 +1186,17 @@ describe('beeGameAdapter prompt rules', () => {
       String(path) === '/api/beegame-sessions/beegame_brief/input' &&
       init?.method === 'POST'
     ));
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
+    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as {
+      text?: string;
+      displayText?: string;
+      displayKind?: string;
+    };
 
     expect(body.text).toContain('我要做一个完整游戏项目。');
+    expect(body).toMatchObject({
+      displayText: 'LLM generated idea',
+      displayKind: 'confirmed_brief',
+    });
     expect(body.text).toContain('请像在终端里协作一样');
     expect(body.text).not.toContain('Confirmed BeeGame build brief');
     expect(body.text).not.toContain('Completion contract');
@@ -1249,6 +1257,54 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('Do not create another top-level folder')
     expect(body.text).not.toContain('./snake-game');
     expect(body.text).not.toContain('./games/snake');
+  });
+
+  it('restores the visible idea from transcript display metadata instead of the transport prompt', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_display/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fdisplay-game') {
+        return jsonResponse([
+          {
+            id: 1,
+            sessionId: 'beegame_display',
+            turnId: 'turn-1',
+            type: 'user.message',
+            text: '请使用中文与用户沟通。\n我要做一个完整游戏项目。\n原始想法：做一个你画我猜多人版本',
+            payload: {
+              type: 'user.message',
+              displayText: '做一个你画我猜多人版本',
+              displayKind: 'confirmed_brief',
+            },
+            createdAt: '2026-06-21T00:00:01.000Z',
+          },
+          assistantMessageEvent(2, 'beegame_display', 'turn-1', '我会开始规划。'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.createProject({
+      name: 'display-game',
+      root_path: '/tmp/beegame-projects/display-game',
+    });
+    const project = (await beeGameAdapter.getProjects())[0];
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: project.id,
+      sessionId: 'beegame_display',
+      workspacePath: '/tmp/beegame-projects/display-game',
+    }]));
+
+    const history = await beeGameAdapter.getChatHistory(project.id) as Array<{ sender: string; content: string }>;
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sender: 'user',
+        content: '做一个你画我猜多人版本',
+      }),
+    ]));
+    expect(history.map(message => message.content).join('\n')).not.toContain('请使用中文与用户沟通');
+    expect(history.map(message => message.content).join('\n')).not.toContain('我要做一个完整游戏项目');
   });
 
   it('does not encourage subagents when the BeeGame subagent setting is disabled', async () => {
