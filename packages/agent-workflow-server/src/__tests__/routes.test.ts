@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
@@ -89,6 +89,361 @@ describe('agent workflow server routes', () => {
         }),
       ])
     } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('persists runtime capability settings across app instances', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-runtime-'))
+
+    try {
+      const firstApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const saveRes = await firstApp.request('/api/runtime-settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          autoMemoryEnabled: true,
+          autoDreamEnabled: false,
+          skillSearchEnabled: true,
+          treeSitterBashEnabled: true,
+          webBrowserToolEnabled: true,
+          bashClassifierEnabled: false,
+          mcpSkillsEnabled: true,
+          ignored: true,
+        }),
+      })
+
+      expect(saveRes.status).toBe(200)
+      expect(await saveRes.json()).toEqual({
+        autoMemoryEnabled: true,
+        autoDreamEnabled: false,
+        skillSearchEnabled: true,
+        treeSitterBashEnabled: true,
+        webBrowserToolEnabled: true,
+        bashClassifierEnabled: false,
+        mcpSkillsEnabled: true,
+      })
+
+      const secondApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const listRes = await secondApp.request('/api/runtime-settings')
+
+      expect(listRes.status).toBe(200)
+      expect(await listRes.json()).toEqual({
+        autoMemoryEnabled: true,
+        autoDreamEnabled: false,
+        skillSearchEnabled: true,
+        treeSitterBashEnabled: true,
+        webBrowserToolEnabled: true,
+        bashClassifierEnabled: false,
+        mcpSkillsEnabled: true,
+      })
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('persists MCP servers and masks environment secrets', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-'))
+
+    try {
+      const firstApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const createRes = await firstApp.request('/api/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Unity Bridge',
+          enabled: true,
+          transport: 'stdio',
+          scope: 'beegame',
+          command: 'npx',
+          args: ['unity-mcp'],
+          env: [{ key: 'UNITY_TOKEN', value: 'unity-secret-token' }],
+          autoStart: true,
+        }),
+      })
+
+      expect(createRes.status).toBe(200)
+      const created = await createRes.json()
+      expect(created).toEqual(expect.objectContaining({
+        name: 'Unity Bridge',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['unity-mcp'],
+      }))
+      expect(created.env).toEqual([
+        { key: 'UNITY_TOKEN', valuePreview: 'unit…oken' },
+      ])
+      expect(JSON.stringify(created)).not.toContain('unity-secret-token')
+
+      const updateRes = await firstApp.request(`/api/mcp-servers/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Unity Bridge Updated',
+          enabled: false,
+          transport: 'stdio',
+          scope: 'beegame',
+          command: 'npx',
+          args: ['unity-mcp', '--stdio'],
+          env: [{ key: 'UNITY_TOKEN' }],
+          autoStart: false,
+        }),
+      })
+      expect(updateRes.status).toBe(200)
+      const updated = await updateRes.json()
+      expect(updated.env).toEqual([
+        { key: 'UNITY_TOKEN', valuePreview: 'unit…oken' },
+      ])
+
+      const secondApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const listRes = await secondApp.request('/api/mcp-servers')
+
+      expect(listRes.status).toBe(200)
+      expect(await listRes.json()).toEqual([
+        expect.objectContaining({
+          id: created.id,
+          name: 'Unity Bridge Updated',
+          enabled: false,
+          args: ['unity-mcp', '--stdio'],
+          env: [{ key: 'UNITY_TOKEN', valuePreview: 'unit…oken' }],
+        }),
+      ])
+
+      const deleteRes = await secondApp.request(`/api/mcp-servers/${created.id}`, {
+        method: 'DELETE',
+      })
+      expect(deleteRes.status).toBe(200)
+      expect(await deleteRes.json()).toEqual({ deleted: true })
+      expect(await (await secondApp.request('/api/mcp-servers')).json()).toEqual([])
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('discovers local MCP servers from structured config files', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-discover-'))
+
+    try {
+      await writeFile(
+        join(dataDir, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            'Local Tools': {
+              command: 'npx',
+              args: ['local-tools-mcp'],
+              env: {
+                LOCAL_TOKEN: 'local-secret-token',
+              },
+            },
+            'Remote Tools': {
+              transport: 'http',
+              url: 'http://127.0.0.1:3030/mcp',
+            },
+          },
+        }),
+        'utf8',
+      )
+
+      const firstApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const discoverRes = await firstApp.request('/api/mcp-servers/discover')
+      expect(discoverRes.status).toBe(200)
+      const discovered = await discoverRes.json()
+      expect(discovered).toEqual([
+        expect.objectContaining({
+          name: 'Local Tools',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['local-tools-mcp'],
+          env: [{ key: 'LOCAL_TOKEN', valuePreview: 'loca…oken' }],
+          sourcePath: join(dataDir, '.mcp.json'),
+          exists: false,
+        }),
+        expect.objectContaining({
+          name: 'Remote Tools',
+          transport: 'http',
+          url: 'http://127.0.0.1:3030/mcp',
+          sourcePath: join(dataDir, '.mcp.json'),
+          exists: false,
+        }),
+      ])
+      expect(JSON.stringify(discovered)).not.toContain('local-secret-token')
+
+      const importRes = await firstApp.request('/api/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(discovered[0]),
+      })
+      expect(importRes.status).toBe(200)
+
+      const rediscoverRes = await firstApp.request('/api/mcp-servers/discover')
+      expect(rediscoverRes.status).toBe(200)
+      const rediscovered = await rediscoverRes.json()
+      expect(rediscovered[0]).toEqual(expect.objectContaining({
+        name: 'Local Tools',
+        exists: true,
+      }))
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('tests and discovers running HTTP MCP servers', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      if (
+        init?.method === 'POST' &&
+        requestUrl === 'http://127.0.0.1:18081/mcp'
+      ) {
+        const body = JSON.parse(String(init.body ?? '{}')) as { id?: number }
+        return Response.json({
+          jsonrpc: '2.0',
+          id: body.id ?? 1,
+          result: {
+            protocolVersion: '2024-11-05',
+            serverInfo: {
+              name: 'Runtime MCP',
+              version: '1.0.0',
+            },
+            capabilities: {
+              tools: {},
+            },
+          },
+        })
+      }
+      return new Response('Not found', { status: 404 })
+    }) as typeof fetch
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-active-'))
+
+    try {
+      const runtimeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const endpoint = 'http://127.0.0.1:18081/mcp'
+      const testRes = await runtimeApp.request('/api/mcp-servers/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Runtime MCP',
+          enabled: true,
+          transport: 'http',
+          scope: 'beegame',
+          url: endpoint,
+        }),
+      })
+      expect(testRes.status).toBe(200)
+      expect(await testRes.json()).toEqual(expect.objectContaining({
+        ok: true,
+        status: 'available',
+        endpoint,
+        serverInfo: {
+          name: 'Runtime MCP',
+          version: '1.0.0',
+        },
+      }))
+
+      const discoverRes = await runtimeApp.request(
+        '/api/mcp-servers/discover-active?ports=18081',
+      )
+      expect(discoverRes.status).toBe(200)
+      expect(await discoverRes.json()).toEqual([
+        expect.objectContaining({
+          name: 'Runtime MCP',
+          transport: 'http',
+          url: endpoint,
+          endpoint,
+          exists: false,
+          test: expect.objectContaining({
+            ok: true,
+            status: 'available',
+          }),
+        }),
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts MCP initialize responses delivered as event streams', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      if (
+        init?.method === 'POST' &&
+        requestUrl === 'http://127.0.0.1:18082/mcp'
+      ) {
+        const body = JSON.parse(String(init.body ?? '{}')) as { id?: number }
+        return new Response([
+          'event: message',
+          `data: ${JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id ?? 1,
+            result: {
+              protocolVersion: '2024-11-05',
+              serverInfo: {
+                name: 'Stream MCP',
+                version: '2.0.0',
+              },
+              capabilities: {
+                tools: {
+                  listChanged: true,
+                },
+              },
+            },
+          })}`,
+          '',
+        ].join('\n'), {
+          status: 200,
+          headers: {
+            'content-type': 'text/event-stream',
+            'mcp-session-id': 'test-session',
+          },
+        })
+      }
+      return new Response('Not found', { status: 404 })
+    }) as typeof fetch
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-stream-'))
+
+    try {
+      const runtimeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+      })
+      const endpoint = 'http://127.0.0.1:18082/mcp'
+      const testRes = await runtimeApp.request('/api/mcp-servers/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Stream MCP',
+          enabled: true,
+          transport: 'http',
+          scope: 'beegame',
+          url: endpoint,
+        }),
+      })
+
+      expect(testRes.status).toBe(200)
+      expect(await testRes.json()).toEqual(expect.objectContaining({
+        ok: true,
+        status: 'available',
+        endpoint,
+        serverInfo: {
+          name: 'Stream MCP',
+          version: '2.0.0',
+        },
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
       await rm(dataDir, { recursive: true, force: true })
     }
   })

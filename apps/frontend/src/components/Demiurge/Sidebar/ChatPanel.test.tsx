@@ -283,6 +283,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByTestId('beegame-conversation-axis-shell')).not.toHaveClass('left-[calc(100vw-420px)]');
         const rail = screen.getByTestId('beegame-conversation-axis-rail');
         expect(rail).toHaveClass('overflow-y-auto');
+        expect(rail).toHaveClass('py-12');
+        expect(rail).not.toHaveClass('py-8');
 
         const firstTick = screen.getByRole('button', { name: 'Jump to message 1' });
         expect(firstTick).toHaveAttribute('data-active', 'true');

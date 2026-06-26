@@ -888,6 +888,76 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('injects saved runtime capability settings into new BeeGame turns', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'runtime-capability-game')
+    const fake = createFakeRunner(undefined, 'build_write_complete')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    const model = createModelConfig('dashboard-local', {
+      name: 'Primary LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://llm.example.invalid/v1',
+      apiKey: 'sk-dashboard-secret',
+      models: { balanced: 'balanced-model' },
+    })
+
+    try {
+      const settingsRes = await app.request('/api/runtime-settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          autoMemoryEnabled: false,
+          autoDreamEnabled: true,
+          skillSearchEnabled: true,
+          treeSitterBashEnabled: true,
+          webBrowserToolEnabled: true,
+          bashClassifierEnabled: true,
+          mcpSkillsEnabled: true,
+        }),
+      })
+      expect(settingsRes.status).toBe(200)
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: model.id,
+        }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build with configured capabilities.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      expect(fake.starts[0]?.env).toEqual(expect.objectContaining({
+        SKILL_SEARCH_ENABLED: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        FEATURE_TREE_SITTER_BASH: '1',
+        FEATURE_WEB_BROWSER_TOOL: '1',
+        FEATURE_BASH_CLASSIFIER: '1',
+        FEATURE_MCP_SKILLS: '1',
+      }))
+      expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('claude-config')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('updates an existing BeeGame session model before the next turn', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'model-switch-game')

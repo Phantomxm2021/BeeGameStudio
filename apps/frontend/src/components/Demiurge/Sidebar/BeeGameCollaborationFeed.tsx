@@ -464,7 +464,7 @@ function ConversationAxis({
                 <div
                     ref={railRef}
                     data-testid="beegame-conversation-axis-rail"
-                    className="pointer-events-auto relative h-72 w-10 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                    className="pointer-events-auto relative h-72 w-10 overflow-y-auto overscroll-contain py-12 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                     onWheel={(event) => event.stopPropagation()}
                     style={{
                         WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 14%, black 86%, transparent 100%)',

@@ -44,6 +44,25 @@ import {
   saveWebToolsConfig,
   toPublicWebToolsConfig,
 } from './web-tools-store'
+import {
+  loadRuntimeSettingsConfig,
+  mapRuntimeSettingsToEnv,
+  saveRuntimeSettingsConfig,
+  syncRuntimeSettingsToDedicatedRuntimeConfig,
+} from './runtime-settings-store'
+import {
+  deleteMcpServer,
+  discoverMcpServers,
+  listMcpServers,
+  upsertMcpServer,
+  type McpServerScope,
+  type McpServerTransport,
+} from './mcp-servers-store'
+import {
+  discoverActiveMcpServers,
+  parsePortList,
+  testMcpServerConnection,
+} from './mcp-active-discovery'
 
 type JsonObject = Record<string, unknown>
 
@@ -115,9 +134,16 @@ export function createAgentWorkflowApp(
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
-    () => mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
-      dataDir: dashboardDataRoot,
-    })),
+    () => ({
+      ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
+        dataDir: dashboardDataRoot,
+      })),
+      ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({
+        dataDir: dashboardDataRoot,
+      }), {
+        dataDir: dashboardDataRoot,
+      }),
+    }),
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -219,6 +245,101 @@ export function createAgentWorkflowApp(
     }, {
       dataDir: dashboardDataRoot,
     }))
+  })
+
+  app.get('/api/runtime-settings', c => {
+    return c.json(loadRuntimeSettingsConfig({
+      dataDir: dashboardDataRoot,
+    }))
+  })
+
+  app.put('/api/runtime-settings', async c => {
+    const body = await readJson(c.req.raw)
+    const saved = saveRuntimeSettingsConfig({
+      ...(typeof body.autoMemoryEnabled === 'boolean'
+        ? { autoMemoryEnabled: body.autoMemoryEnabled }
+        : {}),
+      ...(typeof body.autoDreamEnabled === 'boolean'
+        ? { autoDreamEnabled: body.autoDreamEnabled }
+        : {}),
+      ...(typeof body.skillSearchEnabled === 'boolean'
+        ? { skillSearchEnabled: body.skillSearchEnabled }
+        : {}),
+      ...(typeof body.treeSitterBashEnabled === 'boolean'
+        ? { treeSitterBashEnabled: body.treeSitterBashEnabled }
+        : {}),
+      ...(typeof body.webBrowserToolEnabled === 'boolean'
+        ? { webBrowserToolEnabled: body.webBrowserToolEnabled }
+        : {}),
+      ...(typeof body.bashClassifierEnabled === 'boolean'
+        ? { bashClassifierEnabled: body.bashClassifierEnabled }
+        : {}),
+      ...(typeof body.mcpSkillsEnabled === 'boolean'
+        ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
+        : {}),
+    }, {
+      dataDir: dashboardDataRoot,
+    })
+    syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
+      dataDir: dashboardDataRoot,
+    })
+    return c.json(saved)
+  })
+
+  app.get('/api/mcp-servers', c => {
+    return c.json(listMcpServers({
+      dataDir: dashboardDataRoot,
+    }))
+  })
+
+  app.get('/api/mcp-servers/discover', c => {
+    return c.json(discoverMcpServers({
+      dataDir: dashboardDataRoot,
+    }))
+  })
+
+  app.get('/api/mcp-servers/discover-active', async c => {
+    return c.json(await discoverActiveMcpServers(listMcpServers({
+      dataDir: dashboardDataRoot,
+    }), {
+      ports: parsePortList(c.req.query('ports')),
+    }))
+  })
+
+  app.post('/api/mcp-servers/test', async c => {
+    const body = await readJson(c.req.raw)
+    const error = validateMcpServerBody(body)
+    if (error) return c.json({ error }, 400)
+    return c.json(await testMcpServerConnection(toMcpServerInput(body)))
+  })
+
+  app.post('/api/mcp-servers', async c => {
+    const body = await readJson(c.req.raw)
+    const error = validateMcpServerBody(body)
+    if (error) return c.json({ error }, 400)
+    return c.json(upsertMcpServer(toMcpServerInput(body), {
+      dataDir: dashboardDataRoot,
+    }))
+  })
+
+  app.put('/api/mcp-servers/:id', async c => {
+    const body = await readJson(c.req.raw)
+    const error = validateMcpServerBody(body)
+    if (error) return c.json({ error }, 400)
+    return c.json(upsertMcpServer({
+      ...toMcpServerInput(body),
+      id: c.req.param('id'),
+    }, {
+      dataDir: dashboardDataRoot,
+    }))
+  })
+
+  app.delete('/api/mcp-servers/:id', c => {
+    return c.json({
+      deleted: deleteMcpServer(c.req.param('id'), {
+        dataDir: dashboardDataRoot,
+      }),
+    })
   })
 
   app.get('/api/filesystem/directories', async c => {
@@ -1194,6 +1315,64 @@ function toModelMap(value: unknown): {
     ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
     ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
   }
+}
+
+function validateMcpServerBody(body: JsonObject): string | null {
+  if (typeof body.name !== 'string' || !body.name.trim()) {
+    return 'Missing field: name'
+  }
+  const transport = typeof body.transport === 'string'
+    ? body.transport
+    : 'stdio'
+  if (!isMcpServerTransportValue(transport)) {
+    return 'Invalid MCP transport'
+  }
+  if (transport === 'stdio') {
+    if (typeof body.command !== 'string' || !body.command.trim()) {
+      return 'Missing field: command'
+    }
+  } else if (typeof body.url !== 'string' || !body.url.trim()) {
+    return 'Missing field: url'
+  }
+  if (body.env !== undefined && !Array.isArray(body.env)) {
+    return 'Invalid MCP env'
+  }
+  return null
+}
+
+function toMcpServerInput(body: JsonObject) {
+  return {
+    ...(typeof body.id === 'string' ? { id: body.id } : {}),
+    name: String(body.name),
+    enabled: body.enabled !== false,
+    transport: (typeof body.transport === 'string'
+      ? body.transport
+      : 'stdio') as McpServerTransport,
+    scope: (typeof body.scope === 'string'
+      ? body.scope
+      : 'beegame') as McpServerScope,
+    ...(typeof body.command === 'string' ? { command: body.command } : {}),
+    ...(Array.isArray(body.args) ? { args: body.args.map(String) } : {}),
+    ...(typeof body.url === 'string' ? { url: body.url } : {}),
+    ...(typeof body.cwd === 'string' ? { cwd: body.cwd } : {}),
+    ...(Array.isArray(body.env)
+      ? {
+          env: body.env
+            .filter(isObject)
+            .map(item => ({
+              key: typeof item.key === 'string' ? item.key : '',
+              ...(typeof item.value === 'string' ? { value: item.value } : {}),
+            })),
+        }
+      : {}),
+    autoStart: body.autoStart !== false,
+  }
+}
+
+function isMcpServerTransportValue(
+  value: string,
+): value is McpServerTransport {
+  return value === 'stdio' || value === 'sse' || value === 'http'
 }
 
 function isObject(value: unknown): value is JsonObject {
