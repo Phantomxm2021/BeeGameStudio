@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
+import { getBeeGameText } from './BeeGameI18n';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import type { BuildReportPayload } from '../../services/api';
 
@@ -297,17 +298,6 @@ const normalizeUrl = (url?: string): string => {
     return value;
 };
 
-const getPreviewTitle = (labels: { title: string }): string => {
-    if (labels.title.includes('游戏画面')) return '预览';
-    if (labels.title.includes('遊戲畫面')) return '預覽';
-    if (labels.title.includes('预览')) return '预览';
-    if (labels.title.includes('預覽')) return '預覽';
-    if (labels.title.includes('Preview')) return 'Preview';
-    if (labels.title.includes('プレビュー')) return 'プレビュー';
-    if (labels.title.includes('화면')) return '미리보기';
-    return labels.title;
-};
-
 const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPayload | null): PreviewState => {
     const reportStatus = String(buildReport?.status || '').toLowerCase();
     const url = normalizeUrl(buildReport?.build_url);
@@ -342,6 +332,7 @@ export function BeeGameLivePreviewPage({
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
     const labels = LABELS[lang] || LABELS.en;
+    const uiText = getBeeGameText(lang);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
@@ -505,7 +496,7 @@ export function BeeGameLivePreviewPage({
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
                                 <h1 className="text-2xl font-black text-zinc-100">
-                                    {getPreviewTitle(labels)}
+                                    {uiText.previewTitle}
                                 </h1>
                             </div>
                         </div>
@@ -562,7 +553,7 @@ export function BeeGameLivePreviewPage({
                         {canShowPreview ? (
                             <iframe
                                 key={previewUrl}
-                                title={labels.title}
+                                title={uiText.previewTitle}
                                 data-testid="beegame-live-preview-frame"
                                 src={previewUrl}
                                 sandbox="allow-forms allow-pointer-lock allow-popups allow-same-origin allow-scripts"

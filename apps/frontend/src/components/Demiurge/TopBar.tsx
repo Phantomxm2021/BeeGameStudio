@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { translations, type Language } from './AgentsConfig';
+import { getBeeGameText } from './BeeGameI18n';
 
 interface TopBarProps {
     projectName: string;
@@ -19,6 +20,7 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
     const [isEditing, setIsEditing] = useState(false);
     const [tempName, setTempName] = useState(projectName);
     const t = translations[lang];
+    const uiText = getBeeGameText(lang);
 
     useEffect(() => {
         setTempName(projectName);
@@ -48,15 +50,15 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
             if (status === 'running') return t.active;
             if (status === 'waiting_approval') return t.paused || 'Waiting';
             if (status === 'offline') return t.offline || 'Server Unreachable';
-            if (status === 'paused') return 'Paused';
-            if (status === 'finished') return 'Turn Complete';
+            if (status === 'paused') return uiText.paused;
+            if (status === 'finished') return uiText.turnComplete;
             return t.idle;
         }
         if (status === 'running') return t.active;
         if (status === 'offline') return (t as any).offline || 'Server Unreachable';
-        if (status === 'paused') return 'Paused';
-        if (status === 'waiting_approval') return 'Approval Req.';
-        if (status === 'finished') return 'Completed';
+        if (status === 'paused') return uiText.paused;
+        if (status === 'waiting_approval') return uiText.approvalRequestShort;
+        if (status === 'finished') return uiText.completed;
         return t.stopped;
     };
 

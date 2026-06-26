@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { FileArchive, FileText, Eye, Download } from 'lucide-react';
+import type { Language } from '../AgentsConfig';
+import { getBeeGameText } from '../BeeGameI18n';
 
 interface ArtifactsPanelProps {
     artifacts: any[];
@@ -8,6 +10,7 @@ interface ArtifactsPanelProps {
     reviewStatuses: Record<string, any>;
     onPreview: (id: string, name: string) => void;
     onDownload: (id: string, name: string) => void;
+    lang?: Language;
 }
 
 export const ArtifactsPanel = memo(({ 
@@ -15,13 +18,15 @@ export const ArtifactsPanel = memo(({
     isLoading, 
     reviewStatuses, 
     onPreview, 
-    onDownload 
+    onDownload,
+    lang = 'en',
 }: ArtifactsPanelProps) => {
+    const text = getBeeGameText(lang);
     if (isLoading && artifacts.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100"></div>
-                <div className="text-sm">Loading artifacts...</div>
+                <div className="text-sm">{text.loadingArtifacts}</div>
             </div>
         );
     }
@@ -30,7 +35,7 @@ export const ArtifactsPanel = memo(({
         return (
             <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
                 <FileText className="w-12 h-12" />
-                <div className="text-sm">No artifacts generated yet...</div>
+                <div className="text-sm">{text.noArtifacts}</div>
             </div>
         );
     }
@@ -62,7 +67,7 @@ export const ArtifactsPanel = memo(({
                                     <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{art.name || `${type} Doc`}</div>
                                     <div className="flex items-center space-x-2 mt-0.5">
                                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-mono tracking-tighter">
-                                            {isProjectPackage ? 'Generated on download' : `By @${art.created_by || art.author || art.agent_id || 'unknown'} • ${review ? `Review: ${review.outcome || 'Pending'}` : 'Locked'}`}
+                                            {isProjectPackage ? text.generatedOnDownload : `@${art.created_by || art.author || art.agent_id || text.byUnknown} • ${review ? `${text.review}: ${review.outcome || text.pending}` : text.locked}`}
                                         </div>
                                         {review && (
                                             <div className="flex -space-x-1">
@@ -81,8 +86,8 @@ export const ArtifactsPanel = memo(({
                                 {!isProjectPackage ? (
                                     <button
                                         style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                                        onClick={(e) => { e.stopPropagation(); onPreview(reviewKey, art.name || `${type} Doc`); }}
-                                        title="Preview"
+                                        onClick={(e) => { e.stopPropagation(); onPreview(reviewKey, art.name || type); }}
+                                        title={text.preview}
                                     >
                                         <Eye className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
                                     </button>
@@ -90,7 +95,7 @@ export const ArtifactsPanel = memo(({
                                 <button
                                     style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                                     onClick={(e) => { e.stopPropagation(); onDownload(reviewKey, art.name || type); }}
-                                    title="Download"
+                                    title={text.download}
                                 >
                                     <Download className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
                                 </button>

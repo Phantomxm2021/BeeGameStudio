@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bot, FolderOpen, Globe, KeyRound, RotateCcw, Search, X } from 'lucide-react';
 import { LANGUAGE_OPTIONS, translations, type Language } from '../AgentsConfig';
+import { getBeeGameText } from '../BeeGameI18n';
 import {
     getBeeGameSubagentsEnabled,
     getBeeGameWorkspaceSettings,
@@ -33,6 +34,7 @@ type SettingsTab = 'general' | 'model';
 
 export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuProps) {
     const t = translations[lang];
+    const text = getBeeGameText(lang);
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -93,7 +95,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             })
             .catch((error) => {
                 if (!cancelled) {
-                    setWorkspaceStatus(error instanceof Error ? error.message : '工作路径读取失败');
+                    setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
                 }
             });
         setSubagentsEnabled(getBeeGameSubagentsEnabled());
@@ -109,7 +111,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             })
             .catch((error) => {
                 if (!cancelled) {
-                    setWebToolsStatus(error instanceof Error ? error.message : '网页工具配置读取失败');
+                    setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
                 }
             });
         return () => {
@@ -151,7 +153,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             setApiKey('');
             return true;
         } catch (error) {
-            setStatus(error instanceof Error ? error.message : '模型配置保存失败');
+            setStatus(error instanceof Error ? error.message : text.modelSaveFailed);
             return false;
         } finally {
             setIsSaving(false);
@@ -167,7 +169,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             setBeeGameSubagentsEnabled(subagentsEnabled);
             return true;
         } catch (error) {
-            setWorkspaceStatus(error instanceof Error ? error.message : '工作路径保存失败');
+            setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceSaveFailed);
             return false;
         } finally {
             setIsSavingWorkspace(false);
@@ -181,7 +183,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             const next = await resetBeeGameWorkspaceRoot();
             setWorkspacePath(next.workspacePath);
         } catch (error) {
-            setWorkspaceStatus(error instanceof Error ? error.message : '恢复默认工作路径失败');
+            setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceResetFailed);
         } finally {
             setIsSavingWorkspace(false);
         }
@@ -203,7 +205,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             setExaApiKey('');
             return true;
         } catch (error) {
-            setWebToolsStatus(error instanceof Error ? error.message : '网页搜索配置保存失败');
+            setWebToolsStatus(error instanceof Error ? error.message : text.webSearchSaveFailed);
             return false;
         } finally {
             setIsSavingWebTools(false);
@@ -221,7 +223,8 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
         : webSearchKeyField === 'exa'
             ? exaApiKey
             : '';
-    const activeTabLabel = activeTab === 'general' ? '通用' : '模型';
+    const savedPrefix = `${text.savedPrefix}${lang.startsWith('zh') ? '：' : ': '}`;
+    const activeTabLabel = activeTab === 'general' ? text.settingsGeneral : text.settingsModel;
     const isSavingCurrentTab = activeTab === 'general'
         ? isSavingWorkspace || isSavingWebTools
         : isSaving;
@@ -270,7 +273,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                 <div className="mb-4 flex items-center justify-between">
                                     <button
                                         type="button"
-                                        aria-label="关闭设置"
+                                        aria-label={text.closeSettings}
                                         onClick={onClose}
                                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-800/80 text-zinc-200 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
                                     >
@@ -279,8 +282,8 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                 </div>
                                 <div className="space-y-1.5" role="tablist" aria-label={t.systemSettings}>
                                     {[
-                                        { id: 'general' as const, label: '通用', icon: Globe },
-                                        { id: 'model' as const, label: '模型', icon: KeyRound },
+                                        { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
+                                        { id: 'model' as const, label: text.settingsModel, icon: KeyRound },
                                     ].map((tab) => {
                                         const Icon = tab.icon;
                                         const selected = activeTab === tab.id;
@@ -338,12 +341,12 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <FolderOpen className="h-4 w-4 text-zinc-400" />
-                                                工作路径
+                                                {text.workspacePath}
                                             </span>
                                             <div className="min-w-0 space-y-2">
                                                 <div className="flex items-center gap-2">
                                                     <input
-                                                        aria-label="工作路径"
+                                                        aria-label={text.workspacePath}
                                                         value={workspacePath}
                                                         onChange={(event) => setWorkspacePath(event.target.value)}
                                                         placeholder="/absolute/path/to/Projects"
@@ -351,8 +354,8 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                     />
                                                     <button
                                                         type="button"
-                                                        aria-label="恢复默认"
-                                                        title="恢复默认"
+                                                        aria-label={text.resetDefault}
+                                                        title={text.resetDefault}
                                                         onClick={handleResetWorkspace}
                                                         disabled={isSavingWorkspace}
                                                         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-700 bg-[#18191d] text-zinc-300 transition-colors hover:bg-[#24252a] disabled:cursor-not-allowed disabled:opacity-50"
@@ -369,12 +372,12 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100 sm:mt-2.5">
                                                 <Search className="h-4 w-4 text-zinc-400" />
-                                                Web Search
+                                                {text.webSearch}
                                             </span>
                                             <div className="min-w-0 space-y-2">
                                                 <div className="flex items-center gap-2">
                                                     <select
-                                                        aria-label="Search Backend"
+                                                        aria-label={text.searchBackend}
                                                         value={webSearchAdapter}
                                                         onChange={(event) => setWebSearchAdapter(event.target.value as WebSearchAdapter)}
                                                         className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
@@ -398,7 +401,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                                 setExaApiKey(event.target.value);
                                                             }
                                                         }}
-                                                        placeholder={webSearchKeyPreview ? `已保存：${webSearchKeyPreview}` : (webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY')}
+                                                        placeholder={webSearchKeyPreview ? `${savedPrefix}${webSearchKeyPreview}` : (webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY')}
                                                         className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
                                                     />
                                                 ) : null}
@@ -410,16 +413,21 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                         <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <Bot className="h-4 w-4 text-zinc-400" />
-                                                Enable subagents
+                                                {text.subagents}
                                             </span>
                                             <span className="flex items-center justify-end">
-                                                <input
-                                                    aria-label="Enable subagents"
-                                                    type="checkbox"
-                                                    checked={subagentsEnabled}
-                                                    onChange={(event) => setSubagentsEnabled(event.target.checked)}
-                                                    className="h-5 w-5 accent-orange-500"
-                                                />
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    aria-label={text.subagents}
+                                                    aria-checked={subagentsEnabled}
+                                                    onClick={() => setSubagentsEnabled((value) => !value)}
+                                                    className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60 ${subagentsEnabled ? 'border-orange-500/70 bg-orange-500' : 'border-zinc-700 bg-zinc-800'}`}
+                                                >
+                                                    <span
+                                                        className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${subagentsEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                                                    />
+                                                </button>
                                             </span>
                                         </label>
                                     </div>
@@ -429,9 +437,9 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                     <>
                                         <div className="divide-y divide-zinc-700/60">
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                                                <span className="text-sm font-medium text-zinc-100">Provider</span>
+                                                <span className="text-sm font-medium text-zinc-100">{text.provider}</span>
                                                 <select
-                                                    aria-label="Provider"
+                                                    aria-label={text.provider}
                                                     value={provider}
                                                     onChange={(event) => setProvider(event.target.value as ModelProviderKind)}
                                                     className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
@@ -444,9 +452,9 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                             </label>
 
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                                                <span className="text-sm font-medium text-zinc-100">Base URL</span>
+                                                <span className="text-sm font-medium text-zinc-100">{text.baseUrl}</span>
                                                 <input
-                                                    aria-label="Base URL"
+                                                    aria-label={text.baseUrl}
                                                     value={baseUrl}
                                                     onChange={(event) => setBaseUrl(event.target.value)}
                                                     placeholder="https://api.example.com/v1"
@@ -455,24 +463,24 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                             </label>
 
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                                                <span className="text-sm font-medium text-zinc-100">API Key</span>
+                                                <span className="text-sm font-medium text-zinc-100">{text.apiKey}</span>
                                                 <input
-                                                    aria-label="API Key"
+                                                    aria-label={text.apiKey}
                                                     type="password"
                                                     value={apiKey}
                                                     onChange={(event) => setApiKey(event.target.value)}
-                                                    placeholder={apiKeyPreview ? `已保存：${apiKeyPreview}` : 'sk-...'}
+                                                    placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'}
                                                     className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
                                                 />
                                             </label>
 
                                             <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                                                <span className="text-sm font-medium text-zinc-100 sm:mt-2.5">Models</span>
+                                                <span className="text-sm font-medium text-zinc-100 sm:mt-2.5">{text.models}</span>
                                                 <div className="grid gap-2">
                                                     <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Fast</span>
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">{text.fast}</span>
                                                         <input
-                                                            aria-label="Fast Model"
+                                                            aria-label={text.fastModel}
                                                             value={fastModel}
                                                             onChange={(event) => setFastModel(event.target.value)}
                                                             placeholder="qwen3.5-flash"
@@ -480,9 +488,9 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                         />
                                                     </label>
                                                     <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Balanced</span>
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">{text.balanced}</span>
                                                         <input
-                                                            aria-label="Balanced Model"
+                                                            aria-label={text.balancedModel}
                                                             value={balancedModel}
                                                             onChange={(event) => setBalancedModel(event.target.value)}
                                                             placeholder="qwen3.7-plus"
@@ -490,9 +498,9 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                         />
                                                     </label>
                                                     <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Strong</span>
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">{text.strong}</span>
                                                         <input
-                                                            aria-label="Strong Model"
+                                                            aria-label={text.strongModel}
                                                             value={strongModel}
                                                             onChange={(event) => setStrongModel(event.target.value)}
                                                             placeholder="qwen3.7-max"
@@ -512,12 +520,12 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                 <div className="flex items-center justify-end border-t border-zinc-700/70 px-6 py-4">
                                 <button
                                     type="button"
-                                    aria-label="保存设置"
+                                    aria-label={text.saveSettings}
                                     onClick={handleSaveSettings}
                                     disabled={isSaveDisabled}
                                     className="inline-flex h-10 items-center rounded-xl bg-zinc-100 px-5 text-sm font-black text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    {isSavingCurrentTab ? '保存中' : '保存设置'}
+                                    {isSavingCurrentTab ? text.saving : text.saveSettings}
                                 </button>
                             </div>
                             </main>

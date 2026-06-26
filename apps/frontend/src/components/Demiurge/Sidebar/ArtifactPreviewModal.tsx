@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, X } from 'lucide-react';
 import { MarkdownRenderer } from './ChatComponents';
+import type { Language } from '../AgentsConfig';
+import { getBeeGameText } from '../BeeGameI18n';
 
 interface ArtifactPreviewModalProps {
     isOpen: boolean;
@@ -8,9 +10,11 @@ interface ArtifactPreviewModalProps {
     title: string;
     content: string;
     isLoading: boolean;
+    lang?: Language;
 }
 
-export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoading }: ArtifactPreviewModalProps) {
+export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoading, lang = 'en' }: ArtifactPreviewModalProps) {
+    const text = getBeeGameText(lang);
     return (
         <AnimatePresence>
             {isOpen && (
@@ -36,7 +40,7 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                                 </div>
                                 <div>
                                     <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{title}</h2>
-                                    <p className="text-xs text-zinc-500 uppercase font-black tracking-widest mt-0.5 opacity-60">Artifact Online Preview</p>
+                                    <p className="text-xs text-zinc-500 uppercase font-black tracking-widest mt-0.5 opacity-60">{text.artifactOnlinePreview}</p>
                                 </div>
                             </div>
                             <button
@@ -52,7 +56,7 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                             {isLoading ? (
                                 <div className="h-full flex flex-col items-center justify-center space-y-4 opacity-40 italic">
                                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-zinc-900 dark:border-zinc-100"></div>
-                                    <p>Fetching content...</p>
+                                    <p>{text.fetchingContent}</p>
                                 </div>
                             ) : (
                                 <div className="prose dark:prose-invert max-w-none">

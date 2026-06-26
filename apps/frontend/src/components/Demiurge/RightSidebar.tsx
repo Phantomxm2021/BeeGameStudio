@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, MessageSquare } from 'lucide-react';
 import { type Language, translations } from './AgentsConfig';
+import { getBeeGameText } from './BeeGameI18n';
 import { api, type ReviewBindingPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -77,6 +78,7 @@ export function RightSidebar({
     const lastMessageCountRef = useRef(messages.length);
 
     const t = translations[lang];
+    const uiText = getBeeGameText(lang);
     const springTransition = { type: "spring" as const, stiffness: 260, damping: 26 };
     const isComposerLocked = isLoading || isRuntimeBusy;
 
@@ -133,7 +135,7 @@ export function RightSidebar({
             document.body.removeChild(a);
         } catch (error) {
             console.error('Artifact download failed:', error);
-            alert('下载失败，请稍后重试。');
+            alert(uiText.artifactDownloadFailed);
         }
     };
 
@@ -155,7 +157,7 @@ export function RightSidebar({
             setPreviewContent(processed);
         } catch (error) {
             console.error('Artifact preview failed:', error);
-            setPreviewContent('Failed to load artifact content. Please try downloading instead.');
+            setPreviewContent(uiText.artifactPreviewFailed);
         } finally {
             setIsPreviewLoading(false);
         }
@@ -247,7 +249,7 @@ export function RightSidebar({
         }`;
     const tabLabel = (tab: 'chat' | 'artifacts') => {
         if (variant !== 'beegame') return t[tab];
-        return tab === 'chat' ? '协作流' : '交付物';
+        return tab === 'chat' ? uiText.collabFlow : uiText.deliverables;
     };
 
     return (
@@ -321,6 +323,7 @@ export function RightSidebar({
                                 waitingApproval={waitingApproval}
                                 projectStatus={projectStatus}
                                 variant={variant}
+                                lang={lang}
                             />
                         ) : (
                             <ArtifactsPanel 
@@ -329,6 +332,7 @@ export function RightSidebar({
                                 reviewStatuses={reviewStatuses}
                                 onPreview={handlePreviewArtifact}
                                 onDownload={handleDownloadArtifact}
+                                lang={lang}
                             />
                         )}
                     </div>
@@ -386,6 +390,7 @@ export function RightSidebar({
                 title={previewTitle}
                 content={previewContent}
                 isLoading={isPreviewLoading}
+                lang={lang}
             />
         </>
     );

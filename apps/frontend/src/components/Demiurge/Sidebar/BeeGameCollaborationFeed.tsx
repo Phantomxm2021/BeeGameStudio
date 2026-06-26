@@ -14,11 +14,14 @@ import {
 } from 'lucide-react';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatComponents';
+import type { Language } from '../AgentsConfig';
+import { getBeeGameText, type BeeGameText } from '../BeeGameI18n';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+    lang?: Language;
 };
 
 type ToolFeedMessage = ChatDisplayMessage & {
@@ -109,8 +112,14 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
     };
 };
 
-const getToolTitle = (tool: NormalizedTool): string => {
-    return `${tool.name} ${tool.status}`;
+const getToolStatusLabel = (status: NormalizedTool['status'], text: BeeGameText): string => {
+    if (status === 'completed') return text.toolCompleted;
+    if (status === 'failed') return text.toolFailed;
+    return text.toolRunning;
+};
+
+const getToolTitle = (tool: NormalizedTool, text: BeeGameText): string => {
+    return `${tool.name} ${getToolStatusLabel(tool.status, text)}`;
 };
 
 const getToolIcon = (toolName?: string) => {
@@ -177,23 +186,26 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
 export const BeeGameCollaborationFeed = memo(({
     messages,
     onPreviewArtifact,
+    lang = 'en',
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const text = getBeeGameText(lang);
 
     return (
         <div data-testid="beegame-collaboration-feed" className="space-y-3">
             {entries.map((entry) => (
                 entry.kind === 'user' ? (
-                    <UserMessageCard key={entry.message.id} message={entry.message} />
+                    <UserMessageCard key={entry.message.id} message={entry.message} text={text} />
                 ) : entry.kind === 'agent' ? (
                     <AgentFeedGroup
                         key={entry.message.id}
                         message={entry.message}
                         tools={entry.tools}
                         onPreviewArtifact={onPreviewArtifact}
+                        text={text}
                     />
                 ) : (
-                    <ToolGroup key={entry.id} tools={entry.tools} onPreviewArtifact={onPreviewArtifact} />
+                    <ToolGroup key={entry.id} tools={entry.tools} onPreviewArtifact={onPreviewArtifact} text={text} />
                 )
             ))}
         </div>
@@ -202,14 +214,14 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
-function UserMessageCard({ message }: { message: ChatDisplayMessage }) {
+function UserMessageCard({ message, text }: { message: ChatDisplayMessage; text: BeeGameText }) {
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
             className="ml-auto max-w-[88%] rounded-xl border border-zinc-700/70 bg-zinc-800/45 px-4 py-3 text-zinc-100 shadow-sm"
         >
             <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">You</span>
+                <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">{text.you}</span>
                 <span className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">
                     <User className="h-4 w-4" />
                 </span>
@@ -228,10 +240,12 @@ function AgentFeedGroup({
     message,
     tools,
     onPreviewArtifact,
+    text,
 }: {
     message: ChatDisplayMessage;
     tools: NormalizedTool[];
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+    text: BeeGameText;
 }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -241,9 +255,10 @@ function AgentFeedGroup({
                 message={message}
                 isCollapsed={isCollapsed}
                 onToggleCollapsed={() => setIsCollapsed((value) => !value)}
+                text={text}
             />
             {!isCollapsed && tools.length > 0 ? (
-                <ToolGroup tools={tools} onPreviewArtifact={onPreviewArtifact} />
+                <ToolGroup tools={tools} onPreviewArtifact={onPreviewArtifact} text={text} />
             ) : null}
         </div>
     );
@@ -253,10 +268,12 @@ function AgentSummaryCard({
     message,
     isCollapsed,
     onToggleCollapsed,
+    text,
 }: {
     message: ChatDisplayMessage;
     isCollapsed: boolean;
     onToggleCollapsed: () => void;
+    text: BeeGameText;
 }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const preview = getAgentPreview(message.content);
@@ -272,7 +289,7 @@ function AgentSummaryCard({
                     <button
                         type="button"
                         aria-expanded={!isCollapsed}
-                        aria-label={isCollapsed ? 'Expand BeeGame message' : 'Collapse BeeGame message'}
+                        aria-label={isCollapsed ? text.expandMessage : text.collapseMessage}
                         onClick={onToggleCollapsed}
                         className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                     >
@@ -300,7 +317,7 @@ function AgentSummaryCard({
                                 onClick={() => setIsExpanded((value) => !value)}
                                 className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-orange-300 hover:text-orange-200"
                             >
-                                {isExpanded ? 'Hide summary details' : 'View summary details'}
+                                {isExpanded ? text.hideSummaryDetails : text.viewSummaryDetails}
                                 {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             </button>
                         ) : null}
@@ -314,9 +331,11 @@ function AgentSummaryCard({
 function ToolGroup({
     tools,
     onPreviewArtifact,
+    text,
 }: {
     tools: NormalizedTool[];
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+    text: BeeGameText;
 }) {
     return (
         <div className="relative pl-8">
@@ -327,6 +346,7 @@ function ToolGroup({
                         message={message}
                         isLast={index === tools.length - 1}
                         onPreviewArtifact={onPreviewArtifact}
+                        text={text}
                     />
                 ))}
             </div>
@@ -338,10 +358,12 @@ function ToolTimelineCard({
     message,
     isLast,
     onPreviewArtifact,
+    text,
 }: {
     message: NormalizedTool;
     isLast: boolean;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+    text: BeeGameText;
 }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const Icon = getToolIcon(message.name);
@@ -352,7 +374,7 @@ function ToolTimelineCard({
     const statusClassName = isCompleted ? 'text-emerald-400' : isFailed ? 'text-red-400' : 'text-orange-400';
     const detail = message.detail;
     const output = message.output;
-    const title = getToolTitle(message);
+    const title = getToolTitle(message, text);
     const previewId = message.artifactId || message.id;
     const previewTitle = detail || title;
     const previewContent = message.artifactId ? undefined : [detail, output].filter(Boolean).join('\n\n');
@@ -413,21 +435,21 @@ function ToolTimelineCard({
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <button
                                         type="button"
-                                        aria-label={`Open ${previewTitle}`}
+                                        aria-label={`${text.open} ${previewTitle}`}
                                         onClick={() => onPreviewArtifact?.(previewId, previewTitle, previewContent || undefined)}
                                         className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
                                     >
                                         <FolderOpen className="h-3.5 w-3.5" />
-                                        Open
+                                        {text.open}
                                     </button>
                                     <button
                                         type="button"
-                                        aria-label={`Diff ${previewTitle}`}
-                                        onClick={() => onPreviewArtifact?.(`${previewId}:diff`, `Diff: ${previewTitle}`, diffContent)}
+                                        aria-label={`${text.diff} ${previewTitle}`}
+                                        onClick={() => onPreviewArtifact?.(`${previewId}:diff`, `${text.diff}: ${previewTitle}`, diffContent)}
                                         className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
                                     >
                                         <GitCompare className="h-3.5 w-3.5" />
-                                        Diff
+                                        {text.diff}
                                     </button>
                                 </div>
                             ) : null}

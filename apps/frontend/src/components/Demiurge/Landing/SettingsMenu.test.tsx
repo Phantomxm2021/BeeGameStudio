@@ -103,11 +103,12 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
         expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
-        expect(screen.getByLabelText('Enable subagents')).toBeInTheDocument();
+        expect(screen.getByLabelText('Subagents')).toBeInTheDocument();
+        expect(screen.getByRole('switch', { name: 'Subagents' })).toBeChecked();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
         expect(screen.getByLabelText('工作路径')).toBeInTheDocument();
-        expect(screen.getByLabelText('Search Backend')).toBeInTheDocument();
+        expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存网页配置' })).not.toBeInTheDocument();
@@ -212,15 +213,15 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByText('BeeGame LLM')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('设为默认模型')).not.toBeInTheDocument();
-        expect(screen.getByLabelText('Fast Model')).toBeInTheDocument();
-        expect(screen.getByLabelText('Balanced Model')).toBeInTheDocument();
-        expect(screen.getByLabelText('Strong Model')).toBeInTheDocument();
+        expect(screen.getByLabelText('Fast 模型')).toBeInTheDocument();
+        expect(screen.getByLabelText('Balanced 模型')).toBeInTheDocument();
+        expect(screen.getByLabelText('Strong 模型')).toBeInTheDocument();
 
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
-        await userEvent.type(screen.getByLabelText('Fast Model'), 'gpt-4.1-mini');
-        await userEvent.type(screen.getByLabelText('Balanced Model'), 'gpt-4.1');
-        await userEvent.type(screen.getByLabelText('Strong Model'), 'gpt-4.1-pro');
+        await userEvent.type(screen.getByLabelText('Fast 模型'), 'gpt-4.1-mini');
+        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'gpt-4.1');
+        await userEvent.type(screen.getByLabelText('Strong 模型'), 'gpt-4.1-pro');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith({
@@ -275,7 +276,7 @@ describe('SettingsMenu model settings', () => {
         expect(apiKeyInput).toHaveAttribute('placeholder', '已保存：sk-...saved');
         expect(apiKeyInput).toHaveValue('');
 
-        const modelInput = screen.getByLabelText('Balanced Model');
+        const modelInput = screen.getByLabelText('Balanced 模型');
         await userEvent.clear(modelInput);
         await userEvent.type(modelInput, 'qwen3.7-max');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -306,7 +307,7 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
 
         expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
-        await userEvent.selectOptions(screen.getByLabelText('Search Backend'), 'brave');
+        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
         await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -316,7 +317,7 @@ describe('SettingsMenu model settings', () => {
         }));
         expect(screen.queryByText('网页搜索配置已保存；新会话生效。')).not.toBeInTheDocument();
 
-        await userEvent.selectOptions(screen.getByLabelText('Search Backend'), 'exa');
+        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'exa');
         expect(screen.getByLabelText('EXA_API_KEY')).toBeInTheDocument();
     });
 });

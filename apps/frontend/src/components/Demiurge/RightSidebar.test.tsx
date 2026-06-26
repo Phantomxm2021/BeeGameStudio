@@ -72,7 +72,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        const input = screen.getByPlaceholderText(/AI is processing/i);
+        const input = screen.getByPlaceholderText(/AI 正在处理/i);
         expect(input).toBeDisabled();
 
         await user.click(screen.getByRole('button', { name: '团队协作' }));

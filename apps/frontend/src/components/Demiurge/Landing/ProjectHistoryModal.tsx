@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
+import { getBeeGameText } from '../BeeGameI18n';
 import { useProjectStore } from '../../../store/projectStore';
 
 interface ProjectHistoryModalProps {
@@ -28,6 +29,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
     const t = translations[lang];
+    const text = getBeeGameText(lang);
 
     const closeMenu = () => {
         setActiveMenuId(null);
@@ -101,7 +103,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             </div>
                             <button
                                 type="button"
-                                aria-label="Close"
+                                aria-label={text.close}
                                 onClick={() => {
                                     closeMenu();
                                     onClose();
@@ -116,7 +118,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             {projects.length === 0 ? (
                                 <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-zinc-200 text-zinc-400 dark:border-white/10 dark:text-zinc-500">
                                     <Clock className="h-8 w-8 stroke-1" />
-                                    <span className="text-xs font-bold uppercase tracking-widest">No Projects Found</span>
+                                    <span className="text-xs font-bold uppercase tracking-widest">{text.noProjectsFound}</span>
                                 </div>
                             ) : (
                                 projects.map((project) => (
@@ -136,7 +138,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                         >
                                             <div className="min-w-0 pr-4">
                                                 <span className="block truncate text-sm font-semibold text-zinc-950 dark:text-white">
-                                                    {project.name || 'Untitled Project'}
+                                                    {project.name || text.untitledProject}
                                                 </span>
                                                 <span className="mt-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-zinc-400">
                                                     <Clock className="h-3 w-3" />
@@ -145,7 +147,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             </div>
                                             <button
                                                 type="button"
-                                                aria-label={`More actions for ${project.name || 'Untitled Project'}`}
+                                                aria-label={`${text.moreActionsFor} ${project.name || text.untitledProject}`}
                                                 onClick={(event) => toggleMenu(event, project.id)}
                                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-white/30"
                                             >
@@ -176,7 +178,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             }`}
                                     >
                                         <Trash2 className="h-3.5 w-3.5" />
-                                        {confirmingDeleteId === activeProject.id ? 'Confirm Delete' : 'Delete Project'}
+                                        {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
                                     </button>
                                 </motion.div>
                             </AnimatePresence>,

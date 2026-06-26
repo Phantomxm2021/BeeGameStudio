@@ -8,6 +8,8 @@ import { formatGddReviewSummary, isBlockerResolutionReview, isBeeGamePermissionR
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
+import type { Language } from '../AgentsConfig';
+import { getBeeGameText } from '../BeeGameI18n';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -42,6 +44,7 @@ interface ChatPanelProps {
     projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
     variant?: 'legacy' | 'beegame';
+    lang?: Language;
 }
 
 const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
@@ -73,31 +76,33 @@ export const ChatPanel = memo(({
     projectStatus,
     isComposerLocked = false,
     variant = 'legacy',
+    lang = 'en',
 }: ChatPanelProps) => {
+    const text = getBeeGameText(lang);
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
     ): string => {
         if (!review?.gate_id) {
-            if (action === 'approve') return 'Approve';
-            if (action === 'revise') return 'Revise';
-            return 'Reject';
+            if (action === 'approve') return text.approve;
+            if (action === 'revise') return text.revise;
+            return text.reject;
         }
         if (isApprovalActionPending(approvalState, review.gate_id, action)) {
             if (action === 'approve') {
-                return approvalState.phase === 'submitting' ? 'Submitting' : 'Starting';
+                return approvalState.phase === 'submitting' ? text.submitting : text.starting;
             }
-            return approvalState.phase === 'submitting' ? 'Submitting' : 'Refreshing';
+            return approvalState.phase === 'submitting' ? text.submitting : text.refreshing;
         }
         if (action === 'approve') {
-            if (isBeeGamePermissionReview(review)) return 'Allow';
-            return review?.type === 'INTENT_CLARIFICATION' ? 'Continue' : 'Approve';
+            if (isBeeGamePermissionReview(review)) return text.allow;
+            return review?.type === 'INTENT_CLARIFICATION' ? text.continue : text.approve;
         }
         if (action === 'revise') {
-            if (isBeeGamePermissionReview(review)) return 'Deny';
-            return review?.type === 'INTENT_CLARIFICATION' ? 'Revise' : 'Revise';
+            if (isBeeGamePermissionReview(review)) return text.deny;
+            return text.revise;
         }
-        return 'Reject';
+        return text.reject;
     };
 
     const reviewApproveLabel = (review: ReviewDisplayModel): string => {
@@ -150,6 +155,7 @@ export const ChatPanel = memo(({
                             messages={messages}
                             projectStatus={projectStatus}
                             onPreviewArtifact={onPreviewArtifact}
+                            lang={lang}
                         />
                     ) : messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20">
@@ -159,7 +165,7 @@ export const ChatPanel = memo(({
                             >
                                 <MessageSquare className="w-16 h-16 text-zinc-400" />
                             </motion.div>
-                            <p className="text-sm font-medium">No messages yet...</p>
+                            <p className="text-sm font-medium">{text.noMessages}</p>
                         </div>
                     ) : (
                         messages.map((m) => (
@@ -187,9 +193,9 @@ export const ChatPanel = memo(({
                                 <div className="flex items-start space-x-3">
                                     <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">Action Required</div>
+                                        <div className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">{text.actionRequired}</div>
                                         <div className="text-sm text-blue-900 dark:text-blue-100 opacity-80 mb-2">
-                                            The agent has generated a default resource manifest. You can upload your own custom CSV to override it, or skip to use the default.
+                                            {text.resourceManifestDescription}
                                         </div>
                                         <div className="flex space-x-3 mt-4">
                                             <button
@@ -197,7 +203,7 @@ export const ChatPanel = memo(({
                                                 disabled={isLoading}
                                                 className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50"
                                             >
-                                                <span>Skip</span>
+                                                <span>{text.skip}</span>
                                             </button>
 
                                             <div className="flex-1">
@@ -222,7 +228,7 @@ export const ChatPanel = memo(({
                                                     htmlFor={`upload-csv-${review.gate_id}`}
                                                     className={`w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
                                                 >
-                                                    <span>Upload</span>
+                                                    <span>{text.upload}</span>
                                                 </label>
                                             </div>
                                         </div>
@@ -251,16 +257,16 @@ export const ChatPanel = memo(({
                             gateId={activeComposerReview.gate_id}
                             title={
                                 beeGamePermission
-                                    ? 'Permission Required'
+                                    ? text.permissionRequired
                                     : activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                        ? 'Clarification Required'
+                                        ? text.clarificationRequired
                                         : gddReadyForUserApproval
-                                            ? 'Approval Required'
-                                            : 'Revision Required'
+                                            ? text.approvalRequired
+                                            : text.revisionRequired
                             }
                             description={
                                 activeComposerReview.type === 'INTENT_CLARIFICATION'
-                                    ? 'Answer the clarification or choose how to proceed with the current brief.'
+                                    ? text.clarificationDescription
                                     : formatGddReviewSummary(activeComposerReview)
                             }
                             tone={
@@ -316,7 +322,7 @@ export const ChatPanel = memo(({
                         <textarea
                             ref={textareaRef}
                             className={textareaClassName}
-                            placeholder={isComposerLocked || isLoading ? "AI is processing..." : waitingApproval.placeholder}
+                            placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
                             value={chatInput}
                             onChange={(e) => onChatInputChange(e.target.value)}
                             onCompositionStart={() => setIsComposing(true)}
