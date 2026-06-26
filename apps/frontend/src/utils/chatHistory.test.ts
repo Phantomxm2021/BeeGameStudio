@@ -65,7 +65,7 @@ describe('normalizeChatHistory semantic metadata', () => {
                 content: 'Last check failed.\nCommand: game-engine build\nOutput: Exit code 1',
                 type: 'text',
                 taskKind: 'last_check_failed',
-                nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+                nextAction: 'continue_from_last_failed_check',
                 requiresUserAction: true,
                 timestamp: '2026-06-21T00:00:00Z',
             },
@@ -74,7 +74,7 @@ describe('normalizeChatHistory semantic metadata', () => {
         expect(messages).toHaveLength(1);
         expect(messages[0]).toMatchObject({
             taskKind: 'last_check_failed',
-            nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+            nextAction: 'continue_from_last_failed_check',
             requiresUserAction: true,
         });
     });

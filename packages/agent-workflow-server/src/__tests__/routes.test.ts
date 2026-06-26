@@ -204,7 +204,7 @@ describe('agent workflow server routes', () => {
       const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ idea: 'LLM generated idea' }),
+        body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
       })
 
       expect(res.status).toBe(200)
@@ -263,6 +263,8 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('recommendedDimension examples:')
       expect(systemPrompt).toContain('recommendedInputs examples:')
       expect(systemPrompt).toContain('Do not output Auto for recommended metadata')
+      expect(systemPrompt).toContain('Use this selected UI language for every user-facing natural-language JSON value: zh')
+      expect(systemPrompt).toContain('Keep JSON property names in English')
       expect(systemPrompt).not.toContain('prototype title')
       expect(systemPrompt).not.toContain('playable prototype name')
       expect(systemPrompt).not.toContain('Core Loop')

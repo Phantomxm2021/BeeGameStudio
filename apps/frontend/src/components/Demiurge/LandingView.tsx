@@ -95,7 +95,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIsPreparing(true);
         setIntakePhase('generating_options');
         try {
-            const intake = await beeGameAdapter.runIdeaIntake({ idea });
+            const intake = await beeGameAdapter.runIdeaIntake({ idea, language: lang });
             if (intake.needsClarification && intake.clarification) {
                 setIsPreparing(false);
                 setIntakePhase('idle');
@@ -223,6 +223,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 option: selectedOption,
                 settings,
                 title: selectedOption.title,
+                language: lang,
             };
             await onStart(projectName.trim(), undefined, brief);
             setIsTransitioning(true);

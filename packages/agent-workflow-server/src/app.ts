@@ -283,6 +283,8 @@ export function createAgentWorkflowApp(
       return c.json({
         ...(await generateBeeGameIntakeOptions({
           idea: String(body.idea),
+          language:
+            typeof body.language === 'string' ? body.language : undefined,
           ownerId: getOwnerId(c.req.query('ownerId')),
           modelConfigId:
             typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
@@ -313,6 +315,7 @@ export function createAgentWorkflowApp(
 
 async function generateBeeGameIntakeOptions(input: {
   idea: string
+  language?: string
   ownerId: string
   modelConfigId?: string
 }): Promise<BeeGameIntakeAnalysis> {
@@ -391,7 +394,9 @@ async function generateBeeGameIntakeOptions(input: {
             'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
             'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
             'Do not mention dashboard source paths, package paths, commands, or implementation directories.',
-            'Keep the response language aligned with the user idea.',
+            input.language
+              ? `Use this selected UI language for every user-facing natural-language JSON value: ${input.language}. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.`
+              : 'Keep the response language aligned with the user idea. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.',
           ].join('\n'),
         },
         {

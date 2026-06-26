@@ -211,6 +211,32 @@ describe('MessageItem semantic rendering', () => {
         );
     });
 
+    it('uses the selected UI language for the recoverable failed-check action', async () => {
+        const onContinueFixing = vi.fn();
+        render(
+            <MessageItem
+                m={{
+                    id: 'failed-check-zh',
+                    sender: 'system',
+                    content: 'Last check failed.',
+                    timestamp: Date.now(),
+                    type: 'system_status',
+                    taskKind: 'last_check_failed',
+                    requiresUserAction: true,
+                    nextAction: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+                }}
+                lang="zh"
+                onContinueFixing={onContinueFixing}
+            />
+        );
+
+        await userEvent.setup().click(screen.getByRole('button', { name: /continue fixing/i }));
+
+        expect(onContinueFixing).toHaveBeenCalledWith(
+            '继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。',
+        );
+    });
+
     it('renders delivery review messages as neutral review alerts', () => {
         render(
             <MessageItem

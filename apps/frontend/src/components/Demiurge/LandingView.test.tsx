@@ -178,7 +178,7 @@ describe('LandingView bootstrap submission', () => {
         expect(textbox).toBeDisabled();
         await screen.findByText('LLM Mode A');
         expect(screen.getByText('LLM Mode B')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
         expect(onStart).not.toHaveBeenCalled();
         expect(analyzeIdeaIntake).not.toHaveBeenCalled();
     });
@@ -366,6 +366,7 @@ describe('LandingView bootstrap submission', () => {
         expect(clarification).toBeUndefined();
         expect(brief).toMatchObject({
             idea: 'LLM generated idea',
+            language: 'zh',
             title: 'LLM Mode A',
             option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {
@@ -438,7 +439,7 @@ describe('LandingView bootstrap submission', () => {
 
         expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
         expect(screen.queryByText('Dark Mode')).not.toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByText('Language')).toBeInTheDocument();
         expect(screen.getByText('System Settings')).toBeInTheDocument();
         expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument();
@@ -476,7 +477,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
         const dialog = screen.getByRole('dialog', { name: 'History Projects' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'More actions for LLM Project' }));
+        fireEvent.click(screen.getByRole('button', { name: 'More actions LLM Project' }));
 
         const deleteAction = screen.getByRole('button', { name: 'Delete Project' });
         expect(dialog).not.toContainElement(deleteAction);
@@ -488,7 +489,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
 
         expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
-        expect(screen.getByText('No Projects Found')).toBeInTheDocument();
+        expect(screen.getByText('No projects found')).toBeInTheDocument();
     });
 
     it('keeps the history modal content area stable for empty and populated project lists', () => {

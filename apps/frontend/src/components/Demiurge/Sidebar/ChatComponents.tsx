@@ -4,14 +4,25 @@ import { User, MessageSquare, ChevronDown, ChevronUp, AlertCircle, Bot, CheckCir
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { AGENT_UI_MAP } from '../AgentsConfig';
+import { AGENT_UI_MAP, type Language } from '../AgentsConfig';
 import { formatMessageContent } from '../../../utils/formatters';
 import { artifactProcessor } from '../../../utils/artifactProcessor';
 import { ArtifactCard } from './ArtifactCard';
 import { getSystemStatusLabel, normalizeCanonicalMessageType } from '../../../utils/messageSemantics';
 import type { ChatDisplayMessage, GovernanceDisplaySnapshot } from '../../../viewModels/displayModels';
 
-const CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT = 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
+const getContinueFromLastFailedCheckPrompt = (lang: Language = 'en'): string => {
+    if (lang === 'zh' || lang === 'zh-TW') {
+        return '继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。';
+    }
+    if (lang === 'ja') {
+        return '前回失敗したチェックから続けてください。報告された問題を修正し、関連するチェックを再実行し、プロジェクトが動作するまで続けてください。';
+    }
+    if (lang === 'ko') {
+        return '마지막으로 실패한 검사 지점부터 계속하세요. 보고된 문제를 수정하고 관련 검사를 다시 실행한 뒤 프로젝트가 실행될 때까지 계속 진행하세요.';
+    }
+    return 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
+};
 
 const normalizeEscapedNewlines = (input: string): string => {
     if (!input) return '';
@@ -533,11 +544,13 @@ export const MessageItem = memo(({
     onPreviewArtifact,
     onContinueFixing,
     variant = 'legacy',
+    lang = 'en',
 }: {
     m: ChatDisplayMessage,
     onPreviewArtifact?: (artifactId: string, title: string, content?: string) => void,
     onContinueFixing?: (content: string) => void,
     variant?: 'legacy' | 'beegame',
+    lang?: Language,
 }) => {
     const agent = AGENT_UI_MAP[m.sender];
     const isUser = m.sender === 'user';
@@ -567,7 +580,7 @@ export const MessageItem = memo(({
     }
 
     if (!isUser && m.taskKind === 'last_check_failed') {
-        const continueMessage = m.nextAction || CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT;
+        const continueMessage = getContinueFromLastFailedCheckPrompt(lang);
         return (
             <motion.div
                 key={m.id}

@@ -97,6 +97,8 @@ type BeeGameArtifact = {
   package_download?: boolean;
 };
 
+type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko';
+
 export type BeeGameIntakeOption = {
   id: string;
   title: string;
@@ -162,6 +164,7 @@ export type BeeGameBuildBrief = {
   idea: string;
   option: BeeGameIntakeOption;
   settings: BeeGameIntakeSettings;
+  language?: BeeGameLanguage | string;
   root_path?: string;
   title?: string;
 };
@@ -177,7 +180,7 @@ const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
 const USER_QUESTION_TOOL = 'AskUserQuestion';
 const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ?? '').trim();
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
-const CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT = 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
+const CONTINUE_FROM_LAST_FAILED_CHECK_ACTION = 'continue_from_last_failed_check';
 const missingRuntimeSessionIds = new Set<string>();
 
 export function isBeeGameAdapterEnabled(): boolean {
@@ -244,10 +247,10 @@ export const beeGameAdapter = {
     return project;
   },
 
-  async runIdeaIntake(data: { idea: string }): Promise<BeeGameIdeaIntakeResult> {
+  async runIdeaIntake(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIdeaIntakeResult> {
     const response = await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
       '/api/beegame-intake/options?ownerId=dashboard-local',
-      { idea: data.idea },
+      { idea: data.idea, ...(data.language ? { language: data.language } : {}) },
     );
     const intake = normalizeIdeaIntakeResult(response);
     if (intake.options.length === 0 && !intake.clarification) {
@@ -256,7 +259,7 @@ export const beeGameAdapter = {
     return intake;
   },
 
-  async generateIntakeOptions(data: { idea: string }): Promise<BeeGameIntakeOption[]> {
+  async generateIntakeOptions(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIntakeOption[]> {
     return (await this.runIdeaIntake(data)).options;
   },
 
@@ -1272,7 +1275,7 @@ function buildLastFailedCheckAlert(projectId: string, completedEvent: BeeGameEve
     message_id: `beegame-last-check-failed-${completedEvent.sessionId}-${completedEvent.turnId || completedEvent.id}-${failedCheck.id}`,
     timestamp: Date.parse(completedEvent.createdAt) || Date.now(),
     task_kind: 'last_check_failed',
-    next_action: CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT,
+    next_action: CONTINUE_FROM_LAST_FAILED_CHECK_ACTION,
     requires_user_action: true,
   } as WebSocketMessage;
 }
@@ -1925,8 +1928,11 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     brief.option.gameplay,
     settings.notes ?? '',
   ].join('\n');
-  if (containsCjk(languageSource)) {
+  const language = normalizeBeeGameLanguage(brief.language, languageSource);
+  if (language === 'zh' || language === 'zh-TW') {
     return [
+      '请使用中文与用户沟通。除代码、命令、文件路径、包名、API 名称和错误原文外，所有面向用户的说明、提问、总结和文档正文默认使用中文。',
+      '',
       '我要做一个完整游戏项目。请像在终端里协作一样，自主规划、实现、运行检查、修复问题，并在需要我决策时提问。',
       '',
       `原始想法：${brief.idea}`,
@@ -1937,12 +1943,12 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       `第一分钟体验：${brief.option.playerFirstMinute}`,
       `第一版目标：${brief.option.firstBuild}`,
       `主要风险：${brief.option.risk}`,
-      `Platform: ${settings.platform}`,
-      `Visual style: ${settings.visualStyle}`,
-      `Dimension: ${settings.dimension}`,
-      `Genre: ${settings.genre}`,
-      `Inputs: ${settings.inputs.join(', ')}`,
-      `Scope: ${settings.scope}`,
+      `平台：${settings.platform}`,
+      `视觉风格：${settings.visualStyle}`,
+      `表现形式：${settings.dimension}`,
+      `游戏类型：${settings.genre}`,
+      `输入方式：${settings.inputs.join(', ')}`,
+      `范围：${settings.scope}`,
       settings.notes ? `补充说明：${settings.notes}` : '',
       '',
       '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
@@ -1952,7 +1958,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       '实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式；不要强行使用某个固定平台、包管理器、测试框架或浏览器。',
       '不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成。发现问题就继续修复。',
       '请验证真实玩家路径：启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复。',
-      '交付前请使用可用的游戏验收指导或自检清单。最终总结必须分为：Implemented、Verified with evidence、Not verified / Known gaps。只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
+      '交付前请使用可用的游戏验收指导或自检清单。最终总结必须分为：已实现、已验证证据、未验证/已知缺口。只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
     ].filter(Boolean).join('\n');
   }
   return [
@@ -1989,6 +1995,13 @@ function getResponseLanguageInstruction(text: string): string {
   return containsCjk(text)
     ? 'Response language: reply to the user in Simplified Chinese. Keep code, file paths, package names, commands, and API identifiers unchanged.'
     : 'Response language: reply in the same language as the user. Keep code, file paths, package names, commands, and API identifiers unchanged.';
+}
+
+function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' {
+  if (language === 'zh' || language === 'zh-TW' || language === 'ja' || language === 'ko' || language === 'en') {
+    return language;
+  }
+  return containsCjk(fallbackText) ? 'zh' : 'en';
 }
 
 function containsCjk(text: string): boolean {

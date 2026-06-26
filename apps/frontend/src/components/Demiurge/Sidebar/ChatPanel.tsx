@@ -175,6 +175,7 @@ export const ChatPanel = memo(({
                                 onPreviewArtifact={onPreviewArtifact}
                                 onContinueFixing={onSendMessage ? handleContinueFixing : undefined}
                                 variant={variant}
+                                lang={lang}
                             />
                         ))
                     )}

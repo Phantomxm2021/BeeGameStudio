@@ -196,6 +196,26 @@ describe('beeGameAdapter prompt rules', () => {
       firstPlayableValidation: 'LLM validation',
       riskComplexity: 'LLM complexity',
     }));
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
+    expect(requestBody).toEqual({ idea: 'LLM generated idea' });
+  });
+
+  it('passes the selected language to BeeGame intake', async () => {
+    const llmOption = makeLlmOption();
+    const fetchMock = vi.fn(async () => jsonResponse({
+      maturity: 'directional',
+      needsOptions: true,
+      needsClarification: false,
+      detectedConstraints: [],
+      recommendedNextStep: 'choose_direction',
+      options: [llmOption],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.runIdeaIntake({ idea: '做一个贪吃蛇', language: 'zh' });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
+    expect(requestBody).toEqual({ idea: '做一个贪吃蛇', language: 'zh' });
   });
 
   it('accepts structured clarification without synthesizing local options', async () => {
@@ -1174,8 +1194,8 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('Completion contract');
     expect(body.text).not.toContain('Workspace rule:');
     expect(body.text).not.toContain('Branding rule:');
-    expect(body.text).toContain('Platform: Web');
-    expect(body.text).toContain('Inputs: Keyboard/mouse, Touch');
+    expect(body.text).toContain('平台：Web');
+    expect(body.text).toContain('输入方式：Keyboard/mouse, Touch');
     expect(body.text).toContain('请先在 docs/ 下写清项目资源');
     expect(body.text).toContain('美术方向');
     expect(body.text).toContain('UI/UX');
@@ -1189,10 +1209,10 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成');
     expect(body.text).toContain('启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复');
     expect(body.text).toContain('交付前请使用可用的游戏验收指导或自检清单');
-    expect(body.text).toContain('Implemented');
-    expect(body.text).toContain('Verified with evidence');
-    expect(body.text).toContain('Not verified / Known gaps');
-    expect(body.text).toContain('最终总结必须分为');
+    expect(body.text).toContain('最终总结必须分为：已实现、已验证证据、未验证/已知缺口');
+    expect(body.text).not.toContain('Implemented');
+    expect(body.text).not.toContain('Verified with evidence');
+    expect(body.text).not.toContain('Not verified / Known gaps');
     expect(body.text).not.toContain('Create useful project documents under ./docs/');
     expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
     expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
@@ -1756,7 +1776,7 @@ describe('beeGameAdapter prompt rules', () => {
         sender: 'system',
         task_kind: 'last_check_failed',
         requires_user_action: true,
-        next_action: 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.',
+        next_action: 'continue_from_last_failed_check',
         content: expect.stringContaining('Last check failed'),
       }),
       expect.objectContaining({ type: 'status', status: 'idle' }),
