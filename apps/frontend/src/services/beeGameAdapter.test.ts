@@ -1603,7 +1603,7 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
-  it('treats AskUserQuestion as a clarification message instead of an approval gate', async () => {
+  it('treats AskUserQuestion as a clarification review instead of a chat message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs?ownerId=dashboard-local') {
@@ -1657,21 +1657,29 @@ describe('beeGameAdapter prompt rules', () => {
     const reviews = await beeGameAdapter.getPendingUserReviews(result.project.id);
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
 
-    expect(polled.messages).toEqual([
+    expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
+    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(false);
+    expect(reviews.items).toEqual([
       expect.objectContaining({
-        type: 'agent_message',
-        sender: 'beegame',
-        content: expect.stringContaining('你想做单人模式还是双人模式？'),
-        task_kind: 'clarification_question',
-        requires_user_action: true,
+        gate_id: 'tool_question',
+        task_id: 'beegame_question',
+        type: 'INTENT_CLARIFICATION',
+        gate_kind: 'beegame_permission',
+        title: '游戏模式',
+        status: 'awaiting_approval',
+        artifact: expect.objectContaining({
+          title: '游戏模式',
+          content: expect.stringContaining('你想做单人模式还是双人模式？'),
+        }),
+        summary: expect.objectContaining({
+          next_action: expect.stringContaining('你想做单人模式还是双人模式？'),
+        }),
       }),
     ]);
-    expect(polled.messages[0].content).toContain('单人模式');
-    expect(polled.messages[0].content).toContain('双人模式');
-    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(false);
-    expect(reviews.items).toEqual([]);
-    expect(status.approval_required).toBe(false);
-    expect(status.phase).toBe('idle');
+    expect(reviews.items[0].artifact.content).toContain('单人模式');
+    expect(reviews.items[0].artifact.content).toContain('双人模式');
+    expect(status.approval_required).toBe(true);
+    expect(status.phase).toBe('waiting_approval');
   });
 
   it('keeps multiple final assistant messages in the same turn instead of overwriting them', async () => {

@@ -1245,14 +1245,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     }
     case 'permission.requested':
       if (isUserQuestionPermissionEvent(event)) {
-        return [{
-          ...baseMessage('agent_message', {
-          ...event,
-          text: describeUserQuestionEvent(event),
-          }, projectId, 'beegame'),
-          task_kind: 'clarification_question',
-          requires_user_action: true,
-        } as WebSocketMessage];
+        return [];
       }
       return [{
         type: 'human_gate',
@@ -2091,7 +2084,6 @@ function getPendingPermissionEvents(events: BeeGameEvent[]): BeeGameEvent[] {
   );
   return events
     .filter(event => event.type === 'permission.requested')
-    .filter(event => !isUserQuestionPermissionEvent(event))
     .filter(event => {
       const toolUseID = getPayloadString(event, 'toolUseID');
       return toolUseID && !resolved.has(toolUseID);
@@ -2202,6 +2194,10 @@ function decodeArtifactId(artifactId: string): { projectId: string; sessionId: s
 }
 
 function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {
+  if (isUserQuestionPermissionEvent(event)) {
+    return userQuestionEventToReview(event, binding);
+  }
+
   const toolUseID = getPayloadString(event, 'toolUseID');
   const toolName = getPayloadString(event, 'toolName') || 'BeeGame tool';
   const input = event.payload?.input && typeof event.payload.input === 'object'
@@ -2244,6 +2240,69 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
       pending_issue_count: 1,
       blocking_issue_count: 1,
     },
+  };
+}
+
+function userQuestionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {
+  const toolUseID = getPayloadString(event, 'toolUseID');
+  const input = event.payload?.input && typeof event.payload.input === 'object'
+    ? event.payload.input as Record<string, unknown>
+    : {};
+  const question = getPrimaryUserQuestion(input);
+  const title = question.header || 'BeeGame clarification';
+  const content = describeUserQuestionEvent(event);
+  return {
+    gate_id: toolUseID,
+    task_id: binding.sessionId,
+    type: 'INTENT_CLARIFICATION',
+    gate_kind: 'beegame_permission',
+    user_action_kind: 'approve',
+    title,
+    status: 'awaiting_approval',
+    artifact_type: 'intent_clarification',
+    ready_for_user_approval: true,
+    ready_for_promotion: true,
+    created_at: event.createdAt,
+    artifact: {
+      title,
+      artifact_type: 'intent_clarification',
+      content,
+      input,
+    },
+    summary: {
+      block_reason: question.text || event.text,
+      next_action: question.text || content,
+    },
+    binding: {
+      workspace_path: binding.workspacePath,
+      workspace_ref: binding.workspacePath,
+    },
+    review_status: {
+      workflow_id: 'beegame',
+      lane_id: 'clarification',
+      lane_status: 'awaiting_approval',
+      decision_status: 'awaiting_user',
+      user_action_kind: 'approve',
+      requires_user_action: true,
+      pending_issue_count: 1,
+      blocking_issue_count: 1,
+    },
+  };
+}
+
+function getPrimaryUserQuestion(input: Record<string, unknown>): { header: string; text: string } {
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  for (const item of questions) {
+    if (!item || typeof item !== 'object') continue;
+    const question = item as Record<string, unknown>;
+    return {
+      header: String(question.header || '').trim(),
+      text: String(question.question || question.prompt || '').trim(),
+    };
+  }
+  return {
+    header: '',
+    text: String(input.question || input.prompt || input.message || '').trim(),
   };
 }
 
