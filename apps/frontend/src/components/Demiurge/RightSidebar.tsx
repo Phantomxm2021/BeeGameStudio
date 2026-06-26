@@ -282,12 +282,16 @@ export function RightSidebar({
                                 </button>
                             ))}
                         </div>
-                        <button
-                            onClick={() => setIsChatMinimized(true)}
-                            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-900 dark:text-zinc-100"
-                        >
-                            <Minus className="w-5 h-5" />
-                        </button>
+	                        {variant !== 'beegame' ? (
+	                            <button
+	                                type="button"
+	                                aria-label="最小化聊天"
+	                                onClick={() => setIsChatMinimized(true)}
+	                                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-900 dark:text-zinc-100"
+	                            >
+	                                <Minus className="w-5 h-5" />
+	                            </button>
+	                        ) : null}
                     </div>
 
                     {/* Content Area */}
@@ -331,8 +335,8 @@ export function RightSidebar({
                 </div>
             </motion.div>
 
-            <AnimatePresence>
-                {isChatMinimized && (
+	            <AnimatePresence>
+	                {variant !== 'beegame' && isChatMinimized && (
                     <motion.button
                         initial={{ y: 40, opacity: 0, scale: 0.8 }}
                         animate={{ y: 0, opacity: 1, scale: 1 }}

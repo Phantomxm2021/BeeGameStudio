@@ -223,8 +223,9 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
-        expect(userMessage).toHaveClass('bg-sky-950/20');
+        expect(userMessage).toHaveClass('bg-zinc-800/45');
         expect(userMessage).not.toHaveClass('bg-zinc-100');
+        expect(userMessage).not.toHaveClass('bg-sky-950/20');
         expect(screen.getByText('请构建首个可玩版本')).toBeInTheDocument();
         expect(screen.getByText('BeeGame')).toBeInTheDocument();
         expect(screen.getByText('我会先完成可运行闭环，然后验证构建入口。')).toBeInTheDocument();

@@ -78,4 +78,28 @@ describe('RightSidebar tabs', () => {
         await user.click(screen.getByRole('button', { name: '团队协作' }));
         expect(onSendMessage).not.toHaveBeenCalled();
     });
+
+    it('removes the minimize affordance in BeeGame mode', () => {
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        expect(screen.getByRole('button', { name: '协作流' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '最小化聊天' })).not.toBeInTheDocument();
+    });
 });

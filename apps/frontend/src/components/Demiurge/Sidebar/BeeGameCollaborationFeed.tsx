@@ -206,11 +206,11 @@ function UserMessageCard({ message }: { message: ChatDisplayMessage }) {
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
-            className="ml-auto max-w-[88%] rounded-xl border border-sky-500/20 bg-sky-950/20 px-4 py-3 text-sky-50 shadow-sm"
+            className="ml-auto max-w-[88%] rounded-xl border border-zinc-700/70 bg-zinc-800/45 px-4 py-3 text-zinc-100 shadow-sm"
         >
             <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="text-[11px] font-black uppercase tracking-widest text-sky-300/70">You</span>
-                <span className="grid h-7 w-7 place-items-center rounded-lg border border-sky-500/25 bg-sky-950/50 text-sky-200">
+                <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">You</span>
+                <span className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">
                     <User className="h-4 w-4" />
                 </span>
             </div>

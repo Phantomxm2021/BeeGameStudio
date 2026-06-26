@@ -411,16 +411,16 @@ export function BeeGameLivePreviewPage({
                     >
                         {projectName}
                     </button>
-                    <div className="flex items-center gap-2 rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-300">
+                    <div className="flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-xs font-bold text-zinc-300">
                         <Globe2 className="h-3.5 w-3.5" />
                         Web
                     </div>
-                    <div className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
+                    <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
                         <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
                         {statusText}
                     </div>
                     {isSyncing ? (
-                        <div className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-400">
+                        <div className="rounded-xl bg-zinc-800/80 px-3 py-1 text-xs font-bold text-zinc-400">
                             {labels.syncing}
                         </div>
                     ) : null}
@@ -451,9 +451,9 @@ export function BeeGameLivePreviewPage({
                         aria-label={labels.settings}
                         aria-expanded={isUserMenuOpen}
                         onClick={() => setUserMenuOpen(open => !open)}
-                        className="flex h-11 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-2 pl-3 text-zinc-200 transition hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none"
+                        className="flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-2 pl-3 text-zinc-200 transition hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none"
                     >
-                        <span className="grid h-7 w-7 place-items-center rounded-full bg-zinc-800 text-sm font-black text-zinc-100">
+                        <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-800 text-sm font-black text-zinc-100">
                             N
                         </span>
                         <ChevronDown className={`h-4 w-4 text-zinc-500 transition ${isUserMenuOpen ? 'rotate-180' : ''}`} />
@@ -465,7 +465,7 @@ export function BeeGameLivePreviewPage({
                             className="absolute right-0 top-14 z-[80] w-72 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 text-zinc-100 shadow-2xl shadow-black/50 backdrop-blur-xl"
                         >
                             <div className="flex items-center gap-3 px-2 pb-3">
-                                <div className="grid h-9 w-9 place-items-center rounded-full bg-zinc-900 text-sm font-black">N</div>
+                                <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-sm font-black">N</div>
                                 <div className="min-w-0">
                                     <div className="text-sm font-black">N</div>
                                     <div className="truncate text-xs font-bold text-zinc-500">{currentLanguageLabel}</div>
