@@ -1208,6 +1208,11 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('不要强行使用某个固定平台、包管理器、测试框架或浏览器');
     expect(body.text).toContain('不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成');
     expect(body.text).toContain('启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复');
+    expect(body.text).toContain('可执行的玩家路径验证');
+    expect(body.text).toContain('测试脚本必须包含断言');
+    expect(body.text).toContain('不能只打印 true/false、success 或截图日志就当作通过');
+    expect(body.text).toContain('交付前必须做文档与代码一致性检查');
+    expect(body.text).toContain('修 bug、继续任务或调整已有项目时，必须补最小复现、回归测试或对应玩家路径验证');
     expect(body.text).toContain('交付前请使用可用的游戏验收指导或自检清单');
     expect(body.text).toContain('最终总结必须分为：已实现、已验证证据、未验证/已知缺口');
     expect(body.text).not.toContain('Implemented');
@@ -1288,6 +1293,63 @@ describe('beeGameAdapter prompt rules', () => {
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
     expect(body.text).not.toContain('Plan and implement directly in this session unless the user explicitly asks for subagents.');
     expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
+  });
+
+  it('keeps English build prompts explicit about executable evidence', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs?ownerId=dashboard-local') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_english_brief',
+          cwd: '/tmp/beegame-projects/english-game',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_english_brief/input' && init?.method === 'POST') {
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: 'Build a snake game',
+      title: 'Snake Game',
+      option: makeLlmOption({ title: 'Snake Game' }),
+      settings: {
+        platform: 'Web',
+        visualStyle: 'Pixel',
+        dimension: '2D',
+        genre: 'Arcade',
+        inputs: ['Keyboard/mouse'],
+        scope: 'Playable demo',
+        notes: 'Fast restart loop',
+      },
+      language: 'en',
+      root_path: '/tmp/beegame-projects',
+    });
+
+    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_english_brief/input' &&
+      init?.method === 'POST'
+    ));
+    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
+
+    expect(body.text).toContain('executable player-path checks');
+    expect(body.text).toContain('must contain assertions');
+    expect(body.text).toContain('fail with a non-zero exit status');
+    expect(body.text).toContain('Do not count log-only scripts');
+    expect(body.text).toContain('docs-to-code consistency review');
+    expect(body.text).toContain('minimal reproduction, regression test, or matching player-path validation');
+    expect(body.text).toContain('Implemented');
+    expect(body.text).toContain('Verified with evidence');
+    expect(body.text).toContain('Not verified / Known gaps');
   });
 
   it('keeps intake prompts free of package-name branding policy blocks', async () => {

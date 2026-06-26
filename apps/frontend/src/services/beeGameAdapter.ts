@@ -1958,6 +1958,9 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       '实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式；不要强行使用某个固定平台、包管理器、测试框架或浏览器。',
       '不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成。发现问题就继续修复。',
       '请验证真实玩家路径：启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复。',
+      '如果创建可执行的玩家路径验证、自动化检查或测试脚本，测试脚本必须包含断言，失败时必须以非零状态退出；不能只打印 true/false、success 或截图日志就当作通过。',
+      '交付前必须做文档与代码一致性检查：文档里声明的规则、资源、常量、文件路径、输入方式、UI/UX 行为和已实现功能必须能在代码或资源中找到证据；不一致时请修正文档或实现。',
+      '修 bug、继续任务或调整已有项目时，必须补最小复现、回归测试或对应玩家路径验证，并重新运行相关检查。',
       '交付前请使用可用的游戏验收指导或自检清单。最终总结必须分为：已实现、已验证证据、未验证/已知缺口。只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
     ].filter(Boolean).join('\n');
   }
@@ -1987,6 +1990,9 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     'After implementation, choose checks and validation that fit this project, its target platform, and its own tooling. Do not force a specific platform, package manager, test framework, or browser.',
     'Do not use typecheck, lint, build success, empty tests, or model self-review alone as proof that the game is complete. If you find problems, keep fixing them.',
     'Validate the real player path: start or enter the experience, understand the objective, perform the core action, receive feedback, reach win/fail/progression, and restart, continue, or recover.',
+    'If you create executable player-path checks, automated validation, or test scripts, they must contain assertions and fail with a non-zero exit status when expectations are not met. Do not count log-only scripts, true/false prints, success messages, or screenshots alone as evidence.',
+    'Before delivery, perform a docs-to-code consistency review: rules, assets, constants, file paths, inputs, UI/UX behavior, and implemented features claimed in docs must have evidence in code or resources. If they do not match, fix the docs or the implementation.',
+    'When fixing bugs, continuing a task, or changing an existing project, add a minimal reproduction, regression test, or matching player-path validation and rerun the relevant checks.',
     'Before delivery, use available game acceptance guidance or your own checklist. In the final summary, use exactly these sections: Implemented, Verified with evidence, Not verified / Known gaps. Only claim what you actually verified and include validation method, command or action evidence, issues found and fixed, and any remaining gaps.',
   ].filter(Boolean).join('\n');
 }
