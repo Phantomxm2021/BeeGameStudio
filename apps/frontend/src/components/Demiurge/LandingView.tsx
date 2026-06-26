@@ -36,8 +36,6 @@ const scopeOptions = ['Prototype', 'Playable demo', 'Vertical slice', 'MVP'];
 interface LandingViewProps {
     onStart: (projectName: string, clarification?: Record<string, string>, brief?: BeeGameBuildBrief) => StartProjectResult | Promise<StartProjectResult>;
     lang: Language;
-    isDark: boolean;
-    onToggleTheme: () => void;
     onSetLang: (lang: Language) => void;
 }
 
@@ -62,7 +60,7 @@ const optionsWithCurrentValue = (options: string[], value: string): string[] => 
     return [value, ...options];
 };
 
-export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }: LandingViewProps) {
+export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [projectName, setProjectName] = useState('');
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -277,9 +275,7 @@ export function LandingView({ onStart, lang, isDark, onToggleTheme, onSetLang }:
                 <SettingsMenu
                     isOpen={isSettingsOpen}
                     lang={lang}
-                    isDark={isDark}
                     onClose={() => setIsSettingsOpen(false)}
-                    onToggleTheme={onToggleTheme}
                     onSetLang={onSetLang}
                 />
 

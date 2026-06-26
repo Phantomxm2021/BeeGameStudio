@@ -27,6 +27,15 @@ export type CreateModelConfigInput = {
   isDefault: boolean;
 };
 
+export type UpdateModelConfigInput = {
+  name?: string;
+  provider?: ModelProviderKind;
+  baseUrl?: string;
+  apiKey?: string;
+  models?: ModelTierMap;
+  isDefault?: boolean;
+};
+
 const OWNER_ID = 'dashboard-local';
 
 export const listModelConfigs = (): Promise<ModelConfig[]> => (
@@ -35,4 +44,8 @@ export const listModelConfigs = (): Promise<ModelConfig[]> => (
 
 export const createModelConfig = (input: CreateModelConfigInput): Promise<ModelConfig> => (
   apiClient.post(`/api/model-configs?ownerId=${OWNER_ID}`, input)
+);
+
+export const updateModelConfig = (id: string, input: UpdateModelConfigInput): Promise<ModelConfig> => (
+  apiClient.patch(`/api/model-configs/${id}?ownerId=${OWNER_ID}`, input)
 );

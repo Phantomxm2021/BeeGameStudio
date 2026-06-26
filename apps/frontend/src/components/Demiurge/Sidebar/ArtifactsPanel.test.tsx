@@ -45,7 +45,7 @@ describe('ArtifactsPanel', () => {
         await user.click(screen.getByTitle('Download'));
 
         expect(onPreview).toHaveBeenCalledWith('art_1', 'GDD.md');
-        expect(onDownload).toHaveBeenCalledWith('art_1', 'GDD');
+        expect(onDownload).toHaveBeenCalledWith('art_1', 'GDD.md');
     });
 
     it('falls back to id when artifact_id is absent', async () => {
@@ -73,6 +73,38 @@ describe('ArtifactsPanel', () => {
         await user.click(screen.getByTitle('Download'));
 
         expect(onPreview).toHaveBeenCalledWith('art_legacy', 'Legacy.md');
-        expect(onDownload).toHaveBeenCalledWith('art_legacy', 'Document');
+        expect(onDownload).toHaveBeenCalledWith('art_legacy', 'Legacy.md');
+    });
+
+    it('shows project packages as download-only artifacts', async () => {
+        const user = userEvent.setup();
+        const onPreview = vi.fn();
+        const onDownload = vi.fn();
+
+        render(
+            <ArtifactsPanel
+                artifacts={[
+                    {
+                        id: 'beegame-project-package:proj_1',
+                        artifact_id: 'beegame-project-package:proj_1',
+                        name: 'snake-game.zip',
+                        artifact_type: 'Project Package',
+                        package_download: true,
+                    },
+                ]}
+                isLoading={false}
+                reviewStatuses={{}}
+                onPreview={onPreview}
+                onDownload={onDownload}
+            />
+        );
+
+        expect(screen.queryByTitle('Preview')).not.toBeInTheDocument();
+        expect(screen.getByText('Generated on download')).toBeInTheDocument();
+
+        await user.click(screen.getByTitle('Download'));
+
+        expect(onPreview).not.toHaveBeenCalled();
+        expect(onDownload).toHaveBeenCalledWith('beegame-project-package:proj_1', 'snake-game.zip');
     });
 });

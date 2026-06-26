@@ -15,7 +15,12 @@ vi.mock('../../services/api', () => ({
         getArtifacts: vi.fn().mockResolvedValue([]),
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
+        downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
     },
+}));
+
+vi.mock('../../services/beeGameAdapter', () => ({
+    isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
 }));
 
 describe('RightSidebar tabs', () => {

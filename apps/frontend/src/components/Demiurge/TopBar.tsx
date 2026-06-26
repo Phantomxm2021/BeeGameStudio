@@ -109,7 +109,7 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
                     </span>
                     <span className="font-mono text-sm font-bold text-zinc-800 dark:text-zinc-200">
                         {mode === 'beegame'
-                            ? `${phaseLabel || status.toUpperCase().replace('_', ' ')} · ${Math.floor(progress)}%`
+                            ? (phaseLabel || status.toUpperCase().replace('_', ' '))
                             : `${Math.floor(progress)}%`}
                     </span>
                 </div>

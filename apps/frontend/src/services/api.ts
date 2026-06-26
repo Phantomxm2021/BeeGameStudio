@@ -118,6 +118,7 @@ export interface ProjectBaselineStatusPayload {
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
   document_bundle?: DocumentBundleStatusPayload | null;
+  model_config_id?: string | null;
 }
 
 export interface OperatorVisibilityPayload {
@@ -663,7 +664,7 @@ export const api = {
    * @param data - 包含任务 ID
    * @returns 返回操作状态
    */
-  stopTask: (data: { task_id: string }) =>
+  stopTask: (data: { task_id: string; project_id?: string }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.stopTask(data)
       : apiClient.post('/api/chat/stop', data) as Promise<StopTaskResponse>,
@@ -846,7 +847,7 @@ export const api = {
    */
   getProjectTokenUsage: (projectId: string, config?: AxiosRequestConfig) =>
     isBeeGameAdapterEnabled()
-      ? beeGameAdapter.getTokenUsage()
+      ? beeGameAdapter.getTokenUsage(projectId)
       : apiClient.get(`/api/telemetry/token-usage/${projectId}`, config),
 
   // ==================== Artifacts API ====================
@@ -895,6 +896,13 @@ export const api = {
       headers: { 'Accept': 'text/plain, text/markdown, */*' }
     });
     return res as unknown as string;
+  },
+
+  downloadProjectPackage: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.downloadProjectPackage(projectId);
+    }
+    throw new Error('Project package download is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

@@ -1,41 +1,38 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, CheckCircle2, FolderOpen, FolderSearch, Globe, KeyRound, Moon, RotateCcw, Save, Sun } from 'lucide-react';
+import { FolderOpen, Globe, KeyRound, RotateCcw, Search, X } from 'lucide-react';
 import { LANGUAGE_OPTIONS, translations, type Language } from '../AgentsConfig';
 import {
     getBeeGameWorkspaceSettings,
-    getBeeGameSubagentsEnabled,
     resetBeeGameWorkspaceRoot,
-    setBeeGameSubagentsEnabled,
     setBeeGameWorkspaceRoot,
 } from '../../../services/beeGameAdapter';
 import {
     createModelConfig,
     listModelConfigs,
+    updateModelConfig,
     type ModelConfig,
     type ModelProviderKind,
 } from '../../../services/modelConfigApi';
+import {
+    getWebToolsConfig,
+    saveWebToolsConfig,
+    type WebSearchAdapter,
+} from '../../../services/webToolsApi';
 
 interface SettingsMenuProps {
     isOpen: boolean;
     lang: Language;
-    isDark: boolean;
     onClose: () => void;
-    onToggleTheme: () => void;
     onSetLang: (lang: Language) => void;
 }
 
-type BeeGameDesktopBridge = {
-    chooseWorkspacePath?: () => Promise<string | undefined> | string | undefined;
-};
+type SettingsTab = 'general' | 'model';
 
-type WindowWithBeeGameDesktop = Window & {
-    BeeGameDesktop?: BeeGameDesktopBridge;
-};
-
-export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onSetLang }: SettingsMenuProps) {
+export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuProps) {
     const t = translations[lang];
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
+    const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
     const [provider, setProvider] = useState<ModelProviderKind>('openai-compatible');
     const [baseUrl, setBaseUrl] = useState('');
@@ -43,14 +40,21 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
     const [fastModel, setFastModel] = useState('');
     const [balancedModel, setBalancedModel] = useState('');
     const [strongModel, setStrongModel] = useState('');
+    const [apiKeyPreview, setApiKeyPreview] = useState('');
     const [isDefault, setIsDefault] = useState(true);
     const [status, setStatus] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [workspacePath, setWorkspacePath] = useState('');
-    const [isDefaultWorkspace, setIsDefaultWorkspace] = useState(true);
     const [workspaceStatus, setWorkspaceStatus] = useState('');
     const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
-    const [subagentsEnabled, setSubagentsEnabled] = useState(true);
+    const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
+    const [braveApiKey, setBraveApiKey] = useState('');
+    const [braveApiKeyPreview, setBraveApiKeyPreview] = useState('');
+    const [exaApiKey, setExaApiKey] = useState('');
+    const [exaApiKeyPreview, setExaApiKeyPreview] = useState('');
+    const [webToolsStatus, setWebToolsStatus] = useState('');
+    const [isSavingWebTools, setIsSavingWebTools] = useState(false);
+    const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
     useEffect(() => {
         if (!isOpen) return;
@@ -61,22 +65,27 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                 setExistingConfigs(configs);
                 const defaultConfig = configs.find((config) => config.isDefault) || configs[0];
                 if (!defaultConfig) return;
+                setSelectedModelConfigId(defaultConfig.id);
                 setName(defaultConfig.name);
                 setProvider(defaultConfig.provider);
                 setBaseUrl(defaultConfig.baseUrl || '');
                 setFastModel(defaultConfig.models.fast || '');
                 setBalancedModel(defaultConfig.models.balanced || '');
                 setStrongModel(defaultConfig.models.strong || '');
+                setApiKeyPreview(defaultConfig.apiKeyPreview || '');
                 setIsDefault(defaultConfig.isDefault);
             })
             .catch(() => {
-                if (!cancelled) setExistingConfigs([]);
+                if (!cancelled) {
+                    setExistingConfigs([]);
+                    setSelectedModelConfigId('');
+                    setApiKeyPreview('');
+                }
             });
         void getBeeGameWorkspaceSettings()
             .then((settings) => {
                 if (cancelled) return;
                 setWorkspacePath(settings.workspacePath);
-                setIsDefaultWorkspace(settings.isDefault);
                 setWorkspaceStatus('');
             })
             .catch((error) => {
@@ -84,57 +93,77 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                     setWorkspaceStatus(error instanceof Error ? error.message : '工作路径读取失败');
                 }
             });
-        setSubagentsEnabled(getBeeGameSubagentsEnabled());
+        void getWebToolsConfig()
+            .then((config) => {
+                if (cancelled) return;
+                setWebSearchAdapter(config.webSearchAdapter || 'tavily');
+                setBraveApiKeyPreview(config.braveApiKeyPreview || '');
+                setExaApiKeyPreview(config.exaApiKeyPreview || '');
+                setBraveApiKey('');
+                setExaApiKey('');
+                setWebToolsStatus('');
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setWebToolsStatus(error instanceof Error ? error.message : '网页工具配置读取失败');
+                }
+            });
         return () => {
             cancelled = true;
         };
     }, [isOpen]);
 
-    const currentConfigLabel = useMemo(() => {
-        const current = existingConfigs.find((config) => config.isDefault) || existingConfigs[0];
-        if (!current) return '未配置模型';
-        return `${current.name} · ${current.provider} · ${current.apiKeyPreview}`;
-    }, [existingConfigs]);
-
-    const handleSaveModelConfig = async (event: React.FormEvent) => {
-        event.preventDefault();
+    const handleSaveModelConfig = async () => {
         setStatus('');
         setIsSaving(true);
         try {
-            const models = {
-                ...(fastModel.trim() ? { fast: fastModel.trim() } : {}),
-                ...(balancedModel.trim() ? { balanced: balancedModel.trim() } : {}),
-                ...(strongModel.trim() ? { strong: strongModel.trim() } : {}),
-            };
-            const saved = await createModelConfig({
+            const payload = {
                 name: name.trim() || 'BeeGame LLM',
                 provider,
                 ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-                apiKey: apiKey.trim(),
-                models,
+                ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+                models: {
+                    ...(fastModel.trim() ? { fast: fastModel.trim() } : {}),
+                    balanced: balancedModel.trim(),
+                    ...(strongModel.trim() ? { strong: strongModel.trim() } : {}),
+                },
                 isDefault,
-            });
+            };
+            const saved = selectedModelConfigId
+                ? await updateModelConfig(selectedModelConfigId, payload)
+                : await createModelConfig({
+                    ...payload,
+                    apiKey: apiKey.trim(),
+                });
+            setSelectedModelConfigId(saved.id);
             setExistingConfigs([saved, ...existingConfigs.filter((config) => config.id !== saved.id)]);
+            setName(saved.name);
+            setProvider(saved.provider);
+            setBaseUrl(saved.baseUrl || '');
+            setFastModel(saved.models.fast || '');
+            setBalancedModel(saved.models.balanced || '');
+            setStrongModel(saved.models.strong || '');
+            setApiKeyPreview(saved.apiKeyPreview || apiKeyPreview);
             setApiKey('');
-            setStatus('模型配置已保存');
+            return true;
         } catch (error) {
             setStatus(error instanceof Error ? error.message : '模型配置保存失败');
+            return false;
         } finally {
             setIsSaving(false);
         }
     };
 
-    const handleSaveWorkspace = (event: React.FormEvent) => {
-        event.preventDefault();
+    const handleSaveWorkspace = () => {
         setWorkspaceStatus('');
         setIsSavingWorkspace(true);
         try {
             const saved = setBeeGameWorkspaceRoot(workspacePath);
             setWorkspacePath(saved.workspacePath);
-            setIsDefaultWorkspace(saved.isDefault);
-            setWorkspaceStatus('工作路径已保存');
+            return true;
         } catch (error) {
             setWorkspaceStatus(error instanceof Error ? error.message : '工作路径保存失败');
+            return false;
         } finally {
             setIsSavingWorkspace(false);
         }
@@ -146,8 +175,6 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
         try {
             const next = await resetBeeGameWorkspaceRoot();
             setWorkspacePath(next.workspacePath);
-            setIsDefaultWorkspace(next.isDefault);
-            setWorkspaceStatus('已恢复默认工作路径');
         } catch (error) {
             setWorkspaceStatus(error instanceof Error ? error.message : '恢复默认工作路径失败');
         } finally {
@@ -155,21 +182,58 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
         }
     };
 
-    const handleChooseWorkspace = async () => {
-        setWorkspaceStatus('');
+    const handleSaveWebTools = async () => {
+        setWebToolsStatus('');
+        setIsSavingWebTools(true);
         try {
-            const chooseWorkspacePath = (window as WindowWithBeeGameDesktop).BeeGameDesktop?.chooseWorkspacePath;
-            if (!chooseWorkspacePath) {
-                setWorkspaceStatus('当前环境无法打开路径选择器，请粘贴绝对路径。');
-                return;
-            }
-            const selectedPath = await chooseWorkspacePath();
-            if (!selectedPath?.trim()) return;
-            setWorkspacePath(selectedPath.trim());
-            setWorkspaceStatus('已选择工作路径，保存后生效。');
+            const saved = await saveWebToolsConfig({
+                webSearchAdapter,
+                ...(braveApiKey.trim() ? { braveApiKey: braveApiKey.trim() } : {}),
+                ...(exaApiKey.trim() ? { exaApiKey: exaApiKey.trim() } : {}),
+            });
+            setWebSearchAdapter(saved.webSearchAdapter || webSearchAdapter);
+            setBraveApiKeyPreview(saved.braveApiKeyPreview || '');
+            setExaApiKeyPreview(saved.exaApiKeyPreview || '');
+            setBraveApiKey('');
+            setExaApiKey('');
+            return true;
         } catch (error) {
-            setWorkspaceStatus(error instanceof Error ? error.message : '选择工作路径失败');
+            setWebToolsStatus(error instanceof Error ? error.message : '网页搜索配置保存失败');
+            return false;
+        } finally {
+            setIsSavingWebTools(false);
         }
+    };
+
+    const webSearchKeyField = getWebSearchKeyField(webSearchAdapter);
+    const webSearchKeyPreview = webSearchKeyField === 'brave'
+        ? braveApiKeyPreview
+        : webSearchKeyField === 'exa'
+            ? exaApiKeyPreview
+            : '';
+    const webSearchKeyValue = webSearchKeyField === 'brave'
+        ? braveApiKey
+        : webSearchKeyField === 'exa'
+            ? exaApiKey
+            : '';
+    const isSavingCurrentTab = activeTab === 'general'
+        ? isSavingWorkspace || isSavingWebTools
+        : isSaving;
+    const isSaveDisabled = activeTab === 'general'
+        ? isSavingCurrentTab ||
+            !workspacePath.trim() ||
+            (!!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
+        : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
+
+    const handleSaveSettings = async () => {
+        if (activeTab === 'model') {
+            const saved = await handleSaveModelConfig();
+            if (saved) onClose();
+            return;
+        }
+        const workspaceSaved = handleSaveWorkspace();
+        const webToolsSaved = await handleSaveWebTools();
+        if (workspaceSaved && webToolsSaved) onClose();
     };
 
     return (
@@ -181,266 +245,263 @@ export function SettingsMenu({ isOpen, lang, isDark, onClose, onToggleTheme, onS
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    onClick={onClose}
-                    className="fixed inset-0 z-[60] bg-transparent text-zinc-950 dark:text-white"
+                    className="fixed inset-0 z-[220] flex items-center justify-center bg-zinc-950/55 p-4 text-zinc-950 backdrop-blur-sm dark:text-white"
                 >
                     <motion.div
-                        initial={{ opacity: 0, y: -12, scale: 0.98 }}
+                        initial={{ opacity: 0, y: 16, scale: 0.98 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -12, scale: 0.98 }}
+                        exit={{ opacity: 0, y: 16, scale: 0.98 }}
                         transition={{ duration: 0.22, ease: 'easeOut' }}
                         onClick={(event) => event.stopPropagation()}
-                        className="absolute right-4 top-20 max-h-[calc(100vh-6rem)] w-[min(520px,calc(100vw-2rem))] overflow-y-auto rounded-[1.75rem] border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-zinc-900"
+                        className="max-h-[calc(100vh-2rem)] w-[min(720px,calc(100vw-2rem))] overflow-hidden rounded-[1.75rem] border border-zinc-800 bg-[#18191d] shadow-2xl shadow-black/45"
                     >
-                        <div className="space-y-2">
-                            <div className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">
-                                {t.systemSettings}
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={onToggleTheme}
-                                className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:focus-visible:ring-white/30"
-                            >
-                                <span className="flex items-center gap-3 text-sm font-semibold">
-                                    {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                                    {t.darkMode}
-                                </span>
-                                <span className={`h-5 w-9 rounded-full border p-0.5 transition-colors ${isDark ? 'border-white/20 bg-white/20' : 'border-zinc-300 bg-zinc-200'}`}>
-                                    <motion.span
-                                        animate={{ x: isDark ? 16 : 0 }}
-                                        className={`block h-3.5 w-3.5 rounded-full shadow-sm ${isDark ? 'bg-white' : 'bg-white'}`}
-                                    />
-                                </span>
-                            </button>
-
-                            <label className="block rounded-2xl px-3 py-3 transition-colors hover:bg-zinc-100 dark:hover:bg-white/10">
-                                <span className="mb-2 flex items-center gap-3 text-sm font-semibold">
-                                    <Globe className="h-4 w-4" />
-                                    {t.language}
-                                </span>
-                                <select
-                                    value={lang}
-                                    onChange={(event) => onSetLang(event.target.value as Language)}
-                                    className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium text-zinc-950 outline-none transition-colors focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white dark:focus:border-white/30"
-                                >
-                                    {LANGUAGE_OPTIONS.map((option) => (
-                                        <option key={option.code} value={option.code}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-
-                            <form
-                                onSubmit={handleSaveWorkspace}
-                                className="space-y-3 rounded-2xl border border-zinc-200 px-3 py-3 dark:border-white/10"
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <span className="flex items-center gap-3 text-sm font-semibold">
-                                        <FolderOpen className="h-4 w-4" />
-                                        工作路径
-                                    </span>
-                                    <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                        {isDefaultWorkspace ? '默认 Projects' : '自定义'}
-                                    </span>
-                                </div>
-
-                                <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                    <span>工作路径</span>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            aria-label="工作路径"
-                                            value={workspacePath}
-                                            onChange={(event) => setWorkspacePath(event.target.value)}
-                                            placeholder="/absolute/path/to/Projects"
-                                            className="h-11 min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 font-mono text-xs text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        />
-                                        <button
-                                            type="button"
-                                            aria-label="选择工作路径"
-                                            title="选择工作路径"
-                                            onClick={handleChooseWorkspace}
-                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-700 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-white/10 dark:focus-visible:ring-white/30"
-                                        >
-                                            <FolderSearch className="h-4 w-4" />
-                                        </button>
+                        <div className="flex max-h-[calc(100vh-2rem)] flex-col">
+                            <div className="border-b border-zinc-800 px-6 pb-0 pt-5">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                                        {t.systemSettings}
                                     </div>
-                                </label>
-
-                                <div className="flex items-center justify-between gap-3">
-                                    <span className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
-                                        {workspaceStatus || '新项目会创建在这个目录下；留空不保存。'}
-                                    </span>
-                                    <div className="flex shrink-0 items-center gap-2">
-                                        <button
-                                            type="button"
-                                            aria-label="恢复默认"
-                                            title="恢复默认"
-                                            onClick={handleResetWorkspace}
-                                            disabled={isSavingWorkspace}
-                                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/10"
-                                        >
-                                            <RotateCcw className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            aria-label="保存工作路径"
-                                            title="保存工作路径"
-                                            disabled={isSavingWorkspace || !workspacePath.trim()}
-                                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
-                                        >
-                                            <Save className="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </form>
-
-                            <label className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 px-3 py-3 dark:border-white/10">
-                                <span className="min-w-0">
-                                    <span className="flex items-center gap-3 text-sm font-semibold">
-                                        <Bot className="h-4 w-4" />
-                                        Enable subagents
-                                    </span>
-                                    <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                                        Let the runtime decide when delegation is useful. BeeGame will not force it.
-                                    </span>
-                                </span>
-                                <input
-                                    aria-label="Enable subagents"
-                                    type="checkbox"
-                                    checked={subagentsEnabled}
-                                    onChange={(event) => {
-                                        const enabled = setBeeGameSubagentsEnabled(event.target.checked);
-                                        setSubagentsEnabled(enabled);
-                                    }}
-                                    className="h-4 w-4 shrink-0 accent-zinc-900 dark:accent-white"
-                                />
-                            </label>
-
-                            <form
-                                onSubmit={handleSaveModelConfig}
-                                className="space-y-3 rounded-2xl border border-zinc-200 px-3 py-3 dark:border-white/10"
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <span className="flex items-center gap-3 text-sm font-semibold">
-                                        <KeyRound className="h-4 w-4" />
-                                        BeeGame LLM
-                                    </span>
-                                    <span className="min-w-0 truncate text-right text-[11px] text-zinc-500 dark:text-zinc-400">
-                                        {currentConfigLabel}
-                                    </span>
-                                </div>
-
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                        <span>配置名称</span>
-                                        <input
-                                            aria-label="配置名称"
-                                            value={name}
-                                            onChange={(event) => setName(event.target.value)}
-                                            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        />
-                                    </label>
-
-                                    <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                        <span>Provider</span>
-                                        <select
-                                            aria-label="Provider"
-                                            value={provider}
-                                            onChange={(event) => setProvider(event.target.value as ModelProviderKind)}
-                                            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        >
-                                            <option value="openai-compatible">OpenAI Compatible</option>
-                                            <option value="anthropic-compatible">Anthropic API Compatible</option>
-                                            <option value="gemini">Gemini</option>
-                                            <option value="grok">Grok</option>
-                                        </select>
-                                    </label>
-                                </div>
-
-                                <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                    <span>Base URL</span>
-                                    <input
-                                        aria-label="Base URL"
-                                        value={baseUrl}
-                                        onChange={(event) => setBaseUrl(event.target.value)}
-                                        placeholder="https://api.example.com/v1"
-                                        className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                    />
-                                </label>
-
-                                <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                    <span>API Key</span>
-                                    <input
-                                        aria-label="API Key"
-                                        type="password"
-                                        value={apiKey}
-                                        onChange={(event) => setApiKey(event.target.value)}
-                                        className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                    />
-                                </label>
-
-                                <div className="grid gap-3 sm:grid-cols-3">
-                                    <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                        <span>Fast Model</span>
-                                        <input
-                                            aria-label="Fast Model"
-                                            value={fastModel}
-                                            onChange={(event) => setFastModel(event.target.value)}
-                                            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        />
-                                    </label>
-                                    <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                        <span>Balanced Model</span>
-                                        <input
-                                            aria-label="Balanced Model"
-                                            value={balancedModel}
-                                            onChange={(event) => setBalancedModel(event.target.value)}
-                                            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        />
-                                    </label>
-                                    <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                                        <span>Strong Model</span>
-                                        <input
-                                            aria-label="Strong Model"
-                                            value={strongModel}
-                                            onChange={(event) => setStrongModel(event.target.value)}
-                                            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:text-white"
-                                        />
-                                    </label>
-                                </div>
-
-                                <label className="flex items-center justify-between rounded-xl bg-zinc-50 px-3 py-2 text-sm font-semibold dark:bg-zinc-950">
-                                    <span className="flex items-center gap-2">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        设为默认模型
-                                    </span>
-                                    <input
-                                        aria-label="设为默认模型"
-                                        type="checkbox"
-                                        checked={isDefault}
-                                        onChange={(event) => setIsDefault(event.target.checked)}
-                                        className="h-4 w-4 accent-zinc-900 dark:accent-white"
-                                    />
-                                </label>
-
-                                <div className="flex items-center justify-between gap-3">
-                                    <span className="text-xs text-emerald-600 dark:text-emerald-400">{status}</span>
                                     <button
-                                        type="submit"
-                                        disabled={isSaving || !apiKey.trim() || !balancedModel.trim()}
-                                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-zinc-950 px-4 text-sm font-bold text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                                        type="button"
+                                        aria-label="关闭设置"
+                                        onClick={onClose}
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-800 bg-[#1a1b20] text-zinc-400 transition-colors hover:bg-[#202126] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
                                     >
-                                        <Save className="h-4 w-4" />
-                                        {isSaving ? '保存中' : '保存模型配置'}
+                                        <X className="h-4 w-4" />
                                     </button>
                                 </div>
-                            </form>
+                                <div className="mt-4 flex items-center gap-8" role="tablist" aria-label={t.systemSettings}>
+                                    {[
+                                        { id: 'general' as const, label: '通用', icon: Globe },
+                                        { id: 'model' as const, label: '模型', icon: KeyRound },
+                                    ].map((tab) => {
+                                        const Icon = tab.icon;
+                                        const selected = activeTab === tab.id;
+                                        return (
+                                            <button
+                                                key={tab.id}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={selected}
+                                                onClick={() => setActiveTab(tab.id)}
+                                                className={`flex h-12 items-center gap-2 border-b-2 px-1 text-sm font-black transition-colors focus-visible:outline-none ${selected ? 'border-orange-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+                                            >
+                                                <Icon className="h-4 w-4" />
+                                                {tab.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6 pr-7 [scrollbar-gutter:stable]">
+                                {activeTab === 'general' ? (
+                                    <div className="rounded-2xl border border-zinc-800 bg-[#1a1b20]">
+                                        <label className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[10rem_1fr] sm:items-center">
+                                            <span className="flex items-center gap-3 text-sm font-black text-zinc-100">
+                                                <Globe className="h-4 w-4 text-zinc-400" />
+                                                {t.language}
+                                            </span>
+                                            <select
+                                                value={lang}
+                                                onChange={(event) => onSetLang(event.target.value as Language)}
+                                                className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm font-bold text-zinc-100 outline-none transition-colors focus:border-zinc-600"
+                                            >
+                                                {LANGUAGE_OPTIONS.map((option) => (
+                                                    <option key={option.code} value={option.code}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <div className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[10rem_1fr] sm:items-center">
+                                            <span className="flex items-center gap-3 text-sm font-black text-zinc-100">
+                                                <FolderOpen className="h-4 w-4 text-zinc-400" />
+                                                工作路径
+                                            </span>
+                                            <div className="min-w-0 space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        aria-label="工作路径"
+                                                        value={workspacePath}
+                                                        onChange={(event) => setWorkspacePath(event.target.value)}
+                                                        placeholder="/absolute/path/to/Projects"
+                                                        className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-800 bg-[#18191d] px-3 font-mono text-xs text-zinc-100 outline-none focus:border-zinc-600"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        aria-label="恢复默认"
+                                                        title="恢复默认"
+                                                        onClick={handleResetWorkspace}
+                                                        disabled={isSavingWorkspace}
+                                                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-800 bg-[#18191d] text-zinc-300 transition-colors hover:bg-[#202126] disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        <RotateCcw className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                                {workspaceStatus ? (
+                                                    <div className="text-xs text-emerald-400">{workspaceStatus}</div>
+                                                ) : null}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid gap-3 p-4 sm:grid-cols-[10rem_1fr] sm:items-start">
+                                            <span className="flex items-center gap-3 text-sm font-black text-zinc-100 sm:mt-2.5">
+                                                <Search className="h-4 w-4 text-zinc-400" />
+                                                Web Search
+                                            </span>
+                                            <div className="min-w-0 space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        aria-label="Search Backend"
+                                                        value={webSearchAdapter}
+                                                        onChange={(event) => setWebSearchAdapter(event.target.value as WebSearchAdapter)}
+                                                        className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                    >
+                                                        <option value="tavily">Tavily</option>
+                                                        <option value="api">Anthropic API</option>
+                                                        <option value="bing">Bing</option>
+                                                        <option value="brave">Brave</option>
+                                                        <option value="exa">Exa</option>
+                                                    </select>
+                                                </div>
+                                                {webSearchKeyField ? (
+                                                    <input
+                                                        aria-label={webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY'}
+                                                        type="password"
+                                                        value={webSearchKeyValue}
+                                                        onChange={(event) => {
+                                                            if (webSearchKeyField === 'brave') {
+                                                                setBraveApiKey(event.target.value);
+                                                            } else {
+                                                                setExaApiKey(event.target.value);
+                                                            }
+                                                        }}
+                                                        placeholder={webSearchKeyPreview ? `已保存：${webSearchKeyPreview}` : (webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY')}
+                                                        className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                    />
+                                                ) : null}
+                                                {webToolsStatus ? (
+                                                    <div className="text-xs text-emerald-400">{webToolsStatus}</div>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : null}
+
+                                {activeTab === 'model' ? (
+                                    <>
+                                        <div className="rounded-2xl border border-zinc-800 bg-[#1a1b20]">
+                                            <label className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[9rem_1fr] sm:items-center">
+                                                <span className="text-sm font-black text-zinc-100">Provider</span>
+                                                <select
+                                                    aria-label="Provider"
+                                                    value={provider}
+                                                    onChange={(event) => setProvider(event.target.value as ModelProviderKind)}
+                                                    className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                >
+                                                    <option value="openai-compatible">OpenAI Compatible</option>
+                                                    <option value="anthropic-compatible">Anthropic API Compatible</option>
+                                                    <option value="gemini">Gemini</option>
+                                                    <option value="grok">Grok</option>
+                                                </select>
+                                            </label>
+
+                                            <label className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[9rem_1fr] sm:items-center">
+                                                <span className="text-sm font-black text-zinc-100">Base URL</span>
+                                                <input
+                                                    aria-label="Base URL"
+                                                    value={baseUrl}
+                                                    onChange={(event) => setBaseUrl(event.target.value)}
+                                                    placeholder="https://api.example.com/v1"
+                                                    className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                />
+                                            </label>
+
+                                            <label className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[9rem_1fr] sm:items-center">
+                                                <span className="text-sm font-black text-zinc-100">API Key</span>
+                                                <input
+                                                    aria-label="API Key"
+                                                    type="password"
+                                                    value={apiKey}
+                                                    onChange={(event) => setApiKey(event.target.value)}
+                                                    placeholder={apiKeyPreview ? `已保存：${apiKeyPreview}` : 'sk-...'}
+                                                    className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                />
+                                            </label>
+
+                                            <div className="grid gap-3 p-4 sm:grid-cols-[9rem_1fr] sm:items-start">
+                                                <span className="text-sm font-black text-zinc-100 sm:mt-2.5">Models</span>
+                                                <div className="grid gap-2">
+                                                    <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Fast</span>
+                                                        <input
+                                                            aria-label="Fast Model"
+                                                            value={fastModel}
+                                                            onChange={(event) => setFastModel(event.target.value)}
+                                                            placeholder="qwen3.5-flash"
+                                                            className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                        />
+                                                    </label>
+                                                    <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Balanced</span>
+                                                        <input
+                                                            aria-label="Balanced Model"
+                                                            value={balancedModel}
+                                                            onChange={(event) => setBalancedModel(event.target.value)}
+                                                            placeholder="qwen3.7-plus"
+                                                            className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                        />
+                                                    </label>
+                                                    <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
+                                                        <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Strong</span>
+                                                        <input
+                                                            aria-label="Strong Model"
+                                                            value={strongModel}
+                                                            onChange={(event) => setStrongModel(event.target.value)}
+                                                            placeholder="qwen3.7-max"
+                                                            className="h-10 w-full rounded-xl border border-zinc-800 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                                                        />
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-xs text-emerald-400">{status}</span>
+                                        </div>
+                                    </>
+                                ) : null}
+                            </div>
+                            <div className="flex items-center justify-end gap-3 border-t border-zinc-800 px-6 py-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="h-10 rounded-xl border border-zinc-800 px-4 text-sm font-bold text-zinc-300 transition-colors hover:bg-white/5"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-label="保存设置"
+                                    onClick={handleSaveSettings}
+                                    disabled={isSaveDisabled}
+                                    className="inline-flex h-10 items-center rounded-xl bg-zinc-100 px-5 text-sm font-black text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isSavingCurrentTab ? '保存中' : '保存设置'}
+                                </button>
+                            </div>
                         </div>
                     </motion.div>
                 </motion.div>
             )}
         </AnimatePresence>
     );
+}
+
+function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null {
+    if (adapter === 'brave') return 'brave';
+    if (adapter === 'exa') return 'exa';
+    return null;
 }

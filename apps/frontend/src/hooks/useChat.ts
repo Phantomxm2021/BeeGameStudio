@@ -22,6 +22,7 @@ import type { WebSocketState } from './useWebSocket';
 import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
+import { isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
 
 const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -524,6 +525,7 @@ export const useChat = ({
             toolStatus: message.tool_status || 'running',
             toolDetail: message.tool_detail,
             toolOutput: message.tool_output,
+            artifactId: message.artifact_id,
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_start', message);
@@ -557,6 +559,7 @@ export const useChat = ({
             toolStatus: message.tool_status || status,
             toolDetail: message.tool_detail,
             toolOutput: message.tool_output || outputSummary,
+            artifactId: message.artifact_id,
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_end', message);
@@ -843,16 +846,17 @@ export const useChat = ({
    * Requirements: 6.1
    */
   const stopTask = useCallback(async () => {
-    if (!currentTaskId) {
+    const stopTargetId = currentTaskId || (isBeeGameAdapterEnabled() ? projectId : '');
+    if (!stopTargetId) {
       console.warn('[useChat] No task to stop');
       return;
     }
 
     try {
-      console.log('[useChat] Stopping task:', currentTaskId);
+      console.log('[useChat] Stopping task:', stopTargetId);
 
       // Send stop request to backend
-      await api.stopTask({ task_id: currentTaskId });
+      await api.stopTask({ task_id: stopTargetId, project_id: projectId });
 
       setIsLoading(false);
       setCurrentTaskId(null);
@@ -861,7 +865,7 @@ export const useChat = ({
 
       // Add system message
       addMessage({
-        id: `stop-${currentTaskId}-${Date.now()}`,
+        id: `stop-${stopTargetId}-${Date.now()}`,
         sender: 'system',
         content: '任务已停止',
         timestamp: Date.now(),
@@ -884,7 +888,7 @@ export const useChat = ({
 
       onError?.(error as Error);
     }
-  }, [currentTaskId, addMessage, setCurrentSender, onError]);
+  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError]);
 
   /**
    * Approve the current plan

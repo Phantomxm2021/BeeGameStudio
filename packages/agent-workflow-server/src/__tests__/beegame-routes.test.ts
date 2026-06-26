@@ -812,6 +812,69 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('injects saved Brave web search settings into new BeeGame turns', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'brave-search-game')
+    const fake = createFakeRunner(undefined, 'build_write_complete')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    const model = createModelConfig('dashboard-local', {
+      name: 'Primary LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://llm.example.invalid/v1',
+      apiKey: 'sk-dashboard-secret',
+      models: { balanced: 'balanced-model' },
+    })
+    try {
+      const webToolsRes = await app.request('/api/web-tools', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          webSearchAdapter: 'brave',
+          braveApiKey: 'bsa-dashboard-secret',
+        }),
+      })
+      expect(webToolsRes.status).toBe(200)
+      await expect(webToolsRes.json()).resolves.toEqual(expect.objectContaining({
+        webSearchAdapter: 'brave',
+        braveApiKeyPreview: 'bsa-…cret',
+      }))
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: model.id,
+        }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Check current game design references.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      expect(fake.starts[0]?.env).toEqual(expect.objectContaining({
+        WEB_SEARCH_ADAPTER: 'brave',
+        BRAVE_SEARCH_API_KEY: 'bsa-dashboard-secret',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('updates an existing BeeGame session model before the next turn', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'model-switch-game')
@@ -1519,6 +1582,52 @@ describe('beegame session routes', () => {
       expect(await stopRes.json()).toEqual(
         expect.objectContaining({ status: 'stopped', turnStatus: 'idle' }),
       )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('derives stopped runtime snapshot for an interrupted turn', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build a tiny puzzle game.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'permission.requested')
+      })
+
+      const stopRes = await app.request(
+        `/api/beegame-sessions/${session.id}/stop`,
+        { method: 'POST' },
+      )
+      expect(stopRes.status).toBe(200)
+
+      const snapshotRes = await app.request(
+        `/api/beegame-sessions/${session.id}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const snapshot = await snapshotRes.json()
+
+      expect(snapshotRes.status).toBe(200)
+      expect(snapshot).toEqual(expect.objectContaining({
+        phaseName: 'idle',
+        phaseStatus: 'idle',
+      }))
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -2459,6 +2568,154 @@ describe('beegame session routes', () => {
       })
     } finally {
       await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('packages the session workspace as a downloadable zip without dependencies', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      await mkdir(join(workspace, 'docs'), { recursive: true })
+      await mkdir(join(workspace, 'src'), { recursive: true })
+      await mkdir(join(workspace, 'node_modules', 'ignored'), { recursive: true })
+      await writeFile(join(workspace, 'docs', 'GDD.md'), '# GDD')
+      await writeFile(join(workspace, 'src', 'main.ts'), 'export {}')
+      await writeFile(join(workspace, 'node_modules', 'ignored', 'index.js'), '')
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const packageRes = await app.request(
+        `/api/beegame-sessions/${session.id}/package`,
+      )
+      const bytes = new Uint8Array(await packageRes.arrayBuffer())
+      const listingText = new TextDecoder().decode(bytes)
+
+      expect(packageRes.status).toBe(200)
+      expect(packageRes.headers.get('content-type')).toBe('application/zip')
+      expect(packageRes.headers.get('content-disposition')).toContain(
+        `${basename(workspace)}.zip`,
+      )
+      expect(bytes[0]).toBe(0x50)
+      expect(bytes[1]).toBe(0x4b)
+      expect(listingText).toContain('docs/GDD.md')
+      expect(listingText).toContain('src/main.ts')
+      expect(listingText).not.toContain('node_modules')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('packages a workspace from query params after the in-memory session is gone', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      await mkdir(join(workspace, 'docs'), { recursive: true })
+      await writeFile(join(workspace, 'docs', 'GDD.md'), '# GDD')
+
+      const packageRes = await app.request(
+        `/api/beegame-sessions/beegame_missing/package?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const bytes = new Uint8Array(await packageRes.arrayBuffer())
+      const listingText = new TextDecoder().decode(bytes)
+
+      expect(packageRes.status).toBe(200)
+      expect(packageRes.headers.get('content-type')).toBe('application/zip')
+      expect(bytes[0]).toBe(0x50)
+      expect(bytes[1]).toBe(0x4b)
+      expect(listingText).toContain('docs/GDD.md')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('persists BeeGame runtime snapshot for usage phase and model across app instances', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'snapshot-game')
+    await mkdir(workspace, { recursive: true })
+    const model = createModelConfig('dashboard-local', {
+      name: 'Snapshot LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://llm.example.invalid/v1',
+      apiKey: 'sk-dashboard-secret',
+      models: { balanced: 'snapshot-balanced' },
+    })
+    const fake = createFakeRunner([
+      {
+        type: 'result',
+        result: 'Done',
+        usage: {
+          input_tokens: 123,
+          output_tokens: 45,
+          total_tokens: 168,
+        },
+      },
+    ])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: model.id,
+        }),
+      })
+      const session = await sessionRes.json()
+      expect(session.modelConfigId).toBe(model.id)
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build game.' }),
+      })
+      await waitFor(async () => {
+        const snapshotRes = await app.request(
+          `/api/beegame-sessions/${session.id}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+        )
+        const snapshot = await snapshotRes.json()
+        return snapshot?.usage?.total_tokens === 168
+      })
+      const liveSnapshotRes = await app.request(
+        `/api/beegame-sessions/${session.id}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const liveSnapshot = await liveSnapshotRes.json()
+      expect(liveSnapshot.modelConfigId).toBe(model.id)
+      const persistedSnapshot = JSON.parse(
+        await readFile(join(projectsRoot, 'snapshots', `${session.id}.json`), 'utf8'),
+      )
+      expect(persistedSnapshot.modelConfigId).toBe(model.id)
+
+      const restartedApp = createAgentWorkflowApp({
+        sessionRunner: createFakeRunner().runner,
+        defaultWorkspacePath: projectsRoot,
+      })
+      const snapshotRes = await restartedApp.request(
+        `/api/beegame-sessions/${session.id}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const snapshot = await snapshotRes.json()
+
+      expect(snapshotRes.status).toBe(200)
+      expect(snapshot).toEqual(expect.objectContaining({
+        sessionId: session.id,
+        workspacePath: await realpath(workspace),
+        modelConfigId: model.id,
+        phaseName: 'idle',
+      }))
+      expect(snapshot.usage).toEqual({
+        prompt_tokens: 123,
+        completion_tokens: 45,
+        total_tokens: 168,
+      })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 

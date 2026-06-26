@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
 import type { ProjectBaselineStatusPayload } from '../../services/api';
@@ -14,6 +15,7 @@ const loadSystemReadiness = vi.fn().mockResolvedValue(undefined);
 const toggleTheme = vi.fn();
 const showSuccess = vi.fn();
 const showError = vi.fn();
+const stopTask = vi.fn();
 const status = {
     uptime: '1m',
     unity_connected: false,
@@ -31,6 +33,16 @@ let capturedSideMenuProps: Record<string, any> | null = null;
 let mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] as Array<{ phase: number; name: string; timestamp: number }> };
 let mockedMessages: Array<{ id: string; sender: string; content: string; timestamp: number }> = [];
 let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
+let mockedModelConfigs = [
+    {
+        id: 'llm_default',
+        name: 'Default API',
+        provider: 'openai-compatible',
+        apiKeyPreview: 'sk-...',
+        models: { balanced: 'configured-sonnet-live' },
+        isDefault: true,
+    },
+];
 let mockedProjectStatus: ProjectBaselineStatusPayload = {
     project_id: 'proj_1',
     phase: 'DESIGN_IN_PROGRESS',
@@ -91,7 +103,7 @@ vi.mock('../../store/chatStore', () => ({
 vi.mock('../../hooks/useChat', () => ({
     useChat: () => ({
         sendMessage: vi.fn(),
-        stopTask: vi.fn(),
+        stopTask,
         continueTask: vi.fn(),
         approvePlan: vi.fn(),
         uploadManifestCsv: vi.fn(),
@@ -113,6 +125,20 @@ vi.mock('../../hooks/useToast', () => ({
         showSuccess,
         showError,
     }),
+}));
+
+vi.mock('../../services/modelConfigApi', () => ({
+    listModelConfigs: vi.fn(() => Promise.resolve(mockedModelConfigs)),
+    createModelConfig: vi.fn(() => Promise.resolve(mockedModelConfigs[0])),
+}));
+
+vi.mock('../../services/beeGameAdapter', () => ({
+    isBeeGameAdapterEnabled: vi.fn(() => true),
+    getBeeGameWorkspaceSettings: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
+    getBeeGameSubagentsEnabled: vi.fn(() => true),
+    resetBeeGameWorkspaceRoot: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
+    setBeeGameSubagentsEnabled: vi.fn(),
+    setBeeGameWorkspaceRoot: vi.fn((workspacePath: string) => ({ workspacePath, isDefault: false })),
 }));
 
 vi.mock('./TopBar', () => ({
@@ -156,6 +182,16 @@ describe('DashboardView runtime loading', () => {
         mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] };
         mockedMessages = [];
         mockedTokenUsage = {};
+        mockedModelConfigs = [
+            {
+                id: 'llm_default',
+                name: 'Default API',
+                provider: 'openai-compatible',
+                apiKeyPreview: 'sk-...',
+                models: { balanced: 'configured-sonnet-live' },
+                isDefault: true,
+            },
+        ];
         mockedProjectStatus = {
             project_id: 'proj_1',
             phase: 'DESIGN_IN_PROGRESS',
@@ -202,7 +238,9 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
         expect(capturedRightSidebarProps?.progress).toBeLessThan(20);
-        expect(screen.getByText('构建方案 · 0%')).toBeInTheDocument();
+        await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
+        expect(screen.getByText('构建方案')).toBeInTheDocument();
+        expect(screen.queryByText('构建方案 · 0%')).not.toBeInTheDocument();
     });
 
     it('passes BeeGame pipeline phase labels to the live preview header', async () => {
@@ -225,7 +263,10 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
         expect(screen.queryByTestId('top-bar')).not.toBeInTheDocument();
-        expect(screen.getByText('实现构建 · 50%')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
+        await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
+        expect(screen.getByText('实现构建')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
     });
 
     it('passes localized BeeGame phase labels to the live preview header', async () => {
@@ -239,7 +280,9 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(screen.getByText('实现构建 · 0%')).toBeInTheDocument();
+        await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
+        expect(screen.getByText('实现构建')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建 · 0%')).not.toBeInTheDocument();
     });
 
     it('uses live runtime token budget when persisted token usage has not caught up', async () => {
@@ -261,7 +304,51 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
+        expect(screen.queryByText('150')).not.toBeInTheDocument();
+        await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
         expect(screen.getByText('150')).toBeInTheDocument();
+    });
+
+    it('moves header metrics into the selected project hover hint and removes BeeGame branding chrome', async () => {
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+
+        expect(screen.queryByText('BeeGame')).not.toBeInTheDocument();
+        expect(screen.queryByText('消耗')).not.toBeInTheDocument();
+        expect(screen.queryByText('Phase')).not.toBeInTheDocument();
+        expect(screen.queryByText('Model')).not.toBeInTheDocument();
+
+        await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
+
+        expect(screen.getByTestId('beegame-project-hint')).toBeInTheDocument();
+        expect(screen.getByText('消耗')).toBeInTheDocument();
+        expect(screen.getByText('阶段')).toBeInTheDocument();
+        expect(screen.getByText('模型')).toBeInTheDocument();
+    });
+
+    it('shows the current configured model in the project hover hint instead of a hardcoded mock value', async () => {
+        mockedModelConfigs = [
+            {
+                id: 'llm_live',
+                name: 'Live Provider',
+                provider: 'openai-compatible',
+                apiKeyPreview: 'sk-...',
+                models: { fast: 'fast-model', balanced: 'current-balanced-model', strong: 'strong-model' },
+                isDefault: true,
+            },
+        ];
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            model_config_id: 'llm_live',
+        } as ProjectBaselineStatusPayload;
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await userEvent.hover(await screen.findByTestId('beegame-project-trigger'));
+
+        expect(await screen.findByText('current-balanced-model')).toBeInTheDocument();
+        expect(screen.queryByText('Claude Sonnet 4')).not.toBeInTheDocument();
     });
 
     it('replaces the legacy status-node canvas with the BeeGame live preview surface', async () => {
@@ -283,11 +370,56 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(screen.getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: '预览' })).toBeInTheDocument();
+        expect(screen.queryByText('实时预览')).not.toBeInTheDocument();
+        expect(screen.queryByText('Live Preview')).not.toBeInTheDocument();
         expect(screen.queryByText('刷新预览')).not.toBeInTheDocument();
         expect(screen.queryByText('在新窗口打开')).not.toBeInTheDocument();
         expect(screen.queryByText('停止运行')).not.toBeInTheDocument();
         expect(screen.queryByTestId('beegame-preview-runtime-strip')).not.toBeInTheDocument();
         expect(screen.queryByTestId('beegame-preview-metric-grid')).not.toBeInTheDocument();
+    });
+
+    it('wires the top bar back button and opens the homepage settings modal from the user menu', async () => {
+        const user = userEvent.setup();
+        const onBack = vi.fn();
+        const onSetLang = vi.fn();
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={onSetLang} onBack={onBack} />);
+
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+
+        await user.click(screen.getByRole('button', { name: '返回项目列表' }));
+        expect(onBack).toHaveBeenCalledTimes(1);
+
+        expect(screen.queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: '设置' }));
+
+        const userSettingsMenu = screen.getByTestId('beegame-user-settings-menu');
+        expect(userSettingsMenu).toBeInTheDocument();
+        expect(within(userSettingsMenu).queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
+
+        await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '设置' }));
+
+        const settingsDialog = await screen.findByRole('dialog', { name: '系统设置' });
+        expect(screen.queryByTestId('beegame-user-settings-menu')).not.toBeInTheDocument();
+        await user.selectOptions(within(settingsDialog).getByRole('combobox', { name: '语言选择' }), 'en');
+        expect(onSetLang).toHaveBeenCalledWith('en');
+    });
+
+    it('keeps the top bar popover layer above the right-side chat panel', async () => {
+        const user = userEvent.setup();
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const topNav = await screen.findByTestId('beegame-shell-top-nav');
+        expect(topNav).toHaveClass('z-[90]');
+
+        await user.click(screen.getByRole('button', { name: '设置' }));
+
+        expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[80]');
+        expect(capturedRightSidebarProps?.variant).toBe('beegame');
     });
 
     it('renders the built game URL inside the BeeGame live preview frame', async () => {
@@ -305,6 +437,44 @@ describe('DashboardView runtime loading', () => {
         const frame = await screen.findByTestId('beegame-live-preview-frame');
 
         expect(frame).toHaveAttribute('src', 'http://127.0.0.1:5178');
+        expect(screen.getByRole('button', { name: '暂停预览' })).toBeEnabled();
+    });
+
+    it('pauses the live preview locally without stopping the BeeGame runtime', async () => {
+        const user = userEvent.setup();
+        stopTask.mockResolvedValue(undefined);
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: {
+                status: 'passed',
+                build_url: 'http://127.0.0.1:5178',
+                entrypoint: 'dist/index.html',
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const frame = await screen.findByTestId('beegame-live-preview-frame');
+        const refreshButton = screen.getByRole('button', { name: '刷新预览' });
+        const stopButton = screen.getByRole('button', { name: '暂停预览' });
+        const openButton = screen.getByRole('button', { name: '在新窗口打开' });
+        const controls = refreshButton.parentElement?.parentElement;
+
+        expect(controls?.children[0]).toContainElement(refreshButton);
+        expect(controls?.children[1]).toContainElement(stopButton);
+        expect(controls?.children[2]).toContainElement(openButton);
+
+        await user.hover(stopButton);
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('暂停预览');
+
+        await user.click(stopButton);
+        expect(stopTask).not.toHaveBeenCalled();
+        expect(screen.getAllByText('运行已停止').length).toBeGreaterThan(0);
+        expect(frame).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '播放预览' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: '播放预览' }));
+        expect(await screen.findByTestId('beegame-live-preview-frame')).toHaveAttribute('src', 'http://127.0.0.1:5178');
     });
 
     it('shows the workspace folder name as the dashboard project title without renaming the project', async () => {

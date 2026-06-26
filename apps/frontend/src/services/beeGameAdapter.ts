@@ -1,4 +1,5 @@
 import type {
+  BuildReportPayload,
   ContinueTaskResponse,
   PendingUserReviewItem,
   ProjectBaselineStatusPayload,
@@ -47,6 +48,20 @@ type BeeGameEvent = {
   createdAt: string;
 };
 
+type BeeGameRuntimeSnapshot = {
+  sessionId: string;
+  workspacePath: string;
+  modelConfigId?: string;
+  phaseName: string;
+  phaseStatus: string;
+  updatedAt: string;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+};
+
 type ModelConfig = {
   id: string;
   isDefault?: boolean;
@@ -74,10 +89,11 @@ type BeeGameArtifact = {
   id: string;
   name: string;
   artifact_type: string;
-  path: string;
+  path?: string;
   status: 'active';
   created_by: 'beegame';
   created_at: string;
+  package_download?: boolean;
 };
 
 export type BeeGameIntakeOption = {
@@ -156,10 +172,12 @@ const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
 const SUBAGENTS_ENABLED_KEY = 'beegame-adapter-subagents-enabled';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
+const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
 const USER_QUESTION_TOOL = 'AskUserQuestion';
 const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ?? '').trim();
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
 const CONTINUE_FROM_LAST_FAILED_CHECK_PROMPT = 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
+const missingRuntimeSessionIds = new Set<string>();
 
 export function isBeeGameAdapterEnabled(): boolean {
   return String(import.meta.env.VITE_BEEGAME_ADAPTER ?? '1') !== '0';
@@ -362,13 +380,14 @@ export const beeGameAdapter = {
     };
   },
 
-  async stopTask(data: { task_id: string }): Promise<StopTaskResponse> {
-    await postJson(`/api/beegame-sessions/${data.task_id}/stop`, {});
+  async stopTask(data: { task_id: string; project_id?: string }): Promise<StopTaskResponse> {
+    const sessionId = resolveStopSessionId(data);
+    await postJson(`/api/beegame-sessions/${sessionId}/stop`, {});
     return {
-      command_id: data.task_id,
-      task_id: data.task_id,
+      command_id: sessionId,
+      task_id: sessionId,
       state: 'stopped',
-      trace_id: data.task_id,
+      trace_id: sessionId,
     };
   },
 
@@ -391,7 +410,9 @@ export const beeGameAdapter = {
   }> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return { lastEventId: afterEventId, messages: [] };
-    const eventResult = await fetchBeeGameEventsResultForBinding(binding, afterEventId);
+    const eventResult = await fetchBeeGameEventsResultForBinding(binding, afterEventId, {
+      restoreMissingSession: true,
+    });
     const events = eventResult.events;
     const lastEventId = events.length > 0 ? events[events.length - 1].id : afterEventId;
     const normalizedEvents = normalizeLiveEvents(projectId, events);
@@ -404,9 +425,13 @@ export const beeGameAdapter = {
 
   async getProjectStatus(projectId: string): Promise<ProjectBaselineStatusPayload> {
     const binding = await ensureProjectBinding(projectId);
+    const snapshot = binding ? await fetchBeeGameRuntimeSnapshotIfAvailable(binding) : undefined;
     const eventResult = binding
       ? await fetchBeeGameEventsResultForBinding(binding)
       : { events: [], recoveredFromTranscript: false };
+    const session = binding && !eventResult.recoveredFromTranscript
+      ? await fetchBeeGameSessionIfAvailable(binding.sessionId)
+      : undefined;
     const events = eventResult.events;
     const pending = eventResult.recoveredFromTranscript ? [] : getPendingPermissionEvents(events);
     const runtimeStatus = deriveRuntimeStatus(events, pending, eventResult.recoveredFromTranscript);
@@ -419,9 +444,10 @@ export const beeGameAdapter = {
       updated_at: runtimeStatus.updatedAt,
       approval_required: pending.length > 0,
       next_action: runtimeStatus.nextAction,
-      context: deriveContextVisibility(events),
-      build_report: null,
+      context: deriveContextVisibility(events, snapshot),
+      build_report: deriveBuildReport(events),
       review_status: null,
+      model_config_id: session?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     };
   },
 
@@ -483,12 +509,15 @@ export const beeGameAdapter = {
 
   async getWorkflowPhases(projectId: string): Promise<unknown> {
     const binding = await ensureProjectBinding(projectId);
+    const snapshot = binding ? await fetchBeeGameRuntimeSnapshotIfAvailable(binding) : undefined;
     const events = binding ? await fetchBeeGameEventsForBinding(binding) : [];
-    return derivePhaseInfo(events);
+    return derivePhaseInfo(events, snapshot);
   },
 
-  async getTokenUsage(): Promise<Record<string, unknown>> {
-    return {};
+  async getTokenUsage(projectId: string): Promise<Record<string, unknown>> {
+    const binding = await ensureProjectBinding(projectId);
+    const snapshot = binding ? await fetchBeeGameRuntimeSnapshotIfAvailable(binding) : undefined;
+    return snapshot?.usage ?? {};
   },
 
   async getTasks(): Promise<unknown[]> {
@@ -499,7 +528,19 @@ export const beeGameAdapter = {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return [];
     const events = await fetchBeeGameEventsForBinding(binding);
-    return extractArtifacts(projectId, events);
+    return [
+      ...extractArtifacts(projectId, events, binding.workspacePath),
+      {
+        artifact_id: encodeProjectPackageArtifactId(projectId),
+        id: encodeProjectPackageArtifactId(projectId),
+        name: `${binding.workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`,
+        artifact_type: 'Project Package',
+        status: 'active',
+        created_by: 'beegame',
+        created_at: new Date().toISOString(),
+        package_download: true,
+      },
+    ];
   },
 
   async getArtifactContent(artifactId: string): Promise<string> {
@@ -509,6 +550,22 @@ export const beeGameAdapter = {
       `/api/beegame-sessions/${artifactRef.sessionId}/artifacts?path=${encodeURIComponent(artifactRef.path)}`,
     );
     return result.content;
+  },
+
+  async downloadProjectPackage(projectId: string): Promise<{ blob: Blob; filename: string }> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    let response = await fetchProjectPackage(binding);
+    if (response.status === 404) {
+      await restoreBeeGameSessionForBinding(binding);
+      response = await fetchProjectPackage(binding);
+    }
+    if (!response.ok) {
+      throw new Error(await getResponseErrorMessage(response));
+    }
+    const disposition = response.headers.get('content-disposition') || '';
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `${binding.workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`;
+    return { blob: await response.blob(), filename };
   },
 
   async getArtifactReviewStatus(artifactId: string): Promise<{
@@ -618,6 +675,17 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
       const session = await syncBeeGameSessionModel(
         await fetchBeeGameSession(binding.sessionId),
       );
+      if (session.status !== 'running') {
+        const recoveredEvents = await fetchBeeGameTranscriptIfAvailable(binding);
+        const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
+        const restored = await startBeeGameSession(workspacePath, binding.sessionId);
+        saveBinding({ projectId, sessionId: restored.id, workspacePath });
+        return {
+          session: restored,
+          recoveredEvents,
+          previousSessionId: binding.sessionId,
+        };
+      }
       return {
         session,
         recoveredEvents: [],
@@ -646,6 +714,16 @@ async function ensureProjectBinding(projectId: string): Promise<ProjectSessionBi
   const binding = getBinding(projectId);
   if (!binding) return undefined;
   return binding;
+}
+
+function resolveStopSessionId(data: { task_id: string; project_id?: string }): string {
+  const projectId = String(data.project_id || '').trim();
+  if (projectId) {
+    const binding = getBinding(projectId);
+    if (binding?.sessionId) return binding.sessionId;
+    if (projectId.startsWith('project_')) return projectId.slice('project_'.length);
+  }
+  return String(data.task_id || '').trim();
 }
 
 function isSessionNotFoundError(error: unknown): boolean {
@@ -792,6 +870,46 @@ async function fetchBeeGameSession(sessionId: string): Promise<BeeGameSession> {
   return getJson(`/api/beegame-sessions/${sessionId}`);
 }
 
+async function fetchBeeGameSessionIfAvailable(sessionId: string): Promise<BeeGameSession | undefined> {
+  try {
+    return await fetchBeeGameSession(sessionId);
+  } catch (error) {
+    if (isSessionNotFoundError(error)) return undefined;
+    throw error;
+  }
+}
+
+function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
+  const params = new URLSearchParams({ workspacePath: binding.workspacePath });
+  return fetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
+}
+
+async function restoreBeeGameSessionForBinding(binding: ProjectSessionBinding): Promise<void> {
+  await postJson('/api/beegame-sessions', {
+    workspacePath: binding.workspacePath,
+    transcriptSessionId: binding.sessionId,
+  });
+}
+
+async function getResponseErrorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const body = await response.json().catch(() => ({}));
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'error' in body &&
+      typeof body.error === 'string'
+    ) {
+      return body.error;
+    }
+  } else {
+    const text = (await response.text().catch(() => '')).trim();
+    if (text) return `Request failed with status ${response.status}: ${text.slice(0, 180)}`;
+  }
+  return `Request failed with status ${response.status}`;
+}
+
 async function updateBeeGameSessionModel(
   sessionId: string,
   modelConfigId: string,
@@ -838,6 +956,22 @@ async function fetchBeeGameTranscript(sessionId: string, workspacePath: string):
   return getJson(`/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`);
 }
 
+async function fetchBeeGameRuntimeSnapshot(binding: ProjectSessionBinding): Promise<BeeGameRuntimeSnapshot> {
+  return getJson(
+    `/api/beegame-sessions/${binding.sessionId}/runtime-snapshot?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
+  );
+}
+
+async function fetchBeeGameRuntimeSnapshotIfAvailable(
+  binding: ProjectSessionBinding,
+): Promise<BeeGameRuntimeSnapshot | undefined> {
+  try {
+    return await fetchBeeGameRuntimeSnapshot(binding);
+  } catch {
+    return undefined;
+  }
+}
+
 async function fetchBeeGameEventsForBinding(
   binding: ProjectSessionBinding,
   after = 0,
@@ -848,14 +982,48 @@ async function fetchBeeGameEventsForBinding(
 async function fetchBeeGameEventsResultForBinding(
   binding: ProjectSessionBinding,
   after = 0,
+  options: { restoreMissingSession?: boolean } = {},
 ): Promise<BeeGameEventsResult> {
-  try {
+  if (!options.restoreMissingSession && missingRuntimeSessionIds.has(binding.sessionId)) {
+    const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
     return {
-      events: await fetchBeeGameEvents(binding.sessionId, after),
+      events: transcript.filter(event => event.id > after),
+      recoveredFromTranscript: true,
+    };
+  }
+  try {
+    const events = await fetchBeeGameEvents(binding.sessionId, after);
+    missingRuntimeSessionIds.delete(binding.sessionId);
+    return {
+      events,
       recoveredFromTranscript: false,
     };
   } catch (error) {
     if (!isSessionNotFoundError(error)) throw error;
+    missingRuntimeSessionIds.add(binding.sessionId);
+    if (!options.restoreMissingSession) {
+      const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
+      return {
+        events: transcript.filter(event => event.id > after),
+        recoveredFromTranscript: true,
+      };
+    }
+    try {
+      await restoreBeeGameSessionForBinding(binding);
+      missingRuntimeSessionIds.delete(binding.sessionId);
+      return {
+        events: await fetchBeeGameEvents(binding.sessionId, after),
+        recoveredFromTranscript: false,
+      };
+    } catch (restoreError) {
+      if (!isSessionNotFoundError(restoreError)) {
+        const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
+        return {
+          events: transcript.filter(event => event.id > after),
+          recoveredFromTranscript: true,
+        };
+      }
+    }
     const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
     return {
       events: transcript.filter(event => event.id > after),
@@ -893,6 +1061,7 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
     toolStatus: message.tool_status,
     toolDetail: message.tool_detail,
     toolOutput: message.tool_output,
+    artifactId: message.artifact_id,
     isSubagentTool: message.is_subagent_tool,
   }));
 }
@@ -927,6 +1096,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       const startedInput = getPayloadRecord(event, 'input');
       const startedTool = getPayloadString(event, 'toolName') || event.text;
       const startedInfo = getToolDisplayInfo(startedTool, 'running', startedInput, workspacePath);
+      const startedArtifactPath = getArtifactPath(startedTool, startedInput);
       return [{
         type: 'tool_start',
         task_id: taskId,
@@ -937,6 +1107,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         content: formatToolContent(startedInfo),
         tool_status: startedInfo.status,
         tool_detail: startedInfo.detail,
+        artifact_id: startedArtifactPath ? encodeArtifactId(projectId, event.sessionId, startedArtifactPath) : undefined,
         is_subagent_tool: startedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -945,6 +1116,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       const progressTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
       const progressInfo = getToolDisplayInfo(progressTool, 'running', progressInput, workspacePath, output);
+      const progressArtifactPath = getArtifactPath(progressTool, progressInput);
       return [{
         type: 'tool_start',
         task_id: taskId,
@@ -956,6 +1128,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_status: progressInfo.status,
         tool_detail: progressInfo.detail,
         tool_output: progressInfo.output,
+        artifact_id: progressArtifactPath ? encodeArtifactId(projectId, event.sessionId, progressArtifactPath) : undefined,
         is_subagent_tool: progressInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -966,6 +1139,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       const finishedTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
       const finishedInfo = getToolDisplayInfo(finishedTool, event.type === 'tool.failed' ? 'failed' : 'completed', finishedInput, workspacePath, output);
+      const finishedArtifactPath = getArtifactPath(finishedTool, finishedInput);
       return [{
         type: 'tool_end',
         task_id: taskId,
@@ -978,6 +1152,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_status: finishedInfo.status,
         tool_detail: finishedInfo.detail,
         tool_output: finishedInfo.output,
+        artifact_id: finishedArtifactPath ? encodeArtifactId(projectId, event.sessionId, finishedArtifactPath) : undefined,
         is_subagent_tool: finishedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -1112,10 +1287,66 @@ function summarizeTurnEvidence(events: BeeGameEvent[]): string[] {
 function summarizeEvidenceOutput(output: string): string {
   const compact = output.replace(/\s+/g, ' ').trim();
   if (!compact) return '';
-  const urlMatch = compact.match(/https?:\/\/(?:localhost|127\.0\.0\.1|\[[^\]]+\]|[^\s/]+)(?::\d+)?\/?[^\s]*/i);
+  const urlMatch = compact.match(PREVIEW_URL_PATTERN);
   if (urlMatch) return `observed URL ${urlMatch[0]}`;
   if (/\b(error|failed|failure|exception)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
   if (/\b(pass(?:ed)?|success(?:ful)?|built|compiled|ready)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
+  return '';
+}
+
+const PREVIEW_URL_PATTERN = /https?:\/\/(?:localhost|127\.0\.0\.1|\[[^\]]+\]|[^\s/]+)(?::\d+)?\/?[^\s)]*/i;
+
+function deriveBuildReport(events: BeeGameEvent[]): BuildReportPayload | null {
+  const buildEvents = events
+    .filter(event => event.type === 'tool.completed' || event.type === 'tool.failed' || event.type === 'assistant.message')
+    .sort((a, b) => b.id - a.id);
+  const latestUrl = findLatestPreviewUrl(buildEvents);
+  if (!latestUrl) return null;
+
+  const sourceEvent = buildEvents.find(event => {
+    const values = [
+      event.text,
+      typeof event.payload?.output === 'string' ? event.payload.output : '',
+      typeof event.payload?.url === 'string' ? event.payload.url : '',
+      typeof event.payload?.build_url === 'string' ? event.payload.build_url : '',
+      typeof event.payload?.preview_url === 'string' ? event.payload.preview_url : '',
+    ];
+    return values.some(value => value.includes(latestUrl));
+  }) || buildEvents[0];
+  const command = sourceEvent && sourceEvent.type !== 'assistant.message' ? getBashCommand(sourceEvent) : '';
+  return {
+    status: 'passed',
+    entrypoint: '',
+    report_path: '',
+    build_url: latestUrl || '',
+    agents: ['beegame'],
+    generated_paths: [],
+    checks: sourceEvent ? [{
+      name: command || 'preview',
+      status: 'passed',
+      detail: truncateEvidenceDetail(sourceEvent.type === 'assistant.message' ? sourceEvent.text : getEventOutput(sourceEvent)),
+      path: '',
+    }] : [],
+    summary: `Playable preview available at ${latestUrl}`,
+    failure_reason: '',
+    created_at: sourceEvent?.createdAt,
+  };
+}
+
+function findLatestPreviewUrl(events: BeeGameEvent[]): string {
+  for (const event of events) {
+    const candidates = [
+      event.text,
+      typeof event.payload?.output === 'string' ? event.payload.output : '',
+      typeof event.payload?.url === 'string' ? event.payload.url : '',
+      typeof event.payload?.build_url === 'string' ? event.payload.build_url : '',
+      typeof event.payload?.preview_url === 'string' ? event.payload.preview_url : '',
+    ];
+    for (const value of candidates) {
+      const match = value.match(PREVIEW_URL_PATTERN);
+      if (match) return match[0];
+    }
+  }
   return '';
 }
 
@@ -1175,13 +1406,20 @@ function truncateForChatAlert(output: string): string {
   return `${text.slice(0, 1200)}...`;
 }
 
-function derivePhaseInfo(events: BeeGameEvent[]): {
+function derivePhaseInfo(
+  events: BeeGameEvent[],
+  snapshot?: BeeGameRuntimeSnapshot,
+): {
   current_phase: number;
   phase_name: string;
   history: Array<{ phase: number; name: string; timestamp: number }>;
 } {
   const status = deriveRuntimeStatus(events, getPendingPermissionEvents(events));
-  const currentPhase = status.phase === 'running' ? 'running' : '';
+  const currentPhase = status.phase === 'running'
+    ? 'running'
+    : snapshot?.phaseName && snapshot.phaseName !== 'idle'
+      ? snapshot.phaseName
+      : '';
   return {
     current_phase: currentPhase ? 1 : 0,
     phase_name: currentPhase,
@@ -1189,9 +1427,9 @@ function derivePhaseInfo(events: BeeGameEvent[]): {
   };
 }
 
-function deriveContextVisibility(events: BeeGameEvent[]) {
+function deriveContextVisibility(events: BeeGameEvent[], snapshot?: BeeGameRuntimeSnapshot) {
   const observation = [...events].reverse().find(event => event.type === 'runtime.observation');
-  const usage = getLatestTokenUsage(events);
+  const usage = getLatestTokenUsage(events) ?? snapshot?.usage ?? null;
   if (!observation && !usage) return null;
   const features = getRuntimeFeatures(observation);
   const labels = features
@@ -1407,7 +1645,13 @@ function getActiveTurn(events: BeeGameEvent[]): string | null {
       openTurns.add(getTurnDisplayId(event));
       continue;
     }
-    if (event.type === 'turn.completed' || event.type === 'turn.empty' || event.type === 'turn.failed') {
+    if (
+      event.type === 'turn.completed' ||
+      event.type === 'turn.empty' ||
+      event.type === 'turn.failed' ||
+      event.type === 'session.stopped' ||
+      event.type === 'session.failed'
+    ) {
       openTurns.delete(getTurnDisplayId(event));
       continue;
     }
@@ -1808,14 +2052,15 @@ function describeUserQuestionEvent(event: BeeGameEvent): string {
   return question || event.text || 'BeeGame needs more details from you.';
 }
 
-function extractArtifacts(projectId: string, events: BeeGameEvent[]): BeeGameArtifact[] {
+function extractArtifacts(projectId: string, events: BeeGameEvent[], workspacePath: string): BeeGameArtifact[] {
   const artifacts = new Map<string, BeeGameArtifact>();
   for (const event of events) {
     if (event.type !== 'tool.started' && event.type !== 'tool.completed') continue;
     const toolName = getPayloadString(event, 'toolName') || '';
     const input = getPayloadRecord(event, 'input');
-    const path = getArtifactPath(toolName, input);
+    const path = toWorkspaceRelativePath(getArtifactPath(toolName, input), workspacePath);
     if (!path) continue;
+    if (!isDeliverableDocPath(path)) continue;
     const artifactId = encodeArtifactId(projectId, event.sessionId, path);
     artifacts.set(path, {
       artifact_id: artifactId,
@@ -1828,13 +2073,35 @@ function extractArtifacts(projectId: string, events: BeeGameEvent[]): BeeGameArt
       created_at: event.createdAt,
     });
   }
-  return [...artifacts.values()].sort((a, b) => a.path.localeCompare(b.path));
+  return [...artifacts.values()].sort((a, b) => String(a.path || '').localeCompare(String(b.path || '')));
+}
+
+function toWorkspaceRelativePath(path: string, workspacePath: string): string {
+  const normalized = path.split('\\').join('/').replace(/^\.\/+/, '').replace(/\/+$/, '');
+  const normalizedWorkspace = workspacePath.split('\\').join('/').replace(/\/+$/, '');
+  if (normalizedWorkspace && normalized.startsWith(`${normalizedWorkspace}/`)) {
+    return normalized.slice(normalizedWorkspace.length + 1);
+  }
+  return normalized;
+}
+
+function isDeliverableDocPath(path: string): boolean {
+  const normalized = path.split('\\').join('/').replace(/^\.\/+/, '');
+  return normalized.startsWith('docs/') && /\.md$/i.test(normalized);
 }
 
 function getArtifactPath(toolName: string, input: Record<string, unknown>): string {
   const normalizedTool = toolName.toLowerCase();
   if (!['write', 'edit', 'multiedit', 'notebookedit'].includes(normalizedTool)) return '';
   return String(input.file_path || input.path || input.notebook_path || '').trim();
+}
+
+function encodeProjectPackageArtifactId(projectId: string): string {
+  return `${PROJECT_PACKAGE_ARTIFACT_PREFIX}${encodeURIComponent(projectId)}`;
+}
+
+export function isBeeGameProjectPackageArtifactId(artifactId: string): boolean {
+  return artifactId.startsWith(PROJECT_PACKAGE_ARTIFACT_PREFIX);
 }
 
 function encodeArtifactId(projectId: string, sessionId: string, path: string): string {

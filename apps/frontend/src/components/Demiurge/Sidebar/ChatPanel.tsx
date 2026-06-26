@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, AlertCircle, Send } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
+import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import type { ReviewBindingPayload } from '../../../services/api';
 import { formatGddReviewSummary, isBlockerResolutionReview, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
@@ -125,7 +126,7 @@ export const ChatPanel = memo(({
         ? 'flex h-full flex-col bg-transparent'
         : 'flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl';
     const scrollClassName = isBeeGameVariant
-        ? 'flex-1 overflow-y-auto px-4 pt-4 space-y-3 relative pb-4'
+        ? 'flex-1 overflow-y-auto px-4 pt-4 relative pb-4'
         : 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
     const composerShellClassName = isBeeGameVariant
         ? 'border-t border-zinc-800 bg-zinc-950/70 px-4 pb-4 pt-4'
@@ -144,7 +145,13 @@ export const ChatPanel = memo(({
                 className={scrollClassName}
             >
                 <AnimatePresence initial={false}>
-                    {messages.length === 0 ? (
+                    {isBeeGameVariant ? (
+                        <BeeGameCollaborationFeed
+                            messages={messages}
+                            projectStatus={projectStatus}
+                            onPreviewArtifact={onPreviewArtifact}
+                        />
+                    ) : messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20">
                             <motion.div
                                 animate={{ scale: [1, 1.1, 1] }}

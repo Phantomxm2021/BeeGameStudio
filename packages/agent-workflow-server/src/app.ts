@@ -28,6 +28,12 @@ import {
   getBeeGameProjectDatabasePath,
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
+import {
+  loadWebToolsConfig,
+  mapWebToolsConfigToRuntimeEnv,
+  saveWebToolsConfig,
+  toPublicWebToolsConfig,
+} from './web-tools-store'
 
 type JsonObject = Record<string, unknown>
 
@@ -96,6 +102,9 @@ export function createAgentWorkflowApp(
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
+    () => mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
+      dataDir: dashboardDataRoot,
+    })),
   )
   const projectStore = new BeeGameProjectMetadataStore(
     getBeeGameProjectDatabasePath(dashboardDataRoot),
@@ -156,6 +165,41 @@ export function createAgentWorkflowApp(
     const deleted = deleteModelConfig(c.req.param('id'))
     if (deleted) persistModelConfigs(modelConfigStore)
     return c.json({ deleted })
+  })
+
+  app.get('/api/web-tools', c => {
+    return c.json(toPublicWebToolsConfig(loadWebToolsConfig({
+      dataDir: dashboardDataRoot,
+    })))
+  })
+
+  app.put('/api/web-tools', async c => {
+    const body = await readJson(c.req.raw)
+    return c.json(saveWebToolsConfig({
+      ...(typeof body.webSearchAdapter === 'string'
+        ? { webSearchAdapter: body.webSearchAdapter as never }
+        : {}),
+      ...(typeof body.webFetchAdapter === 'string'
+        ? { webFetchAdapter: body.webFetchAdapter as never }
+        : {}),
+      ...(typeof body.tavilyEndpointUrl === 'string'
+        ? { tavilyEndpointUrl: body.tavilyEndpointUrl }
+        : {}),
+      ...(typeof body.braveApiKey === 'string'
+        ? { braveApiKey: body.braveApiKey }
+        : {}),
+      ...(typeof body.exaApiKey === 'string'
+        ? { exaApiKey: body.exaApiKey }
+        : {}),
+      ...(typeof body.exaEndpointUrl === 'string'
+        ? { exaEndpointUrl: body.exaEndpointUrl }
+        : {}),
+      ...(typeof body.webFetchHttpTimeoutMs === 'number'
+        ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
+        : {}),
+    }, {
+      dataDir: dashboardDataRoot,
+    }))
   })
 
   app.get('/api/filesystem/directories', async c => {
@@ -668,6 +712,19 @@ function registerBeeGameSessionRoutes(
     }
   })
 
+  app.get(`${basePath}/:id/runtime-snapshot`, c => {
+    try {
+      return c.json(
+        beeGameSessions.runtimeSnapshot(
+          c.req.param('id'),
+          c.req.query('workspacePath'),
+        ),
+      )
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 404)
+    }
+  })
+
   app.get(`${basePath}/:id/transcript`, c => {
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
@@ -718,6 +775,30 @@ function registerBeeGameSessionRoutes(
           ? 400
           : 404,
       )
+    }
+  })
+
+  app.get(`${basePath}/:id/package`, async c => {
+    try {
+      const projectPackage = await beeGameSessions.createProjectPackage(
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
+      const body = projectPackage.data.buffer.slice(
+        projectPackage.data.byteOffset,
+        projectPackage.data.byteOffset + projectPackage.data.byteLength,
+      ) as ArrayBuffer
+      return new Response(
+        new Blob([body], { type: projectPackage.contentType }),
+        {
+          headers: {
+            'content-type': projectPackage.contentType,
+            'content-disposition': `attachment; filename="${projectPackage.filename.replace(/"/g, '')}"`,
+          },
+        },
+      )
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
 

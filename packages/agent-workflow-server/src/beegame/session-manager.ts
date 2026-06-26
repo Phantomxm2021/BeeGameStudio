@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { readFile, realpath, rm } from 'node:fs/promises'
+import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
@@ -59,9 +59,29 @@ export type BeeGameSession = {
   updatedAt: Date
 }
 
+export type BeeGameRuntimeSnapshot = {
+  sessionId: string
+  workspacePath: string
+  modelConfigId?: string
+  phaseName: string
+  phaseStatus: string
+  updatedAt: string
+  usage: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
+}
+
 export type BeeGameArtifact = {
   path: string
   content: string
+}
+
+export type BeeGameProjectPackage = {
+  filename: string
+  contentType: 'application/zip'
+  data: Uint8Array
 }
 
 export type DeleteBeeGameSessionResult = {
@@ -142,6 +162,7 @@ export class BeeGameSessionManager {
   constructor(
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
     dashboardDataRoot?: string,
+    private readonly getAdditionalRuntimeEnv: () => Record<string, string> = () => ({}),
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -211,6 +232,7 @@ export class BeeGameSessionManager {
     }
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
+    this.persistRuntimeSnapshot(record)
     this.append(record, 'session.started', `Created BeeGame session in ${cwd}`)
     this.appendRuntimeObservation(record, 'initialized')
 
@@ -240,8 +262,36 @@ export class BeeGameSessionManager {
     record.runtime = runtime
     record.session.modelConfigId = modelConfigId
     record.session.updatedAt = new Date()
+    this.persistRuntimeSnapshot(record)
     this.appendRuntimeObservation(record, 'model_updated')
     return cloneSession(record.session)
+  }
+
+  runtimeSnapshot(
+    sessionId: string,
+    workspacePath?: string,
+  ): BeeGameRuntimeSnapshot {
+    const record = this.sessions.get(sessionId)
+    if (record) return this.deriveRuntimeSnapshot(record)
+    const persisted = this.readPersistedRuntimeSnapshot(sessionId)
+    if (persisted) {
+      if (
+        !workspacePath ||
+        resolveExistingPath(workspacePath) === resolveExistingPath(persisted.workspacePath)
+      ) {
+        return persisted
+      }
+    }
+    if (workspacePath) {
+      const root = resolve(workspacePath)
+      return deriveRuntimeSnapshotFromEvents(
+        sessionId,
+        root,
+        readExistingTranscriptForResume(sessionId, root)?.events ?? [],
+        undefined,
+      )
+    }
+    throw new Error('Session not found')
   }
 
   events(sessionId: string, after = 0): BeeGameEvent[] {
@@ -363,6 +413,32 @@ export class BeeGameSessionManager {
     }
   }
 
+  async createProjectPackage(
+    sessionId: string,
+    workspacePath?: string,
+  ): Promise<BeeGameProjectPackage> {
+    const record = this.sessions.get(sessionId)
+    if (!record && !workspacePath) throw new Error('Session not found')
+    if (!record && workspacePath && !isAbsolute(workspacePath)) {
+      throw new Error('Workspace path must be absolute')
+    }
+    const root = resolve(record?.session.cwd ?? workspacePath ?? '')
+    const files = await collectPackageFiles(root)
+    const data = createZipArchive(
+      await Promise.all(
+        files.map(async file => ({
+          path: file,
+          data: await readFile(resolve(root, file)),
+        })),
+      ),
+    )
+    return {
+      filename: `${basename(root) || 'beegame-project'}.zip`,
+      contentType: 'application/zip',
+      data,
+    }
+  }
+
   private async runDirectTurn(
     record: SessionRecord,
     prompt: string,
@@ -374,7 +450,7 @@ export class BeeGameSessionManager {
         sessionId: record.session.id,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
-        env: buildRuntimeEnv(record.runtime),
+        env: buildRuntimeEnv(record.runtime, this.getAdditionalRuntimeEnv()),
       })
       record.runner = runner
       try {
@@ -693,7 +769,36 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     record.nextEventId += 1
     record.session.updatedAt = new Date()
+    this.persistRuntimeSnapshot(record)
     return event
+  }
+
+  private persistRuntimeSnapshot(record: SessionRecord): void {
+    const snapshot = this.deriveRuntimeSnapshot(record)
+    const snapshotPath = getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id)
+    mkdirSync(dirname(snapshotPath), { recursive: true })
+    writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2))
+  }
+
+  private deriveRuntimeSnapshot(record: SessionRecord): BeeGameRuntimeSnapshot {
+    return deriveRuntimeSnapshotFromEvents(
+      record.session.id,
+      record.session.cwd,
+      record.events,
+      record.session.modelConfigId,
+    )
+  }
+
+  private readPersistedRuntimeSnapshot(
+    sessionId: string,
+  ): BeeGameRuntimeSnapshot | undefined {
+    try {
+      return normalizeRuntimeSnapshot(
+        JSON.parse(readFileSync(getRuntimeSnapshotPath(this.dashboardDataRoot, sessionId), 'utf8')),
+      )
+    } catch {
+      return undefined
+    }
   }
 
   private maybeStartSubagentOutputMonitor(
@@ -1207,6 +1312,224 @@ function getTranscriptProjectPrefix(cwd: string, sessionId: string): string {
 
 function getShortSessionHash(sessionId: string): string {
   return createHash('sha256').update(sessionId).digest('hex').slice(0, 8)
+}
+
+function getRuntimeSnapshotPath(dataRoot: string, sessionId: string): string {
+  return resolve(dataRoot, 'snapshots', `${getSafeSessionFileName(sessionId)}.json`)
+}
+
+function getSafeSessionFileName(sessionId: string): string {
+  return sessionId.replace(/[^a-zA-Z0-9_.-]/g, '_')
+}
+
+function deriveRuntimeSnapshotFromEvents(
+  sessionId: string,
+  workspacePath: string,
+  events: BeeGameEvent[],
+  modelConfigId: string | undefined,
+): BeeGameRuntimeSnapshot {
+  const usage = getLatestRuntimeUsage(events)
+  const latest = events.at(-1)
+  return {
+    sessionId,
+    workspacePath,
+    ...(modelConfigId ? { modelConfigId } : {}),
+    phaseName: deriveSnapshotPhaseName(events),
+    phaseStatus: deriveSnapshotPhaseStatus(events),
+    updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
+    usage,
+  }
+}
+
+function deriveSnapshotPhaseName(events: BeeGameEvent[]): string {
+  if (events.some(event => event.type === 'turn.started' && !hasTurnEnded(events, event.turnId))) {
+    return 'running'
+  }
+  return 'idle'
+}
+
+function deriveSnapshotPhaseStatus(events: BeeGameEvent[]): string {
+  const latest = events.at(-1)
+  if (!latest) return 'idle'
+  if (latest.type === 'permission.requested') return 'waiting_approval'
+  if (latest.type === 'turn.failed' || latest.type === 'session.failed') return 'failed'
+  if (deriveSnapshotPhaseName(events) === 'running') return 'running'
+  return 'idle'
+}
+
+function hasTurnEnded(events: BeeGameEvent[], turnId?: string): boolean {
+  if (!turnId) return true
+  return events.some(event =>
+    event.turnId === turnId &&
+    (
+      event.type === 'turn.completed' ||
+      event.type === 'turn.empty' ||
+      event.type === 'turn.failed' ||
+      event.type === 'result' ||
+      event.type === 'session.stopped' ||
+      event.type === 'session.failed'
+    )
+  )
+}
+
+function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+  for (const event of [...events].reverse()) {
+    if (event.type !== 'result') continue
+    const usage = event.payload?.usage
+    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue
+    const record = usage as Record<string, unknown>
+    const promptTokens = Number(record.input_tokens ?? record.prompt_tokens ?? 0)
+    const completionTokens = Number(record.output_tokens ?? record.completion_tokens ?? 0)
+    const totalTokens = Number(record.total_tokens ?? promptTokens + completionTokens)
+    return {
+      prompt_tokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+      completion_tokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+      total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+    }
+  }
+  return {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
+}
+
+function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid runtime snapshot')
+  }
+  const record = value as Record<string, unknown>
+  const usage = record.usage && typeof record.usage === 'object' && !Array.isArray(record.usage)
+    ? record.usage as Record<string, unknown>
+    : {}
+  return {
+    sessionId: String(record.sessionId || ''),
+    workspacePath: String(record.workspacePath || ''),
+    ...(typeof record.modelConfigId === 'string' && record.modelConfigId
+      ? { modelConfigId: record.modelConfigId }
+      : {}),
+    phaseName: String(record.phaseName || 'idle'),
+    phaseStatus: String(record.phaseStatus || 'idle'),
+    updatedAt: String(record.updatedAt || new Date().toISOString()),
+    usage: {
+      prompt_tokens: Number(usage.prompt_tokens ?? 0),
+      completion_tokens: Number(usage.completion_tokens ?? 0),
+      total_tokens: Number(usage.total_tokens ?? 0),
+    },
+  }
+}
+
+const PACKAGE_EXCLUDED_NAMES = new Set(['.git', 'node_modules', '.DS_Store'])
+
+async function collectPackageFiles(root: string): Promise<string[]> {
+  const files: string[] = []
+  async function walk(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (PACKAGE_EXCLUDED_NAMES.has(entry.name)) continue
+      const fullPath = resolve(dir, entry.name)
+      const rel = relative(root, fullPath).split('\\').join('/')
+      if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue
+      if (entry.isDirectory()) {
+        await walk(fullPath)
+      } else if (entry.isFile()) {
+        const info = await stat(fullPath)
+        if (info.size <= 100 * 1024 * 1024) files.push(rel)
+      }
+    }
+  }
+  await walk(root)
+  return files.sort((a, b) => a.localeCompare(b))
+}
+
+function createZipArchive(files: Array<{ path: string; data: Uint8Array }>): Uint8Array {
+  const localParts: Uint8Array[] = []
+  const centralParts: Uint8Array[] = []
+  let offset = 0
+  for (const file of files) {
+    const name = new TextEncoder().encode(file.path)
+    const data = file.data
+    const crc = crc32(data)
+    const localHeader = new Uint8Array(30 + name.length)
+    const localView = new DataView(localHeader.buffer)
+    localView.setUint32(0, 0x04034b50, true)
+    localView.setUint16(4, 20, true)
+    localView.setUint16(6, 0, true)
+    localView.setUint16(8, 0, true)
+    localView.setUint16(10, 0, true)
+    localView.setUint16(12, 0, true)
+    localView.setUint32(14, crc, true)
+    localView.setUint32(18, data.length, true)
+    localView.setUint32(22, data.length, true)
+    localView.setUint16(26, name.length, true)
+    localView.setUint16(28, 0, true)
+    localHeader.set(name, 30)
+    localParts.push(localHeader, data)
+
+    const centralHeader = new Uint8Array(46 + name.length)
+    const centralView = new DataView(centralHeader.buffer)
+    centralView.setUint32(0, 0x02014b50, true)
+    centralView.setUint16(4, 20, true)
+    centralView.setUint16(6, 20, true)
+    centralView.setUint16(8, 0, true)
+    centralView.setUint16(10, 0, true)
+    centralView.setUint16(12, 0, true)
+    centralView.setUint16(14, 0, true)
+    centralView.setUint32(16, crc, true)
+    centralView.setUint32(20, data.length, true)
+    centralView.setUint32(24, data.length, true)
+    centralView.setUint16(28, name.length, true)
+    centralView.setUint16(30, 0, true)
+    centralView.setUint16(32, 0, true)
+    centralView.setUint16(34, 0, true)
+    centralView.setUint16(36, 0, true)
+    centralView.setUint32(38, 0, true)
+    centralView.setUint32(42, offset, true)
+    centralHeader.set(name, 46)
+    centralParts.push(centralHeader)
+    offset += localHeader.length + data.length
+  }
+
+  const centralOffset = offset
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0)
+  const end = new Uint8Array(22)
+  const endView = new DataView(end.buffer)
+  endView.setUint32(0, 0x06054b50, true)
+  endView.setUint16(4, 0, true)
+  endView.setUint16(6, 0, true)
+  endView.setUint16(8, files.length, true)
+  endView.setUint16(10, files.length, true)
+  endView.setUint32(12, centralSize, true)
+  endView.setUint32(16, centralOffset, true)
+  endView.setUint16(20, 0, true)
+
+  const out = new Uint8Array(centralOffset + centralSize + end.length)
+  let cursor = 0
+  for (const part of [...localParts, ...centralParts, end]) {
+    out.set(part, cursor)
+    cursor += part.length
+  }
+  return out
+}
+
+let crcTable: Uint32Array | undefined
+
+function crc32(data: Uint8Array): number {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256)
+    for (let i = 0; i < 256; i += 1) {
+      let c = i
+      for (let k = 0; k < 8; k += 1) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      }
+      crcTable[i] = c >>> 0
+    }
+  }
+  let crc = 0xffffffff
+  for (const byte of data) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+  }
+  return (crc ^ 0xffffffff) >>> 0
 }
 
 function getSessionArtifactRootPaths(record: SessionRecord): string[] {
@@ -1912,12 +2235,14 @@ function getObjectField(
 
 function buildRuntimeEnv(
   runtime: RuntimeModelConfig | undefined,
+  additionalEnv: Record<string, string> = {},
 ): Record<string, string> {
   const beegameConfigDir =
     process.env.BEEGAME_CONFIG_DIR ?? resolve(homedir(), '.beegame')
   return {
     BEEGAME_CONFIG_DIR: beegameConfigDir,
     BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
+    ...additionalEnv,
     ...(runtime?.env ?? {}),
   }
 }

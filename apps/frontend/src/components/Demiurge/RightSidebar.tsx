@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, MessageSquare } from 'lucide-react';
 import { type Language, translations } from './AgentsConfig';
 import { api, type ReviewBindingPayload } from '../../services/api';
+import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
 import type { WaitingApprovalState } from '../../utils/waitingApproval';
@@ -106,6 +107,18 @@ export function RightSidebar({
 
     const handleDownloadArtifact = async (artifactId: string, title: string) => {
         try {
+            if (isBeeGameProjectPackageArtifactId(artifactId)) {
+                const { blob, filename } = await api.downloadProjectPackage(projectId);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename || title || 'project.zip';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                return;
+            }
             const rawContent = await api.getArtifactContent(artifactId);
             const content = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent, null, 2);
             const processedContent = artifactProcessor.stripMarkers(content);
@@ -232,6 +245,10 @@ export function RightSidebar({
             ? 'text-zinc-900 dark:text-zinc-100'
             : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
         }`;
+    const tabLabel = (tab: 'chat' | 'artifacts') => {
+        if (variant !== 'beegame') return t[tab];
+        return tab === 'chat' ? '协作流' : '交付物';
+    };
 
     return (
         <>
@@ -255,9 +272,9 @@ export function RightSidebar({
                                     onClick={() => setActiveTab(tab)}
                                     className={tabButtonClassName(activeTab === tab)}
                                 >
-                                    {t[tab]}
+                                    {tabLabel(tab)}
                                     {variant === 'beegame' && tab === 'artifacts' ? (
-                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">7</span>
+                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{artifacts.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
                                         <motion.div layoutId="tabUnderline" className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />

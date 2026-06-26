@@ -124,6 +124,12 @@ interface ProjectState {
   setActiveProject: (projectId: string) => Promise<void>;
 
   /**
+   * Return to the landing workspace without opening another project.
+   * Clears project-scoped runtime state and chat history.
+   */
+  clearActiveProject: () => void;
+
+  /**
    * Atomic bootstrap: create project + enqueue first idea message.
    * Required for starting a new project with an initial idea.
    * Requirements: 3.7, Guide 4.0
@@ -259,7 +265,7 @@ export const useProjectStore = create<ProjectState>()(
       setActiveProject: async (projectId) => {
         const normalizedProjectId = projectId || null;
         if (!normalizedProjectId) {
-          set({ activeProjectId: null });
+          get().clearActiveProject();
           return;
         }
 
@@ -282,6 +288,16 @@ export const useProjectStore = create<ProjectState>()(
           }
           throw error;
         }
+      },
+
+      clearActiveProject: () => {
+        set({
+          activeProjectId: null,
+          pendingReviews: [],
+          projectStatus: null,
+          runtimeReadiness: null,
+        });
+        useChatStore.getState().clearMessages();
       },
 
       bootstrapProject: async (data) => {

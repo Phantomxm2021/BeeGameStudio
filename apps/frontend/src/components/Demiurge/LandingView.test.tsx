@@ -79,8 +79,6 @@ const renderLanding = (props?: Partial<React.ComponentProps<typeof LandingView>>
     <LandingView
         onStart={vi.fn()}
         lang="zh"
-        isDark={false}
-        onToggleTheme={vi.fn()}
         onSetLang={vi.fn()}
         {...props}
     />,
@@ -433,13 +431,14 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByRole('heading', { name: '從一個想法開始。' })).not.toBeInTheDocument();
     });
 
-    it('opens the settings overlay with dark mode, language, and system settings', () => {
+    it('opens the simplified settings overlay on the general tab', () => {
         renderLanding({ lang: 'en' });
 
         fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
 
         expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-        expect(screen.getByText('Dark Mode')).toBeInTheDocument();
+        expect(screen.queryByText('Dark Mode')).not.toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByText('Language')).toBeInTheDocument();
         expect(screen.getByText('System Settings')).toBeInTheDocument();
         expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument();

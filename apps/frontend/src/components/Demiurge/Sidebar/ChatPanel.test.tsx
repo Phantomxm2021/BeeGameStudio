@@ -49,13 +49,14 @@ const blockerResolutionReview: PendingUserReviewItem = {
 
 const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = {}) => {
     const onApprovePlan = vi.fn().mockResolvedValue(undefined);
+    const onPreviewArtifact = vi.fn();
     const props: ComponentProps<typeof ChatPanel> = {
         messages: [],
         isLoading: false,
         chatInput: '',
         onChatInputChange: vi.fn(),
         onSend: vi.fn(),
-        onPreviewArtifact: vi.fn(),
+        onPreviewArtifact,
         textareaRef: createRef<HTMLTextAreaElement>(),
         scrollContainerRef: createRef<HTMLDivElement>(),
         isComposing: false,
@@ -77,6 +78,7 @@ const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = 
 
     return {
         onApprovePlan,
+        onPreviewArtifact,
         ...render(<ChatPanel {...props} />),
     };
 };
@@ -167,6 +169,339 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByTestId('beegame-chat-panel')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-chat-composer')).toBeInTheDocument();
+    });
+
+    it('renders BeeGame messages as a compact feed with tools after their message', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_user',
+                    sender: 'user',
+                    content: '请构建首个可玩版本',
+                    timestamp: 1,
+                },
+                {
+                    id: 'm_agent',
+                    sender: 'beegame',
+                    content: '我会先完成可运行闭环，然后验证构建入口。',
+                    timestamp: 2,
+                },
+                {
+                    id: 'm_write',
+                    sender: 'system',
+                    content: 'Write completed\nTarget: docs/PLAYABLE_SPEC.md',
+                    timestamp: 3,
+                    type: 'tool',
+                    toolName: 'Write',
+                    toolStatus: 'completed',
+                    toolDetail: 'docs/PLAYABLE_SPEC.md',
+                },
+                {
+                    id: 'm_bash',
+                    sender: 'system',
+                    content: 'Bash completed\nbun run build',
+                    timestamp: 4,
+                    type: 'tool',
+                    toolName: 'Bash',
+                    toolStatus: 'completed',
+                    toolDetail: 'bun run build',
+                    toolOutput: 'Build passed',
+                },
+            ],
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+                next_action: 'running',
+            } as any,
+        });
+
+        expect(screen.getByTestId('beegame-collaboration-feed')).toBeInTheDocument();
+        expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
+        expect(screen.getByTestId('beegame-user-message-m_user')).toBeInTheDocument();
+        expect(screen.getByText('请构建首个可玩版本')).toBeInTheDocument();
+        expect(screen.getByText('BeeGame')).toBeInTheDocument();
+        expect(screen.getByText('我会先完成可运行闭环，然后验证构建入口。')).toBeInTheDocument();
+        expect(screen.getByText('Write completed')).toBeInTheDocument();
+        expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
+        expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
+
+        const agentCard = screen.getByTestId('beegame-agent-message-m_agent');
+        const writeCard = document.querySelector('[data-tool-id="m_write"]')!;
+        const bashCard = document.querySelector('[data-tool-id="m_bash"]')!;
+        expect(agentCard.compareDocumentPosition(writeCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(writeCard.compareDocumentPosition(bashCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(screen.queryByText('docs/PLAYABLE_SPEC.md')).not.toBeInTheDocument();
+        expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
+        expect(screen.queryByText('Build passed')).not.toBeInTheDocument();
+    });
+
+    it('shows every BeeGame tool call instead of limiting the feed to the last six', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_agent',
+                    sender: 'beegame',
+                    content: '我会连续执行验证。',
+                    timestamp: 1,
+                },
+                ...Array.from({ length: 8 }, (_, index) => ({
+                    id: `m_tool_${index + 1}`,
+                    sender: 'system',
+                    content: `Bash completed\nCommand: check ${index + 1}`,
+                    timestamp: index + 2,
+                    type: 'tool' as const,
+                    toolName: 'Bash',
+                    toolStatus: 'completed' as const,
+                    toolDetail: `check ${index + 1}`,
+                })),
+            ],
+        });
+
+        expect(screen.getAllByTestId(/beegame-tool-timeline-card/)).toHaveLength(8);
+        expect(screen.getAllByText('Bash completed')).toHaveLength(8);
+    });
+
+    it('normalizes BeeGame tool messages from snake_case fields and structured content', async () => {
+        const user = userEvent.setup();
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_snake',
+                    sender: 'system',
+                    content: 'Tool: Write\nStatus: completed\nTarget: docs/GDD.md',
+                    timestamp: 1,
+                    type: 'tool',
+                    tool: 'Write',
+                    tool_status: 'completed',
+                    tool_detail: 'Target: docs/GDD.md',
+                } as any,
+                {
+                    id: 'm_content',
+                    sender: 'system',
+                    content: 'Bash completed\nCommand: bun run build\nOutput: Build passed',
+                    timestamp: 2,
+                    type: 'tool',
+                },
+            ],
+        });
+
+        expect(screen.getByText('Write completed')).toBeInTheDocument();
+        expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
+        expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
+        expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: /Write completed/i }));
+        expect(screen.getByText('docs/GDD.md')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: /Bash completed/i }));
+        expect(screen.getByText('bun run build')).toBeInTheDocument();
+        expect(screen.queryByText(/^Tool$/)).not.toBeInTheDocument();
+    });
+
+    it('keeps long BeeGame final summaries compact inside the collaboration feed', async () => {
+        const user = userEvent.setup();
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_agent_long',
+                    sender: 'beegame',
+                    content: [
+                        '## 项目完成总结',
+                        '',
+                        '我已成功实现了一个完整的体素生存游戏。',
+                        '以下是交付内容。',
+                        '这行应该还可见。',
+                        '这一行之后的详细清单不应该继续撑满整个右侧面板。',
+                        'docs/GDD.md',
+                        'docs/TECH_SPEC.md',
+                        'docs/VERIFICATION.md',
+                    ].join('\n'),
+                    timestamp: 1,
+                },
+            ],
+        });
+
+        const feed = screen.getByTestId('beegame-collaboration-feed');
+        expect(screen.getByRole('heading', { name: '项目完成总结', level: 2 })).toBeInTheDocument();
+        expect(feed.textContent).not.toContain('docs/VERIFICATION.md');
+        await user.click(screen.getByRole('button', { name: 'View summary details' }));
+        expect(feed.textContent).toContain('docs/VERIFICATION.md');
+        expect(screen.getByRole('button', { name: 'Hide summary details' })).toBeInTheDocument();
+    });
+
+    it('allows BeeGame messages to collapse and expand', async () => {
+        const user = userEvent.setup();
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_agent_collapsible',
+                    sender: 'beegame',
+                    content: '这是一条可以折叠的消息。',
+                    timestamp: 1,
+                },
+                {
+                    id: 'm_collapsible_tool',
+                    sender: 'system',
+                    content: 'Bash completed\nCommand: bun run build',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Bash',
+                    toolStatus: 'completed',
+                    toolDetail: 'bun run build',
+                },
+            ],
+        });
+
+        const toggle = screen.getByRole('button', { name: 'Collapse BeeGame message' });
+        expect(screen.getByText('这是一条可以折叠的消息。')).toBeInTheDocument();
+        expect(screen.getByText('Bash completed')).toBeInTheDocument();
+
+        await user.click(toggle);
+
+        expect(screen.queryByText('这是一条可以折叠的消息。')).not.toBeInTheDocument();
+        expect(screen.queryByText('Bash completed')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Expand BeeGame message' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Expand BeeGame message' }));
+
+        expect(screen.getByText('这是一条可以折叠的消息。')).toBeInTheDocument();
+        expect(screen.getByText('Bash completed')).toBeInTheDocument();
+    });
+
+    it('renders BeeGame agent summaries as markdown instead of raw markdown text', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_agent_markdown',
+                    sender: 'beegame',
+                    content: [
+                        '### 项目完成总结',
+                        '',
+                        '以下是 **交付内容**：',
+                        '',
+                        '- **GDD.md** - 游戏设计文档',
+                    ].join('\n'),
+                    timestamp: 1,
+                },
+            ],
+        });
+
+        const heading = screen.getByRole('heading', { name: '项目完成总结', level: 3 });
+        expect(heading).toBeInTheDocument();
+        expect(screen.getByText('交付内容')).toHaveClass('font-bold');
+        expect(screen.queryByText(/### 项目完成总结/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/\*\*交付内容\*\*/)).not.toBeInTheDocument();
+    });
+
+    it('opens tool cards on demand and wires Open and Diff actions to previews', async () => {
+        const user = userEvent.setup();
+        const { onPreviewArtifact } = renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_write',
+                    sender: 'system',
+                    content: 'Write completed\nTarget: docs/GDD.md\nOutput: Created successfully',
+                    timestamp: 1,
+                    type: 'tool',
+                    toolName: 'Write',
+                    toolStatus: 'completed',
+                    toolDetail: 'docs/GDD.md',
+                    toolOutput: 'Created successfully',
+                    artifactId: 'artifact_docs_gdd',
+                },
+            ],
+        });
+
+        const toolToggle = screen.getByRole('button', { name: /Write completed/i });
+        expect(toolToggle).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
+
+        await user.click(toolToggle);
+        expect(toolToggle).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByText('docs/GDD.md')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Open docs/GDD.md' }));
+        expect(onPreviewArtifact).toHaveBeenCalledWith('artifact_docs_gdd', 'docs/GDD.md', undefined);
+
+        await user.click(screen.getByRole('button', { name: 'Diff docs/GDD.md' }));
+        expect(onPreviewArtifact).toHaveBeenCalledWith(
+            'artifact_docs_gdd:diff',
+            'Diff: docs/GDD.md',
+            expect.stringContaining('Created successfully'),
+        );
+    });
+
+    it('does not draw a timeline connector below the final BeeGame tool card', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_write',
+                    sender: 'system',
+                    content: 'Write completed\nTarget: docs/GDD.md',
+                    timestamp: 1,
+                    type: 'tool',
+                    toolName: 'Write',
+                    toolStatus: 'completed',
+                    toolDetail: 'docs/GDD.md',
+                },
+                {
+                    id: 'm_bash',
+                    sender: 'system',
+                    content: 'Bash completed\nCommand: bun run build',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Bash',
+                    toolStatus: 'completed',
+                    toolDetail: 'bun run build',
+                },
+            ],
+        });
+
+        const toolCards = screen.getAllByTestId('beegame-tool-timeline-card');
+        expect(toolCards[0].querySelector('[data-testid="beegame-tool-connector"]')).not.toBeNull();
+        expect(toolCards[1].querySelector('[data-testid="beegame-tool-connector"]')).toBeNull();
+    });
+
+    it('keeps the legacy message rendering path outside BeeGame mode', () => {
+        renderChatPanel({
+            gddReview: undefined,
+            pendingReviews: [],
+            messages: [
+                {
+                    id: 'm_agent',
+                    sender: 'beegame',
+                    content: 'Legacy chat message',
+                    timestamp: 2,
+                },
+            ],
+        });
+
+        expect(screen.queryByTestId('beegame-collaboration-feed')).not.toBeInTheDocument();
+        expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
+        expect(screen.getByText('Legacy chat message')).toBeInTheDocument();
     });
 
     it('restores the normal composer after approval state idles and the pending review is removed', () => {

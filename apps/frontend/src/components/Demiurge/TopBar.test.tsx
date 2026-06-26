@@ -34,6 +34,7 @@ describe('TopBar localized BeeGame labels', () => {
 
         expect(screen.getByText('运行中')).toBeInTheDocument();
         expect(screen.getByText('阶段')).toBeInTheDocument();
-        expect(screen.getByText('实现构建 · 25%')).toBeInTheDocument();
+        expect(screen.getByText('实现构建')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建 · 25%')).not.toBeInTheDocument();
     });
 });

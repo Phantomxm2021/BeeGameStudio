@@ -1,24 +1,27 @@
-import { AlertTriangle, Box, ChevronLeft, ExternalLink, Globe2, MonitorPlay, RefreshCw, Settings, Square } from 'lucide-react';
-import type { Language } from './AgentsConfig';
+import { type ReactNode, useEffect, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square } from 'lucide-react';
+import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
+import { SettingsMenu } from './Landing/SettingsMenu';
 import type { BuildReportPayload } from '../../services/api';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
+type PreviewControl = 'reload' | 'stop' | 'play' | 'open';
 
 interface BeeGameLivePreviewPageProps {
     lang: Language;
     projectName: string;
     status: DashboardStatus;
     phaseLabel: string;
-    progress: number;
     tokens: number;
+    modelName: string;
     isSyncing: boolean;
     buildReport?: BuildReportPayload | null;
     onReload?: () => void;
     onOpenExternal?: (url: string) => void;
-    onStop?: () => void;
+    onStop?: () => void | Promise<void>;
+    onBack?: () => void;
     onSetLang: (lang: Language) => void;
-    onToggleTheme: () => void;
 }
 
 const LABELS: Record<Language, {
@@ -32,11 +35,19 @@ const LABELS: Record<Language, {
     reload: string;
     open: string;
     stop: string;
+    pausePreview: string;
+    play: string;
     build: string;
     health: string;
     entrypoint: string;
     unavailable: string;
     tokens: string;
+    phase: string;
+    model: string;
+    syncing: string;
+    back: string;
+    settings: string;
+    language: string;
 }> = {
     zh: {
         title: '实时游戏画面',
@@ -49,11 +60,19 @@ const LABELS: Record<Language, {
         reload: '刷新预览',
         open: '在新窗口打开',
         stop: '停止运行',
+        pausePreview: '暂停预览',
+        play: '播放预览',
         build: '构建',
         health: '健康状态',
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消耗',
+        phase: '阶段',
+        model: '模型',
+        syncing: '同步中',
+        back: '返回项目列表',
+        settings: '设置',
+        language: '语言',
     },
     'zh-TW': {
         title: '即時遊戲畫面',
@@ -66,11 +85,19 @@ const LABELS: Record<Language, {
         reload: '重新整理預覽',
         open: '在新視窗開啟',
         stop: '停止執行',
+        pausePreview: '暫停預覽',
+        play: '播放預覽',
         build: '建構',
         health: '健康狀態',
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消耗',
+        phase: '階段',
+        model: '模型',
+        syncing: '同步中',
+        back: '返回專案列表',
+        settings: '設定',
+        language: '語言',
     },
     en: {
         title: 'Live Game Preview',
@@ -83,11 +110,19 @@ const LABELS: Record<Language, {
         reload: 'Reload preview',
         open: 'Open in new window',
         stop: 'Stop runtime',
+        pausePreview: 'Pause preview',
+        play: 'Start preview',
         build: 'Build',
         health: 'Health',
         entrypoint: 'Entrypoint',
         unavailable: 'Unavailable',
         tokens: 'Tokens',
+        phase: 'Phase',
+        model: 'Model',
+        syncing: 'Syncing',
+        back: 'Back to projects',
+        settings: 'Settings',
+        language: 'Language',
     },
     ja: {
         title: 'ライブゲームプレビュー',
@@ -100,11 +135,19 @@ const LABELS: Record<Language, {
         reload: 'プレビューを更新',
         open: '新しいウィンドウで開く',
         stop: '実行を停止',
+        pausePreview: 'プレビューを一時停止',
+        play: 'プレビューを開始',
         build: 'ビルド',
         health: '状態',
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消費',
+        phase: 'フェーズ',
+        model: 'モデル',
+        syncing: '同期中',
+        back: 'プロジェクト一覧に戻る',
+        settings: '設定',
+        language: '言語',
     },
     ko: {
         title: '실시간 게임 화면',
@@ -117,11 +160,19 @@ const LABELS: Record<Language, {
         reload: '미리보기 새로고침',
         open: '새 창에서 열기',
         stop: '실행 중지',
+        pausePreview: '미리보기 일시 정지',
+        play: '미리보기 시작',
         build: '빌드',
         health: '상태',
         entrypoint: '진입점',
         unavailable: '없음',
         tokens: '토큰',
+        phase: '단계',
+        model: '모델',
+        syncing: '동기화 중',
+        back: '프로젝트 목록으로 돌아가기',
+        settings: '설정',
+        language: '언어',
     },
     fr: {
         title: 'Aperçu du jeu en direct',
@@ -134,11 +185,19 @@ const LABELS: Record<Language, {
         reload: 'Recharger l’aperçu',
         open: 'Ouvrir dans une nouvelle fenêtre',
         stop: 'Arrêter le runtime',
+        pausePreview: 'Mettre l’aperçu en pause',
+        play: 'Démarrer l’aperçu',
         build: 'Build',
         health: 'Santé',
         entrypoint: 'Entrée',
         unavailable: 'Indisponible',
         tokens: 'Tokens',
+        phase: 'Phase',
+        model: 'Modèle',
+        syncing: 'Synchronisation',
+        back: 'Retour aux projets',
+        settings: 'Réglages',
+        language: 'Langue',
     },
     de: {
         title: 'Live-Spielvorschau',
@@ -151,11 +210,19 @@ const LABELS: Record<Language, {
         reload: 'Vorschau neu laden',
         open: 'In neuem Fenster öffnen',
         stop: 'Runtime stoppen',
+        pausePreview: 'Vorschau pausieren',
+        play: 'Vorschau starten',
         build: 'Build',
         health: 'Status',
         entrypoint: 'Einstieg',
         unavailable: 'Nicht verfügbar',
         tokens: 'Tokens',
+        phase: 'Phase',
+        model: 'Modell',
+        syncing: 'Synchronisierung',
+        back: 'Zurück zu Projekten',
+        settings: 'Einstellungen',
+        language: 'Sprache',
     },
     es: {
         title: 'Vista previa del juego',
@@ -168,11 +235,19 @@ const LABELS: Record<Language, {
         reload: 'Recargar vista previa',
         open: 'Abrir en una ventana nueva',
         stop: 'Detener runtime',
+        pausePreview: 'Pausar vista previa',
+        play: 'Iniciar vista previa',
         build: 'Build',
         health: 'Estado',
         entrypoint: 'Entrada',
         unavailable: 'No disponible',
         tokens: 'Tokens',
+        phase: 'Fase',
+        model: 'Modelo',
+        syncing: 'Sincronizando',
+        back: 'Volver a proyectos',
+        settings: 'Configuración',
+        language: 'Idioma',
     },
     it: {
         title: 'Anteprima gioco live',
@@ -185,11 +260,19 @@ const LABELS: Record<Language, {
         reload: 'Ricarica anteprima',
         open: 'Apri in una nuova finestra',
         stop: 'Ferma runtime',
+        pausePreview: 'Metti in pausa anteprima',
+        play: 'Avvia anteprima',
         build: 'Build',
         health: 'Stato',
         entrypoint: 'Entrypoint',
         unavailable: 'Non disponibile',
         tokens: 'Token',
+        phase: 'Fase',
+        model: 'Modello',
+        syncing: 'Sincronizzazione',
+        back: 'Torna ai progetti',
+        settings: 'Impostazioni',
+        language: 'Lingua',
     },
     pt: {
         title: 'Prévia do jogo ao vivo',
@@ -202,11 +285,19 @@ const LABELS: Record<Language, {
         reload: 'Recarregar prévia',
         open: 'Abrir em nova janela',
         stop: 'Parar runtime',
+        pausePreview: 'Pausar prévia',
+        play: 'Iniciar prévia',
         build: 'Build',
         health: 'Saúde',
         entrypoint: 'Entrada',
         unavailable: 'Indisponível',
         tokens: 'Tokens',
+        phase: 'Fase',
+        model: 'Modelo',
+        syncing: 'Sincronizando',
+        back: 'Voltar aos projetos',
+        settings: 'Configurações',
+        language: 'Idioma',
     },
 };
 
@@ -214,6 +305,17 @@ const normalizeUrl = (url?: string): string => {
     const value = String(url || '').trim();
     if (!value) return '';
     return value;
+};
+
+const getPreviewTitle = (labels: { title: string }): string => {
+    if (labels.title.includes('游戏画面')) return '预览';
+    if (labels.title.includes('遊戲畫面')) return '預覽';
+    if (labels.title.includes('预览')) return '预览';
+    if (labels.title.includes('預覽')) return '預覽';
+    if (labels.title.includes('Preview')) return 'Preview';
+    if (labels.title.includes('プレビュー')) return 'プレビュー';
+    if (labels.title.includes('화면')) return '미리보기';
+    return labels.title;
 };
 
 const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPayload | null): PreviewState => {
@@ -232,20 +334,29 @@ export function BeeGameLivePreviewPage({
     projectName,
     status,
     phaseLabel,
-    progress,
     tokens,
+    modelName,
     isSyncing,
     buildReport,
     onReload,
     onOpenExternal,
     onStop,
+    onBack,
     onSetLang,
-    onToggleTheme,
 }: BeeGameLivePreviewPageProps) {
+    const [isProjectHintOpen, setProjectHintOpen] = useState(false);
+    const [isUserMenuOpen, setUserMenuOpen] = useState(false);
+    const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
+    const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
+    const [isStoppingPreview, setStoppingPreview] = useState(false);
     const labels = LABELS[lang] || LABELS.en;
     const previewUrl = normalizeUrl(buildReport?.build_url);
-    const previewState = getPreviewState(status, buildReport);
+    const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
+    const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
+    const canStopPreview = (status === 'running' || canShowPreview) && !isStoppingPreview;
+    const stopLabel = canShowPreview ? labels.pausePreview : labels.stop;
     const statusText = previewState === 'live'
         ? labels.live
         : previewState === 'failed'
@@ -255,6 +366,29 @@ export function BeeGameLivePreviewPage({
                 : previewState === 'starting'
                     ? labels.starting
                     : labels.waiting;
+    const handleStop = async () => {
+        if (!canStopPreview) return;
+        if (canShowPreview && previewUrl) {
+            setStoppedPreviewUrl(previewUrl);
+            return;
+        }
+        setStoppingPreview(true);
+        try {
+            await onStop?.();
+            if (previewUrl) setStoppedPreviewUrl(previewUrl);
+        } finally {
+            setStoppingPreview(false);
+        }
+    };
+    const handlePlay = () => {
+        setStoppedPreviewUrl('');
+        onReload?.();
+    };
+    const currentLanguageLabel = LANGUAGE_OPTIONS.find(option => option.code === lang)?.label || LANGUAGE_OPTIONS[0]?.label || '';
+
+    useEffect(() => {
+        setStoppedPreviewUrl('');
+    }, [previewUrl]);
 
     return (
         <main
@@ -263,18 +397,29 @@ export function BeeGameLivePreviewPage({
         >
             <header
                 data-testid="beegame-shell-top-nav"
-                className="absolute left-0 right-0 top-0 z-30 flex h-20 items-center border-b border-zinc-800/80 bg-[#080c10]/95 px-7 backdrop-blur-xl"
+                className="absolute left-0 right-0 top-0 z-[90] flex h-20 items-center border-b border-zinc-800/80 bg-[#080c10]/95 px-7 backdrop-blur-xl"
             >
-                <div className="flex w-36 items-center gap-3">
-                    <div className="grid h-8 w-8 place-items-center rounded-xl border border-orange-500/50 text-orange-400">
-                        <Box className="h-4 w-4" />
-                    </div>
-                    <div className="text-lg font-black tracking-tight">BeeGame</div>
-                </div>
-
-                <div className="flex h-12 min-w-0 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4">
-                    <ChevronLeft className="h-4 w-4 text-zinc-500" />
-                    <div className="truncate text-lg font-black text-zinc-100">{projectName}</div>
+                <div className="relative flex min-w-0 items-center gap-4">
+                    <button
+                        type="button"
+                        aria-label={labels.back}
+                        onClick={onBack}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-600 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
+                    >
+                        <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                        type="button"
+                        data-testid="beegame-project-trigger"
+                        aria-describedby={isProjectHintOpen ? 'beegame-project-hint' : undefined}
+                        onMouseEnter={() => setProjectHintOpen(true)}
+                        onMouseLeave={() => setProjectHintOpen(false)}
+                        onFocus={() => setProjectHintOpen(true)}
+                        onBlur={() => setProjectHintOpen(false)}
+                        className="min-w-0 max-w-[34rem] truncate bg-transparent p-0 text-left text-lg font-black text-zinc-100 outline-none transition hover:text-white focus-visible:text-white"
+                    >
+                        {projectName}
+                    </button>
                     <div className="flex items-center gap-2 rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-300">
                         <Globe2 className="h-3.5 w-3.5" />
                         Web
@@ -285,86 +430,140 @@ export function BeeGameLivePreviewPage({
                     </div>
                     {isSyncing ? (
                         <div className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-400">
-                            Syncing
+                            {labels.syncing}
+                        </div>
+                    ) : null}
+                    {isProjectHintOpen ? (
+                        <div
+                            id="beegame-project-hint"
+                            role="tooltip"
+                            data-testid="beegame-project-hint"
+                            className="absolute left-5 top-12 z-50 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
+                        >
+                            <ProjectHintRow label={labels.tokens} value={tokens.toLocaleString()} />
+                            <ProjectHintRow label={labels.phase} value={phaseLabel} />
+                            <ProjectHintRow label={labels.model} value={modelName || labels.unavailable} />
                         </div>
                     ) : null}
                 </div>
 
-                <div className="ml-6 flex items-center divide-x divide-zinc-800">
-                    <HeaderMetric label={labels.tokens} value={tokens.toLocaleString()} />
-                    <HeaderMetric label="Phase" value={`${phaseLabel} · ${Math.floor(progress)}%`} />
-                    <HeaderMetric label="Model" value="Claude Sonnet 4" />
-                </div>
-
-                <div className="ml-auto flex items-center gap-3">
-                    <select
-                        aria-label="Language"
-                        value={lang}
-                        onChange={(event) => onSetLang(event.target.value as Language)}
-                        className="h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm font-bold text-zinc-200 outline-none"
-                    >
-                        <option value="zh">简体中文</option>
-                        <option value="zh-TW">繁體中文</option>
-                        <option value="en">English</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
-                    </select>
+                <div
+                    className="relative ml-auto"
+                    onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                            setUserMenuOpen(false);
+                        }
+                    }}
+                >
                     <button
                         type="button"
-                        aria-label="Theme"
-                        onClick={onToggleTheme}
-                        className="grid h-10 w-10 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300"
+                        aria-label={labels.settings}
+                        aria-expanded={isUserMenuOpen}
+                        onClick={() => setUserMenuOpen(open => !open)}
+                        className="flex h-11 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-2 pl-3 text-zinc-200 transition hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none"
                     >
-                        <Settings className="h-4 w-4" />
+                        <span className="grid h-7 w-7 place-items-center rounded-full bg-zinc-800 text-sm font-black text-zinc-100">
+                            N
+                        </span>
+                        <ChevronDown className={`h-4 w-4 text-zinc-500 transition ${isUserMenuOpen ? 'rotate-180' : ''}`} />
                     </button>
-                    <div className="grid h-11 w-11 place-items-center rounded-full border border-zinc-800 bg-zinc-900 text-sm font-black text-zinc-200">
-                        N
-                    </div>
+                    {isUserMenuOpen ? (
+                        <div
+                            role="menu"
+                            data-testid="beegame-user-settings-menu"
+                            className="absolute right-0 top-14 z-[80] w-72 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 text-zinc-100 shadow-2xl shadow-black/50 backdrop-blur-xl"
+                        >
+                            <div className="flex items-center gap-3 px-2 pb-3">
+                                <div className="grid h-9 w-9 place-items-center rounded-full bg-zinc-900 text-sm font-black">N</div>
+                                <div className="min-w-0">
+                                    <div className="text-sm font-black">N</div>
+                                    <div className="truncate text-xs font-bold text-zinc-500">{currentLanguageLabel}</div>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                aria-label={labels.settings}
+                                onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    setUserMenuOpen(false);
+                                    setSettingsOpen(true);
+                                }}
+                                onClick={() => {
+                                    setUserMenuOpen(false);
+                                    setSettingsOpen(true);
+                                }}
+                                className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 text-left transition hover:border-zinc-700 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/50"
+                            >
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-800 text-zinc-300">
+                                    <Settings className="h-4 w-4" />
+                                </span>
+                                <div className="min-w-0">
+                                    <div className="text-sm font-black">{labels.settings}</div>
+                                    <div className="truncate text-xs font-bold text-zinc-500">{currentLanguageLabel}</div>
+                                </div>
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
             </header>
 
             <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
-                <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
+                <section className="min-h-0 flex-1 overflow-visible rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
                     <div className="flex h-20 items-center justify-between px-9">
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
                                 <h1 className="text-2xl font-black text-zinc-100">
-                                    {labels.title.replace('游戏画面', '预览')}
+                                    {getPreviewTitle(labels)}
                                 </h1>
-                                <span className="text-sm font-bold text-zinc-500">Live Preview</span>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <button
-                                type="button"
-                                aria-label={labels.reload}
-                                title={labels.reload}
-                                onClick={onReload}
+                            <PreviewControlButton
+                                control="reload"
+                                label={labels.reload}
                                 disabled={!canShowPreview}
-                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                                hoveredControl={hoveredControl}
+                                setHoveredControl={setHoveredControl}
+                                onClick={onReload}
                             >
                                 <RefreshCw className="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                aria-label={labels.open}
-                                title={labels.open}
-                                onClick={() => previewUrl && onOpenExternal?.(previewUrl)}
+                            </PreviewControlButton>
+                            {isPreviewLocallyStopped ? (
+                                <PreviewControlButton
+                                    control="play"
+                                    label={labels.play}
+                                    disabled={!previewUrl}
+                                    hoveredControl={hoveredControl}
+                                    setHoveredControl={setHoveredControl}
+                                    onClick={handlePlay}
+                                >
+                                    <Play className="h-4 w-4 fill-emerald-400 text-emerald-400" />
+                                </PreviewControlButton>
+                            ) : (
+                                <PreviewControlButton
+                                    control="stop"
+                                    label={stopLabel}
+                                    disabled={!canStopPreview}
+                                    hoveredControl={hoveredControl}
+                                    setHoveredControl={setHoveredControl}
+                                    onClick={handleStop}
+                                >
+                                    <Square className="h-4 w-4 fill-red-500 text-red-500" />
+                                </PreviewControlButton>
+                            )}
+                            <PreviewControlButton
+                                control="open"
+                                label={labels.open}
                                 disabled={!canShowPreview}
-                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                                hoveredControl={hoveredControl}
+                                setHoveredControl={setHoveredControl}
+                                onClick={() => {
+                                    if (previewUrl) onOpenExternal?.(previewUrl);
+                                }}
                             >
                                 <ExternalLink className="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                aria-label={labels.stop}
-                                title={labels.stop}
-                                onClick={onStop}
-                                disabled={status !== 'running'}
-                                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
-                            >
-                                <Square className="h-4 w-4 fill-red-500 text-red-500" />
-                            </button>
+                            </PreviewControlButton>
                         </div>
                     </div>
 
@@ -397,19 +596,76 @@ export function BeeGameLivePreviewPage({
 
                 </section>
             </div>
+
+            <SettingsMenu
+                isOpen={isSettingsOpen}
+                lang={lang}
+                onClose={() => setSettingsOpen(false)}
+                onSetLang={onSetLang}
+            />
         </main>
     );
 }
 
-function HeaderMetric({ label, value }: { label: string; value: string }) {
+function ProjectHintRow({ label, value }: { label: string; value: string }) {
     return (
-        <div className="min-w-0 px-5">
-            <div className="text-xs font-medium text-zinc-500">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-800/70 py-2 last:border-b-0">
+            <div className="shrink-0 text-xs font-bold text-zinc-500">
                 {label}
             </div>
-            <div className="mt-1 truncate text-sm font-bold text-zinc-100">
+            <div className="min-w-0 truncate text-right text-sm font-bold text-zinc-100">
                 {value}
             </div>
+        </div>
+    );
+}
+
+function PreviewControlButton({
+    control,
+    label,
+    disabled,
+    hoveredControl,
+    setHoveredControl,
+    onClick,
+    children,
+}: {
+    control: PreviewControl;
+    label: string;
+    disabled: boolean;
+    hoveredControl: PreviewControl | null;
+    setHoveredControl: (control: PreviewControl | null) => void;
+    onClick?: () => void | Promise<void>;
+    children: ReactNode;
+}) {
+    const isHintVisible = hoveredControl === control;
+    return (
+        <div
+            className="relative"
+            onMouseEnter={() => setHoveredControl(control)}
+            onMouseLeave={() => setHoveredControl(null)}
+        >
+            <button
+                type="button"
+                aria-label={label}
+                aria-describedby={isHintVisible ? `beegame-preview-control-${control}` : undefined}
+                title={label}
+                onFocus={() => setHoveredControl(control)}
+                onBlur={() => setHoveredControl(null)}
+                onClick={onClick}
+                disabled={disabled}
+                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+            >
+                {children}
+            </button>
+            {isHintVisible ? (
+                <div
+                    id={`beegame-preview-control-${control}`}
+                    role="tooltip"
+                    className="pointer-events-none absolute -top-10 left-1/2 z-[100] -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-200 shadow-xl shadow-black/40"
+                >
+                    {label}
+                </div>
+            ) : null}
         </div>
     );
 }

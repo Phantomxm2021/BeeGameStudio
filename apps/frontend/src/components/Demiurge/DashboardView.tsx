@@ -16,12 +16,14 @@ import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/wait
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
 import { isBeeGameAdapterEnabled } from '../../services/beeGameAdapter';
+import { listModelConfigs, type ModelConfig } from '../../services/modelConfigApi';
 
 interface DashboardViewProps {
     projectId: string;
     projectName: string;
     lang: Language;
     onSetLang: (lang: Language) => void;
+    onBack?: () => void;
     initialPrompt?: string;
 }
 
@@ -172,8 +174,14 @@ const fallbackPhaseLabel = (phaseName: string): string => {
         .join(' ');
 };
 
-export function DashboardView({ projectId, projectName, lang, onSetLang, initialPrompt }: DashboardViewProps) {
+const getModelDisplayName = (config?: ModelConfig): string => {
+    if (!config) return '';
+    return config.models.balanced || config.models.strong || config.models.fast || config.name || '';
+};
+
+export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
+    const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
     const hasSentInitialPrompt = useRef(false);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isBeeGameMode = isBeeGameAdapterEnabled();
@@ -243,6 +251,25 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         hasSentInitialPrompt.current = false;
         setInitialGateStateReady(false);
     }, [projectId]);
+
+    useEffect(() => {
+        if (!isBeeGameMode) return;
+        let cancelled = false;
+        const loadModelConfigList = async () => {
+            try {
+                const configs = await listModelConfigs();
+                if (!cancelled) setModelConfigs(configs);
+            } catch (error) {
+                console.error('Failed to load model configs:', error);
+            }
+        };
+        loadModelConfigList();
+        const interval = setInterval(loadModelConfigList, 10000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [isBeeGameMode]);
 
     // Local derived state mapped from backend
     const isOffline = wsState === 'failed' || wsState === 'disconnected';
@@ -388,6 +415,18 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
         return Math.max(storedTotal, runtimeTotal);
     }, [projectId, projectStatus?.context?.token_budget?.total_tokens, tokenUsage]);
 
+    const currentModelName = useMemo(() => {
+        const currentConfigId = String(projectStatus?.model_config_id || '').trim();
+        const sessionConfig = currentConfigId
+            ? modelConfigs.find((config) => config.id === currentConfigId)
+            : undefined;
+        return getModelDisplayName(
+            sessionConfig ||
+            modelConfigs.find((config) => config.isDefault) ||
+            modelConfigs[0],
+        );
+    }, [modelConfigs, projectStatus?.model_config_id]);
+
     // Logging Token Usage and Progress
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -465,8 +504,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 projectName={displayProjectName}
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
                 phaseLabel={phaseLabel}
-                progress={progressPercent}
                 tokens={displayedTokenTotal}
+                modelName={currentModelName}
                 isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}
                 onReload={() => {
@@ -477,8 +516,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, initial
                 }}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onStop={stopTask}
+                onBack={onBack}
                 onSetLang={onSetLang}
-                onToggleTheme={toggleTheme}
             />
 
             <RightSidebar

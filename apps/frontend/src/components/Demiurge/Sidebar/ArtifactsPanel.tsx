@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Eye, Download } from 'lucide-react';
+import { FileArchive, FileText, Eye, Download } from 'lucide-react';
 
 interface ArtifactsPanelProps {
     artifacts: any[];
@@ -43,6 +43,8 @@ export const ArtifactsPanel = memo(({
                 const artifactId = String(art.artifact_id || art.id || '').trim();
                 const review = reviewStatuses[artifactId];
                 const reviewKey = artifactId || art.id;
+                const isProjectPackage = Boolean(art.package_download);
+                const Icon = isProjectPackage ? FileArchive : FileText;
 
                 return (
                     <motion.div
@@ -54,13 +56,13 @@ export const ArtifactsPanel = memo(({
                         <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-4">
                                 <div className="p-3 bg-zinc-100 dark:bg-zinc-900 rounded-xl text-zinc-900 dark:text-zinc-100">
-                                    <FileText className="w-6 h-6" />
+                                    <Icon className="w-6 h-6" />
                                 </div>
                                 <div>
                                     <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{art.name || `${type} Doc`}</div>
                                     <div className="flex items-center space-x-2 mt-0.5">
                                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-mono tracking-tighter">
-                                            By @{art.created_by || art.author || art.agent_id || 'unknown'} • {review ? `Review: ${review.outcome || 'Pending'}` : 'Locked'}
+                                            {isProjectPackage ? 'Generated on download' : `By @${art.created_by || art.author || art.agent_id || 'unknown'} • ${review ? `Review: ${review.outcome || 'Pending'}` : 'Locked'}`}
                                         </div>
                                         {review && (
                                             <div className="flex -space-x-1">
@@ -76,13 +78,15 @@ export const ArtifactsPanel = memo(({
                                 </div>
                             </div>
                             <div className="flex items-center space-x-2">
-                                <button
-                                    style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                                    onClick={(e) => { e.stopPropagation(); onPreview(reviewKey, art.name || `${type} Doc`); }}
-                                    title="Preview"
-                                >
-                                    <Eye className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
-                                </button>
+                                {!isProjectPackage ? (
+                                    <button
+                                        style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                        onClick={(e) => { e.stopPropagation(); onPreview(reviewKey, art.name || `${type} Doc`); }}
+                                        title="Preview"
+                                    >
+                                        <Eye className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
+                                    </button>
+                                ) : null}
                                 <button
                                     style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                                     onClick={(e) => { e.stopPropagation(); onDownload(reviewKey, art.name || type); }}

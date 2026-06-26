@@ -22,10 +22,14 @@ type QueryEngineConstructor = new (
   config: Record<string, unknown>,
 ) => QueryEngineLike
 
-type MutableAppState = Record<string, unknown> & {
+export type MutableAppState = Record<string, unknown> & {
   toolPermissionContext?: Record<string, unknown>
   agentDefinitions?: unknown
+  tasks?: Record<string, unknown>
 }
+
+type SetMutableAppState = (updater: (prev: MutableAppState) => MutableAppState) => void
+type KillShellTaskFn = (taskId: string, setAppState: SetMutableAppState) => void
 
 type PermissionDecision = {
   behavior: 'allow' | 'deny' | 'ask'
@@ -94,6 +98,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   stop(): void {
     this.engine?.interrupt()
+    void stopRunningLocalShellTasks(this.appState, updater => {
+      if (!this.appState) throw new Error('App state was not initialized')
+      this.appState = updater(this.appState)
+    })
   }
 
   private async ensureEngine(): Promise<QueryEngineLike> {
@@ -268,6 +276,43 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
     return this.engine
   }
+}
+
+export async function stopRunningLocalShellTasks(
+  appState: MutableAppState | null,
+  setAppState: SetMutableAppState,
+  killTaskFn?: KillShellTaskFn,
+): Promise<string[]> {
+  const taskIds = collectRunningLocalShellTaskIds(appState)
+  if (taskIds.length === 0) return []
+  const killTask = killTaskFn ?? await loadKillShellTask()
+  for (const taskId of taskIds) {
+    killTask(taskId, setAppState)
+  }
+  return taskIds
+}
+
+function collectRunningLocalShellTaskIds(appState: MutableAppState | null): string[] {
+  const tasks = appState?.tasks
+  if (!tasks || typeof tasks !== 'object') return []
+  return Object.entries(tasks)
+    .filter(([, task]) => isRunningLocalShellTaskRecord(task))
+    .map(([taskId]) => taskId)
+}
+
+function isRunningLocalShellTaskRecord(task: unknown): boolean {
+  if (typeof task !== 'object' || task === null) return false
+  const record = task as Record<string, unknown>
+  return record.type === 'local_bash' && record.status === 'running'
+}
+
+async function loadKillShellTask(): Promise<KillShellTaskFn> {
+  const module = await loadRootModule('tasks/LocalShellTask/killShellTasks.js')
+  const killTask = module.killTask
+  if (typeof killTask !== 'function') {
+    throw new Error('Missing function export: killTask')
+  }
+  return killTask as KillShellTaskFn
 }
 
 async function loadInitialMessagesForResume(

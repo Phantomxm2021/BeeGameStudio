@@ -24,8 +24,16 @@ import { OperatorControlsPage } from './components/Demiurge/OperatorControlsPage
 import type { Language } from './components/Demiurge/AgentsConfig';
 
 function App() {
-  const { loadProjects, projects, activeProjectId, bootstrapProject, bootstrapProjectFromBrief, setToastCallbacks } = useProjectStore();
-  const { loadStatus, loadAgents, loadActivities, isDark, toggleTheme } = useSystemStore();
+  const {
+    loadProjects,
+    projects,
+    activeProjectId,
+    bootstrapProject,
+    bootstrapProjectFromBrief,
+    setToastCallbacks,
+    clearActiveProject,
+  } = useProjectStore();
+  const { loadStatus, loadAgents, loadActivities, isDark } = useSystemStore();
   const { loadHistory } = useChatStore();
   const { showError, showSuccess } = useToastContext();
 
@@ -136,6 +144,7 @@ function App() {
           projectName={activeProject.name || 'Untitled Project'}
           lang={lang}
           onSetLang={setLang}
+          onBack={clearActiveProject}
           initialPrompt=""
         />
       ) : (
@@ -143,8 +152,6 @@ function App() {
         <LandingView
           lang={lang}
           onSetLang={setLang}
-          isDark={isDark}
-          onToggleTheme={toggleTheme}
           onStart={handleStartProject}
         />
       )}
