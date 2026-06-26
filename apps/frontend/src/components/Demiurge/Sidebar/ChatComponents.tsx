@@ -11,6 +11,8 @@ import { ArtifactCard } from './ArtifactCard';
 import { getSystemStatusLabel, normalizeCanonicalMessageType } from '../../../utils/messageSemantics';
 import type { ChatDisplayMessage, GovernanceDisplaySnapshot } from '../../../viewModels/displayModels';
 
+const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
+
 const getContinueFromLastFailedCheckPrompt = (lang: Language = 'en'): string => {
     if (lang === 'zh' || lang === 'zh-TW') {
         return '继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。';
@@ -643,14 +645,25 @@ export const MessageItem = memo(({
                     onMouseLeave={() => !isUser && setIsHovered(false)}
                     whileHover={{ scale: 1.1 }}
                     className={isBeeGameVariant
-                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'bg-orange-500 text-white'}`
+                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'overflow-hidden border border-orange-400/35 bg-[#2a1a12] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]'}`
                         : `w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
                             ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
                             : (agent?.color || 'bg-zinc-500') + ' text-white'
                             }`
                     }
                 >
-                    {isUser ? <User className={isBeeGameVariant ? 'h-4 w-4' : 'w-6 h-6'} /> : (agent && <agent.icon className={isBeeGameVariant ? 'h-4 w-4' : 'w-6 h-6'} />)}
+                    {isUser ? (
+                        <User className={isBeeGameVariant ? 'h-4 w-4' : 'w-6 h-6'} />
+                    ) : isBeeGameVariant ? (
+                        <img
+                            src={BEEGAME_AVATAR_SRC}
+                            alt="BeeGame"
+                            className="h-5 w-5 object-contain"
+                            draggable={false}
+                        />
+                    ) : (
+                        agent && <agent.icon className="w-6 h-6" />
+                    )}
                 </motion.div>
 
                 <AnimatePresence>

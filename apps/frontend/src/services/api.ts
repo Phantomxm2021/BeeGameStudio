@@ -193,6 +193,49 @@ export interface BeeGamePreviewPayload {
   updatedAt: string;
 }
 
+export type BeeGameAssetIntegrationMode = 'filesystem' | 'mcp' | 'manual';
+
+export interface BeeGameAssetSlotPayload {
+  id: string;
+  name?: string;
+  type?: string;
+  purpose?: string;
+  required?: boolean;
+  placeholder?: boolean;
+  accepted_formats?: string[];
+  recommended_specs?: Record<string, unknown>;
+  target?: {
+    path?: string;
+    integration_notes?: string;
+  };
+  integration_provider?: {
+    type?: BeeGameAssetIntegrationMode;
+    server?: string;
+    capabilities?: string[];
+  };
+  status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed';
+  uploaded_files?: string[];
+  updated_at?: string;
+}
+
+export interface BeeGameAssetManifestPayload {
+  version: number;
+  project_target?: {
+    kind?: string;
+    engine?: string;
+    integration_mode?: BeeGameAssetIntegrationMode;
+    mcp_server?: string;
+  };
+  slots: BeeGameAssetSlotPayload[];
+}
+
+export interface BeeGameAssetUploadPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  path: string;
+  message: string;
+}
+
 export interface ExecutionEvidencePayload {
   execution_id?: string;
   project_id?: string;
@@ -944,6 +987,20 @@ export const api = {
       return beeGameAdapter.stopProjectPreview(projectId);
     }
     throw new Error('Project preview is only available for BeeGame projects');
+  },
+
+  getProjectAssets: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.getProjectAssets(projectId);
+    }
+    throw new Error('Project assets are only available for BeeGame projects');
+  },
+
+  uploadProjectAsset: (projectId: string, slotId: string, file: File) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.uploadProjectAsset(projectId, slotId, file);
+    }
+    throw new Error('Project asset upload is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

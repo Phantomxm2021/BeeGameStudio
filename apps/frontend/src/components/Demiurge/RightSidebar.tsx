@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, MessageSquare } from 'lucide-react';
 import { type Language, translations } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
-import { api, type ReviewBindingPayload } from '../../services/api';
+import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
@@ -14,6 +14,7 @@ import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
 import { ArtifactsPanel } from './Sidebar/ArtifactsPanel';
+import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 
 interface RightSidebarProps {
@@ -61,12 +62,16 @@ export function RightSidebar({
     variant = 'legacy',
 }: RightSidebarProps) {
 
-    const [activeTab, setActiveTab] = useState<'chat' | 'artifacts'>('chat');
+    const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
     const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
+    const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
+    const [isAssetsLoading, setIsAssetsLoading] = useState(false);
+    const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
+    const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
@@ -163,6 +168,29 @@ export function RightSidebar({
         }
     };
 
+    const handleUploadAsset = async (slotId: string, file: File) => {
+        setUploadingAssetSlotId(slotId);
+        try {
+            const result = await api.uploadProjectAsset(projectId, slotId, file);
+            setAssetManifest(result.manifest);
+            setAssetIntegrationMessages(current => ({
+                ...current,
+                [slotId]: result.message,
+            }));
+        } finally {
+            setUploadingAssetSlotId(null);
+        }
+    };
+
+    const handleRequestAssetIntegration = (slot: BeeGameAssetSlotPayload) => {
+        const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
+        onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage);
+    };
+
+    const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
+        onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang));
+    };
+
     // Auto-resize search input
     useEffect(() => {
         const textarea = textareaRef.current;
@@ -232,6 +260,25 @@ export function RightSidebar({
         }
     }, [activeTab, projectId, artifacts.length]);
 
+    useEffect(() => {
+        if (activeTab === 'assets') {
+            const fetchAssets = async () => {
+                try {
+                    setIsAssetsLoading(current => current || !assetManifest);
+                    setAssetManifest(await api.getProjectAssets(projectId));
+                } catch (err) {
+                    console.error('Failed to load project assets:', err);
+                    setAssetManifest({ version: 1, slots: [] });
+                } finally {
+                    setIsAssetsLoading(false);
+                }
+            };
+            fetchAssets();
+            const interval = setInterval(fetchAssets, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [activeTab, projectId]);
+
     const dockClassName = variant === 'beegame'
         ? 'absolute right-4 top-24 bottom-4 w-[420px] z-40 pointer-events-auto'
         : 'absolute right-12 top-28 bottom-12 w-[440px] z-40 pointer-events-auto';
@@ -247,10 +294,15 @@ export function RightSidebar({
             ? 'text-zinc-900 dark:text-zinc-100'
             : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
         }`;
-    const tabLabel = (tab: 'chat' | 'artifacts') => {
-        if (variant !== 'beegame') return t[tab];
-        return tab === 'chat' ? uiText.collabFlow : uiText.deliverables;
+    const tabLabel = (tab: 'chat' | 'artifacts' | 'assets') => {
+        if (variant !== 'beegame') return tab === 'chat' ? t.chat : t.artifacts;
+        if (tab === 'chat') return uiText.collabFlow;
+        if (tab === 'assets') return lang === 'zh' || lang === 'zh-TW' ? '资源' : 'Assets';
+        return uiText.deliverables;
     };
+    const sidebarTabs = variant === 'beegame'
+        ? (['chat', 'artifacts', 'assets'] as const)
+        : (['chat', 'artifacts'] as const);
 
     return (
         <>
@@ -268,7 +320,7 @@ export function RightSidebar({
                     {/* Header Tabs */}
                     <div className={headerClassName}>
                         <div className={variant === 'beegame' ? 'flex items-center gap-6' : 'flex space-x-6'}>
-                            {(['chat', 'artifacts'] as const).map(tab => (
+                            {sidebarTabs.map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -277,6 +329,9 @@ export function RightSidebar({
                                     {tabLabel(tab)}
                                     {variant === 'beegame' && tab === 'artifacts' ? (
                                         <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{artifacts.length}</span>
+                                    ) : null}
+                                    {variant === 'beegame' && tab === 'assets' && assetManifest?.slots.length ? (
+                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{assetManifest.slots.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
                                         <motion.div layoutId="tabUnderline" className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
@@ -325,13 +380,23 @@ export function RightSidebar({
                                 variant={variant}
                                 lang={lang}
                             />
-                        ) : (
+                        ) : activeTab === 'artifacts' ? (
                             <ArtifactsPanel 
                                 artifacts={artifacts}
                                 isLoading={isArtifactsLoading}
                                 reviewStatuses={reviewStatuses}
                                 onPreview={handlePreviewArtifact}
                                 onDownload={handleDownloadArtifact}
+                                lang={lang}
+                            />
+                        ) : (
+                            <AssetsPanel
+                                manifest={assetManifest}
+                                isLoading={isAssetsLoading}
+                                isUploadingSlotId={uploadingAssetSlotId}
+                                onUpload={handleUploadAsset}
+                                onRequestIntegration={handleRequestAssetIntegration}
+                                onRequestAllIntegration={handleRequestAllAssetIntegration}
                                 lang={lang}
                             />
                         )}
@@ -394,4 +459,62 @@ export function RightSidebar({
             />
         </>
     );
+}
+
+function buildAllAssetIntegrationMessage(
+    slots: BeeGameAssetSlotPayload[],
+    uploadedMessages: Record<string, string>,
+    lang: Language
+): string {
+    const directMessages = slots
+        .map(slot => uploadedMessages[slot.id])
+        .filter((message): message is string => Boolean(message));
+    if (directMessages.length === slots.length) {
+        return directMessages.join('\n\n');
+    }
+
+    const lines = slots.map(slot => {
+        const files = slot.uploaded_files?.length
+            ? slot.uploaded_files.join(', ')
+            : slot.target?.path || '';
+        if (lang === 'zh' || lang === 'zh-TW') {
+            return `- ${slot.id}${slot.purpose ? `：${slot.purpose}` : ''}${files ? `；文件：${files}` : ''}`;
+        }
+        return `- ${slot.id}${slot.purpose ? `: ${slot.purpose}` : ''}${files ? `; files: ${files}` : ''}`;
+    });
+
+    if (lang === 'zh' || lang === 'zh-TW') {
+        return [
+            '请统一集成以下已上传资源。',
+            ...lines,
+            '请更新项目引用，运行适合当前项目的检查或预览，并在 assets/asset-manifest.json 中记录每个资源的真实集成状态。',
+        ].join('\n');
+    }
+    return [
+        'Please integrate the following uploaded assets together.',
+        ...lines,
+        'Update project references, run the relevant checks or preview for this project, and record each asset\'s real integration status in assets/asset-manifest.json.',
+    ].join('\n');
+}
+
+function buildAssetIntegrationMessage(slot: BeeGameAssetSlotPayload, lang: Language): string {
+    const files = slot.uploaded_files?.length
+        ? slot.uploaded_files.join(', ')
+        : slot.target?.path || '';
+    if (lang === 'zh' || lang === 'zh-TW') {
+        return [
+            `请集成资源槽 "${slot.id}"。`,
+            files ? `已上传文件：${files}。` : '',
+            slot.purpose ? `用途：${slot.purpose}。` : '',
+            slot.target?.integration_notes ? `集成说明：${slot.target.integration_notes}。` : '',
+            '请更新项目引用，运行适合当前项目的检查或预览，并在 assets/asset-manifest.json 中记录真实集成状态。',
+        ].filter(Boolean).join(' ');
+    }
+    return [
+        `Please integrate asset slot "${slot.id}".`,
+        files ? `Uploaded file: ${files}.` : '',
+        slot.purpose ? `Purpose: ${slot.purpose}.` : '',
+        slot.target?.integration_notes ? `Integration notes: ${slot.target.integration_notes}.` : '',
+        'Update project references, run the relevant checks or preview for this project, and record the real integration status in assets/asset-manifest.json.',
+    ].filter(Boolean).join(' ');
 }

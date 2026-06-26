@@ -1200,6 +1200,10 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('美术方向');
     expect(body.text).toContain('UI/UX');
     expect(body.text).toContain('placeholder/asset slots');
+    expect(body.text).toContain('assets/asset-manifest.json');
+    expect(body.text).toContain('2D/3D/动画/材质/VFX/音频/字体/数据/本地化');
+    expect(body.text).toContain('React/Web 等普通文件项目使用 filesystem');
+    expect(body.text).toContain('Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp');
     expect(body.text).toContain('必须区分“本次交付已实现”和“后续路线图”');
     expect(body.text).toContain('不要把 roadmap 写成已交付能力');
     expect(body.text).toContain('docs 里的 acceptance/checklist 只能作为验收标准');

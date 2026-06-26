@@ -22,6 +22,10 @@ import {
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
+import {
+  readBeeGameAssetManifest,
+  uploadBeeGameAsset,
+} from './beegame/asset-contracts'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
@@ -797,6 +801,37 @@ function registerBeeGameSessionRoutes(
         message === 'Artifact path must stay inside the session workspace'
           ? 400
           : 404,
+      )
+    }
+  })
+
+  app.get(`${basePath}/:id/assets`, async c => {
+    const workspacePath = c.req.query('workspacePath')
+    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
+    try {
+      return c.json(await readBeeGameAssetManifest(workspacePath))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
+    const workspacePath = c.req.query('workspacePath')
+    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
+    const form = await c.req.raw.formData()
+    const file = form.get('file')
+    if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
+    try {
+      return c.json(await uploadBeeGameAsset(
+        workspacePath,
+        c.req.param('slotId'),
+        file,
+      ))
+    } catch (err) {
+      const message = toErrorMessage(err)
+      return c.json(
+        { error: message },
+        message.startsWith('Asset slot not found') ? 404 : 400,
       )
     }
   })

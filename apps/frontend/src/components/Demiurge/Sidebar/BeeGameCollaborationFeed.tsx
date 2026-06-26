@@ -1,6 +1,5 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
-    Bot,
     ChevronDown,
     ChevronRight,
     CheckCircle2,
@@ -17,11 +16,19 @@ import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
 import { getBeeGameText, type BeeGameText } from '../BeeGameI18n';
 
+const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
+
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     lang?: Language;
+};
+
+type BeeGameConversationOverviewRulerProps = {
+    messages: ChatDisplayMessage[];
+    lang?: Language;
+    scrollContainerRef?: RefObject<HTMLDivElement | null>;
 };
 
 type ToolFeedMessage = ChatDisplayMessage & {
@@ -192,27 +199,359 @@ export const BeeGameCollaborationFeed = memo(({
     const text = getBeeGameText(lang);
 
     return (
-        <div data-testid="beegame-collaboration-feed" className="space-y-3">
-            {entries.map((entry) => (
-                entry.kind === 'user' ? (
-                    <UserMessageCard key={entry.message.id} message={entry.message} text={text} />
-                ) : entry.kind === 'agent' ? (
-                    <AgentFeedGroup
-                        key={entry.message.id}
-                        message={entry.message}
-                        tools={entry.tools}
-                        onPreviewArtifact={onPreviewArtifact}
-                        text={text}
-                    />
-                ) : (
-                    <ToolGroup key={entry.id} tools={entry.tools} onPreviewArtifact={onPreviewArtifact} text={text} />
-                )
-            ))}
+        <div data-testid="beegame-collaboration-feed" className="relative min-h-full pl-12">
+            <div className="relative z-10 space-y-3">
+                {entries.map((entry) => (
+                    entry.kind === 'user' ? (
+                        <div key={entry.message.id} data-beegame-message-anchor={entry.message.id}>
+                            <UserMessageCard message={entry.message} text={text} />
+                        </div>
+                    ) : entry.kind === 'agent' ? (
+                        <div key={entry.message.id} data-beegame-message-anchor={entry.message.id}>
+                            <AgentFeedGroup
+                                message={entry.message}
+                                tools={entry.tools}
+                                onPreviewArtifact={onPreviewArtifact}
+                                text={text}
+                            />
+                        </div>
+                    ) : (
+                        <div key={entry.id} data-beegame-message-anchor={entry.id}>
+                            <ToolGroup tools={entry.tools} onPreviewArtifact={onPreviewArtifact} text={text} />
+                        </div>
+                    )
+                ))}
+            </div>
         </div>
     );
 });
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
+
+export const BeeGameConversationOverviewRuler = memo(({
+    messages,
+    lang = 'en',
+    scrollContainerRef,
+}: BeeGameConversationOverviewRulerProps) => {
+    const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const text = getBeeGameText(lang);
+    const axisEntries = useMemo(() => buildAxisEntries(entries, text), [entries, text]);
+    const [activeAxisId, setActiveAxisId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (axisEntries.length === 0) {
+            setActiveAxisId(null);
+            return;
+        }
+
+        const scrollParent = scrollContainerRef?.current || window;
+        const updateActiveEntry = () => {
+            const finalAxisId = axisEntries[axisEntries.length - 1]?.id || null;
+            if (finalAxisId && isScrolledToEnd(scrollParent)) {
+                setActiveAxisId(finalAxisId);
+                return;
+            }
+
+            const viewportRect = 'getBoundingClientRect' in scrollParent && typeof scrollParent.getBoundingClientRect === 'function'
+                ? scrollParent.getBoundingClientRect()
+                : { top: 0, height: window.innerHeight || document.documentElement.clientHeight };
+            const viewportCenter = viewportRect.top + viewportRect.height / 2;
+            let nextActiveId = axisEntries[0]?.id || null;
+            let closestDistance = Number.POSITIVE_INFINITY;
+
+            for (const entry of axisEntries) {
+                const target = document.querySelector<HTMLElement>(`[data-beegame-message-anchor="${CSS.escape(entry.id)}"]`);
+                if (!target) continue;
+                const rect = target.getBoundingClientRect();
+                const targetCenter = rect.top + rect.height / 2;
+                const distance = Math.abs(targetCenter - viewportCenter);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    nextActiveId = entry.id;
+                }
+            }
+
+            setActiveAxisId(nextActiveId);
+        };
+
+        updateActiveEntry();
+        scrollParent.addEventListener('scroll', updateActiveEntry, { passive: true });
+        window.addEventListener('resize', updateActiveEntry);
+        return () => {
+            scrollParent.removeEventListener('scroll', updateActiveEntry);
+            window.removeEventListener('resize', updateActiveEntry);
+        };
+    }, [axisEntries, scrollContainerRef]);
+
+    return (
+        <ConversationAxis
+            entries={axisEntries}
+            activeId={activeAxisId || axisEntries[0]?.id || null}
+            scrollContainerRef={scrollContainerRef}
+        />
+    );
+});
+
+BeeGameConversationOverviewRuler.displayName = 'BeeGameConversationOverviewRuler';
+
+const isScrolledToEnd = (scrollParent: HTMLElement | Window): boolean => {
+    if ('scrollTop' in scrollParent) {
+        if (scrollParent.scrollHeight <= scrollParent.clientHeight) return false;
+        return scrollParent.scrollTop + scrollParent.clientHeight >= scrollParent.scrollHeight - 4;
+    }
+
+    const documentElement = document.documentElement;
+    const scrollTop = window.scrollY || documentElement.scrollTop || document.body.scrollTop || 0;
+    const viewportHeight = window.innerHeight || documentElement.clientHeight || 0;
+    const scrollHeight = documentElement.scrollHeight || document.body.scrollHeight || 0;
+    if (scrollHeight <= viewportHeight) return false;
+    return scrollTop + viewportHeight >= scrollHeight - 4;
+};
+
+type AxisEntry = {
+    id: string;
+    title: string;
+    preview: string;
+    tone: 'user' | 'agent' | 'tool';
+};
+
+const toAxisPreview = (content: string): string => {
+    const normalized = content
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(' ');
+    if (normalized.length <= 92) return normalized;
+    return `${normalized.slice(0, 92).trim()}...`;
+};
+
+const buildAxisEntries = (entries: FeedEntry[], text: BeeGameText): AxisEntry[] => {
+    return entries.map((entry) => {
+        if (entry.kind === 'user') {
+            return {
+                id: entry.message.id,
+                title: text.you,
+                preview: toAxisPreview(entry.message.content),
+                tone: 'user',
+            };
+        }
+        if (entry.kind === 'agent') {
+            return {
+                id: entry.message.id,
+                title: 'BeeGame',
+                preview: toAxisPreview(entry.message.content),
+                tone: 'agent',
+            };
+        }
+        const firstTool = entry.tools[0];
+        return {
+            id: entry.id,
+            title: firstTool ? getToolTitle(firstTool, text) : GENERIC_TOOL_NAME,
+            preview: toAxisPreview(entry.tools.map((tool) => getToolTitle(tool, text)).join('\n')),
+            tone: 'tool',
+        };
+    });
+};
+
+function ConversationAxis({
+    entries,
+    activeId,
+    scrollContainerRef,
+}: {
+    entries: AxisEntry[];
+    activeId: string | null;
+    scrollContainerRef?: RefObject<HTMLDivElement | null>;
+}) {
+    const railRef = useRef<HTMLDivElement>(null);
+    const shellRef = useRef<HTMLDivElement>(null);
+    const scrollAnimationRef = useRef<number | null>(null);
+    const [hoveredId, setHoveredId] = useState<string | null>(null);
+    const [previewTop, setPreviewTop] = useState(0);
+    const hoveredIndex = entries.findIndex((entry) => entry.id === hoveredId);
+    const hoveredEntry = entries.find((entry) => entry.id === hoveredId);
+
+    useEffect(() => {
+        if (!activeId) return;
+        const target = railRef.current?.querySelector<HTMLElement>(`[data-axis-entry-id="${CSS.escape(activeId)}"]`);
+        if (typeof target?.scrollIntoView === 'function') {
+            target.scrollIntoView({ block: 'nearest' });
+        }
+    }, [activeId]);
+
+    useEffect(() => {
+        return () => {
+            if (scrollAnimationRef.current !== null) {
+                window.cancelAnimationFrame(scrollAnimationRef.current);
+            }
+        };
+    }, []);
+
+    const animateScrollTo = (scrollContainer: HTMLDivElement, nextScrollTop: number) => {
+        if (scrollAnimationRef.current !== null) {
+            window.cancelAnimationFrame(scrollAnimationRef.current);
+        }
+
+        const startScrollTop = scrollContainer.scrollTop;
+        const distance = nextScrollTop - startScrollTop;
+        if (Math.abs(distance) < 1) {
+            scrollContainer.scrollTop = nextScrollTop;
+            scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+            return;
+        }
+
+        const duration = Math.min(560, Math.max(240, Math.abs(distance) * 0.55));
+        const startedAt = performance.now();
+        const easeOutCubic = (progress: number) => 1 - Math.pow(1 - progress, 3);
+
+        const step = (timestamp: number) => {
+            const progress = Math.min(1, (timestamp - startedAt) / duration);
+            scrollContainer.scrollTop = startScrollTop + distance * easeOutCubic(progress);
+            scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+            if (progress < 1) {
+                scrollAnimationRef.current = window.requestAnimationFrame(step);
+                return;
+            }
+
+            scrollContainer.scrollTop = nextScrollTop;
+            scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+            scrollAnimationRef.current = null;
+        };
+
+        scrollAnimationRef.current = window.requestAnimationFrame(step);
+    };
+
+    const scrollToEntry = (id: string) => {
+        const target = document.querySelector<HTMLElement>(`[data-beegame-message-anchor="${CSS.escape(id)}"]`);
+        if (!target) return;
+
+        const scrollContainer = scrollContainerRef?.current;
+        if (!scrollContainer) {
+            target.scrollIntoView({ block: 'center', behavior: 'auto' });
+            return;
+        }
+
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const targetTop = targetRect.top - containerRect.top + scrollContainer.scrollTop;
+        const targetHeight = target.offsetHeight || targetRect.height;
+        const nextScrollTop = Math.max(0, targetTop - (scrollContainer.clientHeight - targetHeight) / 2);
+        animateScrollTo(scrollContainer, nextScrollTop);
+    };
+    const updateHoveredEntry = (entryId: string, element: HTMLElement) => {
+        setHoveredId(entryId);
+        const shellRect = shellRef.current?.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        if (!shellRect) {
+            setPreviewTop(element.offsetTop + element.offsetHeight / 2);
+            return;
+        }
+
+        const visibleCenter = elementRect.top - shellRect.top + elementRect.height / 2;
+        setPreviewTop(Math.max(16, Math.min(shellRect.height - 16, visibleCenter)));
+    };
+
+    return (
+        <div
+            data-testid="beegame-conversation-axis"
+            className="pointer-events-none sticky top-1/2 z-50 h-0 w-0"
+        >
+            <div
+                ref={shellRef}
+                data-testid="beegame-conversation-axis-shell"
+                className="absolute left-0 top-0 h-72 w-10 -translate-y-1/2 overflow-visible"
+            >
+                <div
+                    ref={railRef}
+                    data-testid="beegame-conversation-axis-rail"
+                    className="pointer-events-auto relative h-72 w-10 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                    onWheel={(event) => event.stopPropagation()}
+                    style={{
+                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 14%, black 86%, transparent 100%)',
+                        maskImage: 'linear-gradient(to bottom, transparent 0, black 14%, black 86%, transparent 100%)',
+                    }}
+                >
+                    <div className="flex min-h-full flex-col items-start justify-center gap-1">
+                        {entries.map((entry, index) => {
+                            const isActive = activeId === entry.id;
+                            const presentation = getAxisLinePresentation(index, hoveredIndex, isActive);
+                            return (
+                                <button
+                                    key={entry.id}
+                                    type="button"
+                                    aria-label={`Jump to message ${index + 1}`}
+                                    data-axis-entry-id={entry.id}
+                                    data-active={isActive ? 'true' : 'false'}
+                                    onMouseEnter={(event) => updateHoveredEntry(entry.id, event.currentTarget)}
+                                    onMouseLeave={() => setHoveredId(null)}
+                                    onFocus={(event) => updateHoveredEntry(entry.id, event.currentTarget)}
+                                    onBlur={() => setHoveredId(null)}
+                                    onClick={() => scrollToEntry(entry.id)}
+                                    className="group flex h-2.5 w-10 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-orange-400/70"
+                                >
+                                    <span
+                                        data-testid="beegame-conversation-axis-line"
+                                        data-length={presentation.length}
+                                        data-cascade={presentation.cascade}
+                                        className={`block h-1 rounded-full transition-all duration-200 ${presentation.widthClassName} ${presentation.colorClassName}`}
+                                    />
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                {hoveredEntry ? (
+                    <div
+                        role="tooltip"
+                        data-testid="beegame-conversation-axis-preview"
+                        data-anchor-index={String(hoveredIndex)}
+                        className="pointer-events-none absolute left-10 z-30 w-72 -translate-y-1/2 rounded-2xl border border-zinc-700 bg-zinc-800/95 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur-xl"
+                        style={{ top: previewTop }}
+                    >
+                        <div className="truncate text-sm font-black text-zinc-100">{hoveredEntry.title}</div>
+                        <div className="mt-1 line-clamp-3 text-xs leading-5 text-zinc-400">{hoveredEntry.preview}</div>
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+const getAxisLinePresentation = (
+    index: number,
+    hoveredIndex: number,
+    isActive: boolean,
+): {
+    cascade: string;
+    length: 'short' | 'near-3' | 'near-2' | 'near-1' | 'full';
+    widthClassName: string;
+    colorClassName: string;
+} => {
+    if (hoveredIndex >= 0) {
+        const distance = Math.abs(index - hoveredIndex);
+        if (distance <= 3) {
+            const widthByDistance = ['w-9', 'w-7', 'w-5', 'w-3'] as const;
+            const lengthByDistance = ['full', 'near-1', 'near-2', 'near-3'] as const;
+            return {
+                cascade: String(distance),
+                length: lengthByDistance[distance],
+                widthClassName: widthByDistance[distance],
+                colorClassName: distance === 0
+                    ? 'bg-zinc-100 shadow-[0_0_14px_rgba(255,255,255,0.35)]'
+                    : 'bg-orange-300/80 shadow-[0_0_10px_rgba(251,146,60,0.18)]',
+            };
+        }
+    }
+
+    return {
+        cascade: '',
+        length: 'short',
+        widthClassName: 'w-3',
+        colorClassName: isActive
+            ? 'bg-orange-400/90 shadow-[0_0_12px_rgba(251,146,60,0.28)]'
+            : 'bg-zinc-600/70',
+    };
+};
 
 function UserMessageCard({ message, text }: { message: ChatDisplayMessage; text: BeeGameText }) {
     return (
@@ -283,8 +622,13 @@ function AgentSummaryCard({
         <section data-testid={`beegame-agent-message-${message.id}`} className="rounded-xl border border-orange-500/20 bg-orange-950/15 px-4 py-3 text-zinc-100 shadow-sm">
             <div className="min-w-0">
                 <div className="mb-2 flex items-center gap-2">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-orange-500/30 bg-orange-500/15 text-orange-300">
-                        <Bot className="h-4 w-4" />
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-orange-400/35 bg-[#2a1a12] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
+                        <img
+                            src={BEEGAME_AVATAR_SRC}
+                            alt="BeeGame"
+                            className="h-5 w-5 object-contain"
+                            draggable={false}
+                        />
                     </span>
                     <button
                         type="button"
