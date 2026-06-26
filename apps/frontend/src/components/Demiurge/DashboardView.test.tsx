@@ -16,6 +16,11 @@ const toggleTheme = vi.fn();
 const showSuccess = vi.fn();
 const showError = vi.fn();
 const stopTask = vi.fn();
+const apiMocks = vi.hoisted(() => ({
+    startProjectPreview: vi.fn().mockResolvedValue({}),
+    restartProjectPreview: vi.fn().mockResolvedValue({}),
+    stopProjectPreview: vi.fn().mockResolvedValue({}),
+}));
 const status = {
     uptime: '1m',
     unity_connected: false,
@@ -125,6 +130,14 @@ vi.mock('../../hooks/useToast', () => ({
         showSuccess,
         showError,
     }),
+}));
+
+vi.mock('../../services/api', () => ({
+    api: {
+        startProjectPreview: apiMocks.startProjectPreview,
+        restartProjectPreview: apiMocks.restartProjectPreview,
+        stopProjectPreview: apiMocks.stopProjectPreview,
+    },
 }));
 
 vi.mock('../../services/modelConfigApi', () => ({
@@ -437,10 +450,10 @@ describe('DashboardView runtime loading', () => {
         const frame = await screen.findByTestId('beegame-live-preview-frame');
 
         expect(frame).toHaveAttribute('src', 'http://127.0.0.1:5178');
-        expect(screen.getByRole('button', { name: '暂停预览' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '停止预览' })).toBeEnabled();
     });
 
-    it('pauses the live preview locally without stopping the BeeGame runtime', async () => {
+    it('stops the managed preview without stopping the BeeGame runtime', async () => {
         const user = userEvent.setup();
         stopTask.mockResolvedValue(undefined);
         mockedProjectStatus = {
@@ -454,9 +467,9 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        const frame = await screen.findByTestId('beegame-live-preview-frame');
+        await screen.findByTestId('beegame-live-preview-frame');
         const refreshButton = screen.getByRole('button', { name: '刷新预览' });
-        const stopButton = screen.getByRole('button', { name: '暂停预览' });
+        const stopButton = screen.getByRole('button', { name: '停止预览' });
         const openButton = screen.getByRole('button', { name: '在新窗口打开' });
         const controls = refreshButton.parentElement?.parentElement;
 
@@ -465,16 +478,30 @@ describe('DashboardView runtime loading', () => {
         expect(controls?.children[2]).toContainElement(openButton);
 
         await user.hover(stopButton);
-        expect(await screen.findByRole('tooltip')).toHaveTextContent('暂停预览');
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('停止预览');
+
+        await user.click(refreshButton);
+        await waitFor(() => expect(apiMocks.restartProjectPreview).toHaveBeenCalledWith('proj_1'));
 
         await user.click(stopButton);
+        await waitFor(() => expect(apiMocks.stopProjectPreview).toHaveBeenCalledWith('proj_1'));
         expect(stopTask).not.toHaveBeenCalled();
-        expect(screen.getAllByText('运行已停止').length).toBeGreaterThan(0);
-        expect(frame).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '播放预览' })).toBeInTheDocument();
+    });
 
-        await user.click(screen.getByRole('button', { name: '播放预览' }));
-        expect(await screen.findByTestId('beegame-live-preview-frame')).toHaveAttribute('src', 'http://127.0.0.1:5178');
+    it('starts a managed preview when no preview URL is available yet', async () => {
+        const user = userEvent.setup();
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const playButton = screen.getByRole('button', { name: '播放预览' });
+        await user.click(playButton);
+
+        await waitFor(() => expect(apiMocks.startProjectPreview).toHaveBeenCalledWith('proj_1'));
+        expect(stopTask).not.toHaveBeenCalled();
     });
 
     it('shows the workspace folder name as the dashboard project title without renaming the project', async () => {

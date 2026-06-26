@@ -16,6 +16,11 @@ import {
   readSessionTranscriptFromDisk,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
+import {
+  BeeGamePreviewManager,
+  type BeeGamePreviewPortAllocator,
+  type BeeGamePreviewRunner,
+} from './beegame/preview-manager'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
@@ -90,6 +95,8 @@ type BeeGameIntakeAnalysis = {
 
 export type AgentWorkflowAppOptions = {
   sessionRunner?: BeeGameSessionRunner
+  previewRunner?: BeeGamePreviewRunner
+  previewPortAllocator?: BeeGamePreviewPortAllocator
   modelConfigStore?: ModelConfigStoreOptions | false
   defaultWorkspacePath?: string
 }
@@ -105,6 +112,11 @@ export function createAgentWorkflowApp(
     () => mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
       dataDir: dashboardDataRoot,
     })),
+  )
+  const beeGamePreviews = new BeeGamePreviewManager(
+    options.previewRunner,
+    undefined,
+    options.previewPortAllocator,
   )
   const projectStore = new BeeGameProjectMetadataStore(
     getBeeGameProjectDatabasePath(dashboardDataRoot),
@@ -282,12 +294,14 @@ export function createAgentWorkflowApp(
     app,
     '/api/beegame-sessions',
     beeGameSessions,
+    beeGamePreviews,
     options.defaultWorkspacePath,
   )
   registerBeeGameSessionRoutes(
     app,
     '/api/console/sessions',
     beeGameSessions,
+    beeGamePreviews,
     options.defaultWorkspacePath,
   )
 
@@ -663,6 +677,7 @@ function registerBeeGameSessionRoutes(
   app: Hono,
   basePath: string,
   beeGameSessions: BeeGameSessionManager,
+  beeGamePreviews: BeeGamePreviewManager,
   defaultWorkspacePath?: string,
 ): void {
   app.get(basePath, c => c.json(beeGameSessions.list()))
@@ -799,6 +814,57 @@ function registerBeeGameSessionRoutes(
       )
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 404)
+    }
+  })
+
+  app.get(`${basePath}/:id/preview`, c => {
+    const workspacePath = c.req.query('workspacePath')
+    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
+    try {
+      return c.json(beeGamePreviews.status(c.req.param('id'), workspacePath))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/preview`, async c => {
+    const body = await readJson(c.req.raw)
+    const workspacePath = typeof body.workspacePath === 'string'
+      ? body.workspacePath
+      : c.req.query('workspacePath')
+    if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
+    try {
+      return c.json(await beeGamePreviews.start({
+        sessionId: c.req.param('id'),
+        workspacePath,
+      }))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/preview/restart`, async c => {
+    const body = await readJson(c.req.raw)
+    const workspacePath = typeof body.workspacePath === 'string'
+      ? body.workspacePath
+      : c.req.query('workspacePath')
+    if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
+    try {
+      return c.json(await beeGamePreviews.restart({
+        sessionId: c.req.param('id'),
+        workspacePath,
+      }))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.delete(`${basePath}/:id/preview`, async c => {
+    const workspacePath = c.req.query('workspacePath')
+    try {
+      return c.json(beeGamePreviews.stop(c.req.param('id'), workspacePath))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
 

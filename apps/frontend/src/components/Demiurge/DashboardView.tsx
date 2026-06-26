@@ -12,6 +12,7 @@ import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
 import type { PendingUserReviewItem } from '../../services/api';
+import { api } from '../../services/api';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
@@ -330,6 +331,37 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         });
     }, [isBeeGameMode, projectStatus?.phase, isOffline, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages]);
 
+    const refreshPreviewStatus = async () => {
+        await loadProjectStatus(projectId);
+    };
+
+    const handleStartPreview = async () => {
+        try {
+            await api.startProjectPreview(projectId);
+            await refreshPreviewStatus();
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const handleRestartPreview = async () => {
+        try {
+            await api.restartProjectPreview(projectId);
+            await refreshPreviewStatus();
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const handleStopPreview = async () => {
+        try {
+            await api.stopProjectPreview(projectId);
+            await refreshPreviewStatus();
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        }
+    };
+
     // Poll Telemetry Phases & System Agents & Tasks & Pending Reviews
     useEffect(() => {
         if (!projectId) return;
@@ -508,14 +540,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 modelName={currentModelName}
                 isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}
-                onReload={() => {
-                    const frames = document.querySelectorAll<HTMLIFrameElement>('[data-testid="beegame-live-preview-frame"]');
-                    frames.forEach((frame) => {
-                        frame.src = frame.src;
-                    });
-                }}
+                onStartPreview={handleStartPreview}
+                onRestartPreview={handleRestartPreview}
+                onStopPreview={handleStopPreview}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
-                onStop={stopTask}
                 onBack={onBack}
                 onSetLang={onSetLang}
             />

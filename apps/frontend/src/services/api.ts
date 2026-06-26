@@ -180,6 +180,19 @@ export interface BuildReportPayload {
   created_at?: string;
 }
 
+export interface BeeGamePreviewPayload {
+  sessionId: string;
+  workspacePath: string;
+  status: 'idle' | 'starting' | 'running' | 'stopped' | 'failed' | 'unsupported';
+  url: string;
+  port?: number;
+  command?: string;
+  script?: string;
+  entrypoint?: string;
+  message?: string;
+  updatedAt: string;
+}
+
 export interface ExecutionEvidencePayload {
   execution_id?: string;
   project_id?: string;
@@ -903,6 +916,34 @@ export const api = {
       return beeGameAdapter.downloadProjectPackage(projectId);
     }
     throw new Error('Project package download is only available for BeeGame projects');
+  },
+
+  getProjectPreview: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.getProjectPreview(projectId);
+    }
+    throw new Error('Project preview is only available for BeeGame projects');
+  },
+
+  startProjectPreview: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.startProjectPreview(projectId);
+    }
+    throw new Error('Project preview is only available for BeeGame projects');
+  },
+
+  restartProjectPreview: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.restartProjectPreview(projectId);
+    }
+    throw new Error('Project preview is only available for BeeGame projects');
+  },
+
+  stopProjectPreview: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.stopProjectPreview(projectId);
+    }
+    throw new Error('Project preview is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

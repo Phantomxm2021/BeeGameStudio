@@ -1,4 +1,5 @@
 import type {
+  BeeGamePreviewPayload,
   BuildReportPayload,
   ContinueTaskResponse,
   PendingUserReviewItem,
@@ -435,6 +436,7 @@ export const beeGameAdapter = {
     const events = eventResult.events;
     const pending = eventResult.recoveredFromTranscript ? [] : getPendingPermissionEvents(events);
     const runtimeStatus = deriveRuntimeStatus(events, pending, eventResult.recoveredFromTranscript);
+    const preview = binding ? await fetchBeeGamePreviewIfAvailable(binding) : undefined;
     return {
       project_id: projectId,
       phase: runtimeStatus.phase,
@@ -445,7 +447,7 @@ export const beeGameAdapter = {
       approval_required: pending.length > 0,
       next_action: runtimeStatus.nextAction,
       context: deriveContextVisibility(events, snapshot),
-      build_report: deriveBuildReport(events),
+      build_report: preview ? previewSnapshotToBuildReport(preview) : null,
       review_status: null,
       model_config_id: session?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     };
@@ -566,6 +568,34 @@ export const beeGameAdapter = {
     const disposition = response.headers.get('content-disposition') || '';
     const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `${binding.workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`;
     return { blob: await response.blob(), filename };
+  },
+
+  async getProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    return fetchBeeGamePreview(binding);
+  },
+
+  async startProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    return postJson(`/api/beegame-sessions/${binding.sessionId}/preview`, {
+      workspacePath: binding.workspacePath,
+    });
+  },
+
+  async restartProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    return postJson(`/api/beegame-sessions/${binding.sessionId}/preview/restart`, {
+      workspacePath: binding.workspacePath,
+    });
+  },
+
+  async stopProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    return deleteJson<BeeGamePreviewPayload>(`/api/beegame-sessions/${binding.sessionId}/preview?workspacePath=${encodeURIComponent(binding.workspacePath)}`);
   },
 
   async getArtifactReviewStatus(artifactId: string): Promise<{
@@ -882,6 +912,22 @@ async function fetchBeeGameSessionIfAvailable(sessionId: string): Promise<BeeGam
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
   const params = new URLSearchParams({ workspacePath: binding.workspacePath });
   return fetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
+}
+
+async function fetchBeeGamePreview(binding: ProjectSessionBinding): Promise<BeeGamePreviewPayload> {
+  return getJson(
+    `/api/beegame-sessions/${binding.sessionId}/preview?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
+  );
+}
+
+async function fetchBeeGamePreviewIfAvailable(
+  binding: ProjectSessionBinding,
+): Promise<BeeGamePreviewPayload | undefined> {
+  try {
+    return await fetchBeeGamePreview(binding);
+  } catch {
+    return undefined;
+  }
 }
 
 async function restoreBeeGameSessionForBinding(binding: ProjectSessionBinding): Promise<void> {
@@ -1296,58 +1342,29 @@ function summarizeEvidenceOutput(output: string): string {
 
 const PREVIEW_URL_PATTERN = /https?:\/\/(?:localhost|127\.0\.0\.1|\[[^\]]+\]|[^\s/]+)(?::\d+)?\/?[^\s)]*/i;
 
-function deriveBuildReport(events: BeeGameEvent[]): BuildReportPayload | null {
-  const buildEvents = events
-    .filter(event => event.type === 'tool.completed' || event.type === 'tool.failed' || event.type === 'assistant.message')
-    .sort((a, b) => b.id - a.id);
-  const latestUrl = findLatestPreviewUrl(buildEvents);
-  if (!latestUrl) return null;
-
-  const sourceEvent = buildEvents.find(event => {
-    const values = [
-      event.text,
-      typeof event.payload?.output === 'string' ? event.payload.output : '',
-      typeof event.payload?.url === 'string' ? event.payload.url : '',
-      typeof event.payload?.build_url === 'string' ? event.payload.build_url : '',
-      typeof event.payload?.preview_url === 'string' ? event.payload.preview_url : '',
-    ];
-    return values.some(value => value.includes(latestUrl));
-  }) || buildEvents[0];
-  const command = sourceEvent && sourceEvent.type !== 'assistant.message' ? getBashCommand(sourceEvent) : '';
+function previewSnapshotToBuildReport(preview: BeeGamePreviewPayload): BuildReportPayload | null {
+  if (preview.status === 'idle' && !preview.url) return null;
+  const isRunning = preview.status === 'running' && Boolean(preview.url);
+  const isUnavailable = preview.status === 'failed' || preview.status === 'unsupported';
   return {
-    status: 'passed',
-    entrypoint: '',
+    status: isRunning ? 'passed' : isUnavailable ? 'failed' : preview.status,
+    entrypoint: preview.entrypoint || '',
     report_path: '',
-    build_url: latestUrl || '',
-    agents: ['beegame'],
+    build_url: isRunning ? preview.url : '',
+    agents: ['dashboard-preview'],
     generated_paths: [],
-    checks: sourceEvent ? [{
-      name: command || 'preview',
-      status: 'passed',
-      detail: truncateEvidenceDetail(sourceEvent.type === 'assistant.message' ? sourceEvent.text : getEventOutput(sourceEvent)),
+    checks: [{
+      name: preview.script || 'preview',
+      status: isRunning ? 'passed' : preview.status,
+      detail: preview.message || '',
       path: '',
-    }] : [],
-    summary: `Playable preview available at ${latestUrl}`,
-    failure_reason: '',
-    created_at: sourceEvent?.createdAt,
+    }],
+    summary: isRunning
+      ? `Managed preview available at ${preview.url}`
+      : preview.message || 'Preview is not running',
+    failure_reason: isUnavailable ? preview.message || 'Preview unavailable' : '',
+    created_at: preview.updatedAt,
   };
-}
-
-function findLatestPreviewUrl(events: BeeGameEvent[]): string {
-  for (const event of events) {
-    const candidates = [
-      event.text,
-      typeof event.payload?.output === 'string' ? event.payload.output : '',
-      typeof event.payload?.url === 'string' ? event.payload.url : '',
-      typeof event.payload?.build_url === 'string' ? event.payload.build_url : '',
-      typeof event.payload?.preview_url === 'string' ? event.payload.preview_url : '',
-    ];
-    for (const value of candidates) {
-      const match = value.match(PREVIEW_URL_PATTERN);
-      if (match) return match[0];
-    }
-  }
-  return '';
 }
 
 function truncateEvidenceDetail(value: string): string {

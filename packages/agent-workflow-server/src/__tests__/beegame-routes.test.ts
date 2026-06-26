@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import {
   createModelConfig,
   resetAgentWorkflow,
@@ -14,6 +14,7 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from '../beegame/session-manager'
+import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
 
 type FakeRuntimeMode =
   | 'messages'
@@ -2629,6 +2630,106 @@ describe('beegame session routes', () => {
       expect(bytes[0]).toBe(0x50)
       expect(bytes[1]).toBe(0x4b)
       expect(listingText).toContain('docs/GDD.md')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('reports unsupported preview when a project has no web entrypoint', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner })
+    try {
+      const previewRes = await app.request(
+        `/api/beegame-sessions/beegame_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const preview = await previewRes.json()
+
+      expect(previewRes.status).toBe(200)
+      expect(preview).toEqual(expect.objectContaining({
+        sessionId: 'beegame_preview',
+        status: 'unsupported',
+        url: '',
+      }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('starts a managed preview process for package script projects', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const starts: Array<{ command: string[]; cwd: string; env: Record<string, string> }> = []
+    const kills: string[] = []
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      starts.push({ command, cwd: options.cwd, env: options.env })
+      options.onOutput('Local: http://127.0.0.1:63100/\n')
+      return {
+        kill: () => kills.push(command.join(' ')),
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => 63100,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 0.0.0.0' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+      const statusRes = await app.request(
+        `/api/beegame-sessions/beegame_preview/preview?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const status = await statusRes.json()
+      const stopRes = await app.request(
+        `/api/beegame-sessions/beegame_preview/preview?workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'DELETE' },
+      )
+      const stopped = await stopRes.json()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'running',
+        url: 'http://127.0.0.1:63100/',
+        script: 'dev',
+      }))
+      expect(status).toEqual(expect.objectContaining({
+        status: 'running',
+        url: 'http://127.0.0.1:63100/',
+      }))
+      expect(stopped).toEqual(expect.objectContaining({ status: 'stopped' }))
+      expect(starts).toHaveLength(1)
+      expect(starts[0].cwd).toBe(resolve(workspace))
+      expect(starts[0].command).toEqual([
+        'npm',
+        'run',
+        'dev',
+        '--',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '63100',
+      ])
+      expect(starts[0].env.PORT).toBe('63100')
+      expect(kills).toHaveLength(1)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

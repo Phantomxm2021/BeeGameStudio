@@ -17,9 +17,10 @@ interface BeeGameLivePreviewPageProps {
     modelName: string;
     isSyncing: boolean;
     buildReport?: BuildReportPayload | null;
-    onReload?: () => void;
+    onStartPreview?: () => void | Promise<void>;
+    onRestartPreview?: () => void | Promise<void>;
+    onStopPreview?: () => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
-    onStop?: () => void | Promise<void>;
     onBack?: () => void;
     onSetLang: (lang: Language) => void;
 }
@@ -35,7 +36,6 @@ const LABELS: Record<Language, {
     reload: string;
     open: string;
     stop: string;
-    pausePreview: string;
     play: string;
     build: string;
     health: string;
@@ -59,8 +59,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: '刷新预览',
         open: '在新窗口打开',
-        stop: '停止运行',
-        pausePreview: '暂停预览',
+        stop: '停止预览',
         play: '播放预览',
         build: '构建',
         health: '健康状态',
@@ -84,8 +83,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: '重新整理預覽',
         open: '在新視窗開啟',
-        stop: '停止執行',
-        pausePreview: '暫停預覽',
+        stop: '停止預覽',
         play: '播放預覽',
         build: '建構',
         health: '健康狀態',
@@ -109,8 +107,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Reload preview',
         open: 'Open in new window',
-        stop: 'Stop runtime',
-        pausePreview: 'Pause preview',
+        stop: 'Stop preview',
         play: 'Start preview',
         build: 'Build',
         health: 'Health',
@@ -134,8 +131,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'プレビューを更新',
         open: '新しいウィンドウで開く',
-        stop: '実行を停止',
-        pausePreview: 'プレビューを一時停止',
+        stop: 'プレビューを停止',
         play: 'プレビューを開始',
         build: 'ビルド',
         health: '状態',
@@ -159,8 +155,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: '미리보기 새로고침',
         open: '새 창에서 열기',
-        stop: '실행 중지',
-        pausePreview: '미리보기 일시 정지',
+        stop: '미리보기 중지',
         play: '미리보기 시작',
         build: '빌드',
         health: '상태',
@@ -184,8 +179,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Recharger l’aperçu',
         open: 'Ouvrir dans une nouvelle fenêtre',
-        stop: 'Arrêter le runtime',
-        pausePreview: 'Mettre l’aperçu en pause',
+        stop: 'Arrêter l’aperçu',
         play: 'Démarrer l’aperçu',
         build: 'Build',
         health: 'Santé',
@@ -209,8 +203,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Vorschau neu laden',
         open: 'In neuem Fenster öffnen',
-        stop: 'Runtime stoppen',
-        pausePreview: 'Vorschau pausieren',
+        stop: 'Vorschau stoppen',
         play: 'Vorschau starten',
         build: 'Build',
         health: 'Status',
@@ -234,8 +227,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Recargar vista previa',
         open: 'Abrir en una ventana nueva',
-        stop: 'Detener runtime',
-        pausePreview: 'Pausar vista previa',
+        stop: 'Detener vista previa',
         play: 'Iniciar vista previa',
         build: 'Build',
         health: 'Estado',
@@ -259,8 +251,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Ricarica anteprima',
         open: 'Apri in una nuova finestra',
-        stop: 'Ferma runtime',
-        pausePreview: 'Metti in pausa anteprima',
+        stop: 'Ferma anteprima',
         play: 'Avvia anteprima',
         build: 'Build',
         health: 'Stato',
@@ -284,8 +275,7 @@ const LABELS: Record<Language, {
         live: 'Live',
         reload: 'Recarregar prévia',
         open: 'Abrir em nova janela',
-        stop: 'Parar runtime',
-        pausePreview: 'Pausar prévia',
+        stop: 'Parar prévia',
         play: 'Iniciar prévia',
         build: 'Build',
         health: 'Saúde',
@@ -338,9 +328,10 @@ export function BeeGameLivePreviewPage({
     modelName,
     isSyncing,
     buildReport,
-    onReload,
+    onStartPreview,
+    onRestartPreview,
+    onStopPreview,
     onOpenExternal,
-    onStop,
     onBack,
     onSetLang,
 }: BeeGameLivePreviewPageProps) {
@@ -355,8 +346,8 @@ export function BeeGameLivePreviewPage({
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
-    const canStopPreview = (status === 'running' || canShowPreview) && !isStoppingPreview;
-    const stopLabel = canShowPreview ? labels.pausePreview : labels.stop;
+    const canStartPreview = !canShowPreview && !isStoppingPreview;
+    const canStopPreview = canShowPreview && !isStoppingPreview;
     const statusText = previewState === 'live'
         ? labels.live
         : previewState === 'failed'
@@ -368,21 +359,21 @@ export function BeeGameLivePreviewPage({
                     : labels.waiting;
     const handleStop = async () => {
         if (!canStopPreview) return;
-        if (canShowPreview && previewUrl) {
-            setStoppedPreviewUrl(previewUrl);
-            return;
-        }
         setStoppingPreview(true);
         try {
-            await onStop?.();
+            await onStopPreview?.();
             if (previewUrl) setStoppedPreviewUrl(previewUrl);
         } finally {
             setStoppingPreview(false);
         }
     };
-    const handlePlay = () => {
+    const handlePlay = async () => {
         setStoppedPreviewUrl('');
-        onReload?.();
+        await onStartPreview?.();
+    };
+    const handleRestart = async () => {
+        setStoppedPreviewUrl('');
+        await onRestartPreview?.();
     };
     const currentLanguageLabel = LANGUAGE_OPTIONS.find(option => option.code === lang)?.label || LANGUAGE_OPTIONS[0]?.label || '';
 
@@ -525,15 +516,15 @@ export function BeeGameLivePreviewPage({
                                 disabled={!canShowPreview}
                                 hoveredControl={hoveredControl}
                                 setHoveredControl={setHoveredControl}
-                                onClick={onReload}
+                                onClick={handleRestart}
                             >
                                 <RefreshCw className="h-4 w-4" />
                             </PreviewControlButton>
-                            {isPreviewLocallyStopped ? (
+                            {!canShowPreview ? (
                                 <PreviewControlButton
                                     control="play"
                                     label={labels.play}
-                                    disabled={!previewUrl}
+                                    disabled={!canStartPreview}
                                     hoveredControl={hoveredControl}
                                     setHoveredControl={setHoveredControl}
                                     onClick={handlePlay}
@@ -543,7 +534,7 @@ export function BeeGameLivePreviewPage({
                             ) : (
                                 <PreviewControlButton
                                     control="stop"
-                                    label={stopLabel}
+                                    label={labels.stop}
                                     disabled={!canStopPreview}
                                     hoveredControl={hoveredControl}
                                     setHoveredControl={setHoveredControl}

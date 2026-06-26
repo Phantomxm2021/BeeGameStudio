@@ -685,7 +685,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(status.next_action).toBe('Ready for input');
   });
 
-  it('derives a build report preview URL from delivered BeeGame transcript evidence', async () => {
+  it('derives the build report preview URL from the managed preview host', async () => {
     const transcript = [
       turnStartedEvent(1, 'beegame_preview', 'turn-1'),
       bashCompletedEvent(
@@ -706,6 +706,18 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_preview/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fpreview-game') {
         return jsonResponse(transcript);
       }
+      if (path === '/api/beegame-sessions/beegame_preview/preview?workspacePath=%2Ftmp%2Fbeegame-projects%2Fpreview-game') {
+        return jsonResponse({
+          sessionId: 'beegame_preview',
+          workspacePath: '/tmp/beegame-projects/preview-game',
+          status: 'running',
+          url: 'http://127.0.0.1:63100/',
+          port: 63100,
+          script: 'dev',
+          message: 'Managed preview running',
+          updatedAt: '2026-06-21T00:00:05.000Z',
+        });
+      }
       return jsonResponse({ error: 'not found' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -725,7 +737,8 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(status.build_report).toMatchObject({
       status: 'passed',
-      build_url: 'http://127.0.0.1:5178/',
+      build_url: 'http://127.0.0.1:63100/',
+      agents: ['dashboard-preview'],
     });
   });
 
