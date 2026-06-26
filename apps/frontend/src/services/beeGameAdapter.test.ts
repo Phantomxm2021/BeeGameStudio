@@ -1654,7 +1654,7 @@ describe('beeGameAdapter prompt rules', () => {
         return jsonResponse([
           assistantMessageEvent(20, 'beegame_multi', 'turn-1', '先创建项目结构。'),
           assistantMessageEvent(21, 'beegame_multi', 'turn-1', '然后修复类型错误。'),
-          assistantMessageEvent(22, 'beegame_multi', 'turn-1', '最后启动预览服务器。'),
+          assistantMessageEvent(22, 'beegame_multi', 'turn-1', '最后整理验证结果。'),
         ]);
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -1670,7 +1670,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages.map(message => message.content)).toEqual([
       '先创建项目结构。',
       '然后修复类型错误。',
-      '最后启动预览服务器。',
+      '最后整理验证结果。',
     ]);
     expect(polled.messages.map(message => message.message_id)).toEqual([
       'beegame-event-20',

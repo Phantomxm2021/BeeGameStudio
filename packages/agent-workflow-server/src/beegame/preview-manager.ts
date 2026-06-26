@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 
 export type BeeGamePreviewStatus =
   | 'idle'
@@ -48,13 +48,33 @@ export type BeeGamePreviewReadinessProbe = (url: string) => Promise<boolean>
 
 type PreviewRecord = {
   snapshot: BeeGamePreviewSnapshot
-  process?: BeeGamePreviewProcess
+  processes?: BeeGamePreviewProcess[]
 }
 
 type PackageManifest = {
   scripts?: Record<string, string>
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
+}
+
+type PreviewProcessPlan = {
+  role: 'client' | 'server'
+  cwd: string
+  port: number
+  command: string[]
+  script: string
+  entrypoint: string
+  url?: string
+}
+
+type SupportedPreviewPlan = {
+  supported: true
+  port: number
+  url: string
+  command: string[]
+  script: string
+  entrypoint: string
+  processes: PreviewProcessPlan[]
 }
 
 const DEFAULT_PREVIEW_PORT_START = 63100
@@ -113,23 +133,19 @@ export class BeeGamePreviewManager {
       port: plan.port,
       command: plan.command.join(' '),
       script: plan.script,
-      entrypoint: basename(join(workspacePath, 'package.json')),
+      entrypoint: plan.entrypoint,
       message: `Preview starting at ${plan.url}`,
       updatedAt: startedAt,
     })
-    const process = this.runner(plan.command, {
-      cwd: workspacePath,
-      env: {
-        ...processEnv(),
-        BEEGAME_PREVIEW_PORT: String(plan.port),
-        PORT: String(plan.port),
-        VITE_PORT: String(plan.port),
-        HOST: DEFAULT_HOST,
-      },
+    const processes = plan.processes.map(processPlan => this.runner(processPlan.command, {
+      cwd: processPlan.cwd,
+      env: buildPreviewProcessEnv(processPlan, plan),
       onOutput: text => {
         const record = this.records.get(options.sessionId)
         if (!record) return
-        const url = extractPreviewUrl(text) || record.snapshot.url
+        const url = processPlan.role === 'client'
+          ? extractPreviewUrl(text) || record.snapshot.url
+          : record.snapshot.url
         record.snapshot = {
           ...record.snapshot,
           url,
@@ -138,40 +154,20 @@ export class BeeGamePreviewManager {
           updatedAt: new Date().toISOString(),
         }
       },
-    })
-    this.records.set(options.sessionId, { snapshot, process })
-    process.exited?.then(() => {
-      const record = this.records.get(options.sessionId)
-      if (!record || record.process !== process) return
-      record.snapshot = {
-        ...record.snapshot,
-        status: 'stopped',
-        message: 'Preview process exited',
-        updatedAt: new Date().toISOString(),
-      }
-      delete record.process
-    }).catch(error => {
-      const record = this.records.get(options.sessionId)
-      if (!record || record.process !== process) return
-      record.snapshot = {
-        ...record.snapshot,
-        status: 'failed',
-        message: error instanceof Error ? error.message : String(error),
-        updatedAt: new Date().toISOString(),
-      }
-      delete record.process
-    })
-    const ready = await this.readinessProbe(plan.url)
+    }))
+    this.records.set(options.sessionId, { snapshot, processes })
+    this.watchPreviewProcesses(options.sessionId, processes, plan)
+    const readiness = await checkPreviewPlanReadiness(plan, this.readinessProbe)
     const record = this.records.get(options.sessionId)
-    if (!record || record.process !== process) return { ...snapshot }
-    if (!ready) {
-      process.kill()
-      delete record.process
+    if (!record || record.processes !== processes) return { ...snapshot }
+    if (!readiness.ready) {
+      for (const process of processes) process.kill()
+      delete record.processes
       record.snapshot = {
         ...record.snapshot,
         status: 'failed',
         url: '',
-        message: `Preview process started but ${plan.url} did not become reachable. ${record.snapshot.message || ''}`.trim(),
+        message: `${readiness.message} ${record.snapshot.message || ''}`.trim(),
         updatedAt: new Date().toISOString(),
       }
       return { ...record.snapshot }
@@ -202,8 +198,8 @@ export class BeeGamePreviewManager {
     if (resolvedWorkspace && !sameWorkspace(record.snapshot.workspacePath, resolvedWorkspace)) {
       return { ...record.snapshot }
     }
-    record.process?.kill()
-    delete record.process
+    for (const process of record.processes ?? []) process.kill()
+    delete record.processes
     record.snapshot = {
       ...record.snapshot,
       status: 'stopped',
@@ -228,6 +224,44 @@ export class BeeGamePreviewManager {
       ...fields,
     }
   }
+
+  private watchPreviewProcesses(
+    sessionId: string,
+    processes: BeeGamePreviewProcess[],
+    plan: SupportedPreviewPlan,
+  ): void {
+    processes.forEach((process, index) => {
+      const processPlan = plan.processes[index]
+      void (process.exited ?? new Promise(() => {})).then(() => {
+        const record = this.records.get(sessionId)
+        if (!record || record.processes !== processes) return
+        const role = processPlan?.role === 'server' ? 'Backend server' : 'Preview client'
+        record.snapshot = {
+          ...record.snapshot,
+          status: record.snapshot.status === 'running' ? 'failed' : 'stopped',
+          url: '',
+          message: `${role} process exited`,
+          updatedAt: new Date().toISOString(),
+        }
+        for (const runningProcess of processes) {
+          if (runningProcess !== process) runningProcess.kill()
+        }
+        delete record.processes
+      }).catch(error => {
+        const record = this.records.get(sessionId)
+        if (!record || record.processes !== processes) return
+        record.snapshot = {
+          ...record.snapshot,
+          status: 'failed',
+          url: '',
+          message: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        }
+        for (const runningProcess of processes) runningProcess.kill()
+        delete record.processes
+      })
+    })
+  }
 }
 
 async function createPreviewPlan(
@@ -236,13 +270,7 @@ async function createPreviewPlan(
   allocatePort: BeeGamePreviewPortAllocator,
 ): Promise<
   | { supported: false; message: string }
-  | {
-      supported: true
-      port: number
-      url: string
-      command: string[]
-      script: string
-    }
+  | SupportedPreviewPlan
 > {
   const manifestPath = join(workspacePath, 'package.json')
   if (!existsSync(manifestPath)) {
@@ -252,8 +280,15 @@ async function createPreviewPlan(
     }
   }
   const manifest = readPackageManifest(manifestPath)
-  const scripts = manifest.scripts || {}
-  const script = ['preview', 'dev', 'start'].find(name => typeof scripts[name] === 'string' && scripts[name].trim())
+  const splitPlan = await createSplitClientServerPreviewPlan(
+    workspacePath,
+    manifest,
+    portStart,
+    allocatePort,
+  )
+  if (splitPlan) return splitPlan
+
+  const script = chooseScript(manifest, ['preview', 'dev', 'start'])
   if (!script) {
     return {
       supported: false,
@@ -262,13 +297,118 @@ async function createPreviewPlan(
   }
   const port = await allocatePort(portStart)
   const command = buildRunCommand(workspacePath, manifest, script, port)
+  const url = `http://${DEFAULT_HOST}:${port}/`
   return {
     supported: true,
     port,
-    url: `http://${DEFAULT_HOST}:${port}/`,
+    url,
     command,
     script,
+    entrypoint: 'package.json',
+    processes: [{
+      role: 'client',
+      cwd: workspacePath,
+      port,
+      command,
+      script,
+      entrypoint: 'package.json',
+      url,
+    }],
   }
+}
+
+async function createSplitClientServerPreviewPlan(
+  workspacePath: string,
+  rootManifest: PackageManifest,
+  portStart: number,
+  allocatePort: BeeGamePreviewPortAllocator,
+): Promise<SupportedPreviewPlan | undefined> {
+  const clientCwd = join(workspacePath, 'client')
+  const clientManifestPath = join(clientCwd, 'package.json')
+  if (!existsSync(clientManifestPath)) return undefined
+  const clientManifest = readPackageManifest(clientManifestPath)
+  if (!isWebClientManifest(clientManifest)) return undefined
+
+  const serverPlan = await createServerProcessPlan(
+    workspacePath,
+    rootManifest,
+    portStart,
+    allocatePort,
+  )
+  const clientScript = chooseScript(clientManifest, ['dev', 'preview', 'start'])
+  if (!clientScript) return undefined
+  const clientPort = await allocatePort(portStart)
+  const clientCommand = buildRunCommand(clientCwd, clientManifest, clientScript, clientPort)
+  const clientUrl = `http://${DEFAULT_HOST}:${clientPort}/`
+  const clientPlan: PreviewProcessPlan = {
+    role: 'client',
+    cwd: clientCwd,
+    port: clientPort,
+    command: clientCommand,
+    script: clientScript,
+    entrypoint: 'client/package.json',
+    url: clientUrl,
+  }
+  const processes = serverPlan ? [serverPlan, clientPlan] : [clientPlan]
+  return {
+    supported: true,
+    port: clientPort,
+    url: clientUrl,
+    command: clientCommand,
+    script: clientScript,
+    entrypoint: clientPlan.entrypoint,
+    processes,
+  }
+}
+
+async function createServerProcessPlan(
+  workspacePath: string,
+  rootManifest: PackageManifest,
+  portStart: number,
+  allocatePort: BeeGamePreviewPortAllocator,
+): Promise<PreviewProcessPlan | undefined> {
+  const serverCwd = join(workspacePath, 'server')
+  const serverManifestPath = join(serverCwd, 'package.json')
+  if (existsSync(serverManifestPath)) {
+    const serverManifest = readPackageManifest(serverManifestPath)
+    const serverScript = chooseScript(serverManifest, ['dev', 'start'])
+    if (!serverScript) return undefined
+    const serverPort = await allocatePort(portStart)
+    return {
+      role: 'server',
+      cwd: serverCwd,
+      port: serverPort,
+      command: buildRunCommand(serverCwd, serverManifest, serverScript, serverPort),
+      script: serverScript,
+      entrypoint: 'server/package.json',
+      url: `http://${DEFAULT_HOST}:${serverPort}/`,
+    }
+  }
+
+  const rootServerScript = chooseScript(rootManifest, ['dev:server', 'server', 'start:server'])
+  if (!rootServerScript) return undefined
+  const serverPort = await allocatePort(portStart)
+  return {
+    role: 'server',
+    cwd: workspacePath,
+    port: serverPort,
+    command: buildRunCommand(workspacePath, rootManifest, rootServerScript, serverPort),
+    script: rootServerScript,
+    entrypoint: 'package.json',
+    url: `http://${DEFAULT_HOST}:${serverPort}/`,
+  }
+}
+
+function chooseScript(manifest: PackageManifest, names: string[]): string | undefined {
+  return names.find(name => typeof manifest.scripts?.[name] === 'string' && manifest.scripts[name].trim())
+}
+
+function isWebClientManifest(manifest: PackageManifest): boolean {
+  return Boolean(
+    manifest.dependencies?.vite ||
+      manifest.devDependencies?.vite ||
+      chooseScript(manifest, ['dev', 'preview', 'start']),
+  )
 }
 
 function readPackageManifest(path: string): PackageManifest {
@@ -300,6 +440,63 @@ function detectPackageManager(workspacePath: string): 'npm' | 'pnpm' | 'yarn' | 
   if (existsSync(join(workspacePath, 'yarn.lock'))) return 'yarn'
   if (existsSync(join(workspacePath, 'bun.lockb')) || existsSync(join(workspacePath, 'bun.lock'))) return 'bun'
   return 'npm'
+}
+
+function buildPreviewProcessEnv(
+  processPlan: PreviewProcessPlan,
+  plan: SupportedPreviewPlan,
+): Record<string, string> {
+  const serverPlan = plan.processes.find(item => item.role === 'server')
+  const serverHttpUrl = serverPlan ? `http://${DEFAULT_HOST}:${serverPlan.port}` : ''
+  const serverWsUrl = serverPlan ? `ws://${DEFAULT_HOST}:${serverPlan.port}` : ''
+  return {
+    ...processEnv(),
+    BEEGAME_PREVIEW_PORT: String(processPlan.port),
+    PORT: String(processPlan.port),
+    VITE_PORT: String(processPlan.port),
+    HOST: DEFAULT_HOST,
+    ...(processPlan.role === 'server'
+      ? {
+          SERVER_PORT: String(processPlan.port),
+          API_PORT: String(processPlan.port),
+          WS_PORT: String(processPlan.port),
+        }
+      : {}),
+    ...(processPlan.role === 'client' && serverPlan
+      ? {
+          VITE_API_URL: serverHttpUrl,
+          VITE_API_BASE_URL: serverHttpUrl,
+          VITE_BACKEND_URL: serverHttpUrl,
+          VITE_SERVER_URL: serverHttpUrl,
+          VITE_WS_URL: serverWsUrl,
+          VITE_SOCKET_URL: serverWsUrl,
+          VITE_WS_ENDPOINT: serverWsUrl,
+        }
+      : {}),
+  }
+}
+
+async function checkPreviewPlanReadiness(
+  plan: SupportedPreviewPlan,
+  readinessProbe: BeeGamePreviewReadinessProbe,
+): Promise<{ ready: true } | { ready: false; message: string }> {
+  const backendProcesses = plan.processes.filter(process => process.role === 'server' && process.url)
+  for (const process of backendProcesses) {
+    const url = process.url || ''
+    if (!(await readinessProbe(url))) {
+      return {
+        ready: false,
+        message: `Backend server did not become reachable at ${url}. Client preview was not exposed because networked games need the backend running.`,
+      }
+    }
+  }
+  if (!(await readinessProbe(plan.url))) {
+    return {
+      ready: false,
+      message: `Preview client did not become reachable at ${plan.url}.`,
+    }
+  }
+  return { ready: true }
 }
 
 function usesVite(manifest: PackageManifest, script: string): boolean {

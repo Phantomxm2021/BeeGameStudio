@@ -2736,6 +2736,163 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('starts client and server processes for split multiplayer web projects', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-fullstack-'))
+    const starts: Array<{ command: string[]; cwd: string; env: Record<string, string> }> = []
+    const kills: string[] = []
+    const probedUrls: string[] = []
+    let nextPort = 63100
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      starts.push({ command, cwd: options.cwd, env: options.env })
+      options.onOutput(`Local: http://127.0.0.1:${options.env.PORT}/\n`)
+      return {
+        kill: () => kills.push(`${options.cwd}:${command.join(' ')}`),
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => nextPort++,
+      previewReadinessProbe: async url => {
+        probedUrls.push(url)
+        return ['http://127.0.0.1:63100/', 'http://127.0.0.1:63101/'].includes(url)
+      },
+    })
+    try {
+      await mkdir(join(workspace, 'client'), { recursive: true })
+      await mkdir(join(workspace, 'server'), { recursive: true })
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: {
+            'dev:client': 'cd client && npm run dev',
+            'dev:server': 'cd server && npm run dev',
+            start: 'cd server && npm start',
+          },
+        }),
+      )
+      await writeFile(
+        join(workspace, 'client', 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+      await writeFile(
+        join(workspace, 'server', 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'tsx watch src/index.ts', start: 'tsx src/index.ts' },
+          dependencies: { express: '^4.21.0', ws: '^8.18.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_fullstack_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+      const stopRes = await app.request(
+        `/api/beegame-sessions/beegame_fullstack_preview/preview?workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'DELETE' },
+      )
+      const stopped = await stopRes.json()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'running',
+        url: 'http://127.0.0.1:63101/',
+        script: 'dev',
+        entrypoint: 'client/package.json',
+      }))
+      expect(starts).toHaveLength(2)
+      expect(starts[0]).toEqual(expect.objectContaining({
+        cwd: resolve(workspace, 'server'),
+        command: ['npm', 'run', 'dev'],
+      }))
+      expect(starts[0].env.PORT).toBe('63100')
+      expect(starts[1]).toEqual(expect.objectContaining({
+        cwd: resolve(workspace, 'client'),
+        command: ['npm', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', '63101'],
+      }))
+      expect(starts[1].env.PORT).toBe('63101')
+      expect(starts[1].env.VITE_WS_URL).toBe('ws://127.0.0.1:63100')
+      expect(starts[1].env.VITE_API_URL).toBe('http://127.0.0.1:63100')
+      expect(starts[1].env.VITE_SERVER_URL).toBe('http://127.0.0.1:63100')
+      expect(starts[1].env.VITE_BACKEND_URL).toBe('http://127.0.0.1:63100')
+      expect(probedUrls).toEqual(['http://127.0.0.1:63100/', 'http://127.0.0.1:63101/'])
+      expect(stopped).toEqual(expect.objectContaining({ status: 'stopped' }))
+      expect(kills).toHaveLength(2)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('does not mark split previews running when the backend is unreachable', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-fullstack-unreachable-'))
+    const kills: string[] = []
+    let nextPort = 63100
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      options.onOutput(`Local: http://127.0.0.1:${options.env.PORT}/\n`)
+      return {
+        kill: () => kills.push(`${options.cwd}:${command.join(' ')}`),
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => nextPort++,
+      previewReadinessProbe: async url => url === 'http://127.0.0.1:63101/',
+    })
+    try {
+      await mkdir(join(workspace, 'client'), { recursive: true })
+      await mkdir(join(workspace, 'server'), { recursive: true })
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({ scripts: { start: 'cd server && npm start' } }),
+      )
+      await writeFile(
+        join(workspace, 'client', 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+      await writeFile(
+        join(workspace, 'server', 'package.json'),
+        JSON.stringify({
+          scripts: { start: 'node src/index.js' },
+          dependencies: { express: '^4.21.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_fullstack_unreachable_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'failed',
+        url: '',
+      }))
+      expect(started.message).toContain('Backend server did not become reachable')
+      expect(kills).toHaveLength(2)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('does not expose a preview URL until the managed preview is reachable', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const kills: string[] = []
