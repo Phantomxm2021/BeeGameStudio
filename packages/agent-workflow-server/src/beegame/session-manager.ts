@@ -610,9 +610,10 @@ export class BeeGameSessionManager {
         message: 'Allowed so BeeGame can ask the user for clarification.',
       })
     }
+    const sessionWorkspaceRoot = record.session.cwd
     const workspaceViolation = getWorkspaceViolation(
       record.session.cwd,
-      this.dashboardDataRoot,
+      sessionWorkspaceRoot,
       request,
     )
     if (workspaceViolation) {
@@ -632,7 +633,7 @@ export class BeeGameSessionManager {
     }
     const policyDecision = getBeeGamePermissionPolicyDecision(
       record,
-      this.dashboardDataRoot,
+      sessionWorkspaceRoot,
       request,
     )
     if (policyDecision.behavior === 'auto_deny') {
@@ -1871,7 +1872,7 @@ function getWorkspaceViolation(
   const paths = extractPermissionPaths(request.input)
   const outsidePath = paths.find(path => !isPathInside(cwd, allowedRoot, path))
   if (!outsidePath) return ''
-  return `${request.toolName} requested access outside the configured workspace root: ${outsidePath}. The dashboard session is restricted to ${allowedRoot}.`
+  return `${request.toolName} requested access outside the current project workspace: ${outsidePath}. This session is restricted to ${allowedRoot}.`
 }
 
 function extractPermissionPaths(input: Record<string, unknown>): string[] {

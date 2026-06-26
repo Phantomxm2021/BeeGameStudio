@@ -2143,7 +2143,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('auto-approves writes inside the configured workspace root even outside the active project', async () => {
+  test('auto-denies writes to sibling projects inside the configured workspace root', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner(undefined, 'sibling_project_doc_write')
     const app = createAgentWorkflowApp({
@@ -2168,7 +2168,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(fake.runtimes[0].permissionResults).toEqual(['deny'])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2176,8 +2176,8 @@ describe('beegame session routes', () => {
             payload: expect.objectContaining({
               toolUseID: 'tool_wrong_project_design_doc',
               toolName: 'Write',
-              decision: 'allow',
-              autoApproved: true,
+              decision: 'deny',
+              autoDenied: true,
             }),
           }),
         ]),
@@ -2358,7 +2358,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('allows permissions inside the configured workspace root even outside the current project', async () => {
+  test('auto-denies permissions to sibling projects inside the configured workspace root', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'current-project')
     const existingProject = join(projectsRoot, 'existing-project')
@@ -2387,7 +2387,7 @@ describe('beegame session routes', () => {
 
       const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
       const events = await eventsRes.json()
-      expect(fake.runtimes[0].permissionResults).toEqual(['allow'])
+      expect(fake.runtimes[0].permissionResults).toEqual(['deny'])
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2395,8 +2395,8 @@ describe('beegame session routes', () => {
             payload: expect.objectContaining({
               toolUseID: 'tool_workspace_root_write',
               toolName: 'Write',
-              decision: 'allow',
-              autoApproved: true,
+              decision: 'deny',
+              autoDenied: true,
             }),
           }),
         ]),
