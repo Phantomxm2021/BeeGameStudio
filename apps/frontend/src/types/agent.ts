@@ -43,13 +43,8 @@ export interface SystemStatus {
   /** Current project progress as a percentage (0-100) */
   project_progress: number;
 
-  /** Runtime-advertised UI capabilities */
-  capabilities?: {
-    operator_controls_enabled?: boolean;
-    reset_gdd_approval_enabled?: boolean;
-    stage_control_enabled?: boolean;
-    manual_stage_start_enabled?: boolean;
-  };
+  /** Runtime-advertised UI capabilities. Specific feature flags are owned by their feature modules. */
+  capabilities?: Record<string, unknown>;
 }
 
 /**

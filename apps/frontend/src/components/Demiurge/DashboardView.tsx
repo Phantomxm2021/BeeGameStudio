@@ -675,17 +675,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         useProjectStore.getState().setActiveProject('');
     };
 
-    const handleOpenOperatorControls = () => {
-        const params = new URLSearchParams({
-            project_id: projectId,
-            project_name: projectName,
-            lang,
-        });
-        window.open(`/operator-controls?${params.toString()}`, '_blank', 'noopener,noreferrer');
-    };
-
-    const canOpenOperatorControls = Boolean(status?.capabilities?.operator_controls_enabled && status?.capabilities?.stage_control_enabled);
-
     return (
         <div className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}>
             {!isBeeGameMode ? (
@@ -709,8 +698,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     onSetLang={onSetLang}
                     onToggleTheme={toggleTheme}
                     onNewProject={handleNewProject}
-                    canOpenOperatorControls={canOpenOperatorControls}
-                    onOpenOperatorControls={handleOpenOperatorControls}
                 />
             ) : null}
 

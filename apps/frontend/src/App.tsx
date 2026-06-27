@@ -20,7 +20,6 @@ import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 // New Demiurge Views
 import { LandingView } from './components/Demiurge/LandingView';
 import { DashboardView } from './components/Demiurge/DashboardView';
-import { OperatorControlsPage } from './components/Demiurge/OperatorControlsPage';
 import type { Language } from './components/Demiurge/AgentsConfig';
 
 function App() {
@@ -40,8 +39,6 @@ function App() {
   const [lang, setLang] = useState<Language>('zh');
   const loadedHistoryProjectRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
-  const isOperatorControlsPage = window.location.pathname === '/operator-controls';
-  const operatorControlsParams = new URLSearchParams(window.location.search);
 
   // Sync dark mode class to root element
   useEffect(() => {
@@ -121,20 +118,6 @@ function App() {
       throw error;
     }
   };
-
-  if (isOperatorControlsPage) {
-    const operatorControlsLang = (operatorControlsParams.get('lang') || lang) as Language;
-    return (
-      <ErrorBoundary>
-        <OperatorControlsPage
-          projectId={operatorControlsParams.get('project_id') || activeProjectId || ''}
-          projectName={operatorControlsParams.get('project_name') || activeProject?.name || 'Project'}
-          lang={operatorControlsLang}
-          onBackToWorkspace={() => window.close()}
-        />
-      </ErrorBoundary>
-    );
-  }
 
   return (
     <ErrorBoundary>

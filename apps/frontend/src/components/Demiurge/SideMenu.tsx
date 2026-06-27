@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FlaskConical, Play, Square, Settings, Sun, Moon, PlusCircle, Globe } from 'lucide-react';
+import { Play, Square, Settings, Sun, Moon, PlusCircle, Globe } from 'lucide-react';
 import { LANGUAGE_OPTIONS, translations, type Language } from './AgentsConfig';
 
 interface SideMenuProps {
@@ -12,14 +12,11 @@ interface SideMenuProps {
     onSetLang: (lang: Language) => void;
     onToggleTheme: () => void;
     onNewProject: () => void;
-    canOpenOperatorControls?: boolean;
-    onOpenOperatorControls?: () => void;
 }
 
 export function SideMenu({
     status, lang, isDark,
     onToggleStatus, onSetLang, onToggleTheme, onNewProject,
-    canOpenOperatorControls = false, onOpenOperatorControls
 }: SideMenuProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const t = translations[lang];
@@ -86,24 +83,6 @@ export function SideMenu({
                                 </button>
 
                                 <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800/50 mx-2" />
-
-                                {canOpenOperatorControls ? (
-                                    <>
-                                        <button
-                                            onClick={() => {
-                                                setIsMenuOpen(false);
-                                                onOpenOperatorControls?.();
-                                            }}
-                                            className="w-full flex items-center space-x-3 px-3 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-2xl transition-colors group"
-                                        >
-                                            <div className="flex items-center space-x-3 text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors">
-                                                <FlaskConical className="w-4 h-4" />
-                                                <span className="text-[10px] font-black uppercase tracking-widest">Operator Controls</span>
-                                            </div>
-                                        </button>
-                                        <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800/50 mx-2" />
-                                    </>
-                                ) : null}
 
                                 {/* New Project */}
                                 <button

@@ -28,11 +28,7 @@ vi.mock('./store/systemStore', () => ({
     loadActivities,
     isDark: false,
     toggleTheme: vi.fn(),
-    status: {
-      capabilities: {
-        operator_controls_enabled: true,
-      },
-    },
+    status: { capabilities: {} },
   }),
 }));
 

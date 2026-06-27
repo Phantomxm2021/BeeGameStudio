@@ -26,10 +26,7 @@ const status = {
     unity_connected: false,
     active_agents: 0,
     project_progress: 0,
-    capabilities: {
-        operator_controls_enabled: true,
-        reset_gdd_approval_enabled: true,
-    },
+    capabilities: {},
 };
 
 let capturedRightSidebarProps: Record<string, any> | null = null;
@@ -169,13 +166,7 @@ vi.mock('./TopBar', () => ({
 vi.mock('./SideMenu', () => ({
     SideMenu: (props: Record<string, any>) => {
         capturedSideMenuProps = props;
-        return (
-            <div data-testid="side-menu">
-                {props.canOpenOperatorControls ? (
-                    <button type="button" onClick={props.onOpenOperatorControls}>OperatorControls</button>
-                ) : null}
-            </div>
-        );
+        return <div data-testid="side-menu" />;
     },
 }));
 
@@ -221,8 +212,6 @@ describe('DashboardView runtime loading', () => {
         };
         mockedProjects = [];
         mockedHasPermission = vi.fn(() => true);
-        status.capabilities.operator_controls_enabled = true;
-        status.capabilities.stage_control_enabled = true;
     });
 
     it('loads runtime status immediately when mounted', async () => {
@@ -551,24 +540,11 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('lightweight-web-challenge')).toBeInTheDocument();
     });
 
-    it('does not mount the legacy SideMenu in BeeGame mode when test operations are enabled', async () => {
+    it('does not mount the legacy SideMenu in BeeGame mode', async () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(capturedSideMenuProps).toBeNull();
-        expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();
-    });
-
-    it('keeps the BeeGame shell independent from legacy OperatorControls capability flags', async () => {
-        status.capabilities.operator_controls_enabled = false;
-        status.capabilities.stage_control_enabled = false;
-
-        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-
-        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
-
-        expect(capturedSideMenuProps).toBeNull();
-        expect(screen.queryByRole('button', { name: 'OperatorControls' })).not.toBeInTheDocument();
     });
 });
