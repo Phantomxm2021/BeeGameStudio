@@ -66,6 +66,8 @@ import {
 import {
   type BeeGamePermission,
   type BeeGameUserContext,
+  type BeeGameUserResolver,
+  createEnvTokenUserResolver,
   DEFAULT_LOCAL_USER_ID,
   getLocalUserContext,
   hasBeeGamePermission,
@@ -133,6 +135,7 @@ export type AgentWorkflowAppOptions = {
   modelConfigStore?: ModelConfigStoreOptions | false
   defaultWorkspacePath?: string
   currentUser?: BeeGameUserContext
+  currentUserResolver?: BeeGameUserResolver
 }
 
 export function createAgentWorkflowApp(
@@ -140,20 +143,26 @@ export function createAgentWorkflowApp(
 ): Hono {
   const app = new Hono()
   const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
-  const getCurrentUser = () => options.currentUser ?? getLocalUserContext()
-  const getCurrentUserDataRoot = () =>
-    getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser().id)
+  const requestUsers = new WeakMap<Request, BeeGameUserContext>()
+  const requestUserResolver =
+    options.currentUserResolver ?? createEnvTokenUserResolver()
+  const getCurrentUser = (request?: Request) =>
+    options.currentUser ??
+      (request ? requestUsers.get(request) : undefined) ??
+      getLocalUserContext()
+  const getCurrentUserDataRoot = (request?: Request) =>
+    getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
-    () => ({
+    userDataRoot => ({
       ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
-        dataDir: getCurrentUserDataRoot(),
+        dataDir: userDataRoot ?? dashboardDataRoot,
       })),
       ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({
-        dataDir: getCurrentUserDataRoot(),
+        dataDir: userDataRoot ?? dashboardDataRoot,
       }), {
-        dataDir: getCurrentUserDataRoot(),
+        dataDir: userDataRoot ?? dashboardDataRoot,
       }),
     }),
   )
@@ -164,8 +173,8 @@ export function createAgentWorkflowApp(
     options.previewReadinessProbe,
   )
   const projectStores = new Map<string, BeeGameProjectMetadataStore>()
-  const getProjectStore = () => {
-    const dataRoot = getCurrentUserDataRoot()
+  const getProjectStore = (request: Request) => {
+    const dataRoot = getCurrentUserDataRoot(request)
     const existing = projectStores.get(dataRoot)
     if (existing) return existing
     const created = new BeeGameProjectMetadataStore(
@@ -180,11 +189,26 @@ export function createAgentWorkflowApp(
   }
 
   app.use('/api/*', cors())
+  app.use('/api/*', async (c, next) => {
+    if (options.currentUser || !requestUserResolver) {
+      await next()
+      return
+    }
+    const user = requestUserResolver(c.req.raw)
+    if (!user) {
+      return c.json({
+        error: 'Unauthorized',
+        message: 'authentication required',
+      }, 401)
+    }
+    requestUsers.set(c.req.raw, user)
+    await next()
+  })
 
   app.get('/health', c => c.json({ status: 'ok' }))
 
   app.get('/api/current-user', c => {
-    const user = getCurrentUser()
+    const user = getCurrentUser(c.req.raw)
     return c.json({
       id: user.id,
       role: user.role,
@@ -193,11 +217,11 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/model-configs', c => {
-    return c.json(listModelConfigs(getCurrentUser().id))
+    return c.json(listModelConfigs(getCurrentUser(c.req.raw).id))
   })
 
   app.post('/api/model-configs', async c => {
-    const user = getCurrentUser()
+    const user = getCurrentUser(c.req.raw)
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -220,7 +244,7 @@ export function createAgentWorkflowApp(
   })
 
   app.patch('/api/model-configs/:id', async c => {
-    const user = getCurrentUser()
+    const user = getCurrentUser(c.req.raw)
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -244,7 +268,7 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/model-configs/:id', c => {
-    const user = getCurrentUser()
+    const user = getCurrentUser(c.req.raw)
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -254,15 +278,15 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/web-tools', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'secrets.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(toPublicWebToolsConfig(loadWebToolsConfig({
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     })))
   })
 
   app.put('/api/web-tools', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'secrets.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     return c.json(saveWebToolsConfig({
@@ -288,20 +312,20 @@ export function createAgentWorkflowApp(
         ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
         : {}),
     }, {
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.get('/api/runtime-settings', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'runtime_settings.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(loadRuntimeSettingsConfig({
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.put('/api/runtime-settings', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'runtime_settings.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const saved = saveRuntimeSettingsConfig({
@@ -327,42 +351,42 @@ export function createAgentWorkflowApp(
         ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
         : {}),
     }, {
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(saved)
   })
 
   app.get('/api/mcp-servers', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(listMcpServers({
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.get('/api/mcp-servers/discover', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(discoverMcpServers({
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.get('/api/mcp-servers/discover-active', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await discoverActiveMcpServers(listMcpServers({
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }), {
       ports: parsePortList(c.req.query('ports')),
     }))
   })
 
   app.post('/api/mcp-servers/test', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
@@ -371,18 +395,18 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/mcp-servers', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     return c.json(upsertMcpServer(toMcpServerInput(body), {
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.put('/api/mcp-servers/:id', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
@@ -391,22 +415,22 @@ export function createAgentWorkflowApp(
       ...toMcpServerInput(body),
       id: c.req.param('id'),
     }, {
-      dataDir: getCurrentUserDataRoot(),
+      dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
 
   app.delete('/api/mcp-servers/:id', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json({
       deleted: deleteMcpServer(c.req.param('id'), {
-        dataDir: getCurrentUserDataRoot(),
+        dataDir: getCurrentUserDataRoot(c.req.raw),
       }),
     })
   })
 
   app.get('/api/filesystem/directories', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'workspace.manage')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
     if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(await listDirectories(c.req.query('path')))
@@ -416,7 +440,7 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/filesystem/default-workspace', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'workspace.read')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json({
@@ -430,34 +454,34 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/projects', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'project.read')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(getProjectStore().listProjects())
+    return c.json(getProjectStore(c.req.raw).listProjects())
   })
 
   app.post('/api/projects', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['id', 'name', 'created_at'])
     if (error) return c.json({ error }, 400)
     try {
-      return c.json(getProjectStore().upsertProject(toProjectMetadata(body)))
+      return c.json(getProjectStore(c.req.raw).upsertProject(toProjectMetadata(body)))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
 
   app.patch('/api/projects/:id', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const existing = getProjectStore()
+    const existing = getProjectStore(c.req.raw)
       .listProjects()
       .find(project => project.id === c.req.param('id'))
     if (!existing) return c.json({ error: 'Project not found' }, 404)
     try {
-      return c.json(getProjectStore().upsertProject({
+      return c.json(getProjectStore(c.req.raw).upsertProject({
         ...existing,
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(typeof body.root_path === 'string'
@@ -473,13 +497,13 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/projects/:id', c => {
-    const forbidden = requirePermission(getCurrentUser(), 'project.delete')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json({ deleted: getProjectStore().deleteProject(c.req.param('id')) })
+    return c.json({ deleted: getProjectStore(c.req.raw).deleteProject(c.req.param('id')) })
   })
 
   app.post('/api/beegame-intake/options', async c => {
-    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['idea'])
@@ -490,7 +514,7 @@ export function createAgentWorkflowApp(
           idea: String(body.idea),
           language:
             typeof body.language === 'string' ? body.language : undefined,
-          ownerId: getCurrentUser().id,
+          ownerId: getCurrentUser(c.req.raw).id,
           modelConfigId:
             typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
         })),
@@ -508,6 +532,7 @@ export function createAgentWorkflowApp(
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
       getCurrentUser,
+      getUserDataRoot: getCurrentUserDataRoot,
     },
   )
   registerBeeGameSessionRoutes(
@@ -518,6 +543,7 @@ export function createAgentWorkflowApp(
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
       getCurrentUser,
+      getUserDataRoot: getCurrentUserDataRoot,
     },
   )
 
@@ -908,21 +934,22 @@ function registerBeeGameSessionRoutes(
   beeGamePreviews: BeeGamePreviewManager,
   options: {
     defaultWorkspacePath?: string
-    getCurrentUser: () => BeeGameUserContext
+    getCurrentUser: (request?: Request) => BeeGameUserContext
+    getUserDataRoot: (request?: Request) => string
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
-  const check = (permission: BeeGamePermission) =>
-    requirePermission(options.getCurrentUser(), permission)
+  const check = (request: Request, permission: BeeGamePermission) =>
+    requirePermission(options.getCurrentUser(request), permission)
 
   app.get(basePath, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(beeGameSessions.list())
   })
 
   app.post(basePath, async c => {
-    const forbidden = check('agent.send_message')
+    const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['workspacePath'])
@@ -945,6 +972,7 @@ function registerBeeGameSessionRoutes(
           ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
             ? { transcriptSessionId: body.transcriptSessionId }
             : {}),
+          userDataRoot: options.getUserDataRoot(c.req.raw),
         }),
       )
     } catch (err) {
@@ -953,7 +981,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id`, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const session = beeGameSessions.get(c.req.param('id'))
     return session
@@ -962,7 +990,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/events`, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
@@ -973,7 +1001,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/runtime-snapshot`, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(
@@ -988,7 +1016,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/transcript`, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
@@ -1007,7 +1035,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.patch(`${basePath}/:id/model`, async c => {
-    const forbidden = check('agent.send_message')
+    const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['modelConfigId'])
@@ -1029,7 +1057,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/artifacts`, async c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
@@ -1047,7 +1075,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/assets`, async c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
@@ -1059,7 +1087,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
-    const forbidden = check('assets.upload')
+    const forbidden = check(c.req.raw, 'assets.upload')
     if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
@@ -1082,7 +1110,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/package`, async c => {
-    const forbidden = check('project.export')
+    const forbidden = check(c.req.raw, 'project.export')
     if (forbidden) return c.json(forbidden, 403)
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
@@ -1108,7 +1136,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/preview`, c => {
-    const forbidden = check('project.read')
+    const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
@@ -1120,7 +1148,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/preview`, async c => {
-    const forbidden = check('preview.manage')
+    const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
@@ -1138,7 +1166,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/preview/restart`, async c => {
-    const forbidden = check('preview.manage')
+    const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
@@ -1156,7 +1184,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id/preview`, async c => {
-    const forbidden = check('preview.manage')
+    const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     try {
@@ -1167,7 +1195,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/input`, async c => {
-    const forbidden = check('agent.send_message')
+    const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['text'])
@@ -1191,7 +1219,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/permissions/:toolUseID`, async c => {
-    const forbidden = check('agent.approve_tool')
+    const forbidden = check(c.req.raw, 'agent.approve_tool')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const decision = body.decision
@@ -1218,7 +1246,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/stop`, c => {
-    const forbidden = check('agent.cancel')
+    const forbidden = check(c.req.raw, 'agent.cancel')
     if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(beeGameSessions.stop(c.req.param('id')))
@@ -1228,7 +1256,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id`, async c => {
-    const forbidden = check('project.delete')
+    const forbidden = check(c.req.raw, 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
     const workspacePathQuery = c.req.query('workspacePath')

@@ -133,6 +133,7 @@ type PendingPermission = DashboardPermissionRequest & {
 type SessionRecord = {
   session: BeeGameSession
   runtime: RuntimeModelConfig | undefined
+  userDataRoot?: string
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
   abortController: AbortController | null
@@ -153,6 +154,7 @@ export type StartBeeGameSessionInput = {
   workspacePath: string
   modelConfigId?: string
   transcriptSessionId?: string
+  userDataRoot?: string
 }
 
 export class BeeGameSessionManager {
@@ -162,7 +164,7 @@ export class BeeGameSessionManager {
   constructor(
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
     dashboardDataRoot?: string,
-    private readonly getAdditionalRuntimeEnv: () => Record<string, string> = () => ({}),
+    private readonly getAdditionalRuntimeEnv: (userDataRoot?: string) => Record<string, string> = () => ({}),
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -207,6 +209,7 @@ export class BeeGameSessionManager {
     const record: SessionRecord = {
       session,
       runtime,
+      ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
       transcriptPath: recoveredTranscript?.path ??
         getSessionTranscriptPath(
           session.id,
@@ -467,7 +470,10 @@ export class BeeGameSessionManager {
         sessionId: record.session.id,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
-        env: buildRuntimeEnv(record.runtime, this.getAdditionalRuntimeEnv()),
+        env: buildRuntimeEnv(
+          record.runtime,
+          this.getAdditionalRuntimeEnv(record.userDataRoot),
+        ),
       })
       record.runner = runner
       try {

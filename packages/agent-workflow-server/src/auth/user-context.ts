@@ -24,6 +24,10 @@ export type BeeGameUserContext = {
   role: BeeGameRole
 }
 
+export type BeeGameUserResolver = (
+  request: Request,
+) => BeeGameUserContext | undefined
+
 export const DEFAULT_LOCAL_USER_ID = 'dashboard-local'
 
 export function getLocalUserContext(): BeeGameUserContext {
@@ -46,14 +50,26 @@ export function listBeeGamePermissions(
   return [...getRolePermissions(user.role)]
 }
 
-function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {
-  if (role === 'owner') return OWNER_PERMISSIONS
-  if (role === 'developer') return DEVELOPER_PERMISSIONS
-  if (role === 'reviewer') return REVIEWER_PERMISSIONS
-  return VIEWER_PERMISSIONS
+export function createEnvTokenUserResolver(
+  env: NodeJS.ProcessEnv = process.env,
+): BeeGameUserResolver | undefined {
+  const raw = env.BEEGAME_AUTH_TOKENS?.trim()
+  if (!raw) return undefined
+  const usersByToken = parseAuthTokenUsers(raw)
+  return request => {
+    const token = getBearerToken(request)
+    return token ? usersByToken.get(token) : undefined
+  }
 }
 
-function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
+export function getBearerToken(request: Request): string | undefined {
+  const header = request.headers.get('authorization')?.trim()
+  if (!header) return undefined
+  const match = /^Bearer\s+(.+)$/i.exec(header)
+  return match?.[1]?.trim() || undefined
+}
+
+export function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
   if (
     value === 'owner' ||
     value === 'developer' ||
@@ -63,6 +79,57 @@ function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
     return value
   }
   return 'owner'
+}
+
+function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {
+  if (role === 'owner') return OWNER_PERMISSIONS
+  if (role === 'developer') return DEVELOPER_PERMISSIONS
+  if (role === 'reviewer') return REVIEWER_PERMISSIONS
+  return VIEWER_PERMISSIONS
+}
+
+function parseAuthTokenUsers(raw: string): Map<string, BeeGameUserContext> {
+  const parsed = JSON.parse(raw) as unknown
+  const entries = new Map<string, BeeGameUserContext>()
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const entry = toTokenUserEntry(item)
+      if (entry) entries.set(entry.token, entry.user)
+    }
+    return entries
+  }
+  if (isRecord(parsed)) {
+    for (const [token, value] of Object.entries(parsed)) {
+      const user = toUserContext(value)
+      if (token.trim() && user) entries.set(token.trim(), user)
+    }
+  }
+  return entries
+}
+
+function toTokenUserEntry(
+  value: unknown,
+): { token: string; user: BeeGameUserContext } | undefined {
+  if (!isRecord(value)) return undefined
+  const token = typeof value.token === 'string' ? value.token.trim() : ''
+  const user = toUserContext(value)
+  return token && user ? { token, user } : undefined
+}
+
+function toUserContext(value: unknown): BeeGameUserContext | undefined {
+  if (!isRecord(value)) return undefined
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  if (!id) return undefined
+  return {
+    id,
+    role: normalizeBeeGameRole(
+      typeof value.role === 'string' ? value.role : undefined,
+    ),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 const VIEWER_PERMISSIONS = new Set<BeeGamePermission>([

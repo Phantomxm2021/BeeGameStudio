@@ -75,6 +75,103 @@ describe('agent workflow server routes', () => {
     })
   })
 
+  test('resolves current user from bearer auth tokens when configured', async () => {
+    const originalTokens = process.env.BEEGAME_AUTH_TOKENS
+    try {
+      process.env.BEEGAME_AUTH_TOKENS = JSON.stringify({
+        'owner-token': { id: 'owner-user', role: 'owner' },
+        'viewer-token': { id: 'viewer-user', role: 'viewer' },
+      })
+      const authApp = createAgentWorkflowApp()
+
+      const missingRes = await authApp.request('/api/current-user')
+      expect(missingRes.status).toBe(401)
+      expect(await missingRes.json()).toEqual({
+        error: 'Unauthorized',
+        message: 'authentication required',
+      })
+
+      const viewerRes = await authApp.request('/api/current-user', {
+        headers: { authorization: 'Bearer viewer-token' },
+      })
+      expect(viewerRes.status).toBe(200)
+      expect(await viewerRes.json()).toEqual({
+        id: 'viewer-user',
+        role: 'viewer',
+        permissions: [
+          'workspace.read',
+          'project.read',
+          'project.export',
+        ],
+      })
+
+      const ownerRes = await authApp.request('/api/current-user', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(ownerRes.status).toBe(200)
+      expect(await ownerRes.json()).toEqual(expect.objectContaining({
+        id: 'owner-user',
+        role: 'owner',
+        permissions: expect.arrayContaining(['project.delete']),
+      }))
+    } finally {
+      if (originalTokens === undefined) {
+        delete process.env.BEEGAME_AUTH_TOKENS
+      } else {
+        process.env.BEEGAME_AUTH_TOKENS = originalTokens
+      }
+    }
+  })
+
+  test('scopes project metadata by bearer authenticated user', async () => {
+    const originalTokens = process.env.BEEGAME_AUTH_TOKENS
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auth-projects-'))
+    try {
+      process.env.BEEGAME_AUTH_TOKENS = JSON.stringify({
+        'owner-a-token': { id: 'owner-a', role: 'owner' },
+        'owner-b-token': { id: 'owner-b', role: 'owner' },
+      })
+      const authApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+      })
+
+      const createRes = await authApp.request('/api/projects', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer owner-a-token',
+        },
+        body: JSON.stringify({
+          id: 'owner_a_project',
+          name: 'Owner A Project',
+          created_at: 1,
+        }),
+      })
+      expect(createRes.status).toBe(200)
+
+      const ownerAProjectsRes = await authApp.request('/api/projects', {
+        headers: { authorization: 'Bearer owner-a-token' },
+      })
+      expect(ownerAProjectsRes.status).toBe(200)
+      expect(await ownerAProjectsRes.json()).toEqual([
+        expect.objectContaining({ id: 'owner_a_project' }),
+      ])
+
+      const ownerBProjectsRes = await authApp.request('/api/projects', {
+        headers: { authorization: 'Bearer owner-b-token' },
+      })
+      expect(ownerBProjectsRes.status).toBe(200)
+      expect(await ownerBProjectsRes.json()).toEqual([])
+    } finally {
+      if (originalTokens === undefined) {
+        delete process.env.BEEGAME_AUTH_TOKENS
+      } else {
+        process.env.BEEGAME_AUTH_TOKENS = originalTokens
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('can narrow the local single-user role from environment', async () => {
     const originalRole = process.env.BEEGAME_LOCAL_USER_ROLE
     try {

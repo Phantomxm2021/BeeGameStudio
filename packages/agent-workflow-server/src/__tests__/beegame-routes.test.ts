@@ -726,6 +726,85 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('injects bearer authenticated user runtime settings into BeeGame turns', async () => {
+    const originalTokens = process.env.BEEGAME_AUTH_TOKENS
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'auth-runtime-game')
+    const fake = createFakeRunner(undefined, 'build_write_complete')
+    try {
+      process.env.BEEGAME_AUTH_TOKENS = JSON.stringify({
+        'owner-a-token': { id: 'owner-a', role: 'owner' },
+      })
+      const app = createAgentWorkflowApp({
+        sessionRunner: fake.runner,
+        defaultWorkspacePath: projectsRoot,
+      })
+      const model = createModelConfig('owner-a', {
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+      })
+
+      await app.request('/api/web-tools', {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer owner-a-token',
+        },
+        body: JSON.stringify({
+          webSearchAdapter: 'brave',
+          braveApiKey: 'bsa-owner-a-secret',
+        }),
+      })
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer owner-a-token',
+        },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          modelConfigId: model.id,
+        }),
+      })
+      expect(sessionRes.status).toBe(200)
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer owner-a-token',
+        },
+        body: JSON.stringify({ text: 'Build with web tools.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+          { headers: { authorization: 'Bearer owner-a-token' } },
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      expect(fake.starts[0]?.env).toEqual(expect.objectContaining({
+        WEB_SEARCH_ADAPTER: 'brave',
+        BRAVE_SEARCH_API_KEY: 'bsa-owner-a-secret',
+      }))
+    } finally {
+      if (originalTokens === undefined) {
+        delete process.env.BEEGAME_AUTH_TOKENS
+      } else {
+        process.env.BEEGAME_AUTH_TOKENS = originalTokens
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rejects relative workspace paths before creating a runner', async () => {
     const fake = createFakeRunner()
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
