@@ -15,7 +15,8 @@ const { runIdeaIntake } = vi.hoisted(() => ({
 const { getCreditBalance } = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
 }));
-const { isSupabaseAuthConfigured, signInWithSupabasePassword } = vi.hoisted(() => ({
+const { clearSupabaseSession, isSupabaseAuthConfigured, signInWithSupabasePassword } = vi.hoisted(() => ({
+    clearSupabaseSession: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
     signInWithSupabasePassword: vi.fn(),
 }));
@@ -107,6 +108,7 @@ vi.mock('../../services/creditsApi', () => ({
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
+    clearSupabaseSession,
     isSupabaseAuthConfigured,
     signInWithSupabasePassword,
 }));
@@ -235,6 +237,7 @@ beforeEach(() => {
     });
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
+    clearSupabaseSession.mockReset();
     signInWithSupabasePassword.mockReset();
     signInWithSupabasePassword.mockResolvedValue({
         accessToken: 'supabase-access-token',
@@ -292,8 +295,24 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
     });
 
+    it('shows signed-in account and credit balance in the landing actions', async () => {
+        renderLanding();
+
+        expect(await screen.findByText('dashboard-local')).toBeInTheDocument();
+        expect(screen.getByText('300 credits')).toBeInTheDocument();
+    });
+
+    it('clears the Supabase session and reloads the current user when signing out', async () => {
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+
+        expect(clearSupabaseSession).toHaveBeenCalledTimes(1);
+        expect(mockLoadCurrentUser).toHaveBeenCalled();
+    });
+
     it('stops intake generation when available credits are below the intake estimate', async () => {
-        getCreditBalance.mockResolvedValueOnce({
+        getCreditBalance.mockResolvedValue({
             userId: 'dashboard-local',
             plan: 'free',
             balanceCredits: 0,

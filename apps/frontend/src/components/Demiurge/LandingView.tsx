@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { translations, type Language } from './AgentsConfig';
@@ -18,8 +18,9 @@ import {
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
-import { getCreditBalance } from '../../services/creditsApi';
+import { getCreditBalance, type BeeGameCreditBalance } from '../../services/creditsApi';
 import {
+    clearSupabaseSession,
     isSupabaseAuthConfigured,
     signInWithSupabasePassword,
 } from '../../services/supabaseAuthApi';
@@ -85,6 +86,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [loginError, setLoginError] = useState('');
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
+    const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -96,8 +98,33 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 : '启动构建';
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
+    const currentUser = useSystemStore(state => state.currentUser);
     const hasPermission = useSystemStore(state => state.hasPermission);
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
+
+    useEffect(() => {
+        if (!currentUser) {
+            setCreditBalance(null);
+            return;
+        }
+        let cancelled = false;
+        void getCreditBalance()
+            .then((balance) => {
+                if (!cancelled) setCreditBalance(balance);
+            })
+            .catch(() => {
+                if (!cancelled) setCreditBalance(null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUser?.id]);
+
+    const handleSignOut = async () => {
+        clearSupabaseSession();
+        setCreditBalance(null);
+        await loadCurrentUser();
+    };
 
     const ensureGenerationAccess = async (): Promise<boolean> => {
         await loadCurrentUser();
@@ -337,6 +364,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     isTransitioning={isTransitioning}
                     isSettingsOpen={isSettingsOpen}
                     isHistoryOpen={isHistoryOpen}
+                    currentUserId={currentUser?.id}
+                    creditBalance={creditBalance?.balanceCredits}
+                    onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
                         setIsHistoryOpen(false);
