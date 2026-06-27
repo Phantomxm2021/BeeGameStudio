@@ -257,7 +257,7 @@ describe('normalizeProjectBaselineStatusPayload', () => {
             gate_kind: 'blocker_resolution',
             user_action_kind: 'resolve_blockers',
             title: 'Clockwork Garden bundle',
-            ready_for_user_approval: false,
+            ready_for_user_approval: true,
             ready_for_promotion: false,
             open_issue_ids: ['issue_1'],
             open_blocker_ids: ['issue_1'],

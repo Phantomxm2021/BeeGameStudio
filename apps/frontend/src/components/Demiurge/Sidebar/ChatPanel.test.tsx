@@ -33,11 +33,11 @@ const approvalReview: PendingUserReviewItem = {
     open_blocker_ids: [],
 };
 
-const blockerResolutionReview: PendingUserReviewItem = {
+const legacyGateReview: PendingUserReviewItem = {
     ...approvalReview,
     gate_id: 'gate_blockers',
     gate_kind: 'review_blocker_resolution',
-    ready_for_user_approval: false,
+    ready_for_user_approval: true,
     ready_for_promotion: false,
     review_status: {
         ...approvalReview.review_status!,
@@ -92,11 +92,11 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByRole('button', { name: /^revise$/i })).toBeInTheDocument();
     });
 
-    it('shows blocker resolution gates as revision work, not approval', () => {
-        renderChatPanel({ actionReview: blockerResolutionReview });
+    it('does not give legacy blocker gate kinds custom approval behavior', () => {
+        renderChatPanel({ actionReview: legacyGateReview });
 
-        expect(screen.getByText('Revision Required')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+        expect(screen.getByText('Approval Required')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /^revise$/i })).toBeInTheDocument();
     });
 

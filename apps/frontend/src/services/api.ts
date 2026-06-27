@@ -6,7 +6,6 @@ import apiClient, {
   resolveAuthToken,
   setToastErrorCallback,
 } from './apiClient';
-import { isReviewBlockerGateKind } from '../utils/gateSemantics';
 import { beeGameAdapter, isBeeGameAdapterEnabled } from './beeGameAdapter';
 import {
   getCurrentUser as getBeeGameCurrentUser,
@@ -443,9 +442,7 @@ const normalizeDocumentBundleStatusPayload = (
   if (!payload) return undefined;
   const gateKind = String(payload.gate_kind ?? '').trim();
   const userActionKind = String(payload.user_action_kind ?? '').trim();
-  const approvalReady = isReviewBlockerGateKind(gateKind) || userActionKind === 'resolve_blockers'
-    ? false
-    : Boolean(payload.ready_for_user_approval);
+  const approvalReady = Boolean(payload.ready_for_user_approval);
   return {
     bundle_id: String(payload.bundle_id ?? '').trim(),
     bundle_type: String(payload.bundle_type ?? '').trim(),
@@ -523,9 +520,7 @@ const normalizePendingUserReviewItem = (payload: PendingUserReviewItem): Pending
   const reviewStatus = normalizeReviewStatusPayload(payload.review_status);
   const gateKind = String(payload.gate_kind ?? '').trim();
   const userActionKind = String(payload.user_action_kind ?? reviewStatus?.user_action_kind ?? '').trim();
-  const approvalReady = isReviewBlockerGateKind(gateKind) || userActionKind === 'resolve_blockers'
-    ? false
-    : Boolean(payload.ready_for_user_approval);
+  const approvalReady = Boolean(payload.ready_for_user_approval);
   return {
     ...payload,
     binding: {

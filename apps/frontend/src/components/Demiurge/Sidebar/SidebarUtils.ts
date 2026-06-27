@@ -3,7 +3,6 @@ import type {
     ReviewStatusPayload,
 } from '../../../services/api';
 import { localizeReviewMessage } from '../../../utils/reviewStatus';
-import { isReviewBlockerGateKind } from '../../../utils/gateSemantics';
 import type {
     ReviewDisplayModel,
     ReviewStatusDisplayPayload,
@@ -48,13 +47,6 @@ export const getTaskStatusLabel = (task: ProjectTask): string => {
 type ReviewLike = ReviewDisplayModel | undefined | null;
 const LEGACY_BEEGAME_PERMISSION_TYPE = ['CLAU', 'DE_CODE_PERMISSION'].join('');
 
-export const isBlockerResolutionReview = (review: ReviewLike): boolean => {
-    if (!review) return false;
-    const gateKind = String(review.gate_kind || '').trim();
-    const actionKind = String(review.user_action_kind || review.review_status?.user_action_kind || '').trim();
-    return isReviewBlockerGateKind(gateKind) || actionKind === 'resolve_blockers';
-};
-
 export const isBeeGamePermissionReview = (review: ReviewLike): boolean => {
     if (!review) return false;
     return (
@@ -68,7 +60,6 @@ export const isBeeGamePermissionReview = (review: ReviewLike): boolean => {
 export const formatReviewTitle = (review: ReviewLike): string => {
     if (!review) return 'Pending review';
     if (isBeeGamePermissionReview(review)) return review.title || 'BeeGame permission';
-    if (isBlockerResolutionReview(review)) return 'Resolve blockers';
     if (review.type === 'ITERATION_REAPPROVAL_REVIEW') return 'Review required';
     if (review.type === 'GDD_APPROVAL_REVIEW') return 'Review required';
     if (review.type === 'ASSET_MANIFEST_REVIEW') return 'Asset delivery approval';
@@ -108,7 +99,6 @@ const compactPermissionPath = (path: string, workspaceRef: string): string => {
 
 export const isReviewAwaitingUserAction = (review: ReviewLike): boolean => {
     if (!review) return false;
-    if (isBlockerResolutionReview(review)) return false;
     if (review.review_status?.requires_user_action === true) return true;
     return review.ready_for_user_approval === true;
 };
@@ -130,10 +120,6 @@ export const getReviewWorkspaceRef = (review: ReviewLike): string => {
 export const formatReviewSummary = (review: ReviewLike): string => {
     if (isBeeGamePermissionReview(review)) {
         return formatBeeGamePermissionSummary(review);
-    }
-    if (isBlockerResolutionReview(review)) {
-        const artifactId = getCurrentReviewArtifactId(review);
-        return `This review still has unresolved blockers. Update ${artifactId || 'the current artifact'} and continue.`;
     }
     const reviewStatusMessage = localizeReviewMessage(review?.review_status);
     if (reviewStatusMessage) {

@@ -4,7 +4,7 @@ import { MessageSquare, AlertCircle, Send } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed, BeeGameConversationOverviewRuler } from './BeeGameCollaborationFeed';
 import type { ReviewBindingPayload } from '../../../services/api';
-import { formatReviewSummary, isBlockerResolutionReview, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
+import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
@@ -117,7 +117,6 @@ export const ChatPanel = memo(({
 
     const clarificationReview = pendingReviews.find((review: ReviewDisplayModel) => review?.type === 'INTENT_CLARIFICATION' && Boolean(review?.gate_id));
     const reviewReadyForUserApproval = isReviewAwaitingUserAction(actionReview);
-    const blockerResolutionReview = isBlockerResolutionReview(actionReview);
     const beeGamePermission = isBeeGamePermissionReview(actionReview);
     const projectFailed = Boolean(projectStatus?.blocked && String(projectStatus?.blocked_reason || '').trim() === 'pipeline_failed');
     const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || actionReview);
@@ -314,7 +313,7 @@ export const ChatPanel = memo(({
                                             tone: 'reject' as const,
                                             onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview), undefined, 'revise'),
                                         }]
-                                    : [...(!blockerResolutionReview && reviewReadyForUserApproval ? [{
+                                    : [...(reviewReadyForUserApproval ? [{
                                         action: 'approve' as const,
                                         label: reviewApproveLabel(activeComposerReview),
                                         onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview)),
