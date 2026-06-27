@@ -169,6 +169,62 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('rejects sensitive settings routes for read-only users', async () => {
+    const viewerApp = createAgentWorkflowApp({
+      currentUser: {
+        id: 'viewer-user',
+        role: 'viewer',
+      },
+    })
+
+    const requests = [
+      viewerApp.request('/api/web-tools'),
+      viewerApp.request('/api/web-tools', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ braveApiKey: 'brave-secret' }),
+      }),
+      viewerApp.request('/api/runtime-settings'),
+      viewerApp.request('/api/runtime-settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ skillSearchEnabled: true }),
+      }),
+      viewerApp.request('/api/mcp-servers'),
+      viewerApp.request('/api/mcp-servers/discover'),
+      viewerApp.request('/api/mcp-servers/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Local MCP',
+          enabled: true,
+          transport: 'http',
+          scope: 'beegame',
+          url: 'http://127.0.0.1:18081/mcp',
+        }),
+      }),
+      viewerApp.request('/api/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Local MCP',
+          enabled: true,
+          transport: 'http',
+          scope: 'beegame',
+          url: 'http://127.0.0.1:18081/mcp',
+        }),
+      }),
+      viewerApp.request('/api/mcp-servers/server-id', {
+        method: 'DELETE',
+      }),
+    ]
+
+    for (const response of await Promise.all(requests)) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'Forbidden' })
+    }
+  })
+
   test('persists MCP servers and masks environment secrets', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-'))
 

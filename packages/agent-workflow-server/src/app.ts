@@ -64,6 +64,8 @@ import {
   testMcpServerConnection,
 } from './mcp-active-discovery'
 import {
+  type BeeGamePermission,
+  type BeeGameUserContext,
   getLocalUserContext,
   hasBeeGamePermission,
 } from './auth/user-context'
@@ -128,6 +130,7 @@ export type AgentWorkflowAppOptions = {
   previewReadinessProbe?: BeeGamePreviewReadinessProbe
   modelConfigStore?: ModelConfigStoreOptions | false
   defaultWorkspacePath?: string
+  currentUser?: BeeGameUserContext
 }
 
 export function createAgentWorkflowApp(
@@ -162,7 +165,7 @@ export function createAgentWorkflowApp(
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     loadModelConfigsFromStore(modelConfigStore)
   }
-  const getCurrentUser = () => getLocalUserContext()
+  const getCurrentUser = () => options.currentUser ?? getLocalUserContext()
 
   app.use('/api/*', cors())
 
@@ -230,12 +233,16 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/web-tools', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'secrets.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(toPublicWebToolsConfig(loadWebToolsConfig({
       dataDir: dashboardDataRoot,
     })))
   })
 
   app.put('/api/web-tools', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'secrets.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     return c.json(saveWebToolsConfig({
       ...(typeof body.webSearchAdapter === 'string'
@@ -265,12 +272,16 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/runtime-settings', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'runtime_settings.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(loadRuntimeSettingsConfig({
       dataDir: dashboardDataRoot,
     }))
   })
 
   app.put('/api/runtime-settings', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'runtime_settings.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const saved = saveRuntimeSettingsConfig({
       ...(typeof body.autoMemoryEnabled === 'boolean'
@@ -304,18 +315,24 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/mcp-servers', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(listMcpServers({
       dataDir: dashboardDataRoot,
     }))
   })
 
   app.get('/api/mcp-servers/discover', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(discoverMcpServers({
       dataDir: dashboardDataRoot,
     }))
   })
 
   app.get('/api/mcp-servers/discover-active', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(await discoverActiveMcpServers(listMcpServers({
       dataDir: dashboardDataRoot,
     }), {
@@ -324,6 +341,8 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/mcp-servers/test', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
@@ -331,6 +350,8 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/mcp-servers', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
@@ -340,6 +361,8 @@ export function createAgentWorkflowApp(
   })
 
   app.put('/api/mcp-servers/:id', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
@@ -352,6 +375,8 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/mcp-servers/:id', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json({
       deleted: deleteMcpServer(c.req.param('id'), {
         dataDir: dashboardDataRoot,
@@ -456,6 +481,15 @@ export function createAgentWorkflowApp(
   )
 
   return app
+}
+
+function requirePermission(
+  user: BeeGameUserContext,
+  permission: BeeGamePermission,
+): { error: string } | undefined {
+  return hasBeeGamePermission(user, permission)
+    ? undefined
+    : { error: 'Forbidden' }
 }
 
 async function generateBeeGameIntakeOptions(input: {
