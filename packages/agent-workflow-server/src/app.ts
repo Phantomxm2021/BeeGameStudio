@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { realpath, rm } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   createModelConfig,
   deleteModelConfig,
@@ -66,6 +66,7 @@ import {
 import {
   type BeeGamePermission,
   type BeeGameUserContext,
+  DEFAULT_LOCAL_USER_ID,
   getLocalUserContext,
   hasBeeGamePermission,
   listBeeGamePermissions,
@@ -139,17 +140,20 @@ export function createAgentWorkflowApp(
 ): Hono {
   const app = new Hono()
   const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
+  const getCurrentUser = () => options.currentUser ?? getLocalUserContext()
+  const getCurrentUserDataRoot = () =>
+    getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser().id)
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
     () => ({
       ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
-        dataDir: dashboardDataRoot,
+        dataDir: getCurrentUserDataRoot(),
       })),
       ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({
-        dataDir: dashboardDataRoot,
+        dataDir: getCurrentUserDataRoot(),
       }), {
-        dataDir: dashboardDataRoot,
+        dataDir: getCurrentUserDataRoot(),
       }),
     }),
   )
@@ -159,14 +163,21 @@ export function createAgentWorkflowApp(
     options.previewPortAllocator,
     options.previewReadinessProbe,
   )
-  const projectStore = new BeeGameProjectMetadataStore(
-    getBeeGameProjectDatabasePath(dashboardDataRoot),
-  )
+  const projectStores = new Map<string, BeeGameProjectMetadataStore>()
+  const getProjectStore = () => {
+    const dataRoot = getCurrentUserDataRoot()
+    const existing = projectStores.get(dataRoot)
+    if (existing) return existing
+    const created = new BeeGameProjectMetadataStore(
+      getBeeGameProjectDatabasePath(dataRoot),
+    )
+    projectStores.set(dataRoot, created)
+    return created
+  }
   const modelConfigStore = options.modelConfigStore
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     loadModelConfigsFromStore(modelConfigStore)
   }
-  const getCurrentUser = () => options.currentUser ?? getLocalUserContext()
 
   app.use('/api/*', cors())
 
@@ -246,7 +257,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(toPublicWebToolsConfig(loadWebToolsConfig({
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     })))
   })
 
@@ -277,7 +288,7 @@ export function createAgentWorkflowApp(
         ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
         : {}),
     }, {
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -285,7 +296,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(loadRuntimeSettingsConfig({
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -316,10 +327,10 @@ export function createAgentWorkflowApp(
         ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
         : {}),
     }, {
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     })
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     })
     return c.json(saved)
   })
@@ -328,7 +339,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(listMcpServers({
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -336,7 +347,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(discoverMcpServers({
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -344,7 +355,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await discoverActiveMcpServers(listMcpServers({
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }), {
       ports: parsePortList(c.req.query('ports')),
     }))
@@ -366,7 +377,7 @@ export function createAgentWorkflowApp(
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     return c.json(upsertMcpServer(toMcpServerInput(body), {
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -380,7 +391,7 @@ export function createAgentWorkflowApp(
       ...toMcpServerInput(body),
       id: c.req.param('id'),
     }, {
-      dataDir: dashboardDataRoot,
+      dataDir: getCurrentUserDataRoot(),
     }))
   })
 
@@ -389,7 +400,7 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     return c.json({
       deleted: deleteMcpServer(c.req.param('id'), {
-        dataDir: dashboardDataRoot,
+        dataDir: getCurrentUserDataRoot(),
       }),
     })
   })
@@ -421,7 +432,7 @@ export function createAgentWorkflowApp(
   app.get('/api/projects', c => {
     const forbidden = requirePermission(getCurrentUser(), 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(projectStore.listProjects())
+    return c.json(getProjectStore().listProjects())
   })
 
   app.post('/api/projects', async c => {
@@ -431,7 +442,7 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['id', 'name', 'created_at'])
     if (error) return c.json({ error }, 400)
     try {
-      return c.json(projectStore.upsertProject(toProjectMetadata(body)))
+      return c.json(getProjectStore().upsertProject(toProjectMetadata(body)))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -441,12 +452,12 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const existing = projectStore
+    const existing = getProjectStore()
       .listProjects()
       .find(project => project.id === c.req.param('id'))
     if (!existing) return c.json({ error: 'Project not found' }, 404)
     try {
-      return c.json(projectStore.upsertProject({
+      return c.json(getProjectStore().upsertProject({
         ...existing,
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(typeof body.root_path === 'string'
@@ -464,7 +475,7 @@ export function createAgentWorkflowApp(
   app.delete('/api/projects/:id', c => {
     const forbidden = requirePermission(getCurrentUser(), 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json({ deleted: projectStore.deleteProject(c.req.param('id')) })
+    return c.json({ deleted: getProjectStore().deleteProject(c.req.param('id')) })
   })
 
   app.post('/api/beegame-intake/options', async c => {
@@ -1338,6 +1349,26 @@ function getDashboardDataRoot(defaultWorkspacePath?: string): string {
       process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
       resolve(process.cwd(), 'Projects'),
   )
+}
+
+function getUserDashboardDataRoot(
+  dashboardDataRoot: string,
+  userId: string,
+): string {
+  const normalizedUserId = normalizeUserDataDirName(userId)
+  if (!normalizedUserId || normalizedUserId === DEFAULT_LOCAL_USER_ID) {
+    return dashboardDataRoot
+  }
+  return join(dashboardDataRoot, 'users', normalizedUserId)
+}
+
+function normalizeUserDataDirName(userId: string): string {
+  return userId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
 }
 
 async function resolveSessionWorkspacePath(

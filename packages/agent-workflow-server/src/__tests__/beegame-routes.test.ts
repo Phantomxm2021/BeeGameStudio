@@ -647,6 +647,85 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('scopes dashboard stores by current user', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const ownerAApp = createAgentWorkflowApp({
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: 'owner-a', role: 'owner' },
+    })
+    const ownerBApp = createAgentWorkflowApp({
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: 'owner-b', role: 'owner' },
+    })
+
+    try {
+      const projectARes = await ownerAApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_a',
+          name: 'Project A',
+          created_at: 1,
+        }),
+      })
+      expect(projectARes.status).toBe(200)
+
+      await ownerAApp.request('/api/web-tools', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          webSearchAdapter: 'brave',
+          braveApiKey: 'bsa-owner-a-secret',
+        }),
+      })
+      await ownerAApp.request('/api/runtime-settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ skillSearchEnabled: true }),
+      })
+      await ownerAApp.request('/api/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Owner A MCP',
+          enabled: true,
+          transport: 'stdio',
+          scope: 'beegame',
+          command: 'owner-a-mcp',
+        }),
+      })
+
+      const ownerAProjects = await (await ownerAApp.request('/api/projects')).json()
+      const ownerBProjects = await (await ownerBApp.request('/api/projects')).json()
+      expect(ownerAProjects).toEqual([
+        expect.objectContaining({ id: 'project_a', name: 'Project A' }),
+      ])
+      expect(ownerBProjects).toEqual([])
+
+      const ownerAWebTools = await (await ownerAApp.request('/api/web-tools')).json()
+      const ownerBWebTools = await (await ownerBApp.request('/api/web-tools')).json()
+      expect(ownerAWebTools).toEqual(expect.objectContaining({
+        webSearchAdapter: 'brave',
+        braveApiKeyPreview: 'bsa-…cret',
+      }))
+      expect(ownerBWebTools).toEqual({})
+
+      const ownerARuntimeSettings = await (await ownerAApp.request('/api/runtime-settings')).json()
+      const ownerBRuntimeSettings = await (await ownerBApp.request('/api/runtime-settings')).json()
+      expect(ownerARuntimeSettings).toEqual({ skillSearchEnabled: true })
+      expect(ownerBRuntimeSettings).toEqual({})
+
+      const ownerAMcpServers = await (await ownerAApp.request('/api/mcp-servers')).json()
+      const ownerBMcpServers = await (await ownerBApp.request('/api/mcp-servers')).json()
+      expect(ownerAMcpServers).toEqual([
+        expect.objectContaining({ name: 'Owner A MCP', command: 'owner-a-mcp' }),
+      ])
+      expect(ownerBMcpServers).toEqual([])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rejects relative workspace paths before creating a runner', async () => {
     const fake = createFakeRunner()
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
