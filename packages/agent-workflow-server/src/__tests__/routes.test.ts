@@ -12,8 +12,8 @@ describe('agent workflow server routes', () => {
     resetAgentWorkflow()
   })
 
-  test('creates and lists masked model configs for an owner', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=owner-a', {
+  test('creates and lists masked model configs for the current user', async () => {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -30,7 +30,30 @@ describe('agent workflow server routes', () => {
     expect(created.apiKey).toBeUndefined()
     expect(created.apiKeyPreview).toBe('sk-d...cret')
 
-    const listRes = await app.request('/api/model-configs?ownerId=owner-a')
+    const listRes = await app.request('/api/model-configs')
+    expect(listRes.status).toBe(200)
+    expect(await listRes.json()).toEqual([
+      expect.objectContaining({ id: created.id, name: 'Primary LLM' }),
+    ])
+  })
+
+  test('derives the default local user for model configs without owner query parameters', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+    const created = await createRes.json()
+
+    const listRes = await app.request('/api/model-configs')
     expect(listRes.status).toBe(200)
     expect(await listRes.json()).toEqual([
       expect.objectContaining({ id: created.id, name: 'Primary LLM' }),
@@ -55,7 +78,7 @@ describe('agent workflow server routes', () => {
         modelConfigStore: { dataDir },
       })
       const createRes = await firstApp.request(
-        '/api/model-configs?ownerId=owner-a',
+        '/api/model-configs',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -77,7 +100,7 @@ describe('agent workflow server routes', () => {
         modelConfigStore: { dataDir },
       })
       const listRes = await secondApp.request(
-        '/api/model-configs?ownerId=owner-a',
+        '/api/model-configs',
       )
 
       expect(listRes.status).toBe(200)
@@ -509,7 +532,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('analyzes BeeGame intake and returns game-mode options from the default model config', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -578,7 +601,7 @@ describe('agent workflow server routes', () => {
     }) as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
@@ -657,7 +680,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('returns structured clarification when the model cannot recommend modes yet', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -699,7 +722,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'idea requiring clarification' }),
@@ -730,7 +753,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('accepts minimal LLM game-mode options and derives internal brief fields', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -774,7 +797,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -801,7 +824,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('accepts OpenAI-compatible content arrays for intake options', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -850,7 +873,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -869,7 +892,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('accepts LLM metadata strings or arrays without dropping valid game modes', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -909,7 +932,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -931,7 +954,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('does not reject otherwise valid intake options when optional inputs are omitted', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -972,7 +995,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -990,7 +1013,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('extracts the first complete JSON object from prose-wrapped model output', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -1032,7 +1055,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),
@@ -1050,7 +1073,7 @@ describe('agent workflow server routes', () => {
   })
 
   test('accepts game-mode options with only title and gameplay', async () => {
-    const createRes = await app.request('/api/model-configs?ownerId=dashboard-local', {
+    const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -1083,7 +1106,7 @@ describe('agent workflow server routes', () => {
     })) as unknown as typeof fetch
 
     try {
-      const res = await app.request('/api/beegame-intake/options?ownerId=dashboard-local', {
+      const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ idea: 'LLM generated idea' }),

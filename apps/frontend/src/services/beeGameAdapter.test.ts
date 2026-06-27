@@ -149,7 +149,7 @@ describe('beeGameAdapter prompt rules', () => {
 
     await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
       .rejects.toThrow('intake unavailable');
-    expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/options?ownerId=dashboard-local', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/options', expect.objectContaining({
       method: 'POST',
     }));
   });
@@ -261,7 +261,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/filesystem/default-workspace') {
         return jsonResponse({ path: '/tmp/beegame-projects' });
       }
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -340,7 +340,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('uses the configured workspace root for new projects without replacing it with a project path', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -401,7 +401,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/filesystem/default-workspace') {
         return jsonResponse({ path: '/tmp/beegame-projects' });
       }
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -459,7 +459,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/filesystem/default-workspace') {
         return jsonResponse({ path: '/tmp/beegame-projects' });
       }
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions/beegame_legacy') {
@@ -837,7 +837,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('sends recovered transcript context when a message recreates a missing backend session', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/filesystem/default-workspace') {
@@ -923,7 +923,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('restarts a stopped BeeGame session before sending a new chat message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/filesystem/default-workspace') {
@@ -1060,11 +1060,10 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([
           {
             id: 'llm_new',
-            ownerId: 'dashboard-local',
             name: 'New Model',
             provider: 'openai-compatible',
             apiKeyPreview: 'sk-...',
@@ -1139,7 +1138,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1311,7 +1310,7 @@ describe('beeGameAdapter prompt rules', () => {
     localStorage.setItem('beegame-adapter-subagents-enabled', '0');
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1358,7 +1357,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps English build prompts explicit about executable evidence', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1415,7 +1414,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps intake prompts free of package-name branding policy blocks', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1461,7 +1460,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('sends follow-up messages without repeating session policy blocks', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1527,7 +1526,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps repeated tool calls as distinct chat messages', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1606,7 +1605,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('treats AskUserQuestion as a clarification review instead of a chat message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1685,7 +1684,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps multiple final assistant messages in the same turn instead of overwriting them', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1750,7 +1749,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('maps BeeGame turn completion to idle instead of finished project status', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1797,7 +1796,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('shows an evidence review reminder with tool evidence when a turn ends successfully', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1855,7 +1854,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('shows a recoverable alert when a turn ends after a failed validation command', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1916,7 +1915,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('hides streaming partials and shows only the final assistant message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -1982,7 +1981,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps assistant and tool messages in BeeGame event order', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2071,7 +2070,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('formats Agent tool events as subagent cards', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2162,7 +2161,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('maps BeeGame result usage into token usage messages', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2225,7 +2224,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('maps runtime observation events into project context without adding chat noise', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2297,7 +2296,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('shows real permission requests without synthetic runtime gates', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2362,7 +2361,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('deletes the backing BeeGame session artifacts when deleting a project', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
@@ -2409,7 +2408,7 @@ describe('beeGameAdapter prompt rules', () => {
   it('treats an already-missing BeeGame session workspace as deleted locally', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs?ownerId=dashboard-local') {
+      if (path === '/api/model-configs') {
         return jsonResponse([{ id: 'model_default', isDefault: true }]);
       }
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {

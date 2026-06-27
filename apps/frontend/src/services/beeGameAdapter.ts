@@ -251,7 +251,7 @@ export const beeGameAdapter = {
 
   async runIdeaIntake(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIdeaIntakeResult> {
     const response = await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
-      '/api/beegame-intake/options?ownerId=dashboard-local',
+      '/api/beegame-intake/options',
       { idea: data.idea, ...(data.language ? { language: data.language } : {}) },
     );
     const intake = normalizeIdeaIntakeResult(response);
@@ -922,7 +922,7 @@ async function startBeeGameSession(workspacePath: string, transcriptSessionId?: 
 
 async function getDefaultModelConfigId(): Promise<string> {
   try {
-    const configs = await getJson<ModelConfig[]>('/api/model-configs?ownerId=dashboard-local');
+    const configs = await getJson<ModelConfig[]>('/api/model-configs');
     return configs.find(config => config.isDefault)?.id || configs[0]?.id || '';
   } catch {
     return '';

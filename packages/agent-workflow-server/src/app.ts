@@ -63,6 +63,10 @@ import {
   parsePortList,
   testMcpServerConnection,
 } from './mcp-active-discovery'
+import {
+  getLocalUserContext,
+  hasBeeGamePermission,
+} from './auth/user-context'
 
 type JsonObject = Record<string, unknown>
 
@@ -158,21 +162,26 @@ export function createAgentWorkflowApp(
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     loadModelConfigsFromStore(modelConfigStore)
   }
+  const getCurrentUser = () => getLocalUserContext()
 
   app.use('/api/*', cors())
 
   app.get('/health', c => c.json({ status: 'ok' }))
 
   app.get('/api/model-configs', c => {
-    return c.json(listModelConfigs(getOwnerId(c.req.query('ownerId'))))
+    return c.json(listModelConfigs(getCurrentUser().id))
   })
 
   app.post('/api/model-configs', async c => {
+    const user = getCurrentUser()
+    if (!hasBeeGamePermission(user, 'model_config.manage')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
 
-    const created = createModelConfig(getOwnerId(c.req.query('ownerId')), {
+    const created = createModelConfig(user.id, {
       name: String(body.name),
       provider: body.provider as ModelProviderKind,
       ...(typeof body.baseUrl === 'string' && body.baseUrl
@@ -187,6 +196,10 @@ export function createAgentWorkflowApp(
   })
 
   app.patch('/api/model-configs/:id', async c => {
+    const user = getCurrentUser()
+    if (!hasBeeGamePermission(user, 'model_config.manage')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
     const body = await readJson(c.req.raw)
     const updated = updateModelConfig(c.req.param('id'), {
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
@@ -207,6 +220,10 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/model-configs/:id', c => {
+    const user = getCurrentUser()
+    if (!hasBeeGamePermission(user, 'model_config.manage')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
     const deleted = deleteModelConfig(c.req.param('id'))
     if (deleted) persistModelConfigs(modelConfigStore)
     return c.json({ deleted })
@@ -413,7 +430,7 @@ export function createAgentWorkflowApp(
           idea: String(body.idea),
           language:
             typeof body.language === 'string' ? body.language : undefined,
-          ownerId: getOwnerId(c.req.query('ownerId')),
+          ownerId: getCurrentUser().id,
           modelConfigId:
             typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
         })),
@@ -1315,10 +1332,6 @@ function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectM
       ? { updated_at: Number(body.updated_at) }
       : {}),
   }
-}
-
-function getOwnerId(ownerId: string | undefined): string {
-  return ownerId?.trim() || 'default-owner'
 }
 
 async function readJson(request: Request): Promise<JsonObject> {

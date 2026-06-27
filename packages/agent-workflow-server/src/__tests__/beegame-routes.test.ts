@@ -8,6 +8,7 @@ import {
   resetAgentWorkflow,
 } from '@claude-code-best/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
+import { DEFAULT_LOCAL_USER_ID } from '../auth/user-context'
 import type {
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -539,7 +540,7 @@ describe('beegame session routes', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'build_write_complete')
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
-    const model = createModelConfig('dashboard-local', {
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
@@ -669,7 +670,7 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
     })
-    const model = createModelConfig('dashboard-local', {
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
@@ -833,7 +834,7 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
     })
-    const model = createModelConfig('dashboard-local', {
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
@@ -896,7 +897,7 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
     })
-    const model = createModelConfig('dashboard-local', {
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
@@ -966,14 +967,14 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
     })
-    const oldModel = createModelConfig('dashboard-local', {
+    const oldModel = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Old LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://old-llm.example.invalid/v1',
       apiKey: 'sk-old-secret',
       models: { balanced: 'old-balanced-model' },
     })
-    const newModel = createModelConfig('dashboard-local', {
+    const newModel = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'New LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://new-llm.example.invalid/v1',
@@ -3216,7 +3217,7 @@ describe('beegame session routes', () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const workspace = join(projectsRoot, 'snapshot-game')
     await mkdir(workspace, { recursive: true })
-    const model = createModelConfig('dashboard-local', {
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Snapshot LLM',
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',

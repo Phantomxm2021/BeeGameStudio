@@ -36,16 +36,14 @@ export type UpdateModelConfigInput = {
   isDefault?: boolean;
 };
 
-const OWNER_ID = 'dashboard-local';
-
 export const listModelConfigs = (): Promise<ModelConfig[]> => (
-  apiClient.get(`/api/model-configs?ownerId=${OWNER_ID}`)
+  apiClient.get('/api/model-configs')
 );
 
 export const createModelConfig = (input: CreateModelConfigInput): Promise<ModelConfig> => (
-  apiClient.post(`/api/model-configs?ownerId=${OWNER_ID}`, input)
+  apiClient.post('/api/model-configs', input)
 );
 
 export const updateModelConfig = (id: string, input: UpdateModelConfigInput): Promise<ModelConfig> => (
-  apiClient.patch(`/api/model-configs/${id}?ownerId=${OWNER_ID}`, input)
+  apiClient.patch(`/api/model-configs/${id}`, input)
 );
