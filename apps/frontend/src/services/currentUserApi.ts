@@ -29,7 +29,9 @@ export type BeeGameCurrentUser = {
 };
 
 export const getCurrentUser = (): Promise<BeeGameCurrentUser> => (
-  apiClient.get('/api/current-user')
+  apiClient.get('/api/current-user', {
+    headers: { 'Hide-Error-Toast': 'true' },
+  })
 );
 
 export const hasPermission = (

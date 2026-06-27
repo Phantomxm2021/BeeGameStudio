@@ -27,7 +27,9 @@ describe('currentUserApi', () => {
     vi.mocked(apiClient.get).mockResolvedValue(user);
 
     await expect(getCurrentUser()).resolves.toEqual(user);
-    expect(apiClient.get).toHaveBeenCalledWith('/api/current-user');
+    expect(apiClient.get).toHaveBeenCalledWith('/api/current-user', {
+      headers: { 'Hide-Error-Toast': 'true' },
+    });
   });
 
   it('checks whether a user has a named permission', () => {

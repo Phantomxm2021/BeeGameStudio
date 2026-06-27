@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 import App from './App';
 
@@ -7,6 +7,11 @@ const loadProjects = vi.fn().mockResolvedValue(undefined);
 const loadStatus = vi.fn().mockResolvedValue(undefined);
 const loadAgents = vi.fn().mockResolvedValue(undefined);
 const loadActivities = vi.fn().mockResolvedValue(undefined);
+const loadCurrentUser = vi.fn().mockResolvedValue({
+  id: 'owner-user',
+  role: 'owner',
+  permissions: ['project.read'],
+});
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
@@ -26,6 +31,7 @@ vi.mock('./store/systemStore', () => ({
     loadStatus,
     loadAgents,
     loadActivities,
+    loadCurrentUser,
     isDark: false,
     toggleTheme: vi.fn(),
     status: { capabilities: {} },
@@ -76,6 +82,11 @@ vi.mock('./components/Demiurge/DashboardView', () => ({
 describe('App view routing', () => {
   afterEach(() => {
     vi.clearAllMocks();
+    loadCurrentUser.mockResolvedValue({
+      id: 'owner-user',
+      role: 'owner',
+      permissions: ['project.read'],
+    });
     window.history.pushState({}, '', '/');
   });
 
@@ -89,5 +100,18 @@ describe('App view routing', () => {
     window.history.pushState({}, '', '/');
     render(<App />);
     expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
+  });
+
+  it('does not load protected dashboard data when no user is signed in', async () => {
+    loadCurrentUser.mockResolvedValueOnce(null);
+
+    render(<App />);
+
+    expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
+    await waitFor(() => expect(loadCurrentUser).toHaveBeenCalledTimes(1));
+    expect(loadProjects).not.toHaveBeenCalled();
+    expect(loadStatus).not.toHaveBeenCalled();
+    expect(loadAgents).not.toHaveBeenCalled();
+    expect(loadActivities).not.toHaveBeenCalled();
   });
 });

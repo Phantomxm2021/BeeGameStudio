@@ -101,7 +101,7 @@ interface SystemState {
   /**
    * Load current BeeGame user and role permissions.
    */
-  loadCurrentUser: () => Promise<void>;
+  loadCurrentUser: () => Promise<BeeGameCurrentUser | null>;
 
   /**
    * Check whether the current user has a named permission.
@@ -194,9 +194,11 @@ export const useSystemStore = create<SystemState>()(
         try {
           const currentUser = await api.getCurrentUser();
           set({ currentUser });
+          return currentUser;
         } catch (error) {
           console.error('Failed to load current user:', error);
           set({ currentUser: null });
+          return null;
         }
       },
 

@@ -61,9 +61,10 @@ function App() {
     const initializeApp = async () => {
       try {
         consumeSupabaseRedirectSession();
+        const currentUser = await loadCurrentUser();
+        if (!currentUser) return;
         await Promise.all([
           loadProjects(),
-          loadCurrentUser(),
           loadStatus(),
           loadAgents(),
           loadActivities(),
