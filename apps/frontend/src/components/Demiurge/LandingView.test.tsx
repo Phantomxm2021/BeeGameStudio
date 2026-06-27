@@ -308,7 +308,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-        expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
+        expect(screen.getByText('继续你的项目、模型配置和生成进度。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
     });

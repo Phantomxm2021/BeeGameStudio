@@ -659,7 +659,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     >
                         <form
                             onSubmit={handleLoginSubmit}
-                            className="input-surface w-full max-w-md rounded-[28px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                            className="input-surface w-full max-w-md rounded-[30px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)] sm:p-7"
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
@@ -668,8 +668,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     </h2>
                                     <p className="mt-3 text-sm leading-6 text-zinc-300">
                                         {authMode === 'register'
-                                            ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
-                                            : '登录后继续你的项目、模型设置和生成进度。'}
+                                            ? '创建账号后，你的项目、模型配置和 credit 记录都会安全保存。'
+                                            : '继续你的项目、模型配置和生成进度。'}
                                     </p>
                                 </div>
                                 <button
@@ -709,7 +709,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     注册账号
                                 </button>
                             </div>
-                            <div className="mt-6 space-y-3">
+                            <div className="mt-6 space-y-4">
                                 {authMode === 'register' ? (
                                     <label className="block text-sm font-semibold text-zinc-200">
                                         昵称
@@ -736,9 +736,22 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         placeholder="you@example.com"
                                     />
                                 </label>
-                                <label className="block text-sm font-semibold text-zinc-200">
-                                    密码
+                                <div className="block text-sm font-semibold text-zinc-200">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <label htmlFor="beegame-auth-password">密码</label>
+                                        {authMode === 'login' ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleSendPasswordReset()}
+                                                disabled={isSigningIn}
+                                                className="text-xs font-semibold text-zinc-400 transition hover:text-amber-200 disabled:opacity-60"
+                                            >
+                                                忘记密码？
+                                            </button>
+                                        ) : null}
+                                    </div>
                                     <input
+                                        id="beegame-auth-password"
                                         aria-label="密码"
                                         type="password"
                                         value={loginPassword}
@@ -747,17 +760,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                                         placeholder={authMode === 'register' ? '至少 6 位密码' : '输入密码'}
                                     />
-                                </label>
-                                {authMode === 'login' ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => void handleSendPasswordReset()}
-                                        disabled={isSigningIn}
-                                        className="text-sm font-semibold text-amber-200 transition hover:text-amber-100 disabled:opacity-60"
-                                    >
-                                        忘记密码？发送重置邮件
-                                    </button>
-                                ) : (
+                                </div>
+                                {authMode === 'register' ? (
                                     <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300">
                                         <input
                                             aria-label="同意用户协议"
@@ -770,7 +774,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             我已阅读并同意 BeeGame 用户协议与隐私条款，理解生成内容会消耗 credit。
                                         </span>
                                     </label>
-                                )}
+                                ) : null}
                             </div>
                             {loginError ? (
                                 <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">
@@ -782,9 +786,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     {loginNotice}
                                 </div>
                             ) : null}
-                            <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            <div className="my-5 flex items-center gap-3 text-xs font-semibold tracking-[0.12em] text-zinc-500">
                                 <span className="h-px flex-1 bg-white/10" />
-                                <span>或使用第三方账号</span>
+                                <span>第三方账号</span>
                                 <span className="h-px flex-1 bg-white/10" />
                             </div>
                             <div className="grid gap-2 sm:grid-cols-2">
@@ -803,11 +807,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     Google
                                 </button>
                             </div>
-                            <div className="mt-6 flex items-center justify-end gap-3">
+                            <div className="mt-6 flex items-center justify-end gap-3 border-t border-white/10 pt-5">
                                 <button
                                     type="submit"
                                     disabled={isSigningIn}
-                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="w-full rounded-full bg-white px-5 py-3 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                 >
                                     {isSigningIn ? '处理中...' : authMode === 'register' ? '注册并继续' : '登录并继续'}
                                 </button>
