@@ -12,8 +12,21 @@ const { generateIntakeOptions } = vi.hoisted(() => ({
 const { runIdeaIntake } = vi.hoisted(() => ({
     runIdeaIntake: vi.fn(),
 }));
+const { getCreditBalance } = vi.hoisted(() => ({
+    getCreditBalance: vi.fn(),
+}));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
+const mockLoadCurrentUser = vi.fn();
+let mockCurrentUser: {
+    id: string;
+    role: 'owner' | 'developer' | 'reviewer' | 'viewer';
+    permissions: string[];
+} | null = {
+    id: 'dashboard-local',
+    role: 'owner',
+    permissions: ['project.create', 'project.delete'],
+};
 let mockProjects: Array<{ id: string; name: string; created_at: string }> = [];
 const terminalRenderState = vi.hoisted(() => ({ renderCount: 0 }));
 
@@ -32,16 +45,26 @@ vi.mock('../../store/projectStore', () => ({
     },
 }));
 
-vi.mock('../../store/systemStore', () => ({
-    useSystemStore: (selector?: (state: {
+vi.mock('../../store/systemStore', () => {
+    const useSystemStore = (selector?: (state: {
+        currentUser: typeof mockCurrentUser;
+        loadCurrentUser: typeof mockLoadCurrentUser;
         hasPermission: (permission: string) => boolean;
     }) => unknown) => {
         const state = {
-            hasPermission: (permission: string) => permission === 'project.delete',
+            currentUser: mockCurrentUser,
+            loadCurrentUser: mockLoadCurrentUser,
+            hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
         };
         return selector ? selector(state) : state;
-    },
-}));
+    };
+    useSystemStore.getState = () => ({
+        currentUser: mockCurrentUser,
+        loadCurrentUser: mockLoadCurrentUser,
+        hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
+    });
+    return { useSystemStore };
+});
 
 vi.mock('../../services/api', () => ({
     api: {
@@ -73,6 +96,10 @@ vi.mock('../../services/beeGameAdapter', () => ({
 vi.mock('../../services/modelConfigApi', () => ({
     createModelConfig: vi.fn(),
     listModelConfigs: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('../../services/creditsApi', () => ({
+    getCreditBalance,
 }));
 
 vi.mock('./DemiurgeLogo', () => ({
@@ -173,10 +200,77 @@ beforeEach(() => {
     mockProjects = [];
     mockDeleteProject.mockReset();
     mockSetActiveProject.mockReset();
+    mockLoadCurrentUser.mockReset();
+    mockLoadCurrentUser.mockResolvedValue(undefined);
+    mockCurrentUser = {
+        id: 'dashboard-local',
+        role: 'owner',
+        permissions: ['project.create', 'project.delete'],
+    };
+    getCreditBalance.mockReset();
+    getCreditBalance.mockResolvedValue({
+        userId: 'dashboard-local',
+        plan: 'free',
+        balanceCredits: 300,
+        includedCredits: 300,
+        consumedCredits: 0,
+        reservedCredits: 0,
+        creditUnitWeightedTokens: 10000,
+        estimates: {
+            ideaIntake: { minCredits: 1, maxCredits: 3 },
+            planningDocs: { minCredits: 8, maxCredits: 30 },
+            smallPlayableGame: { minCredits: 80, maxCredits: 200 },
+            standardGame: { minCredits: 200, maxCredits: 600 },
+            complexGame: { minCredits: 600, maxCredits: 1500 },
+        },
+    });
     terminalRenderState.renderCount = 0;
 });
 
 describe('LandingView bootstrap submission', () => {
+    it('asks the user to sign in before generating intake options', async () => {
+        mockCurrentUser = null;
+
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        expect(await screen.findByRole('dialog', { name: '登录 BeeGame' })).toBeInTheDocument();
+        expect(screen.getByText('登录后即可继续生成方案，当前输入不会丢失。')).toBeInTheDocument();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+        expect(getCreditBalance).not.toHaveBeenCalled();
+    });
+
+    it('stops intake generation when available credits are below the intake estimate', async () => {
+        getCreditBalance.mockResolvedValueOnce({
+            userId: 'dashboard-local',
+            plan: 'free',
+            balanceCredits: 0,
+            includedCredits: 300,
+            consumedCredits: 300,
+            reservedCredits: 0,
+            creditUnitWeightedTokens: 10000,
+            estimates: {
+                ideaIntake: { minCredits: 1, maxCredits: 3 },
+                planningDocs: { minCredits: 8, maxCredits: 30 },
+                smallPlayableGame: { minCredits: 80, maxCredits: 200 },
+                standardGame: { minCredits: 200, maxCredits: 600 },
+                complexGame: { minCredits: 600, maxCredits: 1500 },
+            },
+        });
+
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        expect(await screen.findByText('Credit 不足，生成方案预计至少需要 1 credit。')).toBeInTheDocument();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+    });
+
     it('generates selectable intake options without starting a BeeGame session immediately', async () => {
         const onStart = vi.fn().mockResolvedValue({ status: 'started', projectId: 'proj_1' });
 

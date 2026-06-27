@@ -75,6 +75,53 @@ describe('agent workflow server routes', () => {
     })
   })
 
+  test('returns an owner-scoped credit balance with generation estimates', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-root-'))
+    try {
+      const authApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-a-token') return { id: 'owner-a', role: 'owner' }
+          if (header === 'Bearer owner-b-token') return { id: 'owner-b', role: 'owner' }
+          return undefined
+        },
+      })
+
+      const ownerARes = await authApp.request('/api/credits', {
+        headers: { authorization: 'Bearer owner-a-token' },
+      })
+      expect(ownerARes.status).toBe(200)
+      expect(await ownerARes.json()).toEqual({
+        userId: 'owner-a',
+        plan: 'free',
+        balanceCredits: 300,
+        includedCredits: 300,
+        consumedCredits: 0,
+        reservedCredits: 0,
+        creditUnitWeightedTokens: 10000,
+        estimates: {
+          ideaIntake: { minCredits: 1, maxCredits: 3 },
+          planningDocs: { minCredits: 8, maxCredits: 30 },
+          smallPlayableGame: { minCredits: 80, maxCredits: 200 },
+          standardGame: { minCredits: 200, maxCredits: 600 },
+          complexGame: { minCredits: 600, maxCredits: 1500 },
+        },
+      })
+
+      const ownerBRes = await authApp.request('/api/credits', {
+        headers: { authorization: 'Bearer owner-b-token' },
+      })
+      expect(ownerBRes.status).toBe(200)
+      expect(await ownerBRes.json()).toEqual(expect.objectContaining({
+        userId: 'owner-b',
+        balanceCredits: 300,
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('resolves current user from bearer auth tokens when configured', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     try {

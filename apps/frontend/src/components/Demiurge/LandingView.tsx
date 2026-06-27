@@ -18,6 +18,7 @@ import {
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
+import { getCreditBalance } from '../../services/creditsApi';
 
 type IntakePhase =
     | 'idle'
@@ -74,6 +75,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [intakeError, setIntakeError] = useState('');
     const [clarification, setClarification] = useState<BeeGameClarification | null>(null);
     const [clarificationDraft, setClarificationDraft] = useState('');
+    const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -86,6 +88,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
     const hasPermission = useSystemStore(state => state.hasPermission);
+    const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
+
+    const ensureGenerationAccess = async (): Promise<boolean> => {
+        await loadCurrentUser();
+        const latestUser = useSystemStore.getState().currentUser;
+        if (!latestUser) {
+            setIsLoginPromptOpen(true);
+            return false;
+        }
+        const credits = await getCreditBalance();
+        const requiredCredits = credits.estimates.ideaIntake.minCredits;
+        if (credits.balanceCredits < requiredCredits) {
+            setIntakeError(`Credit 不足，生成方案预计至少需要 ${requiredCredits} credit。`);
+            return false;
+        }
+        return true;
+    };
 
     const runIntake = async (idea: string) => {
         setIntakeError('');
@@ -137,6 +156,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         event.preventDefault();
         const idea = projectName.trim();
         if (!idea || isTransitioning || isPreparing) return;
+        setIntakeError('');
+        setIsPreparing(true);
+        const canGenerate = await ensureGenerationAccess();
+        if (!canGenerate) {
+            setIsPreparing(false);
+            return;
+        }
+        setIsPreparing(false);
         await runIntake(idea);
     };
 
@@ -293,6 +320,37 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onClose={() => setIsHistoryOpen(false)}
                     onSelectProject={handleSelectProject}
                 />
+
+                {isLoginPromptOpen ? (
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="登录 BeeGame"
+                        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+                    >
+                        <div className="w-full max-w-md rounded-[28px] border border-white/15 bg-zinc-950/90 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-semibold text-white">登录 BeeGame</h2>
+                                    <p className="mt-3 text-sm leading-6 text-zinc-300">
+                                        登录后即可继续生成方案，当前输入不会丢失。
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label="关闭登录弹窗"
+                                    onClick={() => setIsLoginPromptOpen(false)}
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-zinc-300 transition hover:bg-white/15 hover:text-white"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <div className="mt-6 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm leading-6 text-amber-100">
+                                正式登录入口将在 Supabase Auth 接入后启用；当前不会要求你在设置里粘贴 token。
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
 
                 <HeroIntro
                     title={t.landingTitle}

@@ -68,6 +68,10 @@ import {
   listAuditEvents,
 } from './audit-events-store'
 import {
+  getCreditBalance,
+  hasEnoughCreditsForIdeaIntake,
+} from './credit-store'
+import {
   type BeeGamePermission,
   type BeeGameUserContext,
   type BeeGameUserResolver,
@@ -224,6 +228,13 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'audit.read')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(listAuditEvents({
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+    }))
+  })
+
+  app.get('/api/credits', c => {
+    const user = getCurrentUser(c.req.raw)
+    return c.json(getCreditBalance(user.id, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
@@ -627,8 +638,19 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/beegame-intake/options', async c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
+    const creditBalance = getCreditBalance(user.id, {
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+    })
+    if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
+      return c.json({
+        error: 'Insufficient credits',
+        message: `Idea intake requires at least ${creditBalance.estimates.ideaIntake.minCredits} credit.`,
+        credits: creditBalance,
+      }, 402)
+    }
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)
