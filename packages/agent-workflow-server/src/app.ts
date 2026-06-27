@@ -385,6 +385,8 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/filesystem/directories', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'workspace.manage')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(await listDirectories(c.req.query('path')))
     } catch (err) {
@@ -393,6 +395,8 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/filesystem/default-workspace', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'workspace.read')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json({
         path: await getDefaultWorkspacePath({
@@ -405,10 +409,14 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/projects', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(projectStore.listProjects())
   })
 
   app.post('/api/projects', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['id', 'name', 'created_at'])
     if (error) return c.json({ error }, 400)
@@ -420,6 +428,8 @@ export function createAgentWorkflowApp(
   })
 
   app.patch('/api/projects/:id', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const existing = projectStore
       .listProjects()
@@ -442,10 +452,14 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/projects/:id', c => {
+    const forbidden = requirePermission(getCurrentUser(), 'project.delete')
+    if (forbidden) return c.json(forbidden, 403)
     return c.json({ deleted: projectStore.deleteProject(c.req.param('id')) })
   })
 
   app.post('/api/beegame-intake/options', async c => {
+    const forbidden = requirePermission(getCurrentUser(), 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)

@@ -225,6 +225,60 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('applies project and workspace route permissions by role', async () => {
+    const viewerApp = createAgentWorkflowApp({
+      currentUser: {
+        id: 'viewer-user',
+        role: 'viewer',
+      },
+    })
+    const developerApp = createAgentWorkflowApp({
+      currentUser: {
+        id: 'developer-user',
+        role: 'developer',
+      },
+    })
+
+    const viewerListRes = await viewerApp.request('/api/projects')
+    expect(viewerListRes.status).toBe(200)
+
+    const viewerCreateRes = await viewerApp.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'project_viewer_denied',
+        name: 'Viewer Denied',
+        created_at: 1710000000000,
+      }),
+    })
+    expect(viewerCreateRes.status).toBe(403)
+    expect(await viewerCreateRes.json()).toEqual({ error: 'Forbidden' })
+
+    const developerCreateRes = await developerApp.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'project_developer_allowed',
+        name: 'Developer Allowed',
+        created_at: 1710000000000,
+      }),
+    })
+    expect(developerCreateRes.status).toBe(200)
+
+    const developerDeleteRes = await developerApp.request(
+      '/api/projects/project_developer_allowed',
+      { method: 'DELETE' },
+    )
+    expect(developerDeleteRes.status).toBe(403)
+    expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
+
+    const viewerDirectoriesRes = await viewerApp.request(
+      '/api/filesystem/directories',
+    )
+    expect(viewerDirectoriesRes.status).toBe(403)
+    expect(await viewerDirectoriesRes.json()).toEqual({ error: 'Forbidden' })
+  })
+
   test('persists MCP servers and masks environment secrets', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-'))
 
