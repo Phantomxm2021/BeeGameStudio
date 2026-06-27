@@ -26,7 +26,12 @@ export type BeeGameUserContext = {
 
 export type BeeGameUserResolver = (
   request: Request,
-) => BeeGameUserContext | undefined
+) => BeeGameUserContext | undefined | Promise<BeeGameUserContext | undefined>
+
+type BeeGameFetch = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) => Promise<Response>
 
 export const DEFAULT_LOCAL_USER_ID = 'dashboard-local'
 
@@ -62,11 +67,94 @@ export function createEnvTokenUserResolver(
   }
 }
 
+export function createSupabaseUserResolver(
+  options: {
+    url?: string
+    apiKey?: string
+    fetchImpl?: BeeGameFetch
+  } = {},
+): BeeGameUserResolver | undefined {
+  const baseUrl = trimString(
+    options.url ??
+      process.env.BEEGAME_SUPABASE_URL ??
+      process.env.SUPABASE_URL,
+  )
+  const apiKey = trimString(
+    options.apiKey ??
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.BEEGAME_SUPABASE_ANON_KEY ??
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_ANON_KEY,
+  )
+  if (!baseUrl || !apiKey) return undefined
+  const fetchImpl = options.fetchImpl ?? fetch
+  return async request => {
+    const token = getBearerToken(request)
+    if (!token) return undefined
+    const response = await fetchImpl(joinUrl(baseUrl, '/auth/v1/user'), {
+      headers: {
+        apikey: apiKey,
+        authorization: `Bearer ${token}`,
+      },
+    })
+    if (!response.ok) return undefined
+    return toSupabaseUserContext(await response.json())
+  }
+}
+
+export function createConfiguredUserResolver(
+  env: NodeJS.ProcessEnv = process.env,
+): BeeGameUserResolver | undefined {
+  return createEnvTokenUserResolver(env) ??
+    createSupabaseUserResolver({
+      url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL,
+      apiKey:
+        env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
+        env.BEEGAME_SUPABASE_ANON_KEY ??
+        env.SUPABASE_SERVICE_ROLE_KEY ??
+        env.SUPABASE_ANON_KEY,
+    })
+}
+
 export function getBearerToken(request: Request): string | undefined {
   const header = request.headers.get('authorization')?.trim()
   if (!header) return undefined
   const match = /^Bearer\s+(.+)$/i.exec(header)
   return match?.[1]?.trim() || undefined
+}
+
+function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
+  if (!isRecord(value)) return undefined
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  if (!id) return undefined
+  const appMetadata = isRecord(value.app_metadata)
+    ? value.app_metadata
+    : {}
+  const userMetadata = isRecord(value.user_metadata)
+    ? value.user_metadata
+    : {}
+  return {
+    id,
+    role: normalizeBeeGameRole(
+      stringField(appMetadata.beegame_role) ??
+        stringField(appMetadata.role) ??
+        stringField(userMetadata.beegame_role) ??
+        stringField(userMetadata.role),
+    ),
+  }
+}
+
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl}${path}`
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function stringField(value: unknown): string | undefined {
+  const trimmed = trimString(value)
+  return trimmed || undefined
 }
 
 export function normalizeBeeGameRole(value: string | undefined): BeeGameRole {

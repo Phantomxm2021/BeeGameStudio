@@ -123,6 +123,27 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('resolves current user from an async resolver', async () => {
+    const authApp = createAgentWorkflowApp({
+      currentUserResolver: async request => {
+        const header = request.headers.get('authorization')
+        if (header !== 'Bearer async-token') return undefined
+        return { id: 'async-user', role: 'developer' }
+      },
+    })
+
+    const res = await authApp.request('/api/current-user', {
+      headers: { authorization: 'Bearer async-token' },
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(expect.objectContaining({
+      id: 'async-user',
+      role: 'developer',
+      permissions: expect.arrayContaining(['agent.send_message']),
+    }))
+  })
+
   test('scopes project metadata by bearer authenticated user', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auth-projects-'))

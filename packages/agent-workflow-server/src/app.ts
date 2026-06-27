@@ -67,7 +67,7 @@ import {
   type BeeGamePermission,
   type BeeGameUserContext,
   type BeeGameUserResolver,
-  createEnvTokenUserResolver,
+  createConfiguredUserResolver,
   DEFAULT_LOCAL_USER_ID,
   getLocalUserContext,
   hasBeeGamePermission,
@@ -145,7 +145,7 @@ export function createAgentWorkflowApp(
   const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
   const requestUsers = new WeakMap<Request, BeeGameUserContext>()
   const requestUserResolver =
-    options.currentUserResolver ?? createEnvTokenUserResolver()
+    options.currentUserResolver ?? createConfiguredUserResolver()
   const getCurrentUser = (request?: Request) =>
     options.currentUser ??
       (request ? requestUsers.get(request) : undefined) ??
@@ -194,7 +194,7 @@ export function createAgentWorkflowApp(
       await next()
       return
     }
-    const user = requestUserResolver(c.req.raw)
+    const user = await requestUserResolver(c.req.raw)
     if (!user) {
       return c.json({
         error: 'Unauthorized',
