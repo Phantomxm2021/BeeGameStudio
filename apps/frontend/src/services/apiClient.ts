@@ -13,36 +13,11 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 let showToastError: ((message: string) => void) | null = null;
 
-export const AUTH_TOKEN_STORAGE_KEY = 'auth_token';
-
 const getEnvAuthToken = (): string => String(import.meta.env.VITE_API_AUTH_TOKEN ?? '').trim();
 
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
-export const getStoredAuthToken = (): string => (
-  String(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? '').trim()
-);
-
-export const saveAuthToken = (token: string): void => {
-  const trimmed = token.trim();
-  if (trimmed) {
-    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, trimmed);
-    return;
-  }
-  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-};
-
-export const clearAuthToken = (): void => {
-  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-};
-
-export const resolveAuthToken = (): string => {
-  const envToken = getEnvAuthToken();
-  if (envToken) {
-    return envToken;
-  }
-  return getStoredAuthToken();
-};
+export const resolveAuthToken = (): string => getEnvAuthToken();
 
 export const buildApiUrl = (path: string): string => {
   if (!API_BASE_URL || /^[a-z][a-z\d+\-.]*:/i.test(path)) {
@@ -123,9 +98,6 @@ apiClient.interceptors.response.use(
           break;
         case 401:
           errorMessage = buildUnauthorizedMessage(backendMessage);
-          if (!getEnvAuthToken()) {
-            clearAuthToken();
-          }
           break;
         case 403:
           errorMessage = '没有权限访问该资源';

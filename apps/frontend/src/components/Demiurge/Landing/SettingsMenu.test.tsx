@@ -158,7 +158,7 @@ describe('SettingsMenu model settings', () => {
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
         expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByRole('tab', { name: '账户' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
@@ -176,25 +176,6 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
-    });
-
-    it('saves and clears the browser access token from the account tab', async () => {
-        renderSettings();
-
-        await userEvent.click(screen.getByRole('tab', { name: '账户' }));
-        const tokenInput = screen.getByLabelText('访问令牌');
-
-        await userEvent.type(tokenInput, 'supabase-access-token');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        expect(localStorage.getItem('auth_token')).toBe('supabase-access-token');
-        expect(screen.getByText('访问令牌已保存')).toBeInTheDocument();
-
-        await userEvent.click(screen.getByRole('button', { name: '清除' }));
-
-        expect(localStorage.getItem('auth_token')).toBeNull();
-        expect(tokenInput).toHaveValue('');
-        expect(screen.getByText('访问令牌已清除')).toBeInTheDocument();
     });
 
     it('hides privileged settings sections when the user lacks management permissions', () => {

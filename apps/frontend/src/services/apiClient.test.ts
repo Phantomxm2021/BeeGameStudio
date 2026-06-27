@@ -8,7 +8,7 @@ import {
 
 describe('apiClient defaults', () => {
   afterEach(() => {
-    localStorage.clear();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
@@ -17,7 +17,7 @@ describe('apiClient defaults', () => {
   });
 
   it('adds the runtime bearer token to fetch requests', async () => {
-    localStorage.setItem('auth_token', 'runtime-token');
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -28,7 +28,7 @@ describe('apiClient defaults', () => {
   });
 
   it('does not overwrite an explicit authorization header', () => {
-    localStorage.setItem('auth_token', 'runtime-token');
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
 
     const headers = buildAuthHeaders({
       Authorization: 'Bearer explicit-token',

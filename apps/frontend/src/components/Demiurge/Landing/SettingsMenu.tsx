@@ -43,12 +43,6 @@ import {
     type McpServerScope,
     type McpServerTransport,
 } from '../../../services/mcpServersApi';
-import {
-    clearAuthToken,
-    getStoredAuthToken,
-    hasEnvAuthToken,
-    saveAuthToken,
-} from '../../../services/apiClient';
 
 interface SettingsMenuProps {
     isOpen: boolean;
@@ -62,7 +56,7 @@ interface SettingsMenuProps {
     canManageModelConfig?: boolean;
 }
 
-type SettingsTab = 'general' | 'account' | 'runtime' | 'mcp' | 'model';
+type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model';
 type PopoverAnchorRect = {
     top: number;
     right: number;
@@ -141,15 +135,11 @@ export function SettingsMenu({
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
-    const [accessToken, setAccessToken] = useState('');
-    const [authStatus, setAuthStatus] = useState('');
     const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
-        setAccessToken(getStoredAuthToken());
-        setAuthStatus('');
         if (canManageModelConfig) {
             void listModelConfigs()
                 .then((configs) => {
@@ -524,11 +514,8 @@ export function SettingsMenu({
     const savedPrefix = `${text.savedPrefix}${lang.startsWith('zh') ? '：' : ': '}`;
     const capabilityCopy = getRuntimeCapabilityCopy(lang);
     const mcpCopy = getMcpSettingsCopy(lang);
-    const authCopy = getAuthSettingsCopy(lang);
-    const envAuthConfigured = hasEnvAuthToken();
     const tabs = useMemo(() => [
         { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
-        { id: 'account' as const, label: authCopy.title, icon: ShieldCheck },
         ...(canManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
         ...(canManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
         ...(canManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
@@ -536,7 +523,6 @@ export function SettingsMenu({
         canManageMcp,
         canManageModelConfig,
         canManageRuntimeSettings,
-        authCopy.title,
         capabilityCopy.title,
         mcpCopy.title,
         text.settingsGeneral,
@@ -544,8 +530,6 @@ export function SettingsMenu({
     ]);
     const activeTabLabel = activeTab === 'general'
         ? text.settingsGeneral
-        : activeTab === 'account'
-            ? authCopy.title
         : activeTab === 'runtime'
             ? capabilityCopy.title
             : activeTab === 'mcp'
@@ -553,8 +537,6 @@ export function SettingsMenu({
                 : text.settingsModel;
     const isSavingCurrentTab = activeTab === 'general'
         ? (canManageWorkspace && isSavingWorkspace) || (canManageSecrets && isSavingWebTools)
-        : activeTab === 'account'
-            ? false
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
         : activeTab === 'mcp'
@@ -566,8 +548,6 @@ export function SettingsMenu({
             isSavingCurrentTab ||
             (canManageWorkspace && !workspacePath.trim()) ||
             (canManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
-        : activeTab === 'account'
-            ? envAuthConfigured
         : activeTab === 'runtime'
             ? isSavingCurrentTab
         : activeTab === 'mcp'
@@ -583,12 +563,6 @@ export function SettingsMenu({
         if (activeTab === 'runtime') {
             const saved = await handleSaveRuntimeSettings();
             if (saved) onClose();
-            return;
-        }
-        if (activeTab === 'account') {
-            saveAuthToken(accessToken);
-            setAccessToken(getStoredAuthToken());
-            setAuthStatus(accessToken.trim() ? authCopy.saved : authCopy.cleared);
             return;
         }
         if (activeTab === 'mcp') return;
@@ -861,56 +835,6 @@ export function SettingsMenu({
                                             </div>
                                         </div>
                                         ) : null}
-                                    </div>
-                                ) : null}
-
-                                {activeTab === 'account' ? (
-                                    <div className="divide-y divide-zinc-700/60">
-                                        <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                                            <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100 sm:mt-2.5">
-                                                <ShieldCheck className="h-4 w-4 text-zinc-400" />
-                                                {authCopy.accessToken}
-                                            </span>
-                                            <div className="min-w-0 space-y-2">
-                                                <input
-                                                    aria-label={authCopy.accessToken}
-                                                    type="password"
-                                                    value={accessToken}
-                                                    onChange={(event) => {
-                                                        setAccessToken(event.target.value);
-                                                        setAuthStatus('');
-                                                    }}
-                                                    disabled={envAuthConfigured}
-                                                    placeholder={envAuthConfigured ? authCopy.envManaged : authCopy.placeholder}
-                                                    className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-orange-500/70 disabled:cursor-not-allowed disabled:opacity-60"
-                                                />
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <span className="text-xs text-zinc-500">
-                                                        {envAuthConfigured
-                                                            ? authCopy.envNote
-                                                            : accessToken.trim()
-                                                                ? authCopy.browserNote
-                                                                : authCopy.emptyNote}
-                                                    </span>
-                                                    {!envAuthConfigured ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                clearAuthToken();
-                                                                setAccessToken('');
-                                                                setAuthStatus(authCopy.cleared);
-                                                            }}
-                                                            className="inline-flex h-8 items-center rounded-lg border border-zinc-700 px-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-zinc-800"
-                                                        >
-                                                            {authCopy.clear}
-                                                        </button>
-                                                    ) : null}
-                                                </div>
-                                                {authStatus ? (
-                                                    <div className="text-xs text-emerald-400">{authStatus}</div>
-                                                ) : null}
-                                            </div>
-                                        </div>
                                     </div>
                                 ) : null}
 
@@ -1202,48 +1126,6 @@ function discoveredMcpServerToInput(server: DiscoveredMcpServer | ActiveDiscover
         ...(server.cwd ? { cwd: server.cwd } : {}),
         ...(server.env ? { env: server.env } : {}),
         autoStart: server.autoStart,
-    };
-}
-
-type AuthSettingsCopy = {
-    title: string;
-    accessToken: string;
-    placeholder: string;
-    envManaged: string;
-    envNote: string;
-    browserNote: string;
-    emptyNote: string;
-    clear: string;
-    saved: string;
-    cleared: string;
-};
-
-function getAuthSettingsCopy(lang: Language): AuthSettingsCopy {
-    if (lang.startsWith('zh')) {
-        return {
-            title: '账户',
-            accessToken: '访问令牌',
-            placeholder: '粘贴 Supabase 或 BeeGame API access token',
-            envManaged: '已由环境变量配置',
-            envNote: '当前使用 VITE_API_AUTH_TOKEN，浏览器 token 不会生效。',
-            browserNote: '当前 token 会保存在此浏览器，用于后续 API 请求。',
-            emptyNote: '后端开启鉴权时，需要填写访问令牌。',
-            clear: '清除',
-            saved: '访问令牌已保存',
-            cleared: '访问令牌已清除',
-        };
-    }
-    return {
-        title: 'Account',
-        accessToken: 'Access token',
-        placeholder: 'Paste a Supabase or BeeGame API access token',
-        envManaged: 'Configured by environment',
-        envNote: 'VITE_API_AUTH_TOKEN is active; browser tokens are ignored.',
-        browserNote: 'This token is stored in this browser for API requests.',
-        emptyNote: 'Enter an access token when backend auth is enabled.',
-        clear: 'Clear',
-        saved: 'Access token saved',
-        cleared: 'Access token cleared',
     };
 }
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
     buildUnauthorizedMessage,
@@ -12,34 +12,24 @@ import {
 } from './api';
 
 describe('resolveAuthToken', () => {
-    beforeEach(() => {
-        localStorage.clear();
-    });
-
     afterEach(() => {
         vi.unstubAllEnvs();
     });
 
-    it('prefers Vite auth token over localStorage', () => {
+    it('uses the deployment auth token', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', 'env-token');
-        localStorage.setItem('auth_token', 'storage-token');
 
         expect(resolveAuthToken()).toBe('env-token');
     });
 
-    it('falls back to localStorage when no Vite auth token is configured', () => {
+    it('returns an empty token when no deployment token is configured', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', '');
-        localStorage.setItem('auth_token', 'storage-token');
 
-        expect(resolveAuthToken()).toBe('storage-token');
+        expect(resolveAuthToken()).toBe('');
     });
 });
 
 describe('buildUnauthorizedMessage', () => {
-    beforeEach(() => {
-        localStorage.clear();
-    });
-
     afterEach(() => {
         vi.unstubAllEnvs();
     });
@@ -56,9 +46,8 @@ describe('buildUnauthorizedMessage', () => {
         expect(buildUnauthorizedMessage()).toBe('后端已开启鉴权，但前端未配置 token');
     });
 
-    it('reports invalid token when a token is present', () => {
-        vi.stubEnv('VITE_API_AUTH_TOKEN', '');
-        localStorage.setItem('auth_token', 'bad-token');
+    it('reports invalid token when a deployment token is present', () => {
+        vi.stubEnv('VITE_API_AUTH_TOKEN', 'bad-token');
 
         expect(buildUnauthorizedMessage()).toBe('未授权，token 无效或已失效');
     });
