@@ -22,11 +22,11 @@ describe('waitingApproval helpers', () => {
       [],
     );
 
-    expect(state.kind).toBe('gdd');
+    expect(state.kind).toBe('review');
     expect(state.isBlockingChat).toBe(true);
   });
 
-  it('describes blocker resolution gates as blocker work instead of approval', () => {
+  it('handles legacy blocker resolution gates through generic review status', () => {
     const state = getWaitingApprovalState(
       {
         project_id: 'proj_1',
@@ -51,9 +51,32 @@ describe('waitingApproval helpers', () => {
       ],
     );
 
+    expect(state.kind).toBe('review');
     expect(state.isBlockingChat).toBe(true);
-    expect(state.message).toContain('blocker');
-    expect(state.placeholder).toContain('blocker');
+    expect(state.message).not.toContain('blocker');
+    expect(state.placeholder).toBe('请先处理当前请求...');
+  });
+
+  it('does not block chat on legacy governance blocker metadata alone', () => {
+    const state = getWaitingApprovalState(
+      {
+        project_id: 'proj_1',
+        phase: 'paused',
+        blocked: false,
+        governance: {
+          blocked: true,
+          open_blocker_ids: ['legacy_blocker'],
+          unrevalidated_blocker_ids: [],
+          unresolved_conflict_ids: [],
+          promotion_status_by_phase: {},
+          latest_revalidation_by_phase: {},
+        },
+      },
+      [],
+    );
+
+    expect(state.kind).toBe('none');
+    expect(state.isBlockingChat).toBe(false);
   });
 
   it('returns default state when structured review status is absent', () => {

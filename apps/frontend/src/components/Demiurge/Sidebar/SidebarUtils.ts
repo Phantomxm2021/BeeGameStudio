@@ -69,8 +69,8 @@ export const formatReviewTitle = (review: ReviewLike): string => {
     if (!review) return 'Pending review';
     if (isBeeGamePermissionReview(review)) return review.title || 'BeeGame permission';
     if (isBlockerResolutionReview(review)) return 'Resolve blockers';
-    if (review.type === 'ITERATION_REAPPROVAL_REVIEW') return 'Iteration reapproval';
-    if (review.type === 'GDD_APPROVAL_REVIEW') return 'Design approval';
+    if (review.type === 'ITERATION_REAPPROVAL_REVIEW') return 'Review required';
+    if (review.type === 'GDD_APPROVAL_REVIEW') return 'Review required';
     if (review.type === 'ASSET_MANIFEST_REVIEW') return 'Asset delivery approval';
     return review.title || review.task_id || review.artifact_id || 'Pending review';
 };

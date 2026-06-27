@@ -68,7 +68,7 @@ const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = 
             phase: 'idle',
             message: '',
         },
-        gddReview: approvalReview,
+        actionReview: approvalReview,
         pendingReviews: [],
         onUploadManifestCsv: vi.fn(),
         onApproveManifest: vi.fn(),
@@ -93,7 +93,7 @@ describe('ChatPanel approval bar', () => {
     });
 
     it('shows blocker resolution gates as revision work, not approval', () => {
-        renderChatPanel({ gddReview: blockerResolutionReview });
+        renderChatPanel({ actionReview: blockerResolutionReview });
 
         expect(screen.getByText('Revision Required')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
@@ -152,7 +152,7 @@ describe('ChatPanel approval bar', () => {
 
     it('restores the normal composer when no approval gate is active', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
         });
 
@@ -162,7 +162,7 @@ describe('ChatPanel approval bar', () => {
 
     it('uses the BeeGame dock styling for the normal composer', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
         });
@@ -173,7 +173,7 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame messages as a compact feed with tools after their message', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -252,7 +252,7 @@ describe('ChatPanel approval bar', () => {
         Element.prototype.scrollIntoView = scrollIntoView;
 
         const { container } = renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -354,7 +354,7 @@ describe('ChatPanel approval bar', () => {
 
     it('keeps BeeGame axis ticks compact and expands nearby ticks on hover', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: Array.from({ length: 7 }, (_, index) => ({
@@ -414,7 +414,7 @@ describe('ChatPanel approval bar', () => {
 
     it('highlights the final BeeGame axis tick when scrolled to the bottom', async () => {
         const { container } = renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -456,7 +456,7 @@ describe('ChatPanel approval bar', () => {
 
     it('shows every BeeGame tool call instead of limiting the feed to the last six', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -486,7 +486,7 @@ describe('ChatPanel approval bar', () => {
     it('normalizes BeeGame tool messages from snake_case fields and structured content', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -524,7 +524,7 @@ describe('ChatPanel approval bar', () => {
     it('keeps long BeeGame final summaries compact inside the collaboration feed', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -558,7 +558,7 @@ describe('ChatPanel approval bar', () => {
     it('allows BeeGame messages to collapse and expand', async () => {
         const user = userEvent.setup();
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -599,7 +599,7 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame agent summaries as markdown instead of raw markdown text', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -628,7 +628,7 @@ describe('ChatPanel approval bar', () => {
     it('opens tool cards on demand and wires Open and Diff actions to previews', async () => {
         const user = userEvent.setup();
         const { onPreviewArtifact } = renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -668,7 +668,7 @@ describe('ChatPanel approval bar', () => {
 
     it('does not draw a timeline connector below the final BeeGame tool card', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -702,7 +702,7 @@ describe('ChatPanel approval bar', () => {
 
     it('uses plain BeeGame tool status icons without circular badges', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
@@ -752,7 +752,7 @@ describe('ChatPanel approval bar', () => {
 
     it('keeps the legacy message rendering path outside BeeGame mode', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             messages: [
                 {
@@ -771,7 +771,7 @@ describe('ChatPanel approval bar', () => {
 
     it('restores the normal composer after approval state idles and the pending review is removed', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             approvalState: {
                 gateId: null,
@@ -787,7 +787,7 @@ describe('ChatPanel approval bar', () => {
 
     it('locks the normal composer while the runtime is busy', () => {
         renderChatPanel({
-            gddReview: undefined,
+            actionReview: undefined,
             pendingReviews: [],
             chatInput: 'continue',
             isComposerLocked: true,
@@ -799,7 +799,7 @@ describe('ChatPanel approval bar', () => {
 
     it('does not show stale approval actions after the project has failed', () => {
         renderChatPanel({
-            gddReview: approvalReview,
+            actionReview: approvalReview,
             projectStatus: {
                 project_id: 'proj_1',
                 phase: 'gdd',

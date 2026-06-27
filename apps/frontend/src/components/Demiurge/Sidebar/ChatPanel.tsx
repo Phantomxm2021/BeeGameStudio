@@ -36,7 +36,7 @@ interface ChatPanelProps {
         phase: 'idle' | 'submitting' | 'awaiting_runtime' | 'failed';
         message: string;
     };
-    gddReview?: ReviewDisplayModel;
+    actionReview?: ReviewDisplayModel;
     pendingReviews: ReviewDisplayModel[];
     onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
     onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
@@ -69,7 +69,7 @@ export const ChatPanel = memo(({
     setIsComposing,
     onApprovePlan,
     approvalState,
-    gddReview,
+    actionReview,
     pendingReviews,
     onUploadManifestCsv,
     onApproveManifest,
@@ -116,11 +116,11 @@ export const ChatPanel = memo(({
     };
 
     const clarificationReview = pendingReviews.find((review: ReviewDisplayModel) => review?.type === 'INTENT_CLARIFICATION' && Boolean(review?.gate_id));
-    const gddReadyForUserApproval = isReviewAwaitingUserAction(gddReview);
-    const gddBlockerResolution = isBlockerResolutionReview(gddReview);
-    const beeGamePermission = isBeeGamePermissionReview(gddReview);
+    const reviewReadyForUserApproval = isReviewAwaitingUserAction(actionReview);
+    const blockerResolutionReview = isBlockerResolutionReview(actionReview);
+    const beeGamePermission = isBeeGamePermissionReview(actionReview);
     const projectFailed = Boolean(projectStatus?.blocked && String(projectStatus?.blocked_reason || '').trim() === 'pipeline_failed');
-    const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || gddReview);
+    const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || actionReview);
     const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview);
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
     const handleContinueFixing = (message: string) => {
@@ -271,7 +271,7 @@ export const ChatPanel = memo(({
                                     ? text.permissionRequired
                                     : activeComposerReview.type === 'INTENT_CLARIFICATION'
                                         ? text.clarificationRequired
-                                        : gddReadyForUserApproval
+                                        : reviewReadyForUserApproval
                                             ? text.approvalRequired
                                             : text.revisionRequired
                             }
@@ -285,7 +285,7 @@ export const ChatPanel = memo(({
                                     ? 'clarification'
                                     : activeComposerReview.type === 'INTENT_CLARIFICATION'
                                     ? 'clarification'
-                                    : gddReadyForUserApproval
+                                    : reviewReadyForUserApproval
                                         ? 'approval'
                                         : 'revision'
                             }
@@ -314,7 +314,7 @@ export const ChatPanel = memo(({
                                             tone: 'reject' as const,
                                             onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview), undefined, 'revise'),
                                         }]
-                                    : [...(!gddBlockerResolution && gddReadyForUserApproval ? [{
+                                    : [...(!blockerResolutionReview && reviewReadyForUserApproval ? [{
                                         action: 'approve' as const,
                                         label: reviewApproveLabel(activeComposerReview),
                                         onClick: () => onApprovePlan!(toApprovalPayload(activeComposerReview)),

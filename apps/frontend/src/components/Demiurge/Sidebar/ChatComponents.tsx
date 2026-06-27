@@ -9,7 +9,7 @@ import { formatMessageContent } from '../../../utils/formatters';
 import { artifactProcessor } from '../../../utils/artifactProcessor';
 import { ArtifactCard } from './ArtifactCard';
 import { getSystemStatusLabel, normalizeCanonicalMessageType } from '../../../utils/messageSemantics';
-import type { ChatDisplayMessage, GovernanceDisplaySnapshot } from '../../../viewModels/displayModels';
+import type { ChatDisplayMessage } from '../../../viewModels/displayModels';
 
 const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
 
@@ -568,7 +568,6 @@ export const MessageItem = memo(({
     });
     const isError = semanticType === 'error';
     const [isHovered, setIsHovered] = useState(false);
-    const governance = m.governanceSnapshot as GovernanceDisplaySnapshot | undefined;
     const isBeeGameVariant = variant === 'beegame';
 
     if (semanticType === 'tool') return <ToolMessageCard message={m} variant={variant} />;
@@ -759,20 +758,6 @@ export const MessageItem = memo(({
                     <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-700/50 text-xs text-zinc-500 dark:text-zinc-400 italic bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl">
                         <span className="font-bold mr-2">🤔 Thinking:</span>
                         <span>{m.thought}</span>
-                    </div>
-                )}
-                {governance && !isUser && (
-                    <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/80 dark:border-amber-900/50 dark:bg-amber-950/20 p-3 text-[11px] text-zinc-700 dark:text-zinc-200 space-y-1">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
-                            Governance Snapshot
-                        </div>
-                        {governance.kind ? <div>Kind: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{governance.kind}</span></div> : null}
-                        {governance.status ? <div>Status: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{governance.status}</span></div> : null}
-                        {governance.scope ? <div>Scope: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{governance.scope}</span></div> : null}
-                        {governance.convergence_status ? <div>Convergence: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{String(governance.convergence_status).replace(/_/g, ' ')}</span></div> : null}
-                        {governance.reason ? <div>Reason: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{String(governance.reason).replace(/_/g, ' ')}</span></div> : null}
-                        {typeof governance.blocking_issue_count === 'number' ? <div>Blocking issues: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{governance.blocking_issue_count}</span></div> : null}
-                        {typeof governance.open_issue_count === 'number' ? <div>Open issues: <span className="font-semibold text-zinc-900 dark:text-zinc-100">{governance.open_issue_count}</span></div> : null}
                     </div>
                 )}
             </div>
