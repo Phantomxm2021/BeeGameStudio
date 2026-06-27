@@ -390,15 +390,48 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIsProfileOpen(true);
     };
 
-    const handleSaveAvatar = async () => {
+    const handleAvatarFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setProfileError('');
+        setProfileNotice('');
+        if (!file.type.startsWith('image/')) {
+            setProfileError('请选择图片文件。');
+            return;
+        }
+        if (file.size > 2 * 1024 * 1024) {
+            setProfileError('头像图片不能超过 2MB。');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result !== 'string') {
+                setProfileError('头像读取失败，请换一张图片。');
+                return;
+            }
+            setAvatarDraft(reader.result);
+            setProfileNotice('头像已选择，点击完成后保存。');
+        };
+        reader.onerror = () => setProfileError('头像读取失败，请换一张图片。');
+        reader.readAsDataURL(file);
+    };
+
+    const handleFinishProfile = async () => {
         if (isSavingProfile) return;
+        const nextAvatar = avatarDraft.trim();
+        const currentAvatar = currentUser?.avatarUrl || '';
+        if (!nextAvatar || nextAvatar === currentAvatar) {
+            setIsProfileOpen(false);
+            return;
+        }
         setProfileError('');
         setProfileNotice('');
         setIsSavingProfile(true);
         try {
-            await updateSupabaseAvatarUrl(avatarDraft);
+            await updateSupabaseAvatarUrl(nextAvatar);
             await loadCurrentUser();
-            setProfileNotice('头像已更新。');
+            setIsProfileOpen(false);
         } catch (error) {
             setProfileError(error instanceof Error ? error.message : '头像更新失败。');
         } finally {
@@ -625,52 +658,30 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </button>
                             </div>
 
-                            <div className="mt-6 flex items-center gap-4">
-                                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-xl font-black text-white">
-                                    {currentUser.avatarUrl ? (
-                                        <img src={currentUser.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            <div className="mt-8 flex flex-col items-center text-center">
+                                <label className="group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-3xl font-black text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition hover:border-amber-200/70">
+                                    {avatarDraft ? (
+                                        <img src={avatarDraft} alt="" className="h-full w-full object-cover" />
                                     ) : (
                                         getDisplayInitial(currentUser.displayName || currentUser.email || currentUser.id)
                                     )}
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="truncate text-lg font-semibold text-white">{currentUser.displayName || '未设置昵称'}</div>
-                                    <div className="truncate text-sm text-zinc-400">{currentUser.email || '邮箱未公开'}</div>
-                                </div>
-                            </div>
-
-                            <label className="mt-6 block text-sm font-semibold text-zinc-200">
-                                头像 URL
-                                <div className="mt-2 flex gap-2">
                                     <input
-                                        aria-label="头像 URL"
-                                        type="url"
-                                        value={avatarDraft}
-                                        onChange={(event) => setAvatarDraft(event.target.value)}
-                                        placeholder="https://..."
-                                        className="h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                        aria-label="上传头像"
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleAvatarFileChange}
+                                        className="sr-only"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveAvatar}
-                                        disabled={isSavingProfile}
-                                        className="inline-flex h-11 items-center gap-2 rounded-2xl bg-white px-4 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <Camera className="h-4 w-4" />
-                                        保存
-                                    </button>
+                                    <span className="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition group-hover:opacity-100">
+                                        <Camera className="h-6 w-6 text-white" />
+                                    </span>
+                                </label>
+                                <div className="mt-5 max-w-full truncate text-2xl font-semibold text-white">
+                                    {currentUser.displayName || '未设置昵称'}
                                 </div>
-                            </label>
-
-                            <div className="mt-4 grid gap-3">
-                                <label className="block text-sm font-semibold text-zinc-200">
-                                    昵称
-                                    <input aria-label="昵称" readOnly value={currentUser.displayName || ''} className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 text-zinc-300 outline-none" />
-                                </label>
-                                <label className="block text-sm font-semibold text-zinc-200">
-                                    邮箱
-                                    <input aria-label="个人邮箱" readOnly value={currentUser.email || ''} className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 text-zinc-300 outline-none" />
-                                </label>
+                                <div className="mt-1 max-w-full truncate text-sm text-zinc-400">
+                                    {currentUser.email || '邮箱未公开'}
+                                </div>
                             </div>
 
                             {profileError ? <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">{profileError}</div> : null}
@@ -716,10 +727,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setIsProfileOpen(false)}
-                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200"
+                                    onClick={() => void handleFinishProfile()}
+                                    disabled={isSavingProfile}
+                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    完成
+                                    {isSavingProfile ? '保存中...' : '完成'}
                                 </button>
                             </div>
                         </div>

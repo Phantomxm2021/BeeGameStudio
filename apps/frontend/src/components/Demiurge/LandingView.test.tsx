@@ -368,7 +368,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });
 
-    it('opens the profile page and updates the avatar URL', async () => {
+    it('opens the profile page and saves an uploaded avatar only when finished', async () => {
         mockCurrentUser = {
             id: 'alice',
             email: 'alice@example.com',
@@ -382,15 +382,24 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
         expect(await screen.findByRole('dialog', { name: '个人主页' })).toBeInTheDocument();
-        expect(screen.getByDisplayValue('Alice')).toHaveAttribute('readonly');
-        expect(screen.getByDisplayValue('alice@example.com')).toHaveAttribute('readonly');
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+        expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+        expect(screen.queryByLabelText('昵称')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('个人邮箱')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('头像 URL')).not.toBeInTheDocument();
 
-        fireEvent.change(screen.getByLabelText('头像 URL'), {
-            target: { value: 'https://cdn.example.com/alice.png' },
+        const avatarFile = new File(['avatar-bytes'], 'avatar.png', { type: 'image/png' });
+        fireEvent.change(screen.getByLabelText('上传头像'), {
+            target: { files: [avatarFile] },
         });
-        fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
-        await waitFor(() => expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith('https://cdn.example.com/alice.png'));
+        expect(updateSupabaseAvatarUrl).not.toHaveBeenCalled();
+        expect(await screen.findByText('头像已选择，点击完成后保存。')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '完成' }));
+
+        await waitFor(() => {
+            expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith(expect.stringMatching(/^data:image\/png;base64,/));
+        });
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
 
