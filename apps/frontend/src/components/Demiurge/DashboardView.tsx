@@ -201,7 +201,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         isSyncing,
         status,
         isDark,
-        toggleTheme
+        toggleTheme,
+        hasPermission,
     } = useSystemStore();
     const { projects, pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
     const { messages } = useChatStore();
@@ -297,6 +298,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         () => getWaitingApprovalState(projectRuntimeDisplay, reviewDisplayModels),
         [projectRuntimeDisplay, reviewDisplayModels],
     );
+    const canSendMessage = hasPermission('agent.send_message');
+    const canApproveTool = hasPermission('agent.approve_tool');
+    const canManagePreview = hasPermission('preview.manage');
+    const canUploadAssets = hasPermission('assets.upload');
+    const canIntegrateAssets = hasPermission('assets.integrate');
 
     // Auto-Send Initial Prompt
     useEffect(() => {
@@ -343,6 +349,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleStartPreview = async () => {
+        if (!canManagePreview) return;
         try {
             await api.startProjectPreview(projectId);
             await refreshPreviewStatus();
@@ -352,6 +359,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleRestartPreview = async () => {
+        if (!canManagePreview) return;
         try {
             await api.restartProjectPreview(projectId);
             await refreshPreviewStatus();
@@ -361,6 +369,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleStopPreview = async () => {
+        if (!canManagePreview) return;
         try {
             await api.stopProjectPreview(projectId);
             await refreshPreviewStatus();
@@ -613,9 +622,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 modelName={currentModelName}
                 isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}
-                onStartPreview={handleStartPreview}
-                onRestartPreview={handleRestartPreview}
-                onStopPreview={handleStopPreview}
+                onStartPreview={canManagePreview ? handleStartPreview : undefined}
+                onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
+                onStopPreview={canManagePreview ? handleStopPreview : undefined}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onBack={onBack}
                 onSetLang={onSetLang}
@@ -629,7 +638,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 onSendMessage={sendMessage}
                 isLoading={isLoading}
                 isRuntimeBusy={currentStatus === 'running'}
-                onApprovePlan={hasPendingPlanReview ? approvePlan : undefined}
+                onApprovePlan={hasPendingPlanReview && canApproveTool ? approvePlan : undefined}
                 approvalState={approvalState}
                 pendingReviews={reviewDisplayModels}
                 projectStatus={projectRuntimeDisplay}
@@ -637,6 +646,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 onUploadManifestCsv={uploadManifestCsv}
                 onApproveManifest={approveManifest}
                 waitingApproval={waitingApproval}
+                canSendMessage={canSendMessage}
+                canApproveTool={canApproveTool}
+                canUploadAssets={canUploadAssets}
+                canIntegrateAssets={canIntegrateAssets}
                 variant={isBeeGameMode ? 'beegame' : 'legacy'}
             />
         </div>

@@ -58,6 +58,7 @@ let mockedProjectStatus: ProjectBaselineStatusPayload = {
     },
 };
 let mockedProjects: Array<{ id: string; name: string; root_path?: string; created_at: number }> = [];
+let mockedHasPermission = vi.fn(() => true);
 
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: () => ({
@@ -74,6 +75,7 @@ vi.mock('../../store/systemStore', () => ({
         isSyncing: false,
         isDark: true,
         toggleTheme,
+        hasPermission: mockedHasPermission,
     }),
 }));
 
@@ -215,6 +217,7 @@ describe('DashboardView runtime loading', () => {
             },
         };
         mockedProjects = [];
+        mockedHasPermission = vi.fn(() => true);
         status.capabilities.operator_controls_enabled = true;
         status.capabilities.stage_control_enabled = true;
     });
@@ -237,6 +240,22 @@ describe('DashboardView runtime loading', () => {
 
         expect(capturedRightSidebarProps).not.toHaveProperty('canResetGddApproval');
         expect(capturedRightSidebarProps).not.toHaveProperty('onResetGddApproval');
+    });
+
+    it('passes current user permissions to sidebar action gates', async () => {
+        mockedHasPermission = vi.fn((permission: string) => (
+            permission === 'agent.send_message' ||
+            permission === 'assets.upload'
+        ));
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
+
+        expect(capturedRightSidebarProps?.canSendMessage).toBe(true);
+        expect(capturedRightSidebarProps?.canApproveTool).toBe(false);
+        expect(capturedRightSidebarProps?.canUploadAssets).toBe(true);
+        expect(capturedRightSidebarProps?.canIntegrateAssets).toBe(false);
     });
 
     it('passes global workflow progress instead of the old first-phase twenty percent boost', async () => {

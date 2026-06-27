@@ -42,6 +42,10 @@ interface RightSidebarProps {
     onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
     onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
     waitingApproval: WaitingApprovalState;
+    canSendMessage?: boolean;
+    canApproveTool?: boolean;
+    canUploadAssets?: boolean;
+    canIntegrateAssets?: boolean;
     variant?: 'legacy' | 'beegame';
 }
 
@@ -59,6 +63,10 @@ export function RightSidebar({
     onUploadManifestCsv,
     onApproveManifest,
     waitingApproval,
+    canSendMessage = true,
+    canApproveTool = true,
+    canUploadAssets = true,
+    canIntegrateAssets = true,
     variant = 'legacy',
 }: RightSidebarProps) {
 
@@ -107,7 +115,7 @@ export function RightSidebar({
 
     // Handlers
     const handleSend = () => {
-        if (!chatInput.trim() || isComposerLocked || waitingApproval.isBlockingChat) return;
+        if (!canSendMessage || !chatInput.trim() || isComposerLocked || waitingApproval.isBlockingChat) return;
         onSendMessage(chatInput);
         setChatInput('');
     };
@@ -169,6 +177,7 @@ export function RightSidebar({
     };
 
     const handleUploadAsset = async (slotId: string, file: File) => {
+        if (!canUploadAssets) return;
         setUploadingAssetSlotId(slotId);
         try {
             const result = await api.uploadProjectAsset(projectId, slotId, file);
@@ -183,11 +192,13 @@ export function RightSidebar({
     };
 
     const handleRequestAssetIntegration = (slot: BeeGameAssetSlotPayload) => {
+        if (!canSendMessage || !canIntegrateAssets) return;
         const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
         onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage);
     };
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
+        if (!canSendMessage || !canIntegrateAssets) return;
         onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang));
     };
 
@@ -369,7 +380,7 @@ export function RightSidebar({
                                 scrollContainerRef={scrollContainerRef}
                                 isComposing={isComposing}
                                 setIsComposing={setIsComposing}
-                                onApprovePlan={onApprovePlan}
+                                onApprovePlan={canApproveTool ? onApprovePlan : undefined}
                 approvalState={approvalState}
                 gddReview={beeGamePermissionReview || structuredDocumentReview}
                             pendingReviews={pendingReviews}
@@ -377,6 +388,7 @@ export function RightSidebar({
                             onApproveManifest={onApproveManifest}
                                 waitingApproval={waitingApproval}
                                 projectStatus={projectStatus}
+                                canSendMessage={canSendMessage}
                                 variant={variant}
                                 lang={lang}
                             />
@@ -394,9 +406,9 @@ export function RightSidebar({
                                 manifest={assetManifest}
                                 isLoading={isAssetsLoading}
                                 isUploadingSlotId={uploadingAssetSlotId}
-                                onUpload={handleUploadAsset}
-                                onRequestIntegration={handleRequestAssetIntegration}
-                                onRequestAllIntegration={handleRequestAllAssetIntegration}
+                                onUpload={canUploadAssets ? handleUploadAsset : undefined}
+                                onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
+                                onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}
                             />
                         )}

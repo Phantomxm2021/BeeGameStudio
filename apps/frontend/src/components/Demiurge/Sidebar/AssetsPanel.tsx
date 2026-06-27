@@ -17,7 +17,7 @@ interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
     isLoading: boolean;
     isUploadingSlotId?: string | null;
-    onUpload: (slotId: string, file: File) => Promise<void>;
+    onUpload?: (slotId: string, file: File) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
     lang?: Language;
@@ -158,7 +158,7 @@ function AssetSlotCard({
     slot: BeeGameAssetSlotPayload;
     text: typeof LABELS.en;
     isUploading: boolean;
-    onUpload: (slotId: string, file: File) => Promise<void>;
+    onUpload?: (slotId: string, file: File) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -168,7 +168,7 @@ function AssetSlotCard({
     const mode = slot.integration_provider?.type;
 
     const handleFile = async (file: File | undefined) => {
-        if (!file) return;
+        if (!file || !onUpload) return;
         setError('');
         try {
             await onUpload(slot.id, file);
@@ -229,22 +229,26 @@ function AssetSlotCard({
                     {error ? <div className="mt-3 text-xs text-red-300">{error}</div> : null}
 
                     <div className="mt-4 flex flex-wrap gap-2">
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            aria-label={text.upload}
-                            className="hidden"
-                            onChange={event => void handleFile(event.currentTarget.files?.[0])}
-                        />
-                        <button
-                            type="button"
-                            disabled={isUploading}
-                            onClick={() => inputRef.current?.click()}
-                            className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-xs font-black text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            <Upload className="h-4 w-4" />
-                            {isUploading ? text.uploading : text.upload}
-                        </button>
+                        {onUpload ? (
+                            <>
+                                <input
+                                    ref={inputRef}
+                                    type="file"
+                                    aria-label={text.upload}
+                                    className="hidden"
+                                    onChange={event => void handleFile(event.currentTarget.files?.[0])}
+                                />
+                                <button
+                                    type="button"
+                                    disabled={isUploading}
+                                    onClick={() => inputRef.current?.click()}
+                                    className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-xs font-black text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <Upload className="h-4 w-4" />
+                                    {isUploading ? text.uploading : text.upload}
+                                </button>
+                            </>
+                        ) : null}
                         {(status === 'uploaded' || status === 'integrated') && onRequestIntegration ? (
                             <button
                                 type="button"

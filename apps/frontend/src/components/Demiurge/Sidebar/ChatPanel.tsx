@@ -43,6 +43,7 @@ interface ChatPanelProps {
     waitingApproval: WaitingApprovalState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
+    canSendMessage?: boolean;
     variant?: 'legacy' | 'beegame';
     lang?: Language;
 }
@@ -75,6 +76,7 @@ export const ChatPanel = memo(({
     waitingApproval,
     projectStatus,
     isComposerLocked = false,
+    canSendMessage = true,
     variant = 'legacy',
     lang = 'en',
 }: ChatPanelProps) => {
@@ -122,9 +124,10 @@ export const ChatPanel = memo(({
     const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview);
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
     const handleContinueFixing = (message: string) => {
-        if (isComposerLocked || waitingApproval.isBlockingChat) return;
+        if (!canSendMessage || isComposerLocked || waitingApproval.isBlockingChat) return;
         onSendMessage?.(message);
     };
+    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat;
 
     const isBeeGameVariant = variant === 'beegame';
     const panelClassName = isBeeGameVariant
@@ -338,14 +341,14 @@ export const ChatPanel = memo(({
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                                     e.preventDefault();
-                                    onSend();
+                                    if (!isComposerDisabled) onSend();
                                 }
                             }}
-                            disabled={isComposerLocked || isLoading || waitingApproval.isBlockingChat}
+                            disabled={isComposerDisabled}
                         />
                         <button
                             onClick={onSend}
-                            disabled={!chatInput.trim() || isComposerLocked || isLoading || waitingApproval.isBlockingChat}
+                            disabled={!chatInput.trim() || isComposerDisabled}
                             className={sendButtonClassName}
                         >
                             <Send className="w-5 h-5 -ml-0.5" />
