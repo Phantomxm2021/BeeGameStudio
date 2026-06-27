@@ -45,7 +45,6 @@ export const normalizeCanonicalMessageType = ({
   taskKind,
   nextAction,
   requiresUserAction,
-  governanceSnapshot,
 }: SemanticResolverInput): CanonicalChatMessageType => {
   const normalizedType = String(type || '').trim().toLowerCase();
   const mappedType = LEGACY_MAP[normalizedType] || normalizedType;
@@ -71,9 +70,6 @@ export const normalizeCanonicalMessageType = ({
   const kind = String(taskKind || '').trim().toLowerCase();
   if (requiresUserAction) {
     if (action === 'revise' || action === 'upload_manifest' || action === 'clarify' || kind.includes('revision') || kind.includes('clarification')) {
-      return 'revision_request';
-    }
-    if ((governanceSnapshot?.blocking_issue_count || 0) > 0) {
       return 'revision_request';
     }
     return 'approval_request';

@@ -10,13 +10,21 @@ describe('message semantics', () => {
     })).toBe('artifact_card');
   });
 
-  it('maps governance messages requiring revision into revision_request', () => {
+  it('maps explicit revision requests into revision_request', () => {
     expect(normalizeCanonicalMessageType({
       requiresUserAction: true,
       nextAction: 'revise',
       governanceSnapshot: { blocking_issue_count: 2 },
       content: '需要修订',
     })).toBe('revision_request');
+  });
+
+  it('does not infer revision requests from legacy governance snapshots alone', () => {
+    expect(normalizeCanonicalMessageType({
+      requiresUserAction: true,
+      governanceSnapshot: { blocking_issue_count: 2 },
+      content: '需要确认',
+    })).toBe('approval_request');
   });
 
   it('does not infer artifact cards from document-like content without explicit protocol fields', () => {
