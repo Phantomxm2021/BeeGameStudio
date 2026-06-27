@@ -144,6 +144,62 @@ describe('agent workflow server routes', () => {
     }))
   })
 
+  test('records owner-scoped audit events for sensitive settings changes', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-audit-root-'))
+    try {
+      const authApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-token') {
+            return { id: 'owner-a', role: 'owner' }
+          }
+          if (header === 'Bearer viewer-token') {
+            return { id: 'viewer-a', role: 'viewer' }
+          }
+          return undefined
+        },
+      })
+
+      const saveRes = await authApp.request('/api/web-tools', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer owner-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          webSearchAdapter: 'brave',
+          braveApiKey: 'bsa-secret',
+        }),
+      })
+      expect(saveRes.status).toBe(200)
+
+      const viewerRes = await authApp.request('/api/audit-events', {
+        headers: { authorization: 'Bearer viewer-token' },
+      })
+      expect(viewerRes.status).toBe(403)
+
+      const ownerRes = await authApp.request('/api/audit-events', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(ownerRes.status).toBe(200)
+      expect(await ownerRes.json()).toEqual([
+        expect.objectContaining({
+          actorId: 'owner-a',
+          action: 'web_tools.updated',
+          targetType: 'web_tools',
+          targetId: 'owner-a',
+          metadata: expect.objectContaining({
+            webSearchAdapter: 'brave',
+            braveApiKeyChanged: true,
+          }),
+        }),
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('scopes project metadata by bearer authenticated user', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auth-projects-'))

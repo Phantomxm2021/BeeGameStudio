@@ -19,7 +19,8 @@ export type BeeGamePermission =
   | 'model_config.manage'
   | 'mcp.manage'
   | 'runtime_settings.manage'
-  | 'secrets.manage';
+  | 'secrets.manage'
+  | 'audit.read';
 
 export type BeeGameCurrentUser = {
   id: string;
