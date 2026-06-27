@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { History, LogOut, Settings, UserCircle } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
@@ -30,10 +30,22 @@ export function LandingActions({
 }: LandingActionsProps) {
     const t = translations[lang];
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const userMenuLabel = lang === 'en' ? 'User menu' : '用户菜单';
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const userInitial = getUserInitial(currentUserId);
+
+    useEffect(() => {
+        if (!isUserMenuOpen) return undefined;
+        const handlePointerDown = (event: PointerEvent) => {
+            if (!containerRef.current?.contains(event.target as Node)) {
+                setIsUserMenuOpen(false);
+            }
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isUserMenuOpen]);
 
     const handleUserButtonClick = () => {
         if (!currentUserId) {
@@ -60,6 +72,7 @@ export function LandingActions({
 
     return (
         <motion.div
+            ref={containerRef}
             animate={{ opacity: isTransitioning ? 0 : 1, y: isTransitioning ? -8 : 0 }}
             className="absolute right-4 top-4 z-50 flex items-center gap-2 sm:right-8 sm:top-8"
         >
@@ -68,14 +81,15 @@ export function LandingActions({
                 aria-label={userMenuLabel}
                 aria-haspopup="menu"
                 aria-expanded={currentUserId ? isUserMenuOpen : undefined}
+                data-avatar-surface="outline"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={handleUserButtonClick}
-                className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/20 text-zinc-200 shadow-sm backdrop-blur-xl transition-colors hover:border-amber-300/40 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/40 text-white' : ''
+                className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-colors hover:border-amber-300/50 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''
                     }`}
             >
                 {currentUserId ? (
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-300 text-sm font-black text-zinc-950">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-black text-white">
                         {userInitial}
                     </span>
                 ) : (
@@ -87,7 +101,9 @@ export function LandingActions({
                 <div
                     role="menu"
                     aria-label={userMenuLabel}
-                    className="absolute right-0 top-14 w-64 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/90 p-2 text-zinc-100 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
+                    data-surface="frosted-glass"
+                    data-style-source="pixelfork"
+                    className="input-surface absolute right-0 top-14 w-64 overflow-hidden rounded-[28px] border border-white/20 p-2 text-zinc-100 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
                 >
                     <div className="px-3 py-3">
                         <div className="truncate text-sm font-semibold text-white">{currentUserId}</div>

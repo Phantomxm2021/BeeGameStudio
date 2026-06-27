@@ -38,23 +38,8 @@ describe('agent workflow server routes', () => {
   })
 
   test('returns the current user role and permissions', async () => {
-    const ownerRes = await app.request('/api/current-user')
-    expect(ownerRes.status).toBe(200)
-    expect(await ownerRes.json()).toEqual({
-      id: 'dashboard-local',
-      role: 'owner',
-      permissions: expect.arrayContaining([
-        'project.read',
-        'project.create',
-        'project.delete',
-        'agent.send_message',
-        'agent.approve_tool',
-        'model_config.manage',
-        'mcp.manage',
-        'runtime_settings.manage',
-        'secrets.manage',
-      ]),
-    })
+    const anonymousRes = await app.request('/api/current-user')
+    expect(anonymousRes.status).toBe(401)
 
     const viewerApp = createAgentWorkflowApp({
       currentUser: {
@@ -296,33 +281,20 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('can narrow the local single-user role from environment', async () => {
+  test('does not expose the local single-user fallback as a signed-in account', async () => {
     const originalRole = process.env.BEEGAME_LOCAL_USER_ROLE
     try {
       process.env.BEEGAME_LOCAL_USER_ROLE = 'viewer'
       const viewerApp = createAgentWorkflowApp()
       const viewerRes = await viewerApp.request('/api/current-user')
 
-      expect(viewerRes.status).toBe(200)
-      expect(await viewerRes.json()).toEqual({
-        id: 'dashboard-local',
-        role: 'viewer',
-        permissions: [
-          'workspace.read',
-          'project.read',
-          'project.export',
-        ],
-      })
+      expect(viewerRes.status).toBe(401)
 
       process.env.BEEGAME_LOCAL_USER_ROLE = 'unknown-role'
       const fallbackApp = createAgentWorkflowApp()
       const fallbackRes = await fallbackApp.request('/api/current-user')
 
-      expect(fallbackRes.status).toBe(200)
-      expect(await fallbackRes.json()).toEqual(expect.objectContaining({
-        id: 'dashboard-local',
-        role: 'owner',
-      }))
+      expect(fallbackRes.status).toBe(401)
     } finally {
       if (originalRole === undefined) {
         delete process.env.BEEGAME_LOCAL_USER_ROLE

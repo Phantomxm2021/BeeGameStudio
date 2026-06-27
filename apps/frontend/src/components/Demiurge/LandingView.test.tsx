@@ -28,7 +28,7 @@ let mockCurrentUser: {
     role: 'owner' | 'developer' | 'reviewer' | 'viewer';
     permissions: string[];
 } | null = {
-    id: 'dashboard-local',
+    id: 'alice',
     role: 'owner',
     permissions: ['project.create', 'project.delete'],
 };
@@ -214,13 +214,13 @@ beforeEach(() => {
     mockLoadCurrentUser.mockReset();
     mockLoadCurrentUser.mockResolvedValue(undefined);
     mockCurrentUser = {
-        id: 'dashboard-local',
+        id: 'alice',
         role: 'owner',
         permissions: ['project.create', 'project.delete'],
     };
     getCreditBalance.mockReset();
     getCreditBalance.mockResolvedValue({
-        userId: 'dashboard-local',
+        userId: 'alice',
         plan: 'free',
         balanceCredits: 300,
         includedCredits: 300,
@@ -296,6 +296,11 @@ describe('LandingView bootstrap submission', () => {
     });
 
     it('opens account actions from a circular signed-in user avatar', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
         renderLanding();
 
         expect(screen.queryByRole('button', { name: '系统设置' })).not.toBeInTheDocument();
@@ -303,11 +308,44 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
 
-        expect(screen.getByText('D')).toBeInTheDocument();
-        expect(await screen.findByText('dashboard-local')).toBeInTheDocument();
+        expect(screen.getByText('A')).toBeInTheDocument();
+        expect(await screen.findByText('alice')).toBeInTheDocument();
         expect(screen.getByText('300 credits')).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
+    });
+
+    it('closes the account menu when clicking outside it', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        expect(screen.getByRole('menu', { name: '用户菜单' })).toBeInTheDocument();
+
+        fireEvent.pointerDown(document.body);
+
+        await waitFor(() => expect(screen.queryByRole('menu', { name: '用户菜单' })).not.toBeInTheDocument());
+    });
+
+    it('uses the frosted input surface style for the account menu without filling the avatar', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        const userButton = await screen.findByRole('button', { name: '用户菜单' });
+        expect(userButton).toHaveAttribute('data-avatar-surface', 'outline');
+        expect(userButton).not.toHaveClass('bg-black/20');
+
+        fireEvent.click(userButton);
+
+        expect(screen.getByRole('menu', { name: '用户菜单' })).toHaveAttribute('data-surface', 'frosted-glass');
     });
 
     it('opens the login and registration dialog from the anonymous user icon', async () => {
@@ -332,7 +370,7 @@ describe('LandingView bootstrap submission', () => {
 
     it('stops intake generation when available credits are below the intake estimate', async () => {
         getCreditBalance.mockResolvedValue({
-            userId: 'dashboard-local',
+            userId: 'alice',
             plan: 'free',
             balanceCredits: 0,
             includedCredits: 300,

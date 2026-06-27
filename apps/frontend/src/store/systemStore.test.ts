@@ -83,4 +83,5 @@ describe('systemStore token usage', () => {
     expect(useSystemStore.getState().currentUser).toBeNull();
     expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
   });
+
 });

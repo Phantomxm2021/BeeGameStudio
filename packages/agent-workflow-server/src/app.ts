@@ -216,7 +216,13 @@ export function createAgentWorkflowApp(
   app.get('/health', c => c.json({ status: 'ok' }))
 
   app.get('/api/current-user', c => {
-    const user = getCurrentUser(c.req.raw)
+    const user = options.currentUser ?? requestUsers.get(c.req.raw)
+    if (!user) {
+      return c.json({
+        error: 'Unauthorized',
+        message: 'authentication required',
+      }, 401)
+    }
     return c.json({
       id: user.id,
       role: user.role,
