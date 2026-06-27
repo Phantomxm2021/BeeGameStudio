@@ -116,7 +116,6 @@ export interface ProjectBaselineStatusPayload {
   last_resume_failure_stage?: string | null;
   last_resume_failure_at?: string | null;
   can_retry_continue?: boolean;
-  governance?: GovernanceVisibilityPayload;
   context?: ContextVisibilityPayload | null;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
@@ -126,16 +125,6 @@ export interface ProjectBaselineStatusPayload {
 
 export interface OperatorVisibilityPayload {
   operator_visibility: ProjectBaselineStatusPayload | null;
-}
-
-export interface GovernanceVisibilityPayload {
-  blocked?: boolean;
-  blocked_phase?: string;
-  open_blocker_ids?: string[];
-  unrevalidated_blocker_ids?: string[];
-  unresolved_conflict_ids?: string[];
-  promotion_status_by_phase?: Record<string, string>;
-  latest_revalidation_by_phase?: Record<string, unknown>;
 }
 
 export interface ContextVisibilityPayload {
@@ -656,7 +645,6 @@ export const normalizeProjectBaselineStatusPayload = (
       last_resume_failure_stage: null,
       last_resume_failure_at: null,
       can_retry_continue: false,
-      governance: undefined,
       context: undefined,
       execution_evidence: undefined,
       build_report: null,
@@ -667,8 +655,42 @@ export const normalizeProjectBaselineStatusPayload = (
     ? normalizeInboundReviewBindingPayload(normalizedPayload.baseline)
     : null;
   return {
-    ...normalizedPayload,
+    project_id: String(normalizedPayload.project_id ?? '').trim(),
+    phase: String(normalizedPayload.phase ?? '').trim(),
+    blocked: Boolean(normalizedPayload.blocked),
+    blocked_reason: normalizedPayload.blocked_reason ?? null,
+    active_agents: Array.isArray(normalizedPayload.active_agents)
+      ? normalizedPayload.active_agents.map((item) => String(item).trim()).filter(Boolean)
+      : [],
+    updated_at: String(normalizedPayload.updated_at ?? '').trim(),
+    approval_required: Boolean(normalizedPayload.approval_required),
+    next_action: String(normalizedPayload.next_action ?? '').trim(),
     baseline,
+    current_run: normalizedPayload.current_run ?? null,
+    current_snapshot: normalizedPayload.current_snapshot ?? null,
+    latest_validation: normalizedPayload.latest_validation ?? null,
+    latest_review: normalizedPayload.latest_review ?? null,
+    last_resume_task_id: String(normalizedPayload.last_resume_task_id ?? '').trim() || undefined,
+    last_resume_failure: normalizedPayload.last_resume_failure ?? null,
+    last_resume_failure_stage: normalizedPayload.last_resume_failure_stage ?? null,
+    last_resume_failure_at: normalizedPayload.last_resume_failure_at ?? null,
+    can_retry_continue: Boolean(normalizedPayload.can_retry_continue),
+    clarification_required: Boolean(normalizedPayload.clarification_required),
+    answered_slots: normalizedPayload.answered_slots ?? {},
+    pending_slots: Array.isArray(normalizedPayload.pending_slots)
+      ? normalizedPayload.pending_slots.map((item) => String(item).trim()).filter(Boolean)
+      : [],
+    clarification_questions: Array.isArray(normalizedPayload.clarification_questions)
+      ? normalizedPayload.clarification_questions.map((item) => String(item).trim()).filter(Boolean)
+      : [],
+    clarification_suggestions: Array.isArray(normalizedPayload.clarification_suggestions)
+      ? normalizedPayload.clarification_suggestions
+      : [],
+    intent_analysis: normalizedPayload.intent_analysis,
+    confidence: normalizedPayload.confidence,
+    reasoning_summary: normalizedPayload.reasoning_summary,
+    execution_evidence: normalizedPayload.execution_evidence,
+    model_config_id: normalizedPayload.model_config_id,
     review_status: normalizeReviewStatusPayload(normalizedPayload.review_status),
     context: normalizeContextVisibilityPayload(normalizedPayload.context),
     build_report: normalizeBuildReportPayload(normalizedPayload.build_report) ?? null,

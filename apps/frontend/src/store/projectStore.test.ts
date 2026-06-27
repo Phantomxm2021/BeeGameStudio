@@ -157,7 +157,7 @@ describe('projectStore pending review normalization', () => {
         expect(useProjectStore.getState().isLoading).toBe(false);
         expect(chatActions.addMessage).toHaveBeenCalledWith(expect.objectContaining({
             sender: 'system',
-            content: expect.stringContaining('后台进行意图分析'),
+            content: expect.stringContaining('准备可选方向'),
         }));
 
         resolveProjects([{ id: 'proj_1', name: 'Snake Web', created_at: Date.now() }]);
@@ -284,20 +284,12 @@ describe('projectStore pending review normalization', () => {
                 workspace_path: '/tmp/workspace/specs/GDD.md',
             },
             review_status: {
-                workflow_id: 'gdd_v2',
+                workflow_id: 'review_flow',
                 lane_id: 'internal_board_review',
                 lane_status: 'awaiting_approval',
                 decision_status: 'awaiting_user',
                 requires_user_action: true,
                 user_action_kind: 'approve',
-            },
-            governance: {
-                blocked: true,
-                blocked_phase: 'gdd',
-                open_blocker_ids: ['issue_1'],
-                unresolved_conflict_ids: ['conflict_1'],
-                promotion_status_by_phase: { gdd: 'blocked' },
-                latest_revalidation_by_phase: {},
             },
             build_report: {
                 status: ' passed ',
@@ -334,7 +326,6 @@ describe('projectStore pending review normalization', () => {
                 },
             ],
         });
-
         await useProjectStore.getState().loadProjectStatus('proj_1');
 
         expect(useProjectStore.getState().projectStatus).toMatchObject({
@@ -342,20 +333,12 @@ describe('projectStore pending review normalization', () => {
             approval_required: true,
             next_action: 'approve baseline',
             review_status: {
-                workflow_id: 'gdd_v2',
+                workflow_id: 'review_flow',
                 lane_id: 'internal_board_review',
                 lane_status: 'awaiting_approval',
                 decision_status: 'awaiting_user',
                 requires_user_action: true,
                 user_action_kind: 'approve',
-            },
-            governance: {
-                blocked: true,
-                blocked_phase: 'gdd',
-                open_blocker_ids: ['issue_1'],
-                unresolved_conflict_ids: ['conflict_1'],
-                promotion_status_by_phase: { gdd: 'blocked' },
-                latest_revalidation_by_phase: {},
             },
             build_report: {
                 status: 'passed',
@@ -404,33 +387,16 @@ describe('projectStore pending review normalization', () => {
                 project_id: 'proj_1',
                 phase: 'build',
                 blocked: true,
-                blocked_reason: 'governance_blocked',
+                blocked_reason: 'runtime_blocked',
                 approval_required: true,
                 next_action: 'resolve blockers',
                 review_status: {
-                    workflow_id: 'gdd_v2',
+                    workflow_id: 'review_flow',
                     lane_id: 'internal_board_review',
                     lane_status: 'awaiting_user',
                     decision_status: 'awaiting_user',
                     requires_user_action: true,
                     user_action_kind: 'approve',
-                },
-                governance: {
-                    blocked: true,
-                    blocked_phase: 'build',
-                    open_blocker_ids: ['issue_1'],
-                    unrevalidated_blocker_ids: ['issue_2'],
-                    unresolved_conflict_ids: ['conflict_1'],
-                    promotion_status_by_phase: { build: 'blocked' },
-                    latest_revalidation_by_phase: {
-                        build: {
-                            revalidation_id: 'reval_1',
-                            phase: 'build',
-                            status: 'passed',
-                            summary: 'build outputs revalidated',
-                            created_at: '2026-04-21T10:11:12Z',
-                        },
-                    },
                 },
                 build_report: {
                     status: 'passed',
@@ -468,31 +434,15 @@ describe('projectStore pending review normalization', () => {
 
         expect(useProjectStore.getState().projectStatus).toMatchObject({
             project_id: 'proj_1',
-            blocked_reason: 'governance_blocked',
+            blocked_reason: 'runtime_blocked',
             next_action: 'resolve blockers',
             review_status: {
-                workflow_id: 'gdd_v2',
+                workflow_id: 'review_flow',
                 lane_id: 'internal_board_review',
                 lane_status: 'awaiting_user',
                 decision_status: 'awaiting_user',
                 requires_user_action: true,
                 user_action_kind: 'approve',
-            },
-            governance: {
-                blocked: true,
-                blocked_phase: 'build',
-                open_blocker_ids: ['issue_1'],
-                unrevalidated_blocker_ids: ['issue_2'],
-                unresolved_conflict_ids: ['conflict_1'],
-                promotion_status_by_phase: { build: 'blocked' },
-                latest_revalidation_by_phase: {
-                    build: {
-                        revalidation_id: 'reval_1',
-                        status: 'passed',
-                        summary: 'build outputs revalidated',
-                        created_at: '2026-04-21T10:11:12Z',
-                    },
-                },
             },
             build_report: {
                 status: 'passed',
@@ -524,6 +474,7 @@ describe('projectStore pending review normalization', () => {
                 open_blocker_ids: ['issue_1'],
             },
         });
+        expect(useProjectStore.getState().projectStatus).not.toHaveProperty('governance');
     });
 
     it('removes and restores pending reviews by gate id', () => {

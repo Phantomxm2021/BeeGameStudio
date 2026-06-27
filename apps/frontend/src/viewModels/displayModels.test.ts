@@ -1,39 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { toChatDisplayMessage, toProjectRuntimeDisplayModel, toReviewDisplayModel } from './displayModels';
-import type { Message } from '../types/message';
+import { toProjectRuntimeDisplayModel, toReviewDisplayModel } from './displayModels';
 import type { PendingUserReviewItem, ProjectBaselineStatusPayload } from '../services/api';
 
 describe('displayModels', () => {
-  it('does not expose legacy governance snapshots in chat display messages', () => {
-    const message: Message = {
-      id: 'msg_1',
-      sender: 'logos',
-      content: 'review pending',
-      timestamp: 123,
-      type: 'revision_request',
-      governanceSnapshot: {
-        kind: 'review',
-        status: 'blocked',
-        scope: 'gdd',
-        reason: 'needs_revision',
-        convergence_status: 'not_converged',
-        blocking_issue_count: 2,
-        open_issue_count: 3,
-        validator_blocker_ids: ['a', 'b'],
-        source_of_truth_chain: [{ canonical_issue_key: 'ISSUE_1' }],
-      },
-    } as Message;
-
-    const display = toChatDisplayMessage(message);
-
-    expect(display).not.toHaveProperty('governanceSnapshot');
-    expect(display).not.toHaveProperty('diagnostic');
-  });
-
   it('maps pending review to review display model with only runtime-required fields', () => {
     const review: PendingUserReviewItem = {
       gate_id: 'gate_1',
-      type: 'GDD_APPROVAL_REVIEW',
+      type: 'DOCUMENT_APPROVAL_REVIEW',
       gate_kind: 'blocker_resolution',
       user_action_kind: 'resolve_blockers',
       task_id: 'task_1',
@@ -45,14 +18,14 @@ describe('displayModels', () => {
       open_blocker_ids: ['blocker_1'],
       ready_for_user_approval: true,
       review_status: {
-        workflow_id: 'gdd_v2',
+        workflow_id: 'review_flow',
         lane_id: 'internal_board_review',
         lane_status: 'awaiting_user',
         decision_status: 'awaiting_user',
         requires_user_action: true,
         user_action_kind: 'resolve_blockers',
         message: {
-          message_key: 'review.gdd.internal_board.awaiting_user',
+          message_key: 'review.awaiting_user',
           message_params: { unused: 'x' },
         },
         reason_codes: ['unused'],
@@ -77,14 +50,14 @@ describe('displayModels', () => {
     const display = toReviewDisplayModel(review);
 
     expect(display.review_status).toEqual({
-      workflow_id: 'gdd_v2',
+      workflow_id: 'review_flow',
       lane_id: 'internal_board_review',
       lane_status: 'awaiting_user',
       decision_status: 'awaiting_user',
       requires_user_action: true,
       user_action_kind: 'resolve_blockers',
       message: {
-        message_key: 'review.gdd.internal_board.awaiting_user',
+        message_key: 'review.awaiting_user',
       },
     });
     expect(display.gate_kind).toBe('blocker_resolution');
@@ -114,22 +87,13 @@ describe('displayModels', () => {
         workspace_ref: '/tmp/workspace/GDD.md',
       },
       review_status: {
-        workflow_id: 'gdd_v2',
+        workflow_id: 'review_flow',
         lane_id: 'internal_board_review',
         lane_status: 'awaiting_user',
         decision_status: 'awaiting_user',
         requires_user_action: true,
         user_action_kind: 'resolve_blockers',
-        message: { message_key: 'review.gdd.internal_board.awaiting_user' },
-      },
-      governance: {
-        blocked: true,
-        blocked_phase: 'gdd',
-        open_blocker_ids: ['issue_1'],
-        unrevalidated_blocker_ids: [],
-        unresolved_conflict_ids: ['conflict_1'],
-        promotion_status_by_phase: { gdd: 'blocked' },
-        latest_revalidation_by_phase: {},
+        message: { message_key: 'review.awaiting_user' },
       },
       build_report: {
         status: ' passed ',
@@ -161,13 +125,13 @@ describe('displayModels', () => {
       },
       context: {
         bundle_id: ' ctx_1 ',
-        phase: ' gdd ',
+        phase: ' review ',
         status: ' ready ',
         summary: ' context prepared ',
         blackboard_record_count: 1,
         memory_hits: 2,
         rag_sources: [' docs/SystemDesign/18.md '],
-        selected_skills: [' gdd_contract '],
+        selected_skills: [' review_contract '],
       },
       execution_evidence: [
         {
@@ -197,13 +161,13 @@ describe('displayModels', () => {
       },
       next_action: 'approve baseline',
       review_status: {
-        workflow_id: 'gdd_v2',
+        workflow_id: 'review_flow',
         lane_id: 'internal_board_review',
         lane_status: 'awaiting_user',
         decision_status: 'awaiting_user',
         requires_user_action: true,
         user_action_kind: 'resolve_blockers',
-        message: { message_key: 'review.gdd.internal_board.awaiting_user' },
+        message: { message_key: 'review.awaiting_user' },
       },
       build_report: {
         status: 'passed',
@@ -239,14 +203,14 @@ describe('displayModels', () => {
       },
       context: {
         bundle_id: 'ctx_1',
-        phase: 'gdd',
+        phase: 'review',
         status: 'ready',
         summary: 'context prepared',
         failure_reason: undefined,
         blackboard_record_count: 1,
         memory_hits: 2,
         rag_sources: ['docs/SystemDesign/18.md'],
-        selected_skills: ['gdd_contract'],
+        selected_skills: ['review_contract'],
       },
       execution_evidence: [
         {
@@ -271,33 +235,16 @@ describe('displayModels', () => {
         project_id: 'proj_1',
         phase: 'build',
         blocked: true,
-        blocked_reason: 'governance',
+        blocked_reason: 'runtime_blocked',
         approval_required: true,
         next_action: 'resolve blockers',
         review_status: {
-          workflow_id: 'gdd_v2',
+          workflow_id: 'review_flow',
           lane_id: 'internal_board_review',
           lane_status: 'awaiting_user',
           decision_status: 'awaiting_user',
           requires_user_action: true,
-          message: { message_key: 'review.gdd.internal_board.awaiting_user' },
-        },
-        governance: {
-          blocked: true,
-          blocked_phase: 'build',
-          open_blocker_ids: ['issue_1'],
-          unrevalidated_blocker_ids: ['issue_2'],
-          unresolved_conflict_ids: ['conflict_1'],
-          promotion_status_by_phase: { build: 'blocked' },
-          latest_revalidation_by_phase: {
-            build: {
-              revalidation_id: 'reval_1',
-              phase: 'build',
-              status: 'passed',
-              summary: 'build outputs revalidated',
-              created_at: '2026-04-21T10:11:12Z',
-            },
-          },
+          message: { message_key: 'review.awaiting_user' },
         },
         build_report: {
           status: 'passed',
@@ -348,10 +295,6 @@ describe('displayModels', () => {
       ready_for_promotion: false,
     });
     expect(display).not.toHaveProperty('governance');
-    expect(display?.diagnostic?.raw).toHaveProperty('operator_visibility.governance.latest_revalidation_by_phase.build', expect.objectContaining({
-      revalidation_id: 'reval_1',
-      status: 'passed',
-      summary: 'build outputs revalidated',
-    }));
+    expect(display?.diagnostic?.raw).toHaveProperty('operator_visibility.project_id', 'proj_1');
   });
 });

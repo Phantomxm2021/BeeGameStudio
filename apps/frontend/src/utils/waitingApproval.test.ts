@@ -10,11 +10,11 @@ describe('waitingApproval helpers', () => {
         phase: 'DESIGN_IN_PROGRESS',
         blocked: false,
         review_status: {
-          workflow_id: 'gdd_v2',
+          workflow_id: 'review_flow',
           lane_id: 'internal_board_review',
           lane_status: 'awaiting_approval',
           decision_status: 'awaiting_user',
-          message: { message_key: 'review.gdd.internal_board.awaiting_user' },
+          message: { message_key: 'review.awaiting_user' },
           requires_user_action: true,
           user_action_kind: 'approve',
         },
@@ -38,11 +38,11 @@ describe('waitingApproval helpers', () => {
           gate_id: 'gate_blockers',
           gate_kind: 'review_blocker_resolution',
           review_status: {
-            workflow_id: 'gdd_v2',
+            workflow_id: 'review_flow',
             lane_id: 'internal_board_review',
             lane_status: 'awaiting_approval',
             decision_status: 'awaiting_user',
-            message: { message_key: 'review.gdd.internal_board.awaiting_user' },
+            message: { message_key: 'review.awaiting_user' },
             requires_user_action: true,
             user_action_kind: 'approve',
           },
@@ -55,28 +55,6 @@ describe('waitingApproval helpers', () => {
     expect(state.isBlockingChat).toBe(true);
     expect(state.message).not.toContain('blocker');
     expect(state.placeholder).toBe('请先处理当前请求...');
-  });
-
-  it('does not block chat on legacy governance blocker metadata alone', () => {
-    const state = getWaitingApprovalState(
-      {
-        project_id: 'proj_1',
-        phase: 'paused',
-        blocked: false,
-        governance: {
-          blocked: true,
-          open_blocker_ids: ['legacy_blocker'],
-          unrevalidated_blocker_ids: [],
-          unresolved_conflict_ids: [],
-          promotion_status_by_phase: {},
-          latest_revalidation_by_phase: {},
-        },
-      },
-      [],
-    );
-
-    expect(state.kind).toBe('none');
-    expect(state.isBlockingChat).toBe(false);
   });
 
   it('returns default state when structured review status is absent', () => {

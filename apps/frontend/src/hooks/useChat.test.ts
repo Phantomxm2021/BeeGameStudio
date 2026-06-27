@@ -303,11 +303,11 @@ describe('useChat clarification gate handling', () => {
       phase: 'DESIGN_IN_PROGRESS',
       blocked: false,
       review_status: {
-        workflow_id: 'gdd_v2',
+        workflow_id: 'review_flow',
         lane_id: 'internal_board_review',
         lane_status: 'awaiting_approval',
         decision_status: 'awaiting_user',
-        message: { message_key: 'review.gdd.internal_board.awaiting_user' },
+        message: { message_key: 'review.awaiting_user' },
         requires_user_action: true,
         user_action_kind: 'approve',
       },
@@ -323,7 +323,7 @@ describe('useChat clarification gate handling', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sender: 'system',
-      content: 'Internal review completed and is waiting for user approval.',
+      content: 'Internal review passed and is waiting for user approval.',
       type: 'error',
     }));
   });
@@ -370,38 +370,6 @@ describe('useChat clarification gate handling', () => {
     expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
     expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
     expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
-  });
-
-  it('does not block sendMessage on legacy governance metadata alone', async () => {
-    projectStoreState.projectStatus = {
-      project_id: 'proj_1',
-      phase: 'build',
-      blocked: false,
-      governance: {
-        blocked: true,
-        blocked_phase: 'build',
-        open_blocker_ids: ['issue_1'],
-        unrevalidated_blocker_ids: ['issue_2'],
-        unresolved_conflict_ids: ['conflict_1'],
-      },
-    };
-    const onError = vi.fn();
-    vi.mocked(api.sendMessage).mockResolvedValue({
-      task_id: 'task_1',
-      command_id: 'task_1',
-      state: 'running',
-    } as any);
-    const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError }));
-
-    await act(async () => {
-      await result.current.sendMessage('please continue');
-    });
-
-    expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      content: 'please continue',
-      project_id: 'proj_1',
-    }));
-    expect(onError).not.toHaveBeenCalled();
   });
 
   it('removes the pending review immediately after a successful approve submission', async () => {

@@ -132,12 +132,12 @@ describe('normalizeProjectBaselineStatusPayload', () => {
                 workspace_path: '/tmp/workspace/specs/GDD.md',
             },
             review_status: {
-                workflow_id: 'gdd_v2',
+                workflow_id: 'review_flow',
                 lane_id: 'internal_board_review',
                 lane_status: 'awaiting_approval',
                 decision_status: 'awaiting_user',
                 message: {
-                    message_key: 'review.gdd.internal_board.awaiting_user',
+                    message_key: 'review.board.awaiting_user',
                 },
                 requires_user_action: true,
                 user_action_kind: 'approve',
@@ -152,7 +152,7 @@ describe('normalizeProjectBaselineStatusPayload', () => {
             workspace_path: '/tmp/workspace/specs/GDD.md',
         });
         expect(payload.review_status?.decision_status).toBe('awaiting_user');
-        expect(payload.review_status?.message?.message_key).toBe('review.gdd.internal_board.awaiting_user');
+        expect(payload.review_status?.message?.message_key).toBe('review.board.awaiting_user');
     });
 
     it('unwraps operator visibility payloads and preserves expanded runtime fields', () => {
@@ -161,33 +161,16 @@ describe('normalizeProjectBaselineStatusPayload', () => {
                 project_id: 'proj_1',
                 phase: 'build',
                 blocked: true,
-                blocked_reason: 'governance_blocked',
+                blocked_reason: 'runtime_blocked',
                 approval_required: true,
                 next_action: 'resolve blockers',
                 review_status: {
-                    workflow_id: 'gdd_v2',
+                    workflow_id: 'review_flow',
                     lane_id: 'internal_board_review',
                     lane_status: 'awaiting_user',
                     decision_status: 'awaiting_user',
                     requires_user_action: true,
                     user_action_kind: 'approve',
-                },
-                governance: {
-                    blocked: true,
-                    blocked_phase: 'build',
-                    open_blocker_ids: ['issue_1'],
-                    unrevalidated_blocker_ids: ['issue_2'],
-                    unresolved_conflict_ids: ['conflict_1'],
-                    promotion_status_by_phase: { gdd: 'promoted' },
-                    latest_revalidation_by_phase: {
-                        build: {
-                            revalidation_id: 'reval_1',
-                            phase: 'build',
-                            status: 'passed',
-                            summary: 'build outputs revalidated',
-                            created_at: '2026-04-21T10:11:12Z',
-                        },
-                    },
                 },
                 build_report: {
                     status: 'passed',
@@ -272,14 +255,7 @@ describe('normalizeProjectBaselineStatusPayload', () => {
             rag_sources: ['docs/SystemDesign/05.md'],
             selected_skills: ['synthet_build'],
         });
-        expect(payload.governance?.latest_revalidation_by_phase).toMatchObject({
-            build: {
-                revalidation_id: 'reval_1',
-                status: 'passed',
-                summary: 'build outputs revalidated',
-                created_at: '2026-04-21T10:11:12Z',
-            },
-        });
+        expect(payload).not.toHaveProperty('governance');
     });
 });
 
@@ -358,12 +334,12 @@ describe('normalizePendingUserReviewsResponse', () => {
                         threshold_percentage: 0.67,
                     },
                     review_status: {
-                        workflow_id: 'gdd_v2',
+                    workflow_id: 'review_flow',
                         lane_id: 'internal_board_review',
                         lane_status: 'awaiting_approval',
                         decision_status: 'awaiting_user',
                         message: {
-                            message_key: 'review.gdd.internal_board.awaiting_user',
+                            message_key: 'review.awaiting_user',
                         },
                         requires_user_action: true,
                         user_action_kind: 'approve',
@@ -393,6 +369,6 @@ describe('normalizePendingUserReviewsResponse', () => {
             threshold_percentage: 0.67,
         });
         expect(item.review_status?.decision_status).toBe('awaiting_user');
-        expect(item.review_status?.message?.message_key).toBe('review.gdd.internal_board.awaiting_user');
+        expect(item.review_status?.message?.message_key).toBe('review.awaiting_user');
     });
 });

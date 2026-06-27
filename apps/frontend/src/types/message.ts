@@ -24,37 +24,6 @@ export type MessageType =
 
 export type RenderHint = 'default' | 'document' | 'artifact_card' | 'structured_json' | 'csv_table';
 
-export interface GovernanceSnapshot {
-  kind?: string;
-  scope?: string;
-  status?: string;
-  reason?: string;
-  convergence_status?: string;
-  blocking_issue_count?: number;
-  open_issue_count?: number;
-  drift_new_blocker_count?: number;
-  drift_downgraded_issue_ids?: string[];
-  restricted_review_active?: boolean;
-  closure_downgraded_issue_count?: number;
-  closure_downgraded_issue_ids?: string[];
-  conflict_issue_ids?: string[];
-  canonical_issue_keys?: string[];
-  source_of_truth_chain?: Record<string, unknown>[];
-  closed_issue_reopened?: boolean;
-  review_countable_blocker_ids?: string[];
-  validator_blocker_ids?: string[];
-  validator_carried_blocker_ids?: string[];
-  validator_resolved_blocker_ids?: string[];
-  validator_lane_status?: string;
-  validator_snapshot_artifact_ids?: string[];
-  review_attempt_id?: string;
-  bundle_snapshot_id?: string;
-  bundle_artifact_ids?: string[];
-  historical_issue_record_ids?: string[];
-  ledger_snapshot_mismatch?: boolean;
-  counted_toward_budget?: boolean;
-}
-
 export interface ModuleReadinessView {
   status: 'ready' | 'degraded' | 'blocked';
   details: Record<string, unknown>;
@@ -312,9 +281,6 @@ export interface WebSocketMessage {
 
   /** Optional associated artifact ID */
   artifact_id?: string;
-
-  /** Optional governance metadata for blocked/recovery/runtime status cards */
-  governance_snapshot?: GovernanceSnapshot;
 
   /** Explicit render directive from backend */
   render_hint?: RenderHint;

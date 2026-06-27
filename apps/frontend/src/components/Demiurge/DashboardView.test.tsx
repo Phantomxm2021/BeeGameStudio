@@ -84,10 +84,10 @@ vi.mock('../../store/projectStore', () => ({
         projects: mockedProjects,
         pendingReviews: [
             {
-                gate_id: 'gate_human_gdd',
-                type: 'GDD_APPROVAL_REVIEW',
+                gate_id: 'gate_human_review',
+                type: 'DOCUMENT_APPROVAL_REVIEW',
                 review_status: {
-                    workflow_id: 'gdd_v2',
+                    workflow_id: 'review_flow',
                 },
             },
         ],

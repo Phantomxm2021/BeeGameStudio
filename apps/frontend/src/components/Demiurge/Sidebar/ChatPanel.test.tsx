@@ -21,7 +21,7 @@ const approvalReview: PendingUserReviewItem = {
     current_review_iteration: 2,
     ready_for_user_approval: true,
     review_status: {
-        workflow_id: 'gdd_v2',
+        workflow_id: 'review_flow',
         lane_id: 'internal_board_review',
         lane_status: 'awaiting_approval',
         decision_status: 'awaiting_user',
