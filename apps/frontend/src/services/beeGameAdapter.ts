@@ -11,6 +11,7 @@ import type {
 } from './api';
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
+import { authenticatedFetch } from './apiClient';
 
 type BeeGameSession = {
   id: string;
@@ -944,7 +945,7 @@ async function fetchBeeGameSessionIfAvailable(sessionId: string): Promise<BeeGam
 
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
   const params = new URLSearchParams({ workspacePath: binding.workspacePath });
-  return fetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
+  return authenticatedFetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
 }
 
 async function fetchBeeGamePreview(binding: ProjectSessionBinding): Promise<BeeGamePreviewPayload> {
@@ -2357,12 +2358,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path);
+  const response = await authenticatedFetch(path);
   return readResponse<T>(response);
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await authenticatedFetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -2371,7 +2372,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function postForm<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(path, {
+  const response = await authenticatedFetch(path, {
     method: 'POST',
     body,
   });
@@ -2379,7 +2380,7 @@ async function postForm<T>(path: string, body: FormData): Promise<T> {
 }
 
 async function patchJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await authenticatedFetch(path, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -2388,7 +2389,7 @@ async function patchJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function deleteJson<T = unknown>(path: string): Promise<T> {
-  const response = await fetch(path, { method: 'DELETE' });
+  const response = await authenticatedFetch(path, { method: 'DELETE' });
   return readResponse<T>(response);
 }
 

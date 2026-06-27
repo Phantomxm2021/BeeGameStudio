@@ -23,6 +23,35 @@ export const resolveAuthToken = (): string => {
   return String(localStorage.getItem('auth_token') ?? '').trim();
 };
 
+export const buildApiUrl = (path: string): string => {
+  if (!API_BASE_URL || /^[a-z][a-z\d+\-.]*:/i.test(path)) {
+    return path;
+  }
+  const normalizedBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
+};
+
+export const buildAuthHeaders = (headers?: HeadersInit): Headers => {
+  const nextHeaders = new Headers(headers);
+  const token = resolveAuthToken();
+  if (token && !nextHeaders.has('Authorization')) {
+    nextHeaders.set('Authorization', `Bearer ${token}`);
+  }
+  return nextHeaders;
+};
+
+export const authenticatedFetch = (
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> => {
+  const nextInput = typeof input === 'string' ? buildApiUrl(input) : input;
+  return fetch(nextInput, {
+    ...init,
+    headers: buildAuthHeaders(init.headers),
+  });
+};
+
 export const buildUnauthorizedMessage = (backendMessage?: string): string => {
   const normalizedBackendMessage = String(backendMessage ?? '').trim();
   if (normalizedBackendMessage) {
