@@ -308,7 +308,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-        expect(screen.getByText('继续你的项目、模型配置和生成进度。')).toBeInTheDocument();
+        expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
     });
@@ -461,6 +461,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '忘记密码？' })).toBeInTheDocument();
     });
 
     it('switches to registration and creates a Supabase account', async () => {
@@ -479,6 +480,8 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
+        expect(screen.queryByRole('button', { name: 'GitHub' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Google' })).not.toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'New Player' } });
         fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'new@example.com' } });
         fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
