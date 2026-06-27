@@ -8,6 +8,10 @@ import apiClient, {
 } from './apiClient';
 import { isReviewBlockerGateKind } from '../utils/gateSemantics';
 import { beeGameAdapter, isBeeGameAdapterEnabled } from './beeGameAdapter';
+import {
+  getCurrentUser as getBeeGameCurrentUser,
+  type BeeGameCurrentUser,
+} from './currentUserApi';
 
 export interface SendMessageResponse {
   command_id: string;
@@ -835,6 +839,8 @@ export const api = {
       : apiClient.delete(`/api/projects/${projectId}`),
 
   // ==================== 系统状态 API ====================
+
+  getCurrentUser: (): Promise<BeeGameCurrentUser> => getBeeGameCurrentUser(),
 
   /**
    * 获取系统状态信息

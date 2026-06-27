@@ -33,7 +33,7 @@ function App() {
     setToastCallbacks,
     clearActiveProject,
   } = useProjectStore();
-  const { loadStatus, loadAgents, loadActivities, isDark } = useSystemStore();
+  const { loadStatus, loadAgents, loadActivities, loadCurrentUser, isDark } = useSystemStore();
   const { loadHistory } = useChatStore();
   const { showError, showSuccess } = useToastContext();
 
@@ -64,6 +64,7 @@ function App() {
       try {
         await Promise.all([
           loadProjects(),
+          loadCurrentUser(),
           loadStatus(),
           loadAgents(),
           loadActivities(),
@@ -73,7 +74,7 @@ function App() {
       }
     };
     initializeApp();
-  }, [loadProjects, loadStatus, loadAgents, loadActivities]);
+  }, [loadProjects, loadCurrentUser, loadStatus, loadAgents, loadActivities]);
 
   // Load chat history when active project changes
   useEffect(() => {

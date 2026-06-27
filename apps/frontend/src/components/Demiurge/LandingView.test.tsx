@@ -32,6 +32,17 @@ vi.mock('../../store/projectStore', () => ({
     },
 }));
 
+vi.mock('../../store/systemStore', () => ({
+    useSystemStore: (selector?: (state: {
+        hasPermission: (permission: string) => boolean;
+    }) => unknown) => {
+        const state = {
+            hasPermission: (permission: string) => permission === 'project.delete',
+        };
+        return selector ? selector(state) : state;
+    },
+}));
+
 vi.mock('../../services/api', () => ({
     api: {
         analyzeIdeaIntake,

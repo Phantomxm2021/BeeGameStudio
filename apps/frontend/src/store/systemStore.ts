@@ -14,6 +14,10 @@ import { create } from 'zustand';
 import type { Agent, SystemStatus, Activity, TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
+import type {
+  BeeGameCurrentUser,
+  BeeGamePermission,
+} from '../services/currentUserApi';
 
 export interface PhaseInfo {
   current_phase: number;
@@ -74,6 +78,9 @@ interface SystemState {
   /** Task-specific token usage tracking to prevent double counting */
   taskUsage: Record<string, TokenUsage>;
 
+  /** Current BeeGame user and permission snapshot */
+  currentUser: BeeGameCurrentUser | null;
+
   /** Whether a synchronization (resync) is in progress */
   isSyncing: boolean;
 
@@ -90,6 +97,16 @@ interface SystemState {
    * Load system status from the backend
    */
   loadStatus: () => Promise<void>;
+
+  /**
+   * Load current BeeGame user and role permissions.
+   */
+  loadCurrentUser: () => Promise<void>;
+
+  /**
+   * Check whether the current user has a named permission.
+   */
+  hasPermission: (permission: BeeGamePermission) => boolean;
 
   /**
    * Load all agents and their current status from the backend
@@ -170,7 +187,22 @@ export const useSystemStore = create<SystemState>()(
 
       tasks: [],
       taskUsage: {},
+      currentUser: null,
       lastP2PRoute: null,
+
+      loadCurrentUser: async () => {
+        try {
+          const currentUser = await api.getCurrentUser();
+          set({ currentUser });
+        } catch (error) {
+          console.error('Failed to load current user:', error);
+          set({ currentUser: null });
+        }
+      },
+
+      hasPermission: (permission: BeeGamePermission) => (
+        Boolean(get().currentUser?.permissions.includes(permission))
+      ),
 
       loadStatus: async () => {
         try {

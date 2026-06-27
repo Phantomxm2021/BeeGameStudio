@@ -5,6 +5,7 @@ import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
 import { getBeeGameText } from '../BeeGameI18n';
 import { useProjectStore } from '../../../store/projectStore';
+import { useSystemStore } from '../../../store/systemStore';
 
 interface ProjectHistoryModalProps {
     isOpen: boolean;
@@ -25,6 +26,7 @@ const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
     const { projects, deleteProject } = useProjectStore();
+    const canDeleteProject = useSystemStore(state => state.hasPermission('project.delete'));
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -169,17 +171,19 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                     style={{ left: menuPosition.left, top: menuPosition.top }}
                                     className="fixed z-[90] min-w-[150px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
                                 >
-                                    <button
-                                        type="button"
-                                        onClick={(event) => handleDelete(event, activeProject.id)}
-                                        className={`flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
-                                            ? 'bg-rose-500 text-white'
-                                            : 'text-zinc-600 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-300 dark:hover:bg-rose-950/30 dark:hover:text-rose-300'
-                                            }`}
-                                    >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                        {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
-                                    </button>
+                                    {canDeleteProject ? (
+                                        <button
+                                            type="button"
+                                            onClick={(event) => handleDelete(event, activeProject.id)}
+                                            className={`flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
+                                                ? 'bg-rose-500 text-white'
+                                                : 'text-zinc-600 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-300 dark:hover:bg-rose-950/30 dark:hover:text-rose-300'
+                                                }`}
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
+                                        </button>
+                                    ) : null}
                                 </motion.div>
                             </AnimatePresence>,
                             document.body,

@@ -5,6 +5,7 @@ vi.mock('../services/api', () => ({
     getStatus: vi.fn(),
     getAgents: vi.fn(),
     getActivity: vi.fn(),
+    getCurrentUser: vi.fn(),
     getWorkflowPhases: vi.fn(),
     getTasks: vi.fn(),
     getProjectTokenUsage: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('zustand/middleware', () => ({
 }));
 
 import { useSystemStore } from './systemStore';
+import { api } from '../services/api';
 
 describe('systemStore token usage', () => {
   beforeEach(() => {
@@ -24,7 +26,9 @@ describe('systemStore token usage', () => {
     useSystemStore.setState({
       tokenUsage: {},
       taskUsage: {},
+      currentUser: null,
     });
+    vi.clearAllMocks();
   });
 
   it('keeps project and task token usage monotonic for cumulative snapshots', () => {
@@ -44,5 +48,39 @@ describe('systemStore token usage', () => {
       completion_tokens: 50,
       total_tokens: 170,
     });
+  });
+
+  it('loads the current user and checks named permissions', async () => {
+    vi.mocked(api.getCurrentUser).mockResolvedValue({
+      id: 'developer-user',
+      role: 'developer',
+      permissions: ['project.read', 'agent.send_message'],
+    });
+
+    await useSystemStore.getState().loadCurrentUser();
+
+    expect(useSystemStore.getState().currentUser).toEqual({
+      id: 'developer-user',
+      role: 'developer',
+      permissions: ['project.read', 'agent.send_message'],
+    });
+    expect(useSystemStore.getState().hasPermission('agent.send_message')).toBe(true);
+    expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
+  });
+
+  it('clears current user when loading permissions fails', async () => {
+    useSystemStore.setState({
+      currentUser: {
+        id: 'old-user',
+        role: 'owner',
+        permissions: ['project.delete'],
+      },
+    });
+    vi.mocked(api.getCurrentUser).mockRejectedValue(new Error('offline'));
+
+    await useSystemStore.getState().loadCurrentUser();
+
+    expect(useSystemStore.getState().currentUser).toBeNull();
+    expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
   });
 });
