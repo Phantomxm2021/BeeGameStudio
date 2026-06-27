@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
@@ -49,6 +49,11 @@ interface SettingsMenuProps {
     lang: Language;
     onClose: () => void;
     onSetLang: (lang: Language) => void;
+    canManageWorkspace?: boolean;
+    canManageSecrets?: boolean;
+    canManageRuntimeSettings?: boolean;
+    canManageMcp?: boolean;
+    canManageModelConfig?: boolean;
 }
 
 type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model';
@@ -78,7 +83,17 @@ type McpServerForm = {
     autoStart: boolean;
 };
 
-export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuProps) {
+export function SettingsMenu({
+    isOpen,
+    lang,
+    onClose,
+    onSetLang,
+    canManageWorkspace = true,
+    canManageSecrets = true,
+    canManageRuntimeSettings = true,
+    canManageMcp = true,
+    canManageModelConfig = true,
+}: SettingsMenuProps) {
     const t = translations[lang];
     const text = getBeeGameText(lang);
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
@@ -125,82 +140,92 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
     useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
-        void listModelConfigs()
-            .then((configs) => {
-                if (cancelled) return;
-                setExistingConfigs(configs);
-                const defaultConfig = configs.find((config) => config.isDefault) || configs[0];
-                if (!defaultConfig) return;
-                setSelectedModelConfigId(defaultConfig.id);
-                setName(defaultConfig.name);
-                setProvider(defaultConfig.provider);
-                setBaseUrl(defaultConfig.baseUrl || '');
-                setFastModel(defaultConfig.models.fast || '');
-                setBalancedModel(defaultConfig.models.balanced || '');
-                setStrongModel(defaultConfig.models.strong || '');
-                setApiKeyPreview(defaultConfig.apiKeyPreview || '');
-                setIsDefault(defaultConfig.isDefault);
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setExistingConfigs([]);
-                    setSelectedModelConfigId('');
-                    setApiKeyPreview('');
-                }
-            });
-        void getBeeGameWorkspaceSettings()
-            .then((settings) => {
-                if (cancelled) return;
-                setWorkspacePath(settings.workspacePath);
-                setWorkspaceStatus('');
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
-                }
-            });
+        if (canManageModelConfig) {
+            void listModelConfigs()
+                .then((configs) => {
+                    if (cancelled) return;
+                    setExistingConfigs(configs);
+                    const defaultConfig = configs.find((config) => config.isDefault) || configs[0];
+                    if (!defaultConfig) return;
+                    setSelectedModelConfigId(defaultConfig.id);
+                    setName(defaultConfig.name);
+                    setProvider(defaultConfig.provider);
+                    setBaseUrl(defaultConfig.baseUrl || '');
+                    setFastModel(defaultConfig.models.fast || '');
+                    setBalancedModel(defaultConfig.models.balanced || '');
+                    setStrongModel(defaultConfig.models.strong || '');
+                    setApiKeyPreview(defaultConfig.apiKeyPreview || '');
+                    setIsDefault(defaultConfig.isDefault);
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        setExistingConfigs([]);
+                        setSelectedModelConfigId('');
+                        setApiKeyPreview('');
+                    }
+                });
+        }
+        if (canManageWorkspace) {
+            void getBeeGameWorkspaceSettings()
+                .then((settings) => {
+                    if (cancelled) return;
+                    setWorkspacePath(settings.workspacePath);
+                    setWorkspaceStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
+                    }
+                });
+        }
         setSubagentsEnabled(getBeeGameSubagentsEnabled());
-        void getWebToolsConfig()
-            .then((config) => {
-                if (cancelled) return;
-                setWebSearchAdapter(config.webSearchAdapter || 'tavily');
-                setBraveApiKeyPreview(config.braveApiKeyPreview || '');
-                setExaApiKeyPreview(config.exaApiKeyPreview || '');
-                setBraveApiKey('');
-                setExaApiKey('');
-                setWebToolsStatus('');
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
-                }
-            });
-        void getRuntimeSettings()
-            .then((config) => {
-                if (cancelled) return;
-                setRuntimeSettings(normalizeRuntimeSettings(config));
-                setRuntimeSettingsStatus('');
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings unavailable');
-                }
-            });
-        void listMcpServers()
-            .then((servers) => {
-                if (cancelled) return;
-                setMcpServers(servers);
-                setMcpForm(createEmptyMcpForm());
-                setMcpFormAnchor(null);
-                setIsMcpActionMenuOpen(false);
-                setDiscoveredMcpServers([]);
-                setMcpStatus('');
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setMcpStatus(error instanceof Error ? error.message : 'MCP settings unavailable');
-                }
-            });
+        if (canManageSecrets) {
+            void getWebToolsConfig()
+                .then((config) => {
+                    if (cancelled) return;
+                    setWebSearchAdapter(config.webSearchAdapter || 'tavily');
+                    setBraveApiKeyPreview(config.braveApiKeyPreview || '');
+                    setExaApiKeyPreview(config.exaApiKeyPreview || '');
+                    setBraveApiKey('');
+                    setExaApiKey('');
+                    setWebToolsStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
+                    }
+                });
+        }
+        if (canManageRuntimeSettings) {
+            void getRuntimeSettings()
+                .then((config) => {
+                    if (cancelled) return;
+                    setRuntimeSettings(normalizeRuntimeSettings(config));
+                    setRuntimeSettingsStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings unavailable');
+                    }
+                });
+        }
+        if (canManageMcp) {
+            void listMcpServers()
+                .then((servers) => {
+                    if (cancelled) return;
+                    setMcpServers(servers);
+                    setMcpForm(createEmptyMcpForm());
+                    setMcpFormAnchor(null);
+                    setIsMcpActionMenuOpen(false);
+                    setDiscoveredMcpServers([]);
+                    setMcpStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setMcpStatus(error instanceof Error ? error.message : 'MCP settings unavailable');
+                    }
+                });
+        }
         return () => {
             cancelled = true;
             if (mcpAutoSaveTimerRef.current !== null) {
@@ -208,7 +233,16 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                 mcpAutoSaveTimerRef.current = null;
             }
         };
-    }, [isOpen]);
+    }, [
+        canManageMcp,
+        canManageModelConfig,
+        canManageRuntimeSettings,
+        canManageSecrets,
+        canManageWorkspace,
+        isOpen,
+        text.webToolsReadFailed,
+        text.workspaceReadFailed,
+    ]);
 
     const handleSaveModelConfig = async () => {
         setStatus('');
@@ -480,6 +514,20 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
     const savedPrefix = `${text.savedPrefix}${lang.startsWith('zh') ? '：' : ': '}`;
     const capabilityCopy = getRuntimeCapabilityCopy(lang);
     const mcpCopy = getMcpSettingsCopy(lang);
+    const tabs = useMemo(() => [
+        { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
+        ...(canManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
+        ...(canManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
+        ...(canManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
+    ], [
+        canManageMcp,
+        canManageModelConfig,
+        canManageRuntimeSettings,
+        capabilityCopy.title,
+        mcpCopy.title,
+        text.settingsGeneral,
+        text.settingsModel,
+    ]);
     const activeTabLabel = activeTab === 'general'
         ? text.settingsGeneral
         : activeTab === 'runtime'
@@ -488,16 +536,18 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                 ? mcpCopy.title
                 : text.settingsModel;
     const isSavingCurrentTab = activeTab === 'general'
-        ? isSavingWorkspace || isSavingWebTools
+        ? (canManageWorkspace && isSavingWorkspace) || (canManageSecrets && isSavingWebTools)
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
         : activeTab === 'mcp'
                 ? false
             : isSaving;
+    const hasGeneralSaveAction = canManageWorkspace || canManageSecrets;
     const isSaveDisabled = activeTab === 'general'
-        ? isSavingCurrentTab ||
-            !workspacePath.trim() ||
-            (!!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
+        ? !hasGeneralSaveAction ||
+            isSavingCurrentTab ||
+            (canManageWorkspace && !workspacePath.trim()) ||
+            (canManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
         : activeTab === 'runtime'
             ? isSavingCurrentTab
         : activeTab === 'mcp'
@@ -516,8 +566,8 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             return;
         }
         if (activeTab === 'mcp') return;
-        const workspaceSaved = handleSaveWorkspace();
-        const webToolsSaved = await handleSaveWebTools();
+        const workspaceSaved = canManageWorkspace ? handleSaveWorkspace() : true;
+        const webToolsSaved = canManageSecrets ? await handleSaveWebTools() : true;
         if (workspaceSaved && webToolsSaved) onClose();
     };
 
@@ -527,6 +577,12 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
             [key]: !current[key],
         }));
     };
+    useEffect(() => {
+        if (!tabs.some((tab) => tab.id === activeTab)) {
+            setActiveTab('general');
+        }
+    }, [activeTab, tabs]);
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -563,12 +619,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                     </button>
                                 </div>
                                 <div className="space-y-1.5" role="tablist" aria-label={t.systemSettings}>
-                                    {[
-                                        { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
-                                        { id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu },
-                                        { id: 'mcp' as const, label: mcpCopy.title, icon: Network },
-                                        { id: 'model' as const, label: text.settingsModel, icon: KeyRound },
-                                    ].map((tab) => {
+                                    {tabs.map((tab) => {
                                         const Icon = tab.icon;
                                         const selected = activeTab === tab.id;
                                         return (
@@ -597,7 +648,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                             </div>
                                             <h2 className="mt-3 text-xl font-medium text-zinc-100">{activeTabLabel}</h2>
                                         </div>
-                                        {activeTab === 'mcp' ? (
+                                        {activeTab === 'mcp' && canManageMcp ? (
                                             <div className="relative mt-2">
                                                 <button
                                                     type="button"
@@ -708,6 +759,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                             </select>
                                         </label>
 
+                                        {canManageWorkspace ? (
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <FolderOpen className="h-4 w-4 text-zinc-400" />
@@ -738,7 +790,9 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                 ) : null}
                                             </div>
                                         </div>
+                                        ) : null}
 
+                                        {canManageSecrets ? (
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100 sm:mt-2.5">
                                                 <Search className="h-4 w-4 text-zinc-400" />
@@ -780,10 +834,11 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                                 ) : null}
                                             </div>
                                         </div>
+                                        ) : null}
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'runtime' ? (
+                                {activeTab === 'runtime' && canManageRuntimeSettings ? (
                                     <div className="divide-y divide-zinc-700/60">
                                         <CapabilityToggleRow
                                             item={{
@@ -810,7 +865,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'model' ? (
+                                {activeTab === 'model' && canManageModelConfig ? (
                                     <>
                                         <div className="divide-y divide-zinc-700/60">
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
@@ -893,7 +948,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                         </div>
                                     </>
                                 ) : null}
-                                {activeTab === 'mcp' ? (
+                                {activeTab === 'mcp' && canManageMcp ? (
                                     <McpSettingsPanel
                                         copy={mcpCopy}
                                         servers={mcpServers}
@@ -931,7 +986,7 @@ export function SettingsMenu({ isOpen, lang, onClose, onSetLang }: SettingsMenuP
                                     />
                                 ) : null}
                                 </div>
-                                {activeTab !== 'mcp' ? (
+                                {activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-zinc-700/70 px-6 py-4">
                                     <button
                                         type="button"

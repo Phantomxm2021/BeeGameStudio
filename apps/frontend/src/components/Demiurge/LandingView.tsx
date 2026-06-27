@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { translations, type Language } from './AgentsConfig';
 import { useProjectStore } from '../../store/projectStore';
+import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
 import { LandingActions } from './Landing/LandingActions';
@@ -84,6 +85,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 : '启动构建';
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
+    const hasPermission = useSystemStore(state => state.hasPermission);
 
     const runIntake = async (idea: string) => {
         setIntakeError('');
@@ -278,6 +280,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
+                    canManageWorkspace={hasPermission('workspace.manage')}
+                    canManageSecrets={hasPermission('secrets.manage')}
+                    canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
+                    canManageMcp={hasPermission('mcp.manage')}
+                    canManageModelConfig={hasPermission('model_config.manage')}
                 />
 
                 <ProjectHistoryModal

@@ -176,6 +176,36 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
+    it('hides privileged settings sections when the user lacks management permissions', () => {
+        listModelConfigs.mockClear();
+        getBeeGameWorkspaceSettings.mockClear();
+        getWebToolsConfig.mockClear();
+        getRuntimeSettings.mockClear();
+        listMcpServers.mockClear();
+
+        renderSettings({
+            canManageWorkspace: false,
+            canManageSecrets: false,
+            canManageRuntimeSettings: false,
+            canManageMcp: false,
+            canManageModelConfig: false,
+        });
+
+        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+        expect(listModelConfigs).not.toHaveBeenCalled();
+        expect(getBeeGameWorkspaceSettings).not.toHaveBeenCalled();
+        expect(getWebToolsConfig).not.toHaveBeenCalled();
+        expect(getRuntimeSettings).not.toHaveBeenCalled();
+        expect(listMcpServers).not.toHaveBeenCalled();
+    });
+
     it('keeps the settings chrome and controls visually consistent', async () => {
         const onClose = vi.fn();
         const { container } = renderSettings({ onClose });

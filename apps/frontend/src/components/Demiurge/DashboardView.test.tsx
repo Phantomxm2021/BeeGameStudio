@@ -61,22 +61,25 @@ let mockedProjects: Array<{ id: string; name: string; root_path?: string; create
 let mockedHasPermission = vi.fn(() => true);
 
 vi.mock('../../store/systemStore', () => ({
-    useSystemStore: () => ({
-        status,
-        tokenUsage: mockedTokenUsage,
-        phaseInfo: mockedPhaseInfo,
-        loadPhases,
-        loadTokenUsage,
-        agents: [],
-        loadAgents,
-        tasks: [],
-        loadTasks,
-        lastP2PRoute: null,
-        isSyncing: false,
-        isDark: true,
-        toggleTheme,
-        hasPermission: mockedHasPermission,
-    }),
+    useSystemStore: (selector?: (state: Record<string, any>) => unknown) => {
+        const state = {
+            status,
+            tokenUsage: mockedTokenUsage,
+            phaseInfo: mockedPhaseInfo,
+            loadPhases,
+            loadTokenUsage,
+            agents: [],
+            loadAgents,
+            tasks: [],
+            loadTasks,
+            lastP2PRoute: null,
+            isSyncing: false,
+            isDark: true,
+            toggleTheme,
+            hasPermission: mockedHasPermission,
+        };
+        return selector ? selector(state) : state;
+    },
 }));
 
 vi.mock('../../store/projectStore', () => ({

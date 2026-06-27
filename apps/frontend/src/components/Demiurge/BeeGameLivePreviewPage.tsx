@@ -4,6 +4,7 @@ import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import type { BuildReportPayload } from '../../services/api';
+import { useSystemStore } from '../../store/systemStore';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
@@ -333,6 +334,7 @@ export function BeeGameLivePreviewPage({
     const [isStoppingPreview, setStoppingPreview] = useState(false);
     const labels = LABELS[lang] || LABELS.en;
     const uiText = getBeeGameText(lang);
+    const hasPermission = useSystemStore(state => state.hasPermission);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
@@ -584,6 +586,11 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
+                canManageWorkspace={hasPermission('workspace.manage')}
+                canManageSecrets={hasPermission('secrets.manage')}
+                canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
+                canManageMcp={hasPermission('mcp.manage')}
+                canManageModelConfig={hasPermission('model_config.manage')}
             />
         </main>
     );
