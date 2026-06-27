@@ -16,7 +16,10 @@ import { normalizeChatHistory } from './utils/chatHistory';
 import { buildBootstrapPayload } from './utils/bootstrapIdea';
 import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
-import { consumeSupabaseRedirectSession } from './services/supabaseAuthApi';
+import {
+  consumeSupabaseRedirectSession,
+  hydrateSupabaseSessionUser,
+} from './services/supabaseAuthApi';
 
 // New Demiurge Views
 import { LandingView } from './components/Demiurge/LandingView';
@@ -60,7 +63,10 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        consumeSupabaseRedirectSession();
+        const consumedRedirect = consumeSupabaseRedirectSession();
+        if (consumedRedirect) {
+          await hydrateSupabaseSessionUser();
+        }
         const currentUser = await loadCurrentUser();
         if (!currentUser) return;
         await Promise.all([

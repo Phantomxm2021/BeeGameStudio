@@ -182,6 +182,36 @@ export function consumeSupabaseRedirectSession(): boolean {
   return true;
 }
 
+export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSession | null> {
+  const session = getStoredSupabaseSession();
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!session || !supabaseUrl || !anonKey) return session;
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/user`, {
+    headers: {
+      apikey: anonKey,
+      authorization: `Bearer ${session.accessToken}`,
+    },
+  });
+  if (!response.ok) return session;
+  const value = await response.json() as unknown;
+  if (!isRecord(value)) return session;
+  const id = typeof value.id === 'string' && value.id.trim()
+    ? value.id.trim()
+    : session.user.id;
+  const hydrated: BeeGameSupabaseSession = {
+    ...session,
+    user: {
+      id,
+      email: typeof value.email === 'string' ? value.email : session.user.email,
+      displayName: readUserDisplayName(value) ?? session.user.displayName,
+      avatarUrl: readUserAvatarUrl(value) ?? session.user.avatarUrl,
+    },
+  };
+  saveSupabaseSession(hydrated);
+  return hydrated;
+}
+
 export function clearSupabaseSession(): void {
   localStorage.removeItem(SESSION_STORAGE_KEY);
 }
@@ -232,10 +262,25 @@ function toSupabaseSession(value: unknown): BeeGameSupabaseSession {
     user: {
       id,
       email: typeof user.email === 'string' ? user.email : undefined,
-      displayName: readUserMetadataString(user, 'display_name') ?? readUserMetadataString(user, 'name'),
-      avatarUrl: readUserMetadataString(user, 'avatar_url') ?? readUserMetadataString(user, 'picture'),
+      displayName: readUserDisplayName(user),
+      avatarUrl: readUserAvatarUrl(user),
     },
   };
+}
+
+function readUserDisplayName(user: Record<string, unknown>): string | undefined {
+  return readUserMetadataString(user, 'display_name') ??
+    readUserMetadataString(user, 'full_name') ??
+    readUserMetadataString(user, 'name') ??
+    readUserMetadataString(user, 'user_name') ??
+    readUserMetadataString(user, 'preferred_username') ??
+    readUserMetadataString(user, 'nickname');
+}
+
+function readUserAvatarUrl(user: Record<string, unknown>): string | undefined {
+  return readUserMetadataString(user, 'avatar_url') ??
+    readUserMetadataString(user, 'picture') ??
+    readUserMetadataString(user, 'photo_url');
 }
 
 function readUserMetadataString(

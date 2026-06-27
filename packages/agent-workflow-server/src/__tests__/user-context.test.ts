@@ -27,6 +27,10 @@ describe('BeeGame user context', () => {
         return Response.json({
           id: 'user_1',
           app_metadata: { beegame_role: 'developer' },
+          user_metadata: {
+            user_name: 'octo-maker',
+            avatar_url: 'https://avatars.example.com/octo.png',
+          },
         })
       },
     })
@@ -37,7 +41,12 @@ describe('BeeGame user context', () => {
       }),
     )
 
-    expect(user).toEqual({ id: 'user_1', role: 'developer' })
+    expect(user).toEqual({
+      id: 'user_1',
+      role: 'developer',
+      displayName: 'octo-maker',
+      avatarUrl: 'https://avatars.example.com/octo.png',
+    })
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toBe('https://project.supabase.co/auth/v1/user')
     expect(calls[0].headers.get('apikey')).toBe('service-role-key')

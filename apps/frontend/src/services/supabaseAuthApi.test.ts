@@ -4,6 +4,7 @@ import {
   clearSupabaseSession,
   consumeSupabaseRedirectSession,
   getSupabaseAccessToken,
+  hydrateSupabaseSessionUser,
   isSupabaseAuthConfigured,
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
@@ -131,6 +132,48 @@ describe('supabaseAuthApi', () => {
     expect(consumeSupabaseRedirectSession()).toBe(true);
     expect(getSupabaseAccessToken()).toBe('oauth-token');
     expect(replaceState).toHaveBeenCalledWith({}, document.title, '/');
+  });
+
+  it('hydrates OAuth redirect sessions with provider nickname and avatar metadata', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const replaceState = vi.fn();
+    const fetchMock = vi.fn(async () => Response.json({
+      id: 'oauth-user',
+      email: 'oauth@example.com',
+      user_metadata: {
+        user_name: 'octo-maker',
+        avatar_url: 'https://avatars.example.com/octo.png',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('history', { replaceState });
+    vi.stubGlobal('location', {
+      href: 'http://localhost:5173/#access_token=oauth-token&refresh_token=oauth-refresh&expires_in=3600&token_type=bearer',
+      origin: 'http://localhost:5173',
+      pathname: '/',
+      search: '',
+      hash: '#access_token=oauth-token&refresh_token=oauth-refresh&expires_in=3600&token_type=bearer',
+    });
+
+    expect(consumeSupabaseRedirectSession()).toBe(true);
+    const session = await hydrateSupabaseSessionUser();
+
+    expect(session?.user).toMatchObject({
+      id: 'oauth-user',
+      email: 'oauth@example.com',
+      displayName: 'octo-maker',
+      avatarUrl: 'https://avatars.example.com/octo.png',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project.supabase.co/auth/v1/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          authorization: 'Bearer oauth-token',
+        }),
+      }),
+    );
   });
 
   it('clears expired sessions instead of returning stale access tokens', () => {
