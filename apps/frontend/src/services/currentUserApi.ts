@@ -25,6 +25,9 @@ export type BeeGamePermission =
 export type BeeGameCurrentUser = {
   id: string;
   role: BeeGameRole;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
   permissions: BeeGamePermission[];
 };
 

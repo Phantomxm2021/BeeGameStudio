@@ -9,9 +9,12 @@ interface LandingActionsProps {
     isSettingsOpen: boolean;
     isHistoryOpen: boolean;
     currentUserId?: string;
+    currentUserDisplayName?: string;
+    currentUserAvatarUrl?: string;
     creditBalance?: number;
     onToggleSettings: () => void;
     onToggleHistory: () => void;
+    onOpenProfile: () => void;
     onOpenLogin: () => void;
     onSignOut?: () => void;
 }
@@ -22,9 +25,12 @@ export function LandingActions({
     isSettingsOpen,
     isHistoryOpen,
     currentUserId,
+    currentUserDisplayName,
+    currentUserAvatarUrl,
     creditBalance,
     onToggleSettings,
     onToggleHistory,
+    onOpenProfile,
     onOpenLogin,
     onSignOut,
 }: LandingActionsProps) {
@@ -34,7 +40,9 @@ export function LandingActions({
     const userMenuLabel = lang === 'en' ? 'User menu' : '用户菜单';
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
-    const userInitial = getUserInitial(currentUserId);
+    const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
+    const userLabel = currentUserDisplayName || currentUserId;
+    const userInitial = getUserInitial(userLabel);
 
     useEffect(() => {
         if (!isUserMenuOpen) return undefined;
@@ -65,6 +73,11 @@ export function LandingActions({
         onToggleHistory();
     };
 
+    const handleOpenProfile = () => {
+        setIsUserMenuOpen(false);
+        onOpenProfile();
+    };
+
     const handleSignOut = () => {
         setIsUserMenuOpen(false);
         onSignOut?.();
@@ -90,7 +103,13 @@ export function LandingActions({
             >
                 {currentUserId ? (
                     <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-black text-white">
-                        {userInitial}
+                        {currentUserAvatarUrl ? (
+                            <img
+                                src={currentUserAvatarUrl}
+                                alt=""
+                                className="h-8 w-8 rounded-full object-cover"
+                            />
+                        ) : userInitial}
                     </span>
                 ) : (
                     <UserCircle className="h-6 w-6" />
@@ -106,12 +125,21 @@ export function LandingActions({
                     className="input-surface absolute right-0 top-14 w-64 overflow-hidden rounded-[28px] border border-white/20 p-2 text-zinc-100 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
                 >
                     <div className="px-3 py-3">
-                        <div className="truncate text-sm font-semibold text-white">{currentUserId}</div>
+                        <div className="truncate text-sm font-semibold text-white">{userLabel}</div>
                         {typeof creditBalance === 'number' ? (
                             <div className="mt-1 text-xs font-semibold text-emerald-200">{creditBalance} credits</div>
                         ) : null}
                     </div>
                     <div className="my-1 h-px bg-white/10" />
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleOpenProfile}
+                        className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                    >
+                        <UserCircle className="h-4 w-4" />
+                        <span>{profileLabel}</span>
+                    </button>
                     <button
                         type="button"
                         role="menuitem"

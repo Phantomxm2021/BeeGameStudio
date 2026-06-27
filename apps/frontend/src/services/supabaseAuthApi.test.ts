@@ -76,6 +76,7 @@ describe('supabaseAuthApi', () => {
     const session = await signUpWithSupabasePassword({
       email: 'new@example.com',
       password: 'secret-password',
+      displayName: 'New Player',
     });
 
     expect(session?.accessToken).toBe('signup-access-token');
@@ -91,6 +92,9 @@ describe('supabaseAuthApi', () => {
         body: JSON.stringify({
           email: 'new@example.com',
           password: 'secret-password',
+          data: {
+            display_name: 'New Player',
+          },
         }),
       }),
     );

@@ -23,6 +23,9 @@ export type BeeGamePermission =
 export type BeeGameUserContext = {
   id: string
   role: BeeGameRole
+  email?: string
+  displayName?: string
+  avatarUrl?: string
 }
 
 export type BeeGameUserResolver = (
@@ -136,6 +139,25 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
     : {}
   return {
     id,
+    ...(stringField(value.email) ? { email: stringField(value.email) } : {}),
+    ...(stringField(userMetadata.display_name) ??
+      stringField(userMetadata.full_name) ??
+      stringField(userMetadata.name)
+      ? {
+          displayName:
+            stringField(userMetadata.display_name) ??
+            stringField(userMetadata.full_name) ??
+            stringField(userMetadata.name),
+        }
+      : {}),
+    ...(stringField(userMetadata.avatar_url) ??
+      stringField(userMetadata.picture)
+      ? {
+          avatarUrl:
+            stringField(userMetadata.avatar_url) ??
+            stringField(userMetadata.picture),
+        }
+      : {}),
     role: normalizeBeeGameRole(
       stringField(appMetadata.beegame_role) ??
         stringField(appMetadata.role) ??

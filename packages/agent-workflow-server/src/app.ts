@@ -235,6 +235,9 @@ export function createAgentWorkflowApp(
     return c.json({
       id: user.id,
       role: user.role,
+      ...(user.email ? { email: user.email } : {}),
+      ...(user.displayName ? { displayName: user.displayName } : {}),
+      ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
       permissions: listBeeGamePermissions(user),
     })
   })

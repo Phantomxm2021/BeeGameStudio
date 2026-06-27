@@ -18,21 +18,28 @@ const { getCreditBalance } = vi.hoisted(() => ({
 const {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
+    sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
+    updateSupabaseAvatarUrl,
 } = vi.hoisted(() => ({
     clearSupabaseSession: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
+    sendSupabasePasswordReset: vi.fn(),
     signInWithSupabaseOAuth: vi.fn(),
     signInWithSupabasePassword: vi.fn(),
     signUpWithSupabasePassword: vi.fn(),
+    updateSupabaseAvatarUrl: vi.fn(),
 }));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
 const mockLoadCurrentUser = vi.fn();
 let mockCurrentUser: {
     id: string;
+    email?: string;
+    displayName?: string;
+    avatarUrl?: string;
     role: 'owner' | 'developer' | 'reviewer' | 'viewer';
     permissions: string[];
 } | null = {
@@ -118,9 +125,11 @@ vi.mock('../../services/creditsApi', () => ({
 vi.mock('../../services/supabaseAuthApi', () => ({
     clearSupabaseSession,
     isSupabaseAuthConfigured,
+    sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
+    updateSupabaseAvatarUrl,
 }));
 
 vi.mock('./DemiurgeLogo', () => ({
@@ -248,6 +257,7 @@ beforeEach(() => {
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
     clearSupabaseSession.mockReset();
+    sendSupabasePasswordReset.mockReset();
     signInWithSupabaseOAuth.mockReset();
     signInWithSupabasePassword.mockReset();
     signInWithSupabasePassword.mockResolvedValue({
@@ -263,6 +273,18 @@ beforeEach(() => {
         expiresAt: Date.now() + 3600_000,
         user: { id: 'user-2', email: 'new@example.com' },
     });
+    updateSupabaseAvatarUrl.mockReset();
+    updateSupabaseAvatarUrl.mockResolvedValue({
+        accessToken: 'updated-access-token',
+        refreshToken: 'updated-refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        user: {
+            id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            avatarUrl: 'https://cdn.example.com/alice.png',
+        },
+    });
     terminalRenderState.renderCount = 0;
 });
 
@@ -277,7 +299,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-        expect(screen.getByText('登录后即可继续生成方案，当前输入不会丢失。')).toBeInTheDocument();
+        expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
     });
@@ -316,6 +338,8 @@ describe('LandingView bootstrap submission', () => {
     it('opens account actions from a circular signed-in user avatar', async () => {
         mockCurrentUser = {
             id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
@@ -327,10 +351,37 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
 
         expect(screen.getByText('A')).toBeInTheDocument();
-        expect(await screen.findByText('alice')).toBeInTheDocument();
+        expect(await screen.findByText('Alice')).toBeInTheDocument();
         expect(screen.getByText('300 credits')).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
+    });
+
+    it('opens the profile page and updates the avatar URL', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
+
+        expect(await screen.findByRole('dialog', { name: '个人主页' })).toBeInTheDocument();
+        expect(screen.getByDisplayValue('Alice')).toHaveAttribute('readonly');
+        expect(screen.getByDisplayValue('alice@example.com')).toHaveAttribute('readonly');
+
+        fireEvent.change(screen.getByLabelText('头像 URL'), {
+            target: { value: 'https://cdn.example.com/alice.png' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+        await waitFor(() => expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith('https://cdn.example.com/alice.png'));
+        expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
 
     it('closes the account menu when clicking outside it', async () => {
@@ -376,8 +427,8 @@ describe('LandingView bootstrap submission', () => {
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
         expect(screen.getByRole('dialog', { name: '登录 / 注册 BeeGame' })).toHaveAttribute('data-surface', 'frosted-glass');
         expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '使用 Google 登录' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
     });
 
     it('switches to registration and creates a Supabase account', async () => {
@@ -396,13 +447,16 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
+        fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'New Player' } });
         fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'new@example.com' } });
         fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+        fireEvent.click(screen.getByLabelText('同意用户协议'));
         fireEvent.click(screen.getByRole('button', { name: '注册并继续' }));
 
         await waitFor(() => expect(signUpWithSupabasePassword).toHaveBeenCalledWith({
             email: 'new@example.com',
             password: 'secret-password',
+            displayName: 'New Player',
         }));
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
@@ -413,7 +467,7 @@ describe('LandingView bootstrap submission', () => {
         renderLanding();
 
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-        fireEvent.click(await screen.findByRole('button', { name: '使用 GitHub 登录' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'GitHub' }));
 
         expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
     });

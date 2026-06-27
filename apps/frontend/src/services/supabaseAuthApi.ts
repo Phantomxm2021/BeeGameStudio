@@ -1,6 +1,8 @@
 export type BeeGameSupabaseUser = {
   id: string;
   email?: string;
+  displayName?: string;
+  avatarUrl?: string;
 };
 
 export type BeeGameSupabaseSession = {
@@ -13,6 +15,10 @@ export type BeeGameSupabaseSession = {
 export type SupabasePasswordSignInInput = {
   email: string;
   password: string;
+};
+
+export type SupabasePasswordSignUpInput = SupabasePasswordSignInInput & {
+  displayName: string;
 };
 
 export type SupabaseOAuthProvider = 'github' | 'google';
@@ -64,7 +70,7 @@ export async function signInWithSupabasePassword(
 }
 
 export async function signUpWithSupabasePassword(
-  input: SupabasePasswordSignInInput,
+  input: SupabasePasswordSignUpInput,
 ): Promise<BeeGameSupabaseSession | null> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
@@ -80,6 +86,9 @@ export async function signUpWithSupabasePassword(
     body: JSON.stringify({
       email: input.email.trim(),
       password: input.password,
+      data: {
+        display_name: input.displayName.trim(),
+      },
     }),
   });
   if (!response.ok) {
@@ -90,6 +99,56 @@ export async function signUpWithSupabasePassword(
   const session = toSupabaseSession(value);
   saveSupabaseSession(session);
   return session;
+}
+
+export async function sendSupabasePasswordReset(email: string): Promise<void> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/recover`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: email.trim(),
+      redirect_to: window.location.origin,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await readSupabaseError(response));
+  }
+}
+
+export async function updateSupabaseAvatarUrl(avatarUrl: string): Promise<void> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  const accessToken = getSupabaseAccessToken();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  if (!accessToken) {
+    throw new Error('Please sign in again before updating your profile.');
+  }
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      apikey: anonKey,
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        avatar_url: avatarUrl.trim(),
+      },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await readSupabaseError(response));
+  }
 }
 
 export function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): void {
@@ -149,6 +208,8 @@ function getStoredSupabaseSession(): BeeGameSupabaseSession | null {
       user: {
         id,
         email: typeof user.email === 'string' ? user.email : undefined,
+        displayName: typeof user.displayName === 'string' ? user.displayName : undefined,
+        avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : undefined,
       },
     };
   } catch {
@@ -171,8 +232,19 @@ function toSupabaseSession(value: unknown): BeeGameSupabaseSession {
     user: {
       id,
       email: typeof user.email === 'string' ? user.email : undefined,
+      displayName: readUserMetadataString(user, 'display_name') ?? readUserMetadataString(user, 'name'),
+      avatarUrl: readUserMetadataString(user, 'avatar_url') ?? readUserMetadataString(user, 'picture'),
     },
   };
+}
+
+function readUserMetadataString(
+  user: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const metadata = isRecord(user.user_metadata) ? user.user_metadata : {};
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 async function readSupabaseError(response: Response): Promise<string> {

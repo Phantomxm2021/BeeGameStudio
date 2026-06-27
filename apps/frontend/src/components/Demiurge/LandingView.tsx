@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
 import { translations, type Language } from './AgentsConfig';
 import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
@@ -22,9 +22,11 @@ import { getCreditBalance, type BeeGameCreditBalance } from '../../services/cred
 import {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
+    sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
+    updateSupabaseAvatarUrl,
 } from '../../services/supabaseAuthApi';
 
 type IntakePhase =
@@ -85,9 +87,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
+    const [registerDisplayName, setRegisterDisplayName] = useState('');
+    const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
     const [loginError, setLoginError] = useState('');
+    const [loginNotice, setLoginNotice] = useState('');
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [avatarDraft, setAvatarDraft] = useState('');
+    const [profileError, setProfileError] = useState('');
+    const [profileNotice, setProfileNotice] = useState('');
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const t = translations[lang];
@@ -132,6 +142,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOpenLogin = () => {
         setPendingIdeaAfterLogin(projectName.trim());
         setLoginError('');
+        setLoginNotice('');
         setAuthMode('login');
         setIsLoginPromptOpen(true);
     };
@@ -218,6 +229,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         event.preventDefault();
         if (isSigningIn) return;
         setLoginError('');
+        setLoginNotice('');
         if (!isSupabaseAuthConfigured()) {
             setLoginError('Supabase Auth 尚未配置。');
             return;
@@ -227,16 +239,32 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setLoginError('请输入邮箱和密码。');
             return;
         }
+        if (authMode === 'register') {
+            if (!registerDisplayName.trim()) {
+                setLoginError('请设置昵称。');
+                return;
+            }
+            if (!hasAcceptedTerms) {
+                setLoginError('请先阅读并同意用户协议。');
+                return;
+            }
+        }
         setIsSigningIn(true);
         try {
             if (authMode === 'register') {
-                await signUpWithSupabasePassword({ email, password: loginPassword });
+                await signUpWithSupabasePassword({
+                    email,
+                    password: loginPassword,
+                    displayName: registerDisplayName,
+                });
             } else {
                 await signInWithSupabasePassword({ email, password: loginPassword });
             }
             await loadCurrentUser();
             setIsLoginPromptOpen(false);
             setLoginPassword('');
+            setRegisterDisplayName('');
+            setHasAcceptedTerms(false);
             const nextIdea = pendingIdeaAfterLogin || projectName.trim();
             setPendingIdeaAfterLogin('');
             if (nextIdea) {
@@ -250,6 +278,48 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setLoginError(error instanceof Error ? error.message : '登录失败，请重试。');
         } finally {
             setIsSigningIn(false);
+        }
+    };
+
+    const handleSendPasswordReset = async () => {
+        setLoginError('');
+        setLoginNotice('');
+        const email = loginEmail.trim();
+        if (!email) {
+            setLoginError('请输入邮箱，我们会发送重置密码邮件。');
+            return;
+        }
+        setIsSigningIn(true);
+        try {
+            await sendSupabasePasswordReset(email);
+            setLoginNotice('重置密码邮件已发送，请检查邮箱。');
+        } catch (error) {
+            setLoginError(error instanceof Error ? error.message : '重置密码邮件发送失败。');
+        } finally {
+            setIsSigningIn(false);
+        }
+    };
+
+    const handleOpenProfile = () => {
+        setProfileError('');
+        setProfileNotice('');
+        setAvatarDraft(currentUser?.avatarUrl || '');
+        setIsProfileOpen(true);
+    };
+
+    const handleSaveAvatar = async () => {
+        if (isSavingProfile) return;
+        setProfileError('');
+        setProfileNotice('');
+        setIsSavingProfile(true);
+        try {
+            await updateSupabaseAvatarUrl(avatarDraft);
+            await loadCurrentUser();
+            setProfileNotice('头像已更新。');
+        } catch (error) {
+            setProfileError(error instanceof Error ? error.message : '头像更新失败。');
+        } finally {
+            setIsSavingProfile(false);
         }
     };
 
@@ -388,8 +458,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     isSettingsOpen={isSettingsOpen}
                     isHistoryOpen={isHistoryOpen}
                     currentUserId={currentUser?.id}
+                    currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+                    currentUserAvatarUrl={currentUser?.avatarUrl}
                     creditBalance={creditBalance?.balanceCredits}
                     onOpenLogin={handleOpenLogin}
+                    onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
@@ -420,6 +493,103 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onSelectProject={handleSelectProject}
                 />
 
+                {isProfileOpen && currentUser ? (
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="个人主页"
+                        data-surface="frosted-glass"
+                        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+                    >
+                        <div className="input-surface w-full max-w-md rounded-[28px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-semibold text-white">个人主页</h2>
+                                    <p className="mt-3 text-sm leading-6 text-zinc-300">
+                                        管理你的 BeeGame 账号资料和登录状态。
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label="关闭个人主页"
+                                    onClick={() => setIsProfileOpen(false)}
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-6 flex items-center gap-4">
+                                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-xl font-black text-white">
+                                    {currentUser.avatarUrl ? (
+                                        <img src={currentUser.avatarUrl} alt="" className="h-full w-full object-cover" />
+                                    ) : (
+                                        getDisplayInitial(currentUser.displayName || currentUser.email || currentUser.id)
+                                    )}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="truncate text-lg font-semibold text-white">{currentUser.displayName || '未设置昵称'}</div>
+                                    <div className="truncate text-sm text-zinc-400">{currentUser.email || '邮箱未公开'}</div>
+                                </div>
+                            </div>
+
+                            <label className="mt-6 block text-sm font-semibold text-zinc-200">
+                                头像 URL
+                                <div className="mt-2 flex gap-2">
+                                    <input
+                                        aria-label="头像 URL"
+                                        type="url"
+                                        value={avatarDraft}
+                                        onChange={(event) => setAvatarDraft(event.target.value)}
+                                        placeholder="https://..."
+                                        className="h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveAvatar}
+                                        disabled={isSavingProfile}
+                                        className="inline-flex h-11 items-center gap-2 rounded-2xl bg-white px-4 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <Camera className="h-4 w-4" />
+                                        保存
+                                    </button>
+                                </div>
+                            </label>
+
+                            <div className="mt-4 grid gap-3">
+                                <label className="block text-sm font-semibold text-zinc-200">
+                                    昵称
+                                    <input aria-label="昵称" readOnly value={currentUser.displayName || ''} className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 text-zinc-300 outline-none" />
+                                </label>
+                                <label className="block text-sm font-semibold text-zinc-200">
+                                    邮箱
+                                    <input aria-label="个人邮箱" readOnly value={currentUser.email || ''} className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 text-zinc-300 outline-none" />
+                                </label>
+                            </div>
+
+                            {profileError ? <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">{profileError}</div> : null}
+                            {profileNotice ? <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">{profileNotice}</div> : null}
+
+                            <div className="mt-6 flex justify-between gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => void handleSignOut()}
+                                    className="rounded-full border border-red-300/25 px-5 py-2.5 text-sm font-bold text-red-100 transition hover:bg-red-500/10"
+                                >
+                                    注销账户
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsProfileOpen(false)}
+                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200"
+                                >
+                                    完成
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+
                 {isLoginPromptOpen ? (
                     <div
                         role="dialog"
@@ -434,9 +604,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <h2 className="text-2xl font-semibold text-white">登录 / 注册 BeeGame</h2>
+                                    <h2 className="text-2xl font-semibold text-white">
+                                        {authMode === 'register' ? '创建 BeeGame 账号' : '欢迎回来'}
+                                    </h2>
                                     <p className="mt-3 text-sm leading-6 text-zinc-300">
-                                        登录后即可继续生成方案，当前输入不会丢失。
+                                        {authMode === 'register'
+                                            ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
+                                            : '登录后继续你的项目、模型设置和生成进度。'}
                                     </p>
                                 </div>
                                 <button
@@ -445,6 +619,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     onClick={() => {
                                         setIsLoginPromptOpen(false);
                                         setLoginError('');
+                                        setLoginNotice('');
                                     }}
                                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
                                 >
@@ -454,41 +629,42 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             <div className="mt-6 grid grid-cols-2 gap-2 rounded-full border border-white/10 bg-black/10 p-1">
                                 <button
                                     type="button"
-                                    onClick={() => setAuthMode('login')}
+                                    onClick={() => {
+                                        setAuthMode('login');
+                                        setLoginError('');
+                                        setLoginNotice('');
+                                    }}
                                     className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
                                 >
                                     登录
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setAuthMode('register')}
+                                    onClick={() => {
+                                        setAuthMode('register');
+                                        setLoginError('');
+                                        setLoginNotice('');
+                                    }}
                                     className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
                                 >
                                     注册账号
                                 </button>
                             </div>
-                            <div className="mt-5 grid gap-2 sm:grid-cols-2">
-                                <button
-                                    type="button"
-                                    onClick={() => handleOAuthSignIn('github')}
-                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
-                                >
-                                    使用 GitHub 登录
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleOAuthSignIn('google')}
-                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
-                                >
-                                    使用 Google 登录
-                                </button>
-                            </div>
-                            <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                <span className="h-px flex-1 bg-white/10" />
-                                <span>Email</span>
-                                <span className="h-px flex-1 bg-white/10" />
-                            </div>
                             <div className="mt-6 space-y-3">
+                                {authMode === 'register' ? (
+                                    <label className="block text-sm font-semibold text-zinc-200">
+                                        昵称
+                                        <input
+                                            aria-label="注册昵称"
+                                            type="text"
+                                            value={registerDisplayName}
+                                            onChange={(event) => setRegisterDisplayName(event.target.value)}
+                                            className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                            autoComplete="nickname"
+                                            placeholder="例如：Bee Maker"
+                                        />
+                                    </label>
+                                ) : null}
                                 <label className="block text-sm font-semibold text-zinc-200">
                                     邮箱
                                     <input
@@ -496,8 +672,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="email"
                                         value={loginEmail}
                                         onChange={(event) => setLoginEmail(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition focus:border-amber-300/70"
+                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
                                         autoComplete="email"
+                                        placeholder="you@example.com"
                                     />
                                 </label>
                                 <label className="block text-sm font-semibold text-zinc-200">
@@ -507,16 +684,66 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="password"
                                         value={loginPassword}
                                         onChange={(event) => setLoginPassword(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition focus:border-amber-300/70"
-                                        autoComplete="current-password"
+                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                        autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                                        placeholder={authMode === 'register' ? '至少 6 位密码' : '输入密码'}
                                     />
                                 </label>
+                                {authMode === 'login' ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleSendPasswordReset()}
+                                        disabled={isSigningIn}
+                                        className="text-sm font-semibold text-amber-200 transition hover:text-amber-100 disabled:opacity-60"
+                                    >
+                                        忘记密码？发送重置邮件
+                                    </button>
+                                ) : (
+                                    <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300">
+                                        <input
+                                            aria-label="同意用户协议"
+                                            type="checkbox"
+                                            checked={hasAcceptedTerms}
+                                            onChange={(event) => setHasAcceptedTerms(event.target.checked)}
+                                            className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30"
+                                        />
+                                        <span>
+                                            我已阅读并同意 BeeGame 用户协议与隐私条款，理解生成内容会消耗 credit。
+                                        </span>
+                                    </label>
+                                )}
                             </div>
                             {loginError ? (
                                 <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">
                                     {loginError}
                                 </div>
                             ) : null}
+                            {loginNotice ? (
+                                <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">
+                                    {loginNotice}
+                                </div>
+                            ) : null}
+                            <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                <span className="h-px flex-1 bg-white/10" />
+                                <span>或使用第三方账号</span>
+                                <span className="h-px flex-1 bg-white/10" />
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                <button
+                                    type="button"
+                                    onClick={() => handleOAuthSignIn('github')}
+                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
+                                >
+                                    GitHub
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleOAuthSignIn('google')}
+                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
+                                >
+                                    Google
+                                </button>
+                            </div>
                             <div className="mt-6 flex items-center justify-end gap-3">
                                 <button
                                     type="submit"
@@ -772,3 +999,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </AnimatePresence>
     );
 }
+
+const getDisplayInitial = (value: string): string => {
+    const first = Array.from(value.trim() || 'U')[0] || 'U';
+    return /^[a-z]$/i.test(first) ? first.toUpperCase() : first;
+};
