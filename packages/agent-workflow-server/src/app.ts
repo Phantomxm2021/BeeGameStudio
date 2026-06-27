@@ -484,14 +484,20 @@ export function createAgentWorkflowApp(
     '/api/beegame-sessions',
     beeGameSessions,
     beeGamePreviews,
-    options.defaultWorkspacePath,
+    {
+      defaultWorkspacePath: options.defaultWorkspacePath,
+      getCurrentUser,
+    },
   )
   registerBeeGameSessionRoutes(
     app,
     '/api/console/sessions',
     beeGameSessions,
     beeGamePreviews,
-    options.defaultWorkspacePath,
+    {
+      defaultWorkspacePath: options.defaultWorkspacePath,
+      getCurrentUser,
+    },
   )
 
   return app
@@ -879,11 +885,24 @@ function registerBeeGameSessionRoutes(
   basePath: string,
   beeGameSessions: BeeGameSessionManager,
   beeGamePreviews: BeeGamePreviewManager,
-  defaultWorkspacePath?: string,
+  options: {
+    defaultWorkspacePath?: string
+    getCurrentUser: () => BeeGameUserContext
+  },
 ): void {
-  app.get(basePath, c => c.json(beeGameSessions.list()))
+  const defaultWorkspacePath = options.defaultWorkspacePath
+  const check = (permission: BeeGamePermission) =>
+    requirePermission(options.getCurrentUser(), permission)
+
+  app.get(basePath, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    return c.json(beeGameSessions.list())
+  })
 
   app.post(basePath, async c => {
+    const forbidden = check('agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['workspacePath'])
     if (error) return c.json({ error }, 400)
@@ -913,6 +932,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id`, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     const session = beeGameSessions.get(c.req.param('id'))
     return session
       ? c.json(session)
@@ -920,6 +941,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/events`, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       return c.json(beeGameSessions.events(c.req.param('id'), after))
@@ -929,6 +952,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/runtime-snapshot`, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(
         beeGameSessions.runtimeSnapshot(
@@ -942,6 +967,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/transcript`, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
     } catch (err) {
@@ -959,6 +986,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.patch(`${basePath}/:id/model`, async c => {
+    const forbidden = check('agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['modelConfigId'])
     if (error) return c.json({ error }, 400)
@@ -979,6 +1008,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/artifacts`, async c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
     try {
@@ -995,6 +1026,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/assets`, async c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
@@ -1005,6 +1038,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
+    const forbidden = check('assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     const form = await c.req.raw.formData()
@@ -1026,6 +1061,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/package`, async c => {
+    const forbidden = check('project.export')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
         c.req.param('id'),
@@ -1050,6 +1087,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/preview`, c => {
+    const forbidden = check('project.read')
+    if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
@@ -1060,6 +1099,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/preview`, async c => {
+    const forbidden = check('preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
       ? body.workspacePath
@@ -1076,6 +1117,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/preview/restart`, async c => {
+    const forbidden = check('preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
       ? body.workspacePath
@@ -1092,6 +1135,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id/preview`, async c => {
+    const forbidden = check('preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
     const workspacePath = c.req.query('workspacePath')
     try {
       return c.json(beeGamePreviews.stop(c.req.param('id'), workspacePath))
@@ -1101,6 +1146,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/input`, async c => {
+    const forbidden = check('agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['text'])
     if (error) return c.json({ error }, 400)
@@ -1123,6 +1170,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/permissions/:toolUseID`, async c => {
+    const forbidden = check('agent.approve_tool')
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const decision = body.decision
     if (decision !== 'allow' && decision !== 'deny') {
@@ -1148,6 +1197,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/stop`, c => {
+    const forbidden = check('agent.cancel')
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return c.json(beeGameSessions.stop(c.req.param('id')))
     } catch (err) {
@@ -1156,6 +1207,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id`, async c => {
+    const forbidden = check('project.delete')
+    if (forbidden) return c.json(forbidden, 403)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
     const workspacePathQuery = c.req.query('workspacePath')
     try {

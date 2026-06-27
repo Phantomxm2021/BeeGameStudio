@@ -568,6 +568,85 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('applies BeeGame session route permissions by role', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner()
+    try {
+      const viewerApp = createAgentWorkflowApp({
+        sessionRunner: fake.runner,
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'viewer-user',
+          role: 'viewer',
+        },
+      })
+      const developerApp = createAgentWorkflowApp({
+        sessionRunner: fake.runner,
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'developer-user',
+          role: 'developer',
+        },
+      })
+
+      const viewerCreateRes = await viewerApp.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      expect(viewerCreateRes.status).toBe(403)
+      expect(await viewerCreateRes.json()).toEqual({ error: 'Forbidden' })
+
+      const developerCreateRes = await developerApp.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      expect(developerCreateRes.status).toBe(200)
+      const session = await developerCreateRes.json()
+
+      const viewerInputRes = await viewerApp.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue task' }),
+        },
+      )
+      expect(viewerInputRes.status).toBe(403)
+      expect(await viewerInputRes.json()).toEqual({ error: 'Forbidden' })
+
+      const developerInputRes = await developerApp.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue task' }),
+        },
+      )
+      expect(developerInputRes.status).toBe(200)
+
+      const viewerPreviewRes = await viewerApp.request(
+        `/api/beegame-sessions/${session.id}/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      expect(viewerPreviewRes.status).toBe(403)
+
+      const developerDeleteRes = await developerApp.request(
+        `/api/beegame-sessions/${session.id}`,
+        { method: 'DELETE' },
+      )
+      expect(developerDeleteRes.status).toBe(403)
+      expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rejects relative workspace paths before creating a runner', async () => {
     const fake = createFakeRunner()
     const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
