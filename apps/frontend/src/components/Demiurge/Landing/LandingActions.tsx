@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { History, LogOut, Settings, UserCircle } from 'lucide-react';
+import { History, LogOut, Settings, User, UserCircle } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
 
 interface LandingActionsProps {
@@ -112,7 +112,7 @@ export function LandingActions({
                         ) : userInitial}
                     </span>
                 ) : (
-                    <UserCircle className="h-6 w-6" />
+                    <User className="h-6 w-6" />
                 )}
             </motion.button>
 
