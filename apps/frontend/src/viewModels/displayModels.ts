@@ -6,7 +6,6 @@ import type {
   PendingUserReviewItem,
   ProjectBaselineStatusPayload,
   ExecutionEvidencePayload,
-  GovernanceVisibilityPayload,
   ReviewBindingRef,
   ReviewStatusPayload,
   VerificationSummaryPayload,
@@ -155,7 +154,6 @@ export interface ProjectRuntimeDisplayModel {
   baseline?: ReviewDisplayBindingRef | null;
   next_action?: string;
   review_status?: ReviewStatusDisplayPayload | null;
-  governance?: GovernanceVisibilityPayload;
   context?: ContextVisibilityPayload;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportDisplayModel;
@@ -413,23 +411,6 @@ export const toProjectRuntimeDisplayModel = (
     baseline: normalizeBindingDisplay(normalizedPayload.baseline),
     next_action: trimString(normalizedPayload.next_action) || undefined,
     review_status: normalizeReviewStatusDisplay(normalizedPayload.review_status),
-    governance: normalizedPayload.governance
-      ? {
-          blocked: Boolean(normalizedPayload.governance.blocked),
-          blocked_phase: trimString(normalizedPayload.governance.blocked_phase) || undefined,
-          open_blocker_ids: Array.isArray(normalizedPayload.governance.open_blocker_ids)
-            ? normalizedPayload.governance.open_blocker_ids.map((item) => trimString(item)).filter(Boolean)
-            : [],
-          unrevalidated_blocker_ids: Array.isArray(normalizedPayload.governance.unrevalidated_blocker_ids)
-            ? normalizedPayload.governance.unrevalidated_blocker_ids.map((item) => trimString(item)).filter(Boolean)
-            : [],
-          unresolved_conflict_ids: Array.isArray(normalizedPayload.governance.unresolved_conflict_ids)
-            ? normalizedPayload.governance.unresolved_conflict_ids.map((item) => trimString(item)).filter(Boolean)
-            : [],
-          promotion_status_by_phase: normalizedPayload.governance.promotion_status_by_phase ?? {},
-          latest_revalidation_by_phase: normalizedPayload.governance.latest_revalidation_by_phase ?? {},
-        }
-      : undefined,
     context: normalizedPayload.context
       ? {
           bundle_id: trimString(normalizedPayload.context.bundle_id) || undefined,

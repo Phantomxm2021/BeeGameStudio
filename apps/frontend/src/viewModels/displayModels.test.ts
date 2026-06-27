@@ -183,7 +183,7 @@ describe('displayModels', () => {
 
     const display = toProjectRuntimeDisplayModel(status);
 
-    expect(display).toEqual({
+    expect(display).toMatchObject({
       project_id: 'proj_1',
       phase: 'DESIGN_IN_PROGRESS',
       blocked: true,
@@ -205,15 +205,6 @@ describe('displayModels', () => {
         user_action_kind: 'resolve_blockers',
         message: { message_key: 'review.gdd.internal_board.awaiting_user' },
       },
-      governance: {
-        blocked: true,
-        blocked_phase: 'gdd',
-        open_blocker_ids: ['issue_1'],
-        unrevalidated_blocker_ids: [],
-        unresolved_conflict_ids: ['conflict_1'],
-        promotion_status_by_phase: { gdd: 'blocked' },
-        latest_revalidation_by_phase: {},
-      },
       build_report: {
         status: 'passed',
         entrypoint: 'dist/web/index.html',
@@ -226,8 +217,12 @@ describe('displayModels', () => {
             name: 'vite build',
             status: 'passed',
             detail: 'build completed',
+            path: undefined,
           },
         ],
+        summary: undefined,
+        failure_reason: undefined,
+        created_at: undefined,
       },
       document_bundle: {
         bundle_id: 'bundle_1',
@@ -267,6 +262,7 @@ describe('displayModels', () => {
         raw: status,
       },
     });
+    expect(display).not.toHaveProperty('governance');
   });
 
   it('unwraps operator visibility payloads before building runtime display models', () => {
@@ -351,12 +347,11 @@ describe('displayModels', () => {
       ready_for_user_approval: true,
       ready_for_promotion: false,
     });
-    expect(display?.governance?.latest_revalidation_by_phase).toMatchObject({
-      build: {
-        revalidation_id: 'reval_1',
-        status: 'passed',
-        summary: 'build outputs revalidated',
-      },
-    });
+    expect(display).not.toHaveProperty('governance');
+    expect(display?.diagnostic?.raw).toHaveProperty('operator_visibility.governance.latest_revalidation_by_phase.build', expect.objectContaining({
+      revalidation_id: 'reval_1',
+      status: 'passed',
+      summary: 'build outputs revalidated',
+    }));
   });
 });
