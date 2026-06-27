@@ -231,9 +231,9 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
 
         expect(loadPendingReviews).toHaveBeenCalledWith('proj_1');
-        expect(loadPhases).toHaveBeenCalledWith('proj_1');
-        expect(loadTasks).toHaveBeenCalledWith('proj_1');
-        expect(loadAgents).toHaveBeenCalled();
+        expect(loadPhases).not.toHaveBeenCalled();
+        expect(loadTasks).not.toHaveBeenCalled();
+        expect(loadAgents).not.toHaveBeenCalled();
     });
 
     it('does not expose internal reset controls through the production sidebar', async () => {
@@ -262,7 +262,7 @@ describe('DashboardView runtime loading', () => {
         expect(capturedRightSidebarProps?.canExportProject).toBe(false);
     });
 
-    it('passes global workflow progress instead of the old first-phase twenty percent boost', async () => {
+    it('keeps BeeGame progress detached from legacy workflow phase telemetry', async () => {
         mockedPhaseInfo = {
             current_phase: 1,
             phase_name: 'brief',
@@ -275,11 +275,12 @@ describe('DashboardView runtime loading', () => {
 
         expect(capturedRightSidebarProps?.progress).toBeLessThan(20);
         await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
-        expect(screen.getByText('构建方案')).toBeInTheDocument();
+        expect(screen.getByText('需要处理')).toBeInTheDocument();
+        expect(screen.queryByText('构建方案')).not.toBeInTheDocument();
         expect(screen.queryByText('构建方案 · 0%')).not.toBeInTheDocument();
     });
 
-    it('passes BeeGame pipeline phase labels to the live preview header', async () => {
+    it('passes BeeGame turn state labels to the live preview header', async () => {
         mockedPhaseInfo = {
             current_phase: 3,
             phase_name: 'implementation',
@@ -301,15 +302,20 @@ describe('DashboardView runtime loading', () => {
         expect(screen.queryByTestId('top-bar')).not.toBeInTheDocument();
         expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
         await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
-        expect(screen.getByText('实现构建')).toBeInTheDocument();
+        expect(screen.getByText('构建中')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
         expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
     });
 
-    it('passes localized BeeGame phase labels to the live preview header', async () => {
+    it('localizes BeeGame turn state labels in the live preview header', async () => {
         mockedPhaseInfo = {
             current_phase: 3,
             phase_name: 'implementation',
             history: [{ phase: 3, name: 'implementation', timestamp: 3_000 }],
+        };
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'running',
         };
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
@@ -317,7 +323,8 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
         await userEvent.hover(screen.getByTestId('beegame-project-trigger'));
-        expect(screen.getByText('实现构建')).toBeInTheDocument();
+        expect(screen.getByText('构建中')).toBeInTheDocument();
+        expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
         expect(screen.queryByText('实现构建 · 0%')).not.toBeInTheDocument();
     });
 

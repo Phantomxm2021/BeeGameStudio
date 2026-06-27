@@ -175,6 +175,94 @@ const fallbackPhaseLabel = (phaseName: string): string => {
         .join(' ');
 };
 
+const BEEGAME_TURN_LABELS: Record<Language, Record<string, string>> = {
+    zh: {
+        running: '构建中',
+        waiting_approval: '等待确认',
+        paused: '需要处理',
+        offline: '离线',
+        finished: '待复核',
+        idle: '就绪',
+    },
+    'zh-TW': {
+        running: '建構中',
+        waiting_approval: '等待確認',
+        paused: '需要處理',
+        offline: '離線',
+        finished: '待複核',
+        idle: '就緒',
+    },
+    en: {
+        running: 'Working',
+        waiting_approval: 'Waiting for approval',
+        paused: 'Needs attention',
+        offline: 'Offline',
+        finished: 'Ready for review',
+        idle: 'Ready',
+    },
+    ja: {
+        running: '作業中',
+        waiting_approval: '確認待ち',
+        paused: '対応が必要',
+        offline: 'オフライン',
+        finished: 'レビュー待ち',
+        idle: '準備完了',
+    },
+    ko: {
+        running: '작업 중',
+        waiting_approval: '확인 대기',
+        paused: '확인 필요',
+        offline: '오프라인',
+        finished: '검토 대기',
+        idle: '준비됨',
+    },
+    fr: {
+        running: 'En cours',
+        waiting_approval: 'En attente',
+        paused: 'Action requise',
+        offline: 'Hors ligne',
+        finished: 'A relire',
+        idle: 'Pret',
+    },
+    de: {
+        running: 'In Arbeit',
+        waiting_approval: 'Wartet',
+        paused: 'Aktion nötig',
+        offline: 'Offline',
+        finished: 'Zur Prüfung',
+        idle: 'Bereit',
+    },
+    es: {
+        running: 'Trabajando',
+        waiting_approval: 'Esperando',
+        paused: 'Requiere atención',
+        offline: 'Sin conexión',
+        finished: 'Listo para revisar',
+        idle: 'Listo',
+    },
+    it: {
+        running: 'In corso',
+        waiting_approval: 'In attesa',
+        paused: 'Richiede attenzione',
+        offline: 'Offline',
+        finished: 'Da rivedere',
+        idle: 'Pronto',
+    },
+    pt: {
+        running: 'Trabalhando',
+        waiting_approval: 'Aguardando',
+        paused: 'Requer atenção',
+        offline: 'Offline',
+        finished: 'Pronto para revisar',
+        idle: 'Pronto',
+    },
+};
+
+const getBeeGameTurnLabel = (status: string, lang: Language): string => {
+    const labels = BEEGAME_TURN_LABELS[lang] || BEEGAME_TURN_LABELS.en;
+    return labels[status] || BEEGAME_TURN_LABELS.en[status] || BEEGAME_TURN_LABELS.en.idle;
+};
+
 const getModelDisplayName = (config?: ModelConfig): string => {
     if (!config) return '';
     return config.models.balanced || config.models.strong || config.models.fast || config.name || '';
@@ -239,10 +327,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
                 refreshTimerRef.current = setTimeout(() => {
                     console.log(`[DashboardView] Debounced data refresh triggered by event: ${type}`);
-                    loadPhases(projectId);
                     loadTokenUsage(projectId).catch(console.error);
-                    loadTasks(projectId).catch(console.error);
-                    loadAgents().catch(console.error);
+                    if (!isBeeGameMode) {
+                        loadPhases(projectId);
+                        loadTasks(projectId).catch(console.error);
+                        loadAgents().catch(console.error);
+                    }
                     loadPendingReviews(projectId).catch(console.error);
                     loadProjectStatus(projectId).catch(console.error);
                     refreshTimerRef.current = null;
@@ -314,10 +404,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     }, [initialPrompt, projectId, sendMessage, initialGateStateReady, waitingApproval.isBlockingChat]);
 
-    const hasUnfinishedTasks = useMemo(() => tasks.some((t) => {
-        const status = canonicalTaskStatus(t);
-        return status !== 'released' && status !== 'failed' && status !== 'invalidated' && status !== 'expired';
-    }), [tasks]);
+    const hasUnfinishedTasks = useMemo(() => {
+        if (isBeeGameMode) return false;
+        return tasks.some((t) => {
+            const status = canonicalTaskStatus(t);
+            return status !== 'released' && status !== 'failed' && status !== 'invalidated' && status !== 'expired';
+        });
+    }, [isBeeGameMode, tasks]);
     const isPipelineActive = useMemo(() => {
         const nextAction = String(projectStatus?.next_action || '').toLowerCase();
         const phase = String(projectStatus?.phase || '').toLowerCase();
@@ -379,31 +472,35 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     };
 
-    // Poll Telemetry Phases & System Agents & Tasks & Pending Reviews
+    // Poll live runtime state. BeeGame mode deliberately avoids legacy workflow phase/task telemetry.
     useEffect(() => {
         if (!projectId) return;
 
-        // Force initial load of pending reviews
-        Promise.allSettled([
+        const initialLoads: Array<Promise<unknown>> = [
             loadPendingReviews(projectId),
             loadProjectStatus(projectId),
             loadSystemReadiness(),
-            loadPhases(projectId),
-            loadAgents(),
-            loadTasks(projectId),
-        ]).finally(() => setInitialGateStateReady(true));
+        ];
+        if (!isBeeGameMode) {
+            initialLoads.push(
+                loadPhases(projectId),
+                loadAgents(),
+                loadTasks(projectId),
+            );
+        }
+        Promise.allSettled(initialLoads).finally(() => setInitialGateStateReady(true));
         loadTokenUsage(projectId).catch(console.error);
 
-        // Optimized polling: skip when document is hidden OR when task is in terminal state
         const poll = () => {
             if (document.hidden) return;
             
-            // Only poll frequently if we are running or have unfinished tasks
             if (currentStatus === 'running' || hasUnfinishedTasks || isPipelineActive) {
-                loadPhases(projectId);
                 loadTokenUsage(projectId).catch(console.error);
-                loadAgents().catch(console.error);
-                loadTasks(projectId).catch(console.error);
+                if (!isBeeGameMode) {
+                    loadPhases(projectId);
+                    loadAgents().catch(console.error);
+                    loadTasks(projectId).catch(console.error);
+                }
                 loadPendingReviews(projectId).catch(console.error);
                 loadProjectStatus(projectId).catch(console.error);
             }
@@ -431,7 +528,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             clearInterval(tokenInterval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [projectId, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive]);
+    }, [projectId, isBeeGameMode, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive]);
 
     // BeeGame follows the live runtime turn, not the legacy multi-stage workflow.
     const progressPercent = useMemo(() => {
@@ -447,11 +544,14 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     }, [isBeeGameMode, currentStatus, phaseInfo, messages]);
 
     const phaseLabel = useMemo(() => {
+        if (isBeeGameMode) {
+            return getBeeGameTurnLabel(currentStatus, lang);
+        }
         const phaseName = String(phaseInfo?.phase_name || savedRuntimeSnapshot?.phase_name || '').trim();
         const labels = BEEGAME_PHASE_LABELS[lang] || BEEGAME_PHASE_LABELS.en;
         if (!phaseName) return labels.idea_intake;
         return labels[phaseName] || BEEGAME_PHASE_LABELS.en[phaseName] || fallbackPhaseLabel(phaseName);
-    }, [phaseInfo?.phase_name, savedRuntimeSnapshot?.phase_name, lang]);
+    }, [currentStatus, isBeeGameMode, phaseInfo?.phase_name, savedRuntimeSnapshot?.phase_name, lang]);
 
     const displayProjectName = useMemo(() => {
         return getWorkspaceFolderName(activeProject?.root_path) || projectName;
@@ -546,8 +646,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
         console.log(`[DashboardView] Project: ${projectId} | Token Usage:`, projectTokenUsage);
-        console.log(`[DashboardView] Project Progress: ${progressPercent.toFixed(2)}% (Phase: ${phaseInfo?.phase_name || 'idle'})`);
-    }, [projectId, tokenUsage, progressPercent, phaseInfo]);
+        console.log(`[DashboardView] Project Progress: ${progressPercent.toFixed(2)}% (Status: ${currentStatus})`);
+    }, [projectId, tokenUsage, progressPercent, currentStatus]);
 
     const handleToggleStatus = async () => {
         if (currentStatus === 'running') {
