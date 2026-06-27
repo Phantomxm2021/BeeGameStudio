@@ -258,7 +258,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-        expect(await screen.findByRole('dialog', { name: '登录 BeeGame' })).toBeInTheDocument();
+        expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
         expect(screen.getByText('登录后即可继续生成方案，当前输入不会丢失。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
@@ -282,7 +282,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-        await screen.findByRole('dialog', { name: '登录 BeeGame' });
+        await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
         fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
         fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
         fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
@@ -295,17 +295,36 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
     });
 
-    it('shows signed-in account and credit balance in the landing actions', async () => {
+    it('opens account actions from a circular signed-in user avatar', async () => {
         renderLanding();
 
+        expect(screen.queryByRole('button', { name: '系统设置' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '历史项目' })).not.toBeInTheDocument();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+
+        expect(screen.getByText('D')).toBeInTheDocument();
         expect(await screen.findByText('dashboard-local')).toBeInTheDocument();
         expect(screen.getByText('300 credits')).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
+    });
+
+    it('opens the login and registration dialog from the anonymous user icon', async () => {
+        mockCurrentUser = null;
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+
+        expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
     });
 
     it('clears the Supabase session and reloads the current user when signing out', async () => {
         renderLanding();
 
-        fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '退出登录' }));
 
         expect(clearSupabaseSession).toHaveBeenCalledTimes(1);
         expect(mockLoadCurrentUser).toHaveBeenCalled();
@@ -608,7 +627,8 @@ describe('LandingView bootstrap submission', () => {
     it('opens the simplified settings overlay on the general tab', () => {
         renderLanding({ lang: 'en' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
 
         expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
         expect(screen.queryByText('Dark Mode')).not.toBeInTheDocument();
@@ -634,7 +654,8 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding({ lang: 'zh' });
 
-        fireEvent.click(screen.getByRole('button', { name: '历史项目' }));
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: '历史项目' }));
 
         expect(screen.getByRole('dialog', { name: '历史项目' })).toBeInTheDocument();
         expect(screen.getByText('LLM Project')).toBeInTheDocument();
@@ -647,7 +668,8 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding({ lang: 'en' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+        fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
         const dialog = screen.getByRole('dialog', { name: 'History Projects' });
 
         fireEvent.click(screen.getByRole('button', { name: 'More actions LLM Project' }));
@@ -659,7 +681,8 @@ describe('LandingView bootstrap submission', () => {
     it('shows an empty state in the history modal', () => {
         renderLanding({ lang: 'en' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+        fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
 
         expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
         expect(screen.getByText('No projects found')).toBeInTheDocument();
@@ -668,7 +691,8 @@ describe('LandingView bootstrap submission', () => {
     it('keeps the history modal content area stable for empty and populated project lists', () => {
         const emptyRender = renderLanding({ lang: 'en' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+        fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
 
         const emptyDialog = screen.getByRole('dialog', { name: 'History Projects' });
         const emptyContent = emptyDialog.querySelector('.scrollbar-premium');
@@ -681,7 +705,8 @@ describe('LandingView bootstrap submission', () => {
         ];
         renderLanding({ lang: 'en' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'History Projects' }));
+        fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
 
         const populatedDialog = screen.getByRole('dialog', { name: 'History Projects' });
         const populatedContent = populatedDialog.querySelector('.scrollbar-premium');

@@ -126,6 +126,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         await loadCurrentUser();
     };
 
+    const handleOpenLogin = () => {
+        setPendingIdeaAfterLogin(projectName.trim());
+        setLoginError('');
+        setIsLoginPromptOpen(true);
+    };
+
     const ensureGenerationAccess = async (): Promise<boolean> => {
         await loadCurrentUser();
         const latestUser = useSystemStore.getState().currentUser;
@@ -366,6 +372,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     isHistoryOpen={isHistoryOpen}
                     currentUserId={currentUser?.id}
                     creditBalance={creditBalance?.balanceCredits}
+                    onOpenLogin={handleOpenLogin}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
@@ -400,7 +407,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     <div
                         role="dialog"
                         aria-modal="true"
-                        aria-label="登录 BeeGame"
+                        aria-label="登录 / 注册 BeeGame"
                         className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
                     >
                         <form
@@ -409,7 +416,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <h2 className="text-2xl font-semibold text-white">登录 BeeGame</h2>
+                                    <h2 className="text-2xl font-semibold text-white">登录 / 注册 BeeGame</h2>
                                     <p className="mt-3 text-sm leading-6 text-zinc-300">
                                         登录后即可继续生成方案，当前输入不会丢失。
                                     </p>
