@@ -75,6 +75,42 @@ describe('agent workflow server routes', () => {
     })
   })
 
+  test('can narrow the local single-user role from environment', async () => {
+    const originalRole = process.env.BEEGAME_LOCAL_USER_ROLE
+    try {
+      process.env.BEEGAME_LOCAL_USER_ROLE = 'viewer'
+      const viewerApp = createAgentWorkflowApp()
+      const viewerRes = await viewerApp.request('/api/current-user')
+
+      expect(viewerRes.status).toBe(200)
+      expect(await viewerRes.json()).toEqual({
+        id: 'dashboard-local',
+        role: 'viewer',
+        permissions: [
+          'workspace.read',
+          'project.read',
+          'project.export',
+        ],
+      })
+
+      process.env.BEEGAME_LOCAL_USER_ROLE = 'unknown-role'
+      const fallbackApp = createAgentWorkflowApp()
+      const fallbackRes = await fallbackApp.request('/api/current-user')
+
+      expect(fallbackRes.status).toBe(200)
+      expect(await fallbackRes.json()).toEqual(expect.objectContaining({
+        id: 'dashboard-local',
+        role: 'owner',
+      }))
+    } finally {
+      if (originalRole === undefined) {
+        delete process.env.BEEGAME_LOCAL_USER_ROLE
+      } else {
+        process.env.BEEGAME_LOCAL_USER_ROLE = originalRole
+      }
+    }
+  })
+
   test('derives the default local user for model configs without owner query parameters', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',

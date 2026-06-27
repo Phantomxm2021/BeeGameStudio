@@ -303,6 +303,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const canManagePreview = hasPermission('preview.manage');
     const canUploadAssets = hasPermission('assets.upload');
     const canIntegrateAssets = hasPermission('assets.integrate');
+    const canExportProject = hasPermission('project.export');
 
     // Auto-Send Initial Prompt
     useEffect(() => {
@@ -650,6 +651,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 canApproveTool={canApproveTool}
                 canUploadAssets={canUploadAssets}
                 canIntegrateAssets={canIntegrateAssets}
+                canExportProject={canExportProject}
                 variant={isBeeGameMode ? 'beegame' : 'legacy'}
             />
         </div>

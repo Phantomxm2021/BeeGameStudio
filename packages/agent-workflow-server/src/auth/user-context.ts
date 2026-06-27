@@ -29,7 +29,7 @@ export const DEFAULT_LOCAL_USER_ID = 'dashboard-local'
 export function getLocalUserContext(): BeeGameUserContext {
   return {
     id: process.env.BEEGAME_LOCAL_USER_ID?.trim() || DEFAULT_LOCAL_USER_ID,
-    role: 'owner',
+    role: normalizeBeeGameRole(process.env.BEEGAME_LOCAL_USER_ROLE),
   }
 }
 
@@ -51,6 +51,18 @@ function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {
   if (role === 'developer') return DEVELOPER_PERMISSIONS
   if (role === 'reviewer') return REVIEWER_PERMISSIONS
   return VIEWER_PERMISSIONS
+}
+
+function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
+  if (
+    value === 'owner' ||
+    value === 'developer' ||
+    value === 'reviewer' ||
+    value === 'viewer'
+  ) {
+    return value
+  }
+  return 'owner'
 }
 
 const VIEWER_PERMISSIONS = new Set<BeeGamePermission>([

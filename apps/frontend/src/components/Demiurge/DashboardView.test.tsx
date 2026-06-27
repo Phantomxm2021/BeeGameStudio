@@ -259,6 +259,7 @@ describe('DashboardView runtime loading', () => {
         expect(capturedRightSidebarProps?.canApproveTool).toBe(false);
         expect(capturedRightSidebarProps?.canUploadAssets).toBe(true);
         expect(capturedRightSidebarProps?.canIntegrateAssets).toBe(false);
+        expect(capturedRightSidebarProps?.canExportProject).toBe(false);
     });
 
     it('passes global workflow progress instead of the old first-phase twenty percent boost', async () => {

@@ -107,4 +107,29 @@ describe('ArtifactsPanel', () => {
         expect(onPreview).not.toHaveBeenCalled();
         expect(onDownload).toHaveBeenCalledWith('beegame-project-package:proj_1', 'snake-game.zip');
     });
+
+    it('hides project package downloads when export permission is missing', () => {
+        render(
+            <ArtifactsPanel
+                artifacts={[
+                    {
+                        id: 'beegame-project-package:proj_1',
+                        artifact_id: 'beegame-project-package:proj_1',
+                        name: 'snake-game.zip',
+                        artifact_type: 'Project Package',
+                        package_download: true,
+                    },
+                ]}
+                isLoading={false}
+                reviewStatuses={{}}
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+                canExportProject={false}
+            />
+        );
+
+        expect(screen.queryByTitle('Preview')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Download')).not.toBeInTheDocument();
+        expect(screen.getByText('Generated on download')).toBeInTheDocument();
+    });
 });

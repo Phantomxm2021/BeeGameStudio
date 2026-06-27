@@ -46,6 +46,7 @@ interface RightSidebarProps {
     canApproveTool?: boolean;
     canUploadAssets?: boolean;
     canIntegrateAssets?: boolean;
+    canExportProject?: boolean;
     variant?: 'legacy' | 'beegame';
 }
 
@@ -67,6 +68,7 @@ export function RightSidebar({
     canApproveTool = true,
     canUploadAssets = true,
     canIntegrateAssets = true,
+    canExportProject = true,
     variant = 'legacy',
 }: RightSidebarProps) {
 
@@ -399,6 +401,7 @@ export function RightSidebar({
                                 reviewStatuses={reviewStatuses}
                                 onPreview={handlePreviewArtifact}
                                 onDownload={handleDownloadArtifact}
+                                canExportProject={canExportProject}
                                 lang={lang}
                             />
                         ) : (

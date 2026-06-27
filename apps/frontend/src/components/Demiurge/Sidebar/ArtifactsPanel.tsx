@@ -10,6 +10,7 @@ interface ArtifactsPanelProps {
     reviewStatuses: Record<string, any>;
     onPreview: (id: string, name: string) => void;
     onDownload: (id: string, name: string) => void;
+    canExportProject?: boolean;
     lang?: Language;
 }
 
@@ -19,6 +20,7 @@ export const ArtifactsPanel = memo(({
     reviewStatuses, 
     onPreview, 
     onDownload,
+    canExportProject = true,
     lang = 'en',
 }: ArtifactsPanelProps) => {
     const text = getBeeGameText(lang);
@@ -92,13 +94,15 @@ export const ArtifactsPanel = memo(({
                                         <Eye className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
                                     </button>
                                 ) : null}
-                                <button
-                                    style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                                    onClick={(e) => { e.stopPropagation(); onDownload(reviewKey, art.name || type); }}
-                                    title={text.download}
-                                >
-                                    <Download className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
-                                </button>
+                                {!isProjectPackage || canExportProject ? (
+                                    <button
+                                        style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                        onClick={(e) => { e.stopPropagation(); onDownload(reviewKey, art.name || type); }}
+                                        title={text.download}
+                                    >
+                                        <Download className="w-5 h-5 opacity-40 hover:opacity-100 text-zinc-900 dark:text-zinc-100 transition-opacity" />
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
                     </motion.div>
