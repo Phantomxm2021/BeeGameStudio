@@ -15,6 +15,10 @@ const { runIdeaIntake } = vi.hoisted(() => ({
 const { getCreditBalance } = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
 }));
+const { isSupabaseAuthConfigured, signInWithSupabasePassword } = vi.hoisted(() => ({
+    isSupabaseAuthConfigured: vi.fn(),
+    signInWithSupabasePassword: vi.fn(),
+}));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
 const mockLoadCurrentUser = vi.fn();
@@ -100,6 +104,11 @@ vi.mock('../../services/modelConfigApi', () => ({
 
 vi.mock('../../services/creditsApi', () => ({
     getCreditBalance,
+}));
+
+vi.mock('../../services/supabaseAuthApi', () => ({
+    isSupabaseAuthConfigured,
+    signInWithSupabasePassword,
 }));
 
 vi.mock('./DemiurgeLogo', () => ({
@@ -224,6 +233,15 @@ beforeEach(() => {
             complexGame: { minCredits: 600, maxCredits: 1500 },
         },
     });
+    isSupabaseAuthConfigured.mockReset();
+    isSupabaseAuthConfigured.mockReturnValue(true);
+    signInWithSupabasePassword.mockReset();
+    signInWithSupabasePassword.mockResolvedValue({
+        accessToken: 'supabase-access-token',
+        refreshToken: 'supabase-refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        user: { id: 'user-1', email: 'player@example.com' },
+    });
     terminalRenderState.renderCount = 0;
 });
 
@@ -241,6 +259,37 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByText('登录后即可继续生成方案，当前输入不会丢失。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
+    });
+
+    it('signs in from the login dialog and continues the pending idea generation', async () => {
+        mockCurrentUser = null;
+        mockLoadCurrentUser.mockImplementation(async () => {
+            if (signInWithSupabasePassword.mock.calls.length > 0) {
+                mockCurrentUser = {
+                    id: 'user-1',
+                    role: 'owner',
+                    permissions: ['project.create', 'project.delete'],
+                };
+            }
+        });
+
+        renderLanding();
+
+        const textbox = screen.getByRole('textbox');
+        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
+        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+
+        await screen.findByRole('dialog', { name: '登录 BeeGame' });
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
+        fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+        fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
+
+        await screen.findByText('LLM Mode A');
+        expect(signInWithSupabasePassword).toHaveBeenCalledWith({
+            email: 'player@example.com',
+            password: 'secret-password',
+        });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
     });
 
     it('stops intake generation when available credits are below the intake estimate', async () => {

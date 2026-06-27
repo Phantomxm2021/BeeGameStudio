@@ -1,4 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import { getSupabaseAccessToken } from './supabaseAuthApi';
 
 export interface ApiErrorEnvelope {
   code: string;
@@ -17,7 +18,7 @@ const getEnvAuthToken = (): string => String(import.meta.env.VITE_API_AUTH_TOKEN
 
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
-export const resolveAuthToken = (): string => getEnvAuthToken();
+export const resolveAuthToken = (): string => getEnvAuthToken() || getSupabaseAccessToken();
 
 export const buildApiUrl = (path: string): string => {
   if (!API_BASE_URL || /^[a-z][a-z\d+\-.]*:/i.test(path)) {

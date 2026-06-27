@@ -19,6 +19,10 @@ import {
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
 import { getCreditBalance } from '../../services/creditsApi';
+import {
+    isSupabaseAuthConfigured,
+    signInWithSupabasePassword,
+} from '../../services/supabaseAuthApi';
 
 type IntakePhase =
     | 'idle'
@@ -76,6 +80,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [clarification, setClarification] = useState<BeeGameClarification | null>(null);
     const [clarificationDraft, setClarificationDraft] = useState('');
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
+    const [loginEmail, setLoginEmail] = useState('');
+    const [loginPassword, setLoginPassword] = useState('');
+    const [loginError, setLoginError] = useState('');
+    const [isSigningIn, setIsSigningIn] = useState(false);
+    const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -94,6 +103,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         await loadCurrentUser();
         const latestUser = useSystemStore.getState().currentUser;
         if (!latestUser) {
+            setPendingIdeaAfterLogin(projectName.trim());
             setIsLoginPromptOpen(true);
             return false;
         }
@@ -165,6 +175,41 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
         setIsPreparing(false);
         await runIntake(idea);
+    };
+
+    const handleLoginSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (isSigningIn) return;
+        setLoginError('');
+        if (!isSupabaseAuthConfigured()) {
+            setLoginError('Supabase Auth 尚未配置。');
+            return;
+        }
+        const email = loginEmail.trim();
+        if (!email || !loginPassword) {
+            setLoginError('请输入邮箱和密码。');
+            return;
+        }
+        setIsSigningIn(true);
+        try {
+            await signInWithSupabasePassword({ email, password: loginPassword });
+            await loadCurrentUser();
+            setIsLoginPromptOpen(false);
+            setLoginPassword('');
+            const nextIdea = pendingIdeaAfterLogin || projectName.trim();
+            setPendingIdeaAfterLogin('');
+            if (nextIdea) {
+                setProjectName(nextIdea);
+                const canGenerate = await ensureGenerationAccess();
+                if (canGenerate) {
+                    await runIntake(nextIdea);
+                }
+            }
+        } catch (error) {
+            setLoginError(error instanceof Error ? error.message : '登录失败，请重试。');
+        } finally {
+            setIsSigningIn(false);
+        }
     };
 
     const handleProjectNameChange = (value: string) => {
@@ -328,7 +373,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         aria-label="登录 BeeGame"
                         className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
                     >
-                        <div className="w-full max-w-md rounded-[28px] border border-white/15 bg-zinc-950/90 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
+                        <form
+                            onSubmit={handleLoginSubmit}
+                            className="w-full max-w-md rounded-[28px] border border-white/15 bg-zinc-950/90 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                        >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
                                     <h2 className="text-2xl font-semibold text-white">登录 BeeGame</h2>
@@ -339,16 +387,54 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <button
                                     type="button"
                                     aria-label="关闭登录弹窗"
-                                    onClick={() => setIsLoginPromptOpen(false)}
+                                    onClick={() => {
+                                        setIsLoginPromptOpen(false);
+                                        setLoginError('');
+                                    }}
                                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-zinc-300 transition hover:bg-white/15 hover:text-white"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
                             </div>
-                            <div className="mt-6 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm leading-6 text-amber-100">
-                                正式登录入口将在 Supabase Auth 接入后启用；当前不会要求你在设置里粘贴 token。
+                            <div className="mt-6 space-y-3">
+                                <label className="block text-sm font-semibold text-zinc-200">
+                                    邮箱
+                                    <input
+                                        aria-label="邮箱"
+                                        type="email"
+                                        value={loginEmail}
+                                        onChange={(event) => setLoginEmail(event.target.value)}
+                                        className="mt-2 h-11 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 text-white outline-none transition focus:border-amber-300/70"
+                                        autoComplete="email"
+                                    />
+                                </label>
+                                <label className="block text-sm font-semibold text-zinc-200">
+                                    密码
+                                    <input
+                                        aria-label="密码"
+                                        type="password"
+                                        value={loginPassword}
+                                        onChange={(event) => setLoginPassword(event.target.value)}
+                                        className="mt-2 h-11 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 text-white outline-none transition focus:border-amber-300/70"
+                                        autoComplete="current-password"
+                                    />
+                                </label>
                             </div>
-                        </div>
+                            {loginError ? (
+                                <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">
+                                    {loginError}
+                                </div>
+                            ) : null}
+                            <div className="mt-6 flex items-center justify-end gap-3">
+                                <button
+                                    type="submit"
+                                    disabled={isSigningIn}
+                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {isSigningIn ? '登录中...' : '登录并继续'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 ) : null}
 

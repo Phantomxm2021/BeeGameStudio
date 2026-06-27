@@ -27,6 +27,22 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBe('Bearer runtime-token');
   });
 
+  it('falls back to the Supabase session token when no deployment token is configured', async () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', '');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'supabase-session-token',
+      expiresAt: Date.now() + 3600_000,
+      user: { id: 'user-1' },
+    }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/current-user');
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer supabase-session-token');
+  });
+
   it('does not overwrite an explicit authorization header', () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
 
