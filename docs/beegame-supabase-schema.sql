@@ -14,7 +14,8 @@ create table if not exists public.beegame_workspaces (
   name text not null,
   owner_id uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (owner_id)
 );
 
 create table if not exists public.beegame_workspace_members (
@@ -64,6 +65,12 @@ create table if not exists public.beegame_model_configs (
 create table if not exists public.beegame_runtime_settings (
   owner_id uuid primary key references auth.users(id) on delete cascade,
   settings jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_web_tools (
+  owner_id uuid primary key references auth.users(id) on delete cascade,
+  config jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -134,6 +141,7 @@ alter table public.beegame_projects enable row level security;
 alter table public.beegame_sessions enable row level security;
 alter table public.beegame_model_configs enable row level security;
 alter table public.beegame_runtime_settings enable row level security;
+alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_previews enable row level security;
@@ -165,6 +173,9 @@ create policy "model config owner access" on public.beegame_model_configs
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create policy "runtime settings owner access" on public.beegame_runtime_settings
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create policy "web tools owner access" on public.beegame_web_tools
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create policy "mcp server owner access" on public.beegame_mcp_servers

@@ -1,0 +1,636 @@
+import { randomUUID } from 'node:crypto'
+import type { ModelConfigSnapshotRecord } from '@claude-code-best/agent-workflow'
+import type {
+  McpServerConfig,
+  McpServerEnvVar,
+  McpServerInput,
+  McpServerScope,
+  McpServerTransport,
+} from './mcp-servers-store'
+import type {
+  BeeGameProjectMetadata,
+  BeeGameProjectRuntimeSnapshot,
+} from './project-metadata-store'
+import type { RuntimeSettingsConfig } from './runtime-settings-store'
+import type {
+  WebFetchAdapter,
+  WebSearchAdapter,
+  WebToolsConfig,
+} from './web-tools-store'
+
+type Env = Record<string, string | undefined>
+
+type SupabaseConfig = {
+  url: string
+  serviceRoleKey: string
+}
+
+type JsonObject = Record<string, unknown>
+
+type SupabaseModelConfigRow = {
+  id: string
+  owner_id: string
+  name: string
+  provider: string
+  base_url: string | null
+  api_key_ciphertext: string | null
+  models: JsonObject
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+type SupabaseRuntimeSettingsRow = {
+  owner_id: string
+  settings: JsonObject
+  updated_at: string
+}
+
+type SupabaseWebToolsRow = {
+  owner_id: string
+  config: JsonObject
+  updated_at: string
+}
+
+type SupabaseMcpServerRow = {
+  id: string
+  owner_id: string
+  name: string
+  config: JsonObject
+  env_ciphertext: JsonObject
+  created_at: string
+  updated_at: string
+}
+
+type SupabaseWorkspaceRow = {
+  id: string
+  owner_id: string
+  name: string
+}
+
+type SupabaseProjectRow = {
+  id: string
+  owner_id: string
+  workspace_id: string
+  name: string
+  root_path: string | null
+  runtime_snapshot: JsonObject
+  created_at: string
+  updated_at: string
+}
+
+export function createSupabaseDashboardStoreFromEnv(
+  env: Env = process.env,
+): SupabaseDashboardStore | undefined {
+  const url = (
+    env.BEEGAME_SUPABASE_URL ??
+    env.SUPABASE_URL ??
+    ''
+  ).trim()
+  const serviceRoleKey = (
+    env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
+    env.SUPABASE_SERVICE_ROLE_KEY ??
+    ''
+  ).trim()
+  if (!url || !serviceRoleKey) return undefined
+  return new SupabaseDashboardStore({ url, serviceRoleKey })
+}
+
+export class SupabaseDashboardStore {
+  private readonly baseUrl: string
+  private readonly serviceRoleKey: string
+  private readonly workspaceIds = new Map<string, string>()
+
+  constructor(config: SupabaseConfig) {
+    this.baseUrl = config.url.replace(/\/+$/, '')
+    this.serviceRoleKey = config.serviceRoleKey
+  }
+
+  async loadModelConfigSnapshot(): Promise<ModelConfigSnapshotRecord[]> {
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?select=*`,
+    )
+    return rows.map(row => ({
+      id: row.id,
+      ownerId: row.owner_id,
+      name: row.name,
+      provider: row.provider as ModelConfigSnapshotRecord['provider'],
+      ...(row.base_url ? { baseUrl: row.base_url } : {}),
+      apiKey: row.api_key_ciphertext ?? '',
+      models: toModelMap(row.models),
+      isDefault: row.is_default,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }))
+  }
+
+  async upsertModelConfig(record: ModelConfigSnapshotRecord): Promise<void> {
+    await this.upsert('beegame_model_configs', {
+      id: record.id,
+      owner_id: record.ownerId,
+      name: record.name,
+      provider: record.provider,
+      base_url: record.baseUrl ?? null,
+      api_key_ciphertext: record.apiKey,
+      models: record.models,
+      is_default: record.isDefault,
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+    }, 'id')
+  }
+
+  async deleteModelConfig(ownerId: string, id: string): Promise<boolean> {
+    return this.deleteWhere('beegame_model_configs', {
+      owner_id: ownerId,
+      id,
+    })
+  }
+
+  async loadRuntimeSettings(ownerId: string): Promise<RuntimeSettingsConfig> {
+    const rows = await this.rest<SupabaseRuntimeSettingsRow[]>(
+      `/rest/v1/beegame_runtime_settings?owner_id=eq.${q(ownerId)}&select=settings&limit=1`,
+    )
+    return normalizeRuntimeSettings(rows[0]?.settings ?? {})
+  }
+
+  async saveRuntimeSettings(
+    ownerId: string,
+    config: RuntimeSettingsConfig,
+  ): Promise<RuntimeSettingsConfig> {
+    const previous = await this.loadRuntimeSettings(ownerId)
+    const normalized = normalizeRuntimeSettings({ ...previous, ...config })
+    await this.upsert('beegame_runtime_settings', {
+      owner_id: ownerId,
+      settings: normalized,
+      updated_at: new Date().toISOString(),
+    }, 'owner_id')
+    return normalized
+  }
+
+  async loadWebTools(ownerId: string): Promise<WebToolsConfig> {
+    const rows = await this.rest<SupabaseWebToolsRow[]>(
+      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
+    )
+    return normalizeWebTools(rows[0]?.config ?? {})
+  }
+
+  async saveWebTools(
+    ownerId: string,
+    config: WebToolsConfig,
+  ): Promise<WebToolsConfig> {
+    const previous = await this.loadWebTools(ownerId)
+    const normalized = normalizeWebTools({
+      ...previous,
+      ...config,
+      braveApiKey: resolveSecretInput(config.braveApiKey, previous.braveApiKey),
+      exaApiKey: resolveSecretInput(config.exaApiKey, previous.exaApiKey),
+    })
+    await this.upsert('beegame_web_tools', {
+      owner_id: ownerId,
+      config: normalized,
+      updated_at: new Date().toISOString(),
+    }, 'owner_id')
+    return normalized
+  }
+
+  async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
+    const rows = await this.rest<SupabaseMcpServerRow[]>(
+      `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
+    )
+    return rows.map(row => toPublicMcpServerConfig(rowToMcpServer(row)))
+  }
+
+  async upsertMcpServer(
+    ownerId: string,
+    input: McpServerInput,
+  ): Promise<McpServerConfig> {
+    const existing = input.id
+      ? await this.getMcpServer(ownerId, input.id)
+      : undefined
+    const normalized = normalizeMcpServerInput(input, existing)
+    await this.upsert('beegame_mcp_servers', {
+      id: normalized.id,
+      owner_id: ownerId,
+      name: normalized.name,
+      config: {
+        enabled: normalized.enabled,
+        transport: normalized.transport,
+        scope: normalized.scope,
+        command: normalized.command,
+        args: normalized.args,
+        url: normalized.url,
+        cwd: normalized.cwd,
+        autoStart: normalized.autoStart,
+      },
+      env_ciphertext: {
+        env: normalized.env ?? [],
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, 'id')
+    return toPublicMcpServerConfig(normalized)
+  }
+
+  async deleteMcpServer(ownerId: string, id: string): Promise<boolean> {
+    return this.deleteWhere('beegame_mcp_servers', {
+      owner_id: ownerId,
+      id,
+    })
+  }
+
+  async listProjects(ownerId: string): Promise<BeeGameProjectMetadata[]> {
+    const rows = await this.rest<SupabaseProjectRow[]>(
+      `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&select=*&order=created_at.desc,updated_at.desc`,
+    )
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      ...(row.root_path ? { root_path: row.root_path } : {}),
+      created_at: new Date(row.created_at).getTime(),
+      ...normalizeProjectRuntimeSnapshot(row.runtime_snapshot),
+    }))
+  }
+
+  async upsertProject(
+    ownerId: string,
+    project: BeeGameProjectMetadata,
+  ): Promise<BeeGameProjectMetadata> {
+    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
+    const normalized = normalizeProject(project)
+    await this.upsert('beegame_projects', {
+      id: normalized.id,
+      owner_id: ownerId,
+      workspace_id: workspaceId,
+      name: normalized.name,
+      root_path: normalized.root_path ?? null,
+      runtime_snapshot: normalized.runtime_snapshot ?? {},
+      created_at: new Date(normalized.created_at).toISOString(),
+      updated_at: new Date().toISOString(),
+    }, 'id')
+    return normalized
+  }
+
+  async deleteProject(ownerId: string, id: string): Promise<boolean> {
+    return this.deleteWhere('beegame_projects', {
+      owner_id: ownerId,
+      id,
+    })
+  }
+
+  private async getMcpServer(
+    ownerId: string,
+    id: string,
+  ): Promise<McpServerConfig | undefined> {
+    const rows = await this.rest<SupabaseMcpServerRow[]>(
+      `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
+    )
+    return rows[0] ? rowToMcpServer(rows[0]) : undefined
+  }
+
+  private async ensureDefaultWorkspace(ownerId: string): Promise<string> {
+    const cached = this.workspaceIds.get(ownerId)
+    if (cached) return cached
+    const existing = await this.rest<SupabaseWorkspaceRow[]>(
+      `/rest/v1/beegame_workspaces?owner_id=eq.${q(ownerId)}&select=id,owner_id,name&limit=1`,
+    )
+    if (existing[0]?.id) {
+      this.workspaceIds.set(ownerId, existing[0].id)
+      return existing[0].id
+    }
+    const created = await this.upsert<SupabaseWorkspaceRow>(
+      'beegame_workspaces',
+      {
+        name: 'Default Workspace',
+        owner_id: ownerId,
+      },
+      'owner_id',
+    )
+    const workspaceId = created.id
+    await this.upsert('beegame_workspace_members', {
+      workspace_id: workspaceId,
+      user_id: ownerId,
+      role: 'owner',
+    }, 'workspace_id,user_id')
+    this.workspaceIds.set(ownerId, workspaceId)
+    return workspaceId
+  }
+
+  private async upsert<T = JsonObject>(
+    table: string,
+    payload: JsonObject,
+    onConflict: string,
+  ): Promise<T> {
+    const rows = await this.rest<T[]>(
+      `/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(payload),
+      },
+    )
+    if (!rows[0]) throw new Error(`Supabase ${table} upsert returned no rows`)
+    return rows[0]
+  }
+
+  private async deleteWhere(
+    table: string,
+    filters: Record<string, string>,
+  ): Promise<boolean> {
+    const query = Object.entries(filters)
+      .map(([key, value]) => `${key}=eq.${q(value)}`)
+      .join('&')
+    const rows = await this.rest<JsonObject[]>(
+      `/rest/v1/${table}?${query}&select=id`,
+      {
+        method: 'DELETE',
+        headers: {
+          Prefer: 'return=representation',
+        },
+      },
+    )
+    return rows.length > 0
+  }
+
+  private async rest<T>(
+    path: string,
+    init: RequestInit = {},
+  ): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        apikey: this.serviceRoleKey,
+        authorization: `Bearer ${this.serviceRoleKey}`,
+        'content-type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(
+        `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+      )
+    }
+    if (response.status === 204) return undefined as T
+    return await response.json() as T
+  }
+}
+
+function q(value: string): string {
+  return encodeURIComponent(value)
+}
+
+function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {
+  return {
+    ...(typeof value.fast === 'string' ? { fast: value.fast } : {}),
+    ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
+    ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
+  }
+}
+
+const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
+  'autoMemoryEnabled',
+  'autoDreamEnabled',
+  'skillSearchEnabled',
+  'treeSitterBashEnabled',
+  'webBrowserToolEnabled',
+  'bashClassifierEnabled',
+  'mcpSkillsEnabled',
+]
+
+function normalizeRuntimeSettings(value: unknown): RuntimeSettingsConfig {
+  if (!isObject(value)) return {}
+  const normalized: RuntimeSettingsConfig = {}
+  for (const field of RUNTIME_BOOLEAN_FIELDS) {
+    if (typeof value[field] === 'boolean') normalized[field] = value[field]
+  }
+  return normalized
+}
+
+function normalizeWebTools(value: unknown): WebToolsConfig {
+  if (!isObject(value)) return {}
+  return {
+    ...(isWebSearchAdapter(value.webSearchAdapter)
+      ? { webSearchAdapter: value.webSearchAdapter }
+      : {}),
+    ...(isWebFetchAdapter(value.webFetchAdapter)
+      ? { webFetchAdapter: value.webFetchAdapter }
+      : {}),
+    ...(trimString(value.tavilyEndpointUrl)
+      ? { tavilyEndpointUrl: trimString(value.tavilyEndpointUrl) }
+      : {}),
+    ...(trimString(value.braveApiKey)
+      ? { braveApiKey: trimString(value.braveApiKey) }
+      : {}),
+    ...(trimString(value.exaApiKey)
+      ? { exaApiKey: trimString(value.exaApiKey) }
+      : {}),
+    ...(trimString(value.exaEndpointUrl)
+      ? { exaEndpointUrl: trimString(value.exaEndpointUrl) }
+      : {}),
+    ...(Number.isInteger(value.webFetchHttpTimeoutMs) &&
+    Number(value.webFetchHttpTimeoutMs) > 0
+      ? { webFetchHttpTimeoutMs: Number(value.webFetchHttpTimeoutMs) }
+      : {}),
+  }
+}
+
+function resolveSecretInput(
+  next: string | undefined,
+  previous: string | undefined,
+): string | undefined {
+  if (next === undefined) return previous
+  return trimString(next) || undefined
+}
+
+function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
+  const config = isObject(row.config) ? row.config : {}
+  const envPayload = isObject(row.env_ciphertext) ? row.env_ciphertext : {}
+  return normalizeMcpServerInput({
+    id: row.id,
+    name: row.name,
+    enabled: config.enabled !== false,
+    transport: isMcpServerTransport(config.transport)
+      ? config.transport
+      : 'stdio',
+    scope: isMcpServerScope(config.scope) ? config.scope : 'beegame',
+    ...(typeof config.command === 'string' ? { command: config.command } : {}),
+    ...(Array.isArray(config.args) ? { args: config.args.map(String) } : {}),
+    ...(typeof config.url === 'string' ? { url: config.url } : {}),
+    ...(typeof config.cwd === 'string' ? { cwd: config.cwd } : {}),
+    env: normalizeEnvFromUnknown(envPayload.env),
+    autoStart: config.autoStart !== false,
+  })
+}
+
+function normalizeMcpServerInput(
+  input: McpServerInput,
+  existing?: McpServerConfig,
+): McpServerConfig {
+  const transport = isMcpServerTransport(input.transport)
+    ? input.transport
+    : existing?.transport ?? 'stdio'
+  const scope = isMcpServerScope(input.scope)
+    ? input.scope
+    : existing?.scope ?? 'beegame'
+  const env = normalizeMcpEnv(input.env, existing?.env)
+  const base = {
+    id: trimString(input.id) || existing?.id || randomUUID(),
+    name: trimString(input.name) || existing?.name || 'MCP Server',
+    enabled: typeof input.enabled === 'boolean'
+      ? input.enabled
+      : existing?.enabled ?? true,
+    transport,
+    scope,
+    cwd: trimString(input.cwd) || undefined,
+    env,
+    autoStart: typeof input.autoStart === 'boolean'
+      ? input.autoStart
+      : existing?.autoStart ?? true,
+  }
+  if (transport === 'stdio') {
+    return {
+      ...base,
+      command: trimString(input.command) || existing?.command || '',
+      args: normalizeArgs(input.args),
+    }
+  }
+  return {
+    ...base,
+    url: trimString(input.url) || existing?.url || '',
+  }
+}
+
+function toPublicMcpServerConfig(config: McpServerConfig): McpServerConfig {
+  return {
+    ...config,
+    env: (config.env ?? []).map(item => ({
+      key: item.key,
+      valuePreview: previewSecret(item.value),
+    })),
+  }
+}
+
+function normalizeMcpEnv(
+  input: McpServerEnvVar[] | undefined,
+  existing: McpServerEnvVar[] | undefined,
+): McpServerEnvVar[] {
+  if (!Array.isArray(input)) return existing ?? []
+  const previous = new Map((existing ?? []).map(item => [item.key, item.value]))
+  return input
+    .map(item => {
+      const key = trimString(item.key)
+      if (!key) return undefined
+      const nextValue = item.value === undefined
+        ? previous.get(key)
+        : trimString(item.value) || undefined
+      return {
+        key,
+        ...(nextValue ? { value: nextValue } : {}),
+      }
+    })
+    .filter((item): item is McpServerEnvVar => item !== undefined)
+}
+
+function normalizeEnvFromUnknown(value: unknown): McpServerEnvVar[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => {
+      if (!isObject(item)) return undefined
+      const key = trimString(item.key)
+      if (!key) return undefined
+      return {
+        key,
+        ...(trimString(item.value) ? { value: trimString(item.value) } : {}),
+      }
+    })
+    .filter((item): item is McpServerEnvVar => item !== undefined)
+}
+
+function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetadata {
+  const id = project.id.trim()
+  const name = project.name.trim()
+  if (!id) throw new Error('Project id is required')
+  if (!name) throw new Error('Project name is required')
+  return {
+    id,
+    name,
+    ...(project.root_path?.trim() ? { root_path: project.root_path.trim() } : {}),
+    created_at: Number.isFinite(project.created_at)
+      ? project.created_at
+      : Date.now(),
+    ...normalizeProjectRuntimeSnapshot(project.runtime_snapshot),
+  }
+}
+
+function normalizeProjectRuntimeSnapshot(
+  snapshot: unknown,
+): { runtime_snapshot?: BeeGameProjectRuntimeSnapshot } {
+  if (!isObject(snapshot)) return {}
+  const usage = isObject(snapshot.usage) ? snapshot.usage : undefined
+  const normalizedUsage = usage
+    ? {
+        prompt_tokens: Math.max(0, Number(usage.prompt_tokens) || 0),
+        completion_tokens: Math.max(0, Number(usage.completion_tokens) || 0),
+        total_tokens: Math.max(0, Number(usage.total_tokens) || 0),
+      }
+    : undefined
+  const normalized: BeeGameProjectRuntimeSnapshot = {
+    ...(normalizedUsage ? { usage: normalizedUsage } : {}),
+    ...(trimString(snapshot.phase_name)
+      ? { phase_name: trimString(snapshot.phase_name) }
+      : {}),
+    ...(trimString(snapshot.model_config_id)
+      ? { model_config_id: trimString(snapshot.model_config_id) }
+      : {}),
+    ...(trimString(snapshot.model_name)
+      ? { model_name: trimString(snapshot.model_name) }
+      : {}),
+    ...(Number.isFinite(snapshot.updated_at)
+      ? { updated_at: Number(snapshot.updated_at) }
+      : {}),
+  }
+  return Object.keys(normalized).length > 0
+    ? { runtime_snapshot: normalized }
+    : {}
+}
+
+function normalizeArgs(args: unknown): string[] {
+  if (!Array.isArray(args)) return []
+  return args.map(arg => trimString(arg)).filter(Boolean)
+}
+
+function previewSecret(secret: string | undefined): string | undefined {
+  if (!secret) return undefined
+  if (secret.length <= 8) return '••••'
+  return `${secret.slice(0, 4)}…${secret.slice(-4)}`
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isMcpServerTransport(value: unknown): value is McpServerTransport {
+  return value === 'stdio' || value === 'sse' || value === 'http'
+}
+
+function isMcpServerScope(value: unknown): value is McpServerScope {
+  return value === 'beegame' || value === 'global' || value === 'project'
+}
+
+function isWebSearchAdapter(value: unknown): value is WebSearchAdapter {
+  return value === 'tavily' ||
+    value === 'api' ||
+    value === 'bing' ||
+    value === 'brave' ||
+    value === 'exa'
+}
+
+function isWebFetchAdapter(value: unknown): value is WebFetchAdapter {
+  return value === 'tavily' || value === 'http'
+}

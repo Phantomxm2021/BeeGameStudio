@@ -5,6 +5,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   createModelConfig,
   deleteModelConfig,
+  exportModelConfigSnapshot,
+  importModelConfigSnapshot,
   listModelConfigs,
   mapModelConfigToRuntime,
   updateModelConfig,
@@ -80,6 +82,10 @@ import {
   hasBeeGamePermission,
   listBeeGamePermissions,
 } from './auth/user-context'
+import {
+  createSupabaseDashboardStoreFromEnv,
+  type SupabaseDashboardStore,
+} from './supabase-dashboard-store'
 
 type JsonObject = Record<string, unknown>
 
@@ -150,6 +156,7 @@ export function createAgentWorkflowApp(
 ): Hono {
   const app = new Hono()
   const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
+  const supabaseStore = createSupabaseDashboardStoreFromEnv()
   const requestUsers = new WeakMap<Request, BeeGameUserContext>()
   const requestUserResolver =
     options.currentUserResolver ?? createConfiguredUserResolver()
@@ -247,7 +254,8 @@ export function createAgentWorkflowApp(
     }))
   })
 
-  app.get('/api/model-configs', c => {
+  app.get('/api/model-configs', async c => {
+    await loadSupabaseModelConfigs(supabaseStore)
     return c.json(listModelConfigs(getCurrentUser(c.req.raw).id))
   })
 
@@ -260,6 +268,7 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
 
+    await loadSupabaseModelConfigs(supabaseStore)
     const created = createModelConfig(user.id, {
       name: String(body.name),
       provider: body.provider as ModelProviderKind,
@@ -270,7 +279,7 @@ export function createAgentWorkflowApp(
       models: toModelMap(body.models),
       isDefault: body.isDefault === true,
     })
-    persistModelConfigs(modelConfigStore)
+    await persistModelConfig(supabaseStore, created.id, modelConfigStore)
     appendAuditEvent({
       actorId: user.id,
       action: 'model_config.created',
@@ -292,6 +301,7 @@ export function createAgentWorkflowApp(
       return c.json({ error: 'Forbidden' }, 403)
     }
     const body = await readJson(c.req.raw)
+    await loadSupabaseModelConfigs(supabaseStore)
     const updated = updateModelConfig(c.req.param('id'), {
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(typeof body.provider === 'string'
@@ -306,7 +316,7 @@ export function createAgentWorkflowApp(
     })
     if (!updated) return c.json({ error: 'Config not found' }, 404)
 
-    persistModelConfigs(modelConfigStore)
+    await persistModelConfig(supabaseStore, updated.id, modelConfigStore)
     appendAuditEvent({
       actorId: user.id,
       action: 'model_config.updated',
@@ -323,14 +333,19 @@ export function createAgentWorkflowApp(
     return c.json(updated)
   })
 
-  app.delete('/api/model-configs/:id', c => {
+  app.delete('/api/model-configs/:id', async c => {
     const user = getCurrentUser(c.req.raw)
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
+    await loadSupabaseModelConfigs(supabaseStore)
     const deleted = deleteModelConfig(c.req.param('id'))
     if (deleted) {
-      persistModelConfigs(modelConfigStore)
+      if (supabaseStore) {
+        await supabaseStore.deleteModelConfig(user.id, c.req.param('id'))
+      } else {
+        persistModelConfigs(modelConfigStore)
+      }
       appendAuditEvent({
         actorId: user.id,
         action: 'model_config.deleted',
@@ -343,12 +358,14 @@ export function createAgentWorkflowApp(
     return c.json({ deleted })
   })
 
-  app.get('/api/web-tools', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'secrets.manage')
+  app.get('/api/web-tools', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(toPublicWebToolsConfig(loadWebToolsConfig({
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })))
+    const config = supabaseStore
+      ? await supabaseStore.loadWebTools(user.id)
+      : loadWebToolsConfig({ dataDir: getCurrentUserDataRoot(c.req.raw) })
+    return c.json(toPublicWebToolsConfig(config))
   })
 
   app.put('/api/web-tools', async c => {
@@ -356,7 +373,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const saved = saveWebToolsConfig({
+    const input = {
       ...(typeof body.webSearchAdapter === 'string'
         ? { webSearchAdapter: body.webSearchAdapter as never }
         : {}),
@@ -378,9 +395,12 @@ export function createAgentWorkflowApp(
       ...(typeof body.webFetchHttpTimeoutMs === 'number'
         ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
         : {}),
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    }
+    const saved = supabaseStore
+      ? await supabaseStore.saveWebTools(user.id, input)
+      : saveWebToolsConfig(input, {
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        })
     appendAuditEvent({
       actorId: user.id,
       action: 'web_tools.updated',
@@ -399,19 +419,23 @@ export function createAgentWorkflowApp(
     return c.json(saved)
   })
 
-  app.get('/api/runtime-settings', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'runtime_settings.manage')
+  app.get('/api/runtime-settings', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(loadRuntimeSettingsConfig({
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }))
+    return c.json(supabaseStore
+      ? await supabaseStore.loadRuntimeSettings(user.id)
+      : loadRuntimeSettingsConfig({
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        }))
   })
 
   app.put('/api/runtime-settings', async c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'runtime_settings.manage')
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const saved = saveRuntimeSettingsConfig({
+    const input = {
       ...(typeof body.autoMemoryEnabled === 'boolean'
         ? { autoMemoryEnabled: body.autoMemoryEnabled }
         : {}),
@@ -433,17 +457,20 @@ export function createAgentWorkflowApp(
       ...(typeof body.mcpSkillsEnabled === 'boolean'
         ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
         : {}),
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    }
+    const saved = supabaseStore
+      ? await supabaseStore.saveRuntimeSettings(user.id, input)
+      : saveRuntimeSettingsConfig(input, {
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        })
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     appendAuditEvent({
-      actorId: getCurrentUser(c.req.raw).id,
+      actorId: user.id,
       action: 'runtime_settings.updated',
       targetType: 'runtime_settings',
-      targetId: getCurrentUser(c.req.raw).id,
+      targetId: user.id,
       metadata: saved,
     }, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
@@ -451,12 +478,15 @@ export function createAgentWorkflowApp(
     return c.json(saved)
   })
 
-  app.get('/api/mcp-servers', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
+  app.get('/api/mcp-servers', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(listMcpServers({
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }))
+    return c.json(supabaseStore
+      ? await supabaseStore.listMcpServers(user.id)
+      : listMcpServers({
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        }))
   })
 
   app.get('/api/mcp-servers/discover', c => {
@@ -470,9 +500,11 @@ export function createAgentWorkflowApp(
   app.get('/api/mcp-servers/discover-active', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(await discoverActiveMcpServers(listMcpServers({
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }), {
+    const user = getCurrentUser(c.req.raw)
+    const servers = supabaseStore
+      ? await supabaseStore.listMcpServers(user.id)
+      : listMcpServers({ dataDir: getCurrentUserDataRoot(c.req.raw) })
+    return c.json(await discoverActiveMcpServers(servers, {
       ports: parsePortList(c.req.query('ports')),
     }))
   })
@@ -492,11 +524,14 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
-    const saved = upsertMcpServer(toMcpServerInput(body), {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    const user = getCurrentUser(c.req.raw)
+    const saved = supabaseStore
+      ? await supabaseStore.upsertMcpServer(user.id, toMcpServerInput(body))
+      : upsertMcpServer(toMcpServerInput(body), {
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        })
     appendAuditEvent({
-      actorId: getCurrentUser(c.req.raw).id,
+      actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
       targetId: saved.id,
@@ -517,14 +552,20 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
-    const saved = upsertMcpServer({
-      ...toMcpServerInput(body),
-      id: c.req.param('id'),
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    const user = getCurrentUser(c.req.raw)
+    const saved = supabaseStore
+      ? await supabaseStore.upsertMcpServer(user.id, {
+          ...toMcpServerInput(body),
+          id: c.req.param('id'),
+        })
+      : upsertMcpServer({
+          ...toMcpServerInput(body),
+          id: c.req.param('id'),
+        }, {
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        })
     appendAuditEvent({
-      actorId: getCurrentUser(c.req.raw).id,
+      actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
       targetId: saved.id,
@@ -539,15 +580,18 @@ export function createAgentWorkflowApp(
     return c.json(saved)
   })
 
-  app.delete('/api/mcp-servers/:id', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
+  app.delete('/api/mcp-servers/:id', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    const deleted = deleteMcpServer(c.req.param('id'), {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    const deleted = supabaseStore
+      ? await supabaseStore.deleteMcpServer(user.id, c.req.param('id'))
+      : deleteMcpServer(c.req.param('id'), {
+          dataDir: getCurrentUserDataRoot(c.req.raw),
+        })
     if (deleted) {
       appendAuditEvent({
-        actorId: getCurrentUser(c.req.raw).id,
+        actorId: user.id,
         action: 'mcp_server.deleted',
         targetType: 'mcp_server',
         targetId: c.req.param('id'),
@@ -584,10 +628,13 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.get('/api/projects', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.read')
+  app.get('/api/projects', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(getProjectStore(c.req.raw).listProjects())
+    return c.json(supabaseStore
+      ? await supabaseStore.listProjects(user.id)
+      : getProjectStore(c.req.raw).listProjects())
   })
 
   app.post('/api/projects', async c => {
@@ -597,7 +644,10 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['id', 'name', 'created_at'])
     if (error) return c.json({ error }, 400)
     try {
-      return c.json(getProjectStore(c.req.raw).upsertProject(toProjectMetadata(body)))
+      const user = getCurrentUser(c.req.raw)
+      return c.json(supabaseStore
+        ? await supabaseStore.upsertProject(user.id, toProjectMetadata(body))
+        : getProjectStore(c.req.raw).upsertProject(toProjectMetadata(body)))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -607,12 +657,15 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const existing = getProjectStore(c.req.raw)
-      .listProjects()
+    const user = getCurrentUser(c.req.raw)
+    const projects = supabaseStore
+      ? await supabaseStore.listProjects(user.id)
+      : getProjectStore(c.req.raw).listProjects()
+    const existing = projects
       .find(project => project.id === c.req.param('id'))
     if (!existing) return c.json({ error: 'Project not found' }, 404)
     try {
-      return c.json(getProjectStore(c.req.raw).upsertProject({
+      const nextProject = {
         ...existing,
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(typeof body.root_path === 'string'
@@ -621,17 +674,22 @@ export function createAgentWorkflowApp(
         ...(isObject(body.runtime_snapshot)
           ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
           : {}),
-      }))
+      }
+      return c.json(supabaseStore
+        ? await supabaseStore.upsertProject(user.id, nextProject)
+        : getProjectStore(c.req.raw).upsertProject(nextProject))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
 
-  app.delete('/api/projects/:id', c => {
+  app.delete('/api/projects/:id', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
-    const deleted = getProjectStore(c.req.raw).deleteProject(c.req.param('id'))
+    const deleted = supabaseStore
+      ? await supabaseStore.deleteProject(user.id, c.req.param('id'))
+      : getProjectStore(c.req.raw).deleteProject(c.req.param('id'))
     if (deleted) {
       appendAuditEvent({
         actorId: user.id,
@@ -663,6 +721,7 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)
     try {
+      await loadSupabaseModelConfigs(supabaseStore)
       return c.json({
         ...(await generateBeeGameIntakeOptions({
           idea: String(body.idea),
@@ -1654,6 +1713,26 @@ function persistModelConfigs(
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     saveModelConfigsToStore(modelConfigStore)
   }
+}
+
+async function loadSupabaseModelConfigs(
+  supabaseStore: SupabaseDashboardStore | undefined,
+): Promise<void> {
+  if (!supabaseStore) return
+  importModelConfigSnapshot(await supabaseStore.loadModelConfigSnapshot())
+}
+
+async function persistModelConfig(
+  supabaseStore: SupabaseDashboardStore | undefined,
+  id: string,
+  modelConfigStore: ModelConfigStoreOptions | false | undefined,
+): Promise<void> {
+  if (!supabaseStore) {
+    persistModelConfigs(modelConfigStore)
+    return
+  }
+  const record = exportModelConfigSnapshot().find(config => config.id === id)
+  if (record) await supabaseStore.upsertModelConfig(record)
 }
 
 function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
