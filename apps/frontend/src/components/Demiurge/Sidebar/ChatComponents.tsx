@@ -563,7 +563,6 @@ export const MessageItem = memo(({
         taskKind: m.taskKind,
         nextAction: m.nextAction,
         requiresUserAction: m.requiresUserAction,
-        governanceSnapshot: m.governanceSnapshot,
         content: m.content,
     });
     const isError = semanticType === 'error';

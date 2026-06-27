@@ -135,9 +135,6 @@ export interface Message {
   /** Artifact ID associated with this message (optional, used for artifact preview) */
   artifactId?: string;
 
-  /** Optional governance metadata for chat-side status cards */
-  governanceSnapshot?: GovernanceSnapshot;
-
   /** Explicit render directive from backend metadata */
   renderHint?: RenderHint;
 

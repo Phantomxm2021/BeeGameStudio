@@ -11,17 +11,7 @@ import type {
   ReviewStatusPayload,
   VerificationSummaryPayload,
 } from '../services/api';
-import type { GovernanceSnapshot, Message } from '../types/message';
-
-export interface GovernanceDisplaySnapshot {
-  kind?: string;
-  scope?: string;
-  status?: string;
-  reason?: string;
-  convergence_status?: string;
-  blocking_issue_count?: number;
-  open_issue_count?: number;
-}
+import type { Message } from '../types/message';
 
 export interface ChatDisplayMessage
   extends Pick<
@@ -50,11 +40,7 @@ export interface ChatDisplayMessage
     | 'toolDetail'
     | 'toolOutput'
     | 'isSubagentTool'
-  > {
-  governanceSnapshot?: GovernanceDisplaySnapshot;
-  diagnostic?: {
-    rawGovernanceSnapshot?: GovernanceSnapshot;
-  };
+> {
 }
 
 export interface ReviewStatusDisplayPayload {
@@ -193,26 +179,6 @@ const unwrapProjectRuntimePayload = (
   return payload as ProjectBaselineStatusPayload;
 };
 
-const normalizeGovernanceDisplaySnapshot = (
-  payload?: GovernanceSnapshot,
-): GovernanceDisplaySnapshot | undefined => {
-  if (!payload) {
-    return undefined;
-  }
-  const snapshot: GovernanceDisplaySnapshot = {
-    kind: trimString(payload.kind) || undefined,
-    scope: trimString(payload.scope) || undefined,
-    status: trimString(payload.status) || undefined,
-    reason: trimString(payload.reason) || undefined,
-    convergence_status: trimString(payload.convergence_status) || undefined,
-    blocking_issue_count:
-      typeof payload.blocking_issue_count === 'number' ? payload.blocking_issue_count : undefined,
-    open_issue_count:
-      typeof payload.open_issue_count === 'number' ? payload.open_issue_count : undefined,
-  };
-  return Object.values(snapshot).some((value) => value !== undefined) ? snapshot : undefined;
-};
-
 const normalizeReviewStatusDisplay = (
   payload?: ReviewStatusPayload | null,
 ): ReviewStatusDisplayPayload | null => {
@@ -348,12 +314,6 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   toolDetail: message.toolDetail,
   toolOutput: message.toolOutput,
   isSubagentTool: message.isSubagentTool,
-  governanceSnapshot: normalizeGovernanceDisplaySnapshot(message.governanceSnapshot),
-  diagnostic: message.governanceSnapshot
-    ? {
-        rawGovernanceSnapshot: message.governanceSnapshot,
-      }
-    : undefined,
 });
 
 export const toChatDisplayMessages = (messages: Message[]): ChatDisplayMessage[] =>

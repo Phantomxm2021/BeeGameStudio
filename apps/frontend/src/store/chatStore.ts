@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { GovernanceSnapshot, Message, MessageType } from '../types/message';
+import type { Message, MessageType } from '../types/message';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
 
 function detectCorruption(content: string): boolean {
@@ -48,7 +48,6 @@ interface ChatState {
     isDocument?: boolean,
     artifactId?: string,
     documentTitle?: string,
-    governanceSnapshot?: GovernanceSnapshot,
     semantic?: ChatMessageSemantic,
     timestamp?: number,
     messageId?: string
@@ -62,7 +61,6 @@ interface ChatState {
     isDocument?: boolean,
     artifactId?: string,
     documentTitle?: string,
-    governanceSnapshot?: GovernanceSnapshot,
     semantic?: ChatMessageSemantic,
     timestamp?: number,
     messageId?: string
@@ -146,7 +144,6 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     isDocument: incoming.isDocument !== undefined ? incoming.isDocument : existing.isDocument,
     artifactId: incoming.artifactId || existing.artifactId,
     documentTitle: incoming.documentTitle || existing.documentTitle,
-    governanceSnapshot: incoming.governanceSnapshot || existing.governanceSnapshot,
     renderHint: incoming.renderHint || existing.renderHint,
     artifactType: incoming.artifactType || existing.artifactType,
     taskKind: incoming.taskKind || existing.taskKind,
@@ -200,7 +197,7 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
-      updateMessage: (taskId, content, sender, type, isDocument, artifactId, documentTitle, governanceSnapshot, semantic, timestamp, messageId) =>
+      updateMessage: (taskId, content, sender, type, isDocument, artifactId, documentTitle, semantic, timestamp, messageId) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
           const existingId = state.lastStreamingIdByTask[key];
@@ -220,7 +217,6 @@ export const useChatStore = create<ChatState>()(
               isDocument: isDocument !== undefined ? isDocument : existing.isDocument,
               artifactId: artifactId || existing.artifactId,
               documentTitle: documentTitle || existing.documentTitle,
-              governanceSnapshot: governanceSnapshot || existing.governanceSnapshot,
               renderHint: semantic?.renderHint || existing.renderHint,
               artifactType: semantic?.artifactType || existing.artifactType,
               taskKind: semantic?.taskKind || existing.taskKind,
@@ -247,7 +243,6 @@ export const useChatStore = create<ChatState>()(
             isDocument,
             artifactId,
             documentTitle,
-            governanceSnapshot,
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,
@@ -314,7 +309,7 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
-      finalizeMessage: (taskId, content, sender, type, isDocument, artifactId, documentTitle, governanceSnapshot, semantic, timestamp, messageId) =>
+      finalizeMessage: (taskId, content, sender, type, isDocument, artifactId, documentTitle, semantic, timestamp, messageId) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
           const nextMessages = upsertMessage(state.messages, {
@@ -328,7 +323,6 @@ export const useChatStore = create<ChatState>()(
             isDocument,
             artifactId,
             documentTitle,
-            governanceSnapshot,
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,

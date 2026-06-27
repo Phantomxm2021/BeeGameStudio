@@ -102,11 +102,6 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const clientMessageId = String(record.client_message_id ?? record.clientMessageId ?? '').trim() || undefined;
     const metadata = (record.metadata && typeof record.metadata === 'object') ? record.metadata as Record<string, unknown> : {};
     const rawType = String(record.message_type || record.type || metadata.message_type || '').trim() as MessageType;
-    const governanceSnapshot = (
-      (record.governance_snapshot && typeof record.governance_snapshot === 'object')
-      ? record.governance_snapshot
-      : metadata.governance_snapshot
-    ) as Message['governanceSnapshot'] | undefined;
     const renderHint = String(record.render_hint ?? record.renderHint ?? metadata.render_hint ?? metadata.renderHint ?? '').trim() as Message['renderHint'];
     const artifactType = String(record.artifact_type ?? record.artifactType ?? metadata.artifact_type ?? metadata.artifactType ?? '').trim() || undefined;
     const taskKind = String(record.task_kind ?? record.taskKind ?? metadata.task_kind ?? metadata.taskKind ?? '').trim() || undefined;
@@ -119,7 +114,6 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       taskKind,
       nextAction,
       requiresUserAction: typeof requiresUserActionRaw === 'boolean' ? requiresUserActionRaw : undefined,
-      governanceSnapshot,
       content,
     });
     const isDocument = semanticType === 'artifact_card' || Boolean(record.is_document || record.isDocument || metadata.is_document || metadata.isDocument);
@@ -150,7 +144,6 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       isDocument,
       artifactId,
       documentTitle,
-      governanceSnapshot,
       renderHint: renderHint || undefined,
       artifactType,
       taskKind,

@@ -14,15 +14,13 @@ describe('message semantics', () => {
     expect(normalizeCanonicalMessageType({
       requiresUserAction: true,
       nextAction: 'revise',
-      governanceSnapshot: { blocking_issue_count: 2 },
       content: '需要修订',
     })).toBe('revision_request');
   });
 
-  it('does not infer revision requests from legacy governance snapshots alone', () => {
+  it('maps generic user-action requests into approval_request', () => {
     expect(normalizeCanonicalMessageType({
       requiresUserAction: true,
-      governanceSnapshot: { blocking_issue_count: 2 },
       content: '需要确认',
     })).toBe('approval_request');
   });

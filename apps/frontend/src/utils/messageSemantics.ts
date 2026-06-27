@@ -1,4 +1,4 @@
-import type { GovernanceSnapshot, Message, MessageType, RenderHint, WebSocketMessage } from '../types/message';
+import type { Message, MessageType, RenderHint, WebSocketMessage } from '../types/message';
 
 export type CanonicalChatMessageType =
   | 'text'
@@ -34,7 +34,6 @@ interface SemanticResolverInput {
   taskKind?: string;
   nextAction?: string;
   requiresUserAction?: boolean;
-  governanceSnapshot?: GovernanceSnapshot;
   content?: string;
 }
 
@@ -84,7 +83,6 @@ export const normalizeMessageSemanticFields = <T extends {
   taskKind?: string;
   nextAction?: string;
   requiresUserAction?: boolean;
-  governanceSnapshot?: GovernanceSnapshot;
   content?: string;
 }>(message: T): T & { type: CanonicalChatMessageType } => {
   return {
@@ -101,7 +99,6 @@ export const normalizeWebSocketSemanticType = (message: WebSocketMessage): Canon
     taskKind: message.task_kind,
     nextAction: message.next_action,
     requiresUserAction: message.requires_user_action,
-    governanceSnapshot: message.governance_snapshot,
     content: message.content,
   });
 
@@ -112,7 +109,6 @@ export const normalizeHistorySemanticType = (message: {
   taskKind?: string;
   nextAction?: string;
   requiresUserAction?: boolean;
-  governanceSnapshot?: GovernanceSnapshot;
   content?: string;
 }): CanonicalChatMessageType =>
   normalizeCanonicalMessageType({
@@ -122,7 +118,6 @@ export const normalizeHistorySemanticType = (message: {
     taskKind: message.taskKind,
     nextAction: message.nextAction,
     requiresUserAction: message.requiresUserAction,
-    governanceSnapshot: message.governanceSnapshot,
     content: message.content,
   });
 

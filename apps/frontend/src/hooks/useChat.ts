@@ -290,7 +290,6 @@ export const useChat = ({
             message.is_document,
             message.artifact_id,
             message.document_title,
-            message.governance_snapshot,
             {
               renderHint: message.render_hint,
               artifactType: message.artifact_type,
@@ -318,7 +317,6 @@ export const useChat = ({
             message.is_document,
             message.artifact_id,
             message.document_title,
-            message.governance_snapshot,
             {
               renderHint: message.render_hint,
               artifactType: message.artifact_type,

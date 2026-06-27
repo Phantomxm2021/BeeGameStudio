@@ -4,7 +4,7 @@ import type { Message } from '../types/message';
 import type { PendingUserReviewItem, ProjectBaselineStatusPayload } from '../services/api';
 
 describe('displayModels', () => {
-  it('trims governance snapshot to display-safe fields', () => {
+  it('does not expose legacy governance snapshots in chat display messages', () => {
     const message: Message = {
       id: 'msg_1',
       sender: 'logos',
@@ -22,20 +22,12 @@ describe('displayModels', () => {
         validator_blocker_ids: ['a', 'b'],
         source_of_truth_chain: [{ canonical_issue_key: 'ISSUE_1' }],
       },
-    };
+    } as Message;
 
     const display = toChatDisplayMessage(message);
 
-    expect(display.governanceSnapshot).toEqual({
-      kind: 'review',
-      status: 'blocked',
-      scope: 'gdd',
-      reason: 'needs_revision',
-      convergence_status: 'not_converged',
-      blocking_issue_count: 2,
-      open_issue_count: 3,
-    });
-    expect(display.diagnostic?.rawGovernanceSnapshot?.validator_blocker_ids).toEqual(['a', 'b']);
+    expect(display).not.toHaveProperty('governanceSnapshot');
+    expect(display).not.toHaveProperty('diagnostic');
   });
 
   it('maps pending review to review display model with only runtime-required fields', () => {
