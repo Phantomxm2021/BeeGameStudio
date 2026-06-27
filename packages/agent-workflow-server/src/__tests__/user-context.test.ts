@@ -84,6 +84,39 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
+  test('extracts OAuth profile metadata from identity data', async () => {
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => Response.json({
+        id: 'oauth-user',
+        identities: [
+          {
+            identity_data: {
+              email: 'oauth@example.com',
+              name: 'OAuth Player',
+              picture: 'https://avatars.example.com/oauth.png',
+            },
+          },
+        ],
+      }),
+    })
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer oauth-token' },
+        }),
+      ),
+    ).toEqual({
+      id: 'oauth-user',
+      role: 'owner',
+      email: 'oauth@example.com',
+      displayName: 'OAuth Player',
+      avatarUrl: 'https://avatars.example.com/oauth.png',
+    })
+  })
+
   test('prefers static token resolver over Supabase env resolver', async () => {
     const resolver = createConfiguredUserResolver({
       BEEGAME_AUTH_TOKENS: JSON.stringify({

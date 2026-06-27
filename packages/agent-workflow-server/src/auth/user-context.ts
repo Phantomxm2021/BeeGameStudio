@@ -134,32 +134,62 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
   const appMetadata = isRecord(value.app_metadata)
     ? value.app_metadata
     : {}
-  const userMetadata = isRecord(value.user_metadata)
-    ? value.user_metadata
-    : {}
-  const displayName =
-    stringField(userMetadata.display_name) ??
-    stringField(userMetadata.full_name) ??
-    stringField(userMetadata.name) ??
-    stringField(userMetadata.user_name) ??
-    stringField(userMetadata.preferred_username) ??
-    stringField(userMetadata.nickname)
-  const avatarUrl =
-    stringField(userMetadata.avatar_url) ??
-    stringField(userMetadata.picture) ??
-    stringField(userMetadata.photo_url)
+  const metadataRecords = getSupabaseMetadataRecords(value)
+  const email =
+    stringField(value.email) ??
+    firstMetadataString(metadataRecords, ['email'])
+  const displayName = firstMetadataString(metadataRecords, [
+    'display_name',
+    'full_name',
+    'name',
+    'user_name',
+    'preferred_username',
+    'nickname',
+  ])
+  const avatarUrl = firstMetadataString(metadataRecords, [
+    'avatar_url',
+    'picture',
+    'photo_url',
+  ])
   return {
     id,
-    ...(stringField(value.email) ? { email: stringField(value.email) } : {}),
+    ...(email ? { email } : {}),
     ...(displayName ? { displayName } : {}),
     ...(avatarUrl ? { avatarUrl } : {}),
     role: normalizeBeeGameRole(
       stringField(appMetadata.beegame_role) ??
         stringField(appMetadata.role) ??
-        stringField(userMetadata.beegame_role) ??
-        stringField(userMetadata.role),
+        firstMetadataString(metadataRecords, ['beegame_role', 'role']),
     ),
   }
+}
+
+function getSupabaseMetadataRecords(value: Record<string, unknown>): JsonObject[] {
+  const records: JsonObject[] = []
+  if (isRecord(value.user_metadata)) records.push(value.user_metadata)
+  if (isRecord(value.raw_user_meta_data)) records.push(value.raw_user_meta_data)
+  if (Array.isArray(value.identities)) {
+    for (const identity of value.identities) {
+      if (!isRecord(identity)) continue
+      if (isRecord(identity.identity_data)) records.push(identity.identity_data)
+    }
+  }
+  return records
+}
+
+type JsonObject = Record<string, unknown>
+
+function firstMetadataString(
+  records: JsonObject[],
+  fields: string[],
+): string | undefined {
+  for (const field of fields) {
+    for (const record of records) {
+      const value = stringField(record[field])
+      if (value) return value
+    }
+  }
+  return undefined
 }
 
 function joinUrl(baseUrl: string, path: string): string {

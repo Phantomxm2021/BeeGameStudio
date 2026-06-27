@@ -41,7 +41,8 @@ export function LandingActions({
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
-    const userLabel = currentUserDisplayName || currentUserId;
+    const fallbackUserLabel = lang === 'en' ? 'Signed in' : '已登录';
+    const userLabel = currentUserDisplayName || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
 
     useEffect(() => {

@@ -203,7 +203,7 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
     ...session,
     user: {
       id,
-      email: typeof value.email === 'string' ? value.email : session.user.email,
+      email: readUserEmail(value) ?? session.user.email,
       displayName: readUserDisplayName(value) ?? session.user.displayName,
       avatarUrl: readUserAvatarUrl(value) ?? session.user.avatarUrl,
     },
@@ -261,11 +261,16 @@ function toSupabaseSession(value: unknown): BeeGameSupabaseSession {
     expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
     user: {
       id,
-      email: typeof user.email === 'string' ? user.email : undefined,
+      email: readUserEmail(user),
       displayName: readUserDisplayName(user),
       avatarUrl: readUserAvatarUrl(user),
     },
   };
+}
+
+function readUserEmail(user: Record<string, unknown>): string | undefined {
+  return readUserRootString(user, 'email') ??
+    readUserMetadataString(user, 'email');
 }
 
 function readUserDisplayName(user: Record<string, unknown>): string | undefined {
@@ -287,9 +292,34 @@ function readUserMetadataString(
   user: Record<string, unknown>,
   key: string,
 ): string | undefined {
-  const metadata = isRecord(user.user_metadata) ? user.user_metadata : {};
-  const value = metadata[key];
+  for (const metadata of getSupabaseMetadataRecords(user)) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function readUserRootString(
+  user: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = user[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function getSupabaseMetadataRecords(
+  user: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  if (isRecord(user.user_metadata)) records.push(user.user_metadata);
+  if (isRecord(user.raw_user_meta_data)) records.push(user.raw_user_meta_data);
+  if (Array.isArray(user.identities)) {
+    for (const identity of user.identities) {
+      if (!isRecord(identity)) continue;
+      if (isRecord(identity.identity_data)) records.push(identity.identity_data);
+    }
+  }
+  return records;
 }
 
 async function readSupabaseError(response: Response): Promise<string> {

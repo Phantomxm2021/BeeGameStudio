@@ -368,6 +368,20 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });
 
+    it('does not display the raw user id as the signed-in nickname fallback', async () => {
+        mockCurrentUser = {
+            id: '00000000-0000-0000-0000-000000000001',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+
+        expect(screen.getByText('已登录')).toBeInTheDocument();
+        expect(screen.queryByText('00000000-0000-0000-0000-000000000001')).not.toBeInTheDocument();
+    });
+
     it('opens the profile page and saves an uploaded avatar only when finished', async () => {
         mockCurrentUser = {
             id: 'alice',

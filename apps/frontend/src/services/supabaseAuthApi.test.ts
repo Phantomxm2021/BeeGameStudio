@@ -140,11 +140,15 @@ describe('supabaseAuthApi', () => {
     const replaceState = vi.fn();
     const fetchMock = vi.fn(async () => Response.json({
       id: 'oauth-user',
-      email: 'oauth@example.com',
-      user_metadata: {
-        user_name: 'octo-maker',
-        avatar_url: 'https://avatars.example.com/octo.png',
-      },
+      identities: [
+        {
+          identity_data: {
+            email: 'oauth@example.com',
+            user_name: 'octo-maker',
+            avatar_url: 'https://avatars.example.com/octo.png',
+          },
+        },
+      ],
     }));
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('history', { replaceState });
