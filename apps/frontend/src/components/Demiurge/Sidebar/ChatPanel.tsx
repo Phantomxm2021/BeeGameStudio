@@ -4,7 +4,7 @@ import { MessageSquare, AlertCircle, Send } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed, BeeGameConversationOverviewRuler } from './BeeGameCollaborationFeed';
 import type { ReviewBindingPayload } from '../../../services/api';
-import { formatGddReviewSummary, isBlockerResolutionReview, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
+import { formatReviewSummary, isBlockerResolutionReview, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
@@ -278,7 +278,7 @@ export const ChatPanel = memo(({
                             description={
                                 activeComposerReview.type === 'INTENT_CLARIFICATION'
                                     ? text.clarificationDescription
-                                    : formatGddReviewSummary(activeComposerReview)
+                                    : formatReviewSummary(activeComposerReview)
                             }
                             tone={
                                 beeGamePermission

@@ -1,15 +1,12 @@
 import type { ProjectTask } from '../../../store/systemStore';
 import type {
     ReviewStatusPayload,
-    VerificationDecision,
 } from '../../../services/api';
 import { localizeReviewMessage } from '../../../utils/reviewStatus';
 import { isReviewBlockerGateKind } from '../../../utils/gateSemantics';
 import type {
-    ProjectRuntimeDisplayModel,
     ReviewDisplayModel,
     ReviewStatusDisplayPayload,
-    ReviewDisplayVerification,
 } from '../../../viewModels/displayModels';
 
 export const TASK_STATUS_COLORS: Record<string, string> = {
@@ -49,8 +46,6 @@ export const getTaskStatusLabel = (task: ProjectTask): string => {
 };
 
 type ReviewLike = ReviewDisplayModel | undefined | null;
-type ProjectRuntimeLike = ProjectRuntimeDisplayModel | undefined | null;
-type ReviewStatusLike = ReviewStatusPayload | ReviewStatusDisplayPayload | null | undefined;
 const LEGACY_BEEGAME_PERMISSION_TYPE = ['CLAU', 'DE_CODE_PERMISSION'].join('');
 
 export const isBlockerResolutionReview = (review: ReviewLike): boolean => {
@@ -124,17 +119,7 @@ export const isStructuredDocumentApprovalReview = (review: ReviewLike): boolean 
     return Boolean(review.type?.endsWith('_APPROVAL_REVIEW'));
 };
 
-export const formatChangeTypeLabel = (changeType?: string): string => {
-    if (!changeType) return 'unknown';
-    return changeType.replace(/_/g, ' ');
-};
-
-export const formatRollbackPhaseLabel = (phase?: string): string => {
-    if (!phase) return 'unknown';
-    return phase.replace(/_/g, ' ');
-};
-
-export const getCurrentReviewArtifactId = (review: ReviewLike): string => {
+const getCurrentReviewArtifactId = (review: ReviewLike): string => {
     return String(review?.current_review_artifact_id || review?.artifact_id || '').trim();
 };
 
@@ -142,122 +127,32 @@ export const getReviewWorkspaceRef = (review: ReviewLike): string => {
     return String(review?.binding?.workspace_ref || review?.binding?.workspace_path || review?.workspace_ref || review?.workspace_path || '').trim();
 };
 
-export const isPinnedReviewBinding = (review: ReviewLike): boolean => {
-    return Boolean(String(review?.binding?.checkpoint_id || review?.checkpoint_id || '').trim());
-};
-
-export const getCurrentReviewIteration = (review: ReviewLike): number => {
-    const raw = review?.current_review_iteration ?? review?.review_iteration ?? 1;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-};
-
-export const getReviewBindingSummary = (review: ReviewLike): string => {
-    if (!review) return 'Baseline: unavailable';
-    if (isPinnedReviewBinding(review)) {
-        const checkpoint = String(review?.binding?.checkpoint_id || review?.checkpoint_id || '').trim();
-        return checkpoint ? `Baseline: checkpoint ${checkpoint}` : 'Baseline: pinned checkpoint';
-    }
-    const artifactVersion = review?.binding?.artifact_version ?? review?.artifact_version;
-    if (artifactVersion != null) {
-        return `Baseline: artifact v${artifactVersion}`;
-    }
-    const workspaceRef = getReviewWorkspaceRef(review);
-    if (workspaceRef) {
-        return `Baseline: workspace ${workspaceRef}`;
-    }
-    return 'Baseline: unavailable';
-};
-
-const getReviewLifecycleLabel = (reviewStatus?: ReviewStatusLike): string => {
-    const decisionStatus = String(reviewStatus?.decision_status || '').trim().toLowerCase();
-    const laneStatus = String(reviewStatus?.lane_status || '').trim().toLowerCase();
-    if (decisionStatus === 'awaiting_user') return 'Awaiting User Approval';
-    if (decisionStatus === 'approved') return 'Approved';
-    if (decisionStatus === 'revision_required') return laneStatus.includes('revision') ? 'Applying Internal Review Revisions' : 'Revision Required';
-    if (decisionStatus === 'escalated') return 'Escalated';
-    if (decisionStatus === 'running') return laneStatus.includes('revision') ? 'Re-reviewing Revised GDD' : 'Internal Review Running';
-    return '';
-};
-
-export const formatGddReviewSummary = (review: ReviewLike): string => {
+export const formatReviewSummary = (review: ReviewLike): string => {
     if (isBeeGamePermissionReview(review)) {
         return formatBeeGamePermissionSummary(review);
     }
     if (isBlockerResolutionReview(review)) {
         const artifactId = getCurrentReviewArtifactId(review);
-        const iteration = getCurrentReviewIteration(review);
-        return `GDD 第 ${iteration} 轮内部评审仍有 blocker，当前需修订 artifact ${artifactId || 'unknown'}`;
+        return `This review still has unresolved blockers. Update ${artifactId || 'the current artifact'} and continue.`;
     }
     const reviewStatusMessage = localizeReviewMessage(review?.review_status);
     if (reviewStatusMessage) {
         return reviewStatusMessage;
     }
     const artifactId = getCurrentReviewArtifactId(review);
-    const iteration = getCurrentReviewIteration(review);
     const decisionStatus = String(review?.review_status?.decision_status || '').trim().toLowerCase();
     const laneStatus = String(review?.review_status?.lane_status || '').trim().toLowerCase();
     if (decisionStatus === 'awaiting_user') {
-        return `GDD 第 ${iteration} 轮内部评审已通过，当前待用户确认的是 artifact ${artifactId || 'unknown'}`;
+        return `Review is ready for your confirmation${artifactId ? `: ${artifactId}` : ''}.`;
     }
     if (decisionStatus === 'revision_required' && !laneStatus.includes('revision')) {
-        return `GDD 第 ${iteration} 轮内部评审已完成，当前需按 blocker 修订 artifact ${artifactId || 'unknown'}`;
+        return `Revision is required${artifactId ? ` for ${artifactId}` : ''}.`;
     }
     if (decisionStatus === 'revision_required' && laneStatus.includes('revision')) {
-        return `GDD 第 ${iteration} 轮修订请求已生成，Metis 正在根据 blocker 修订 artifact ${artifactId || 'unknown'}`;
+        return `Revision has started${artifactId ? ` for ${artifactId}` : ''}.`;
     }
     if (decisionStatus === 'running' && laneStatus.includes('revision')) {
-        return `GDD 第 ${iteration} 轮修订已提交，正在重新进行内部评审，当前 artifact ${artifactId || 'unknown'}`;
+        return `Review is running again${artifactId ? ` for ${artifactId}` : ''}.`;
     }
-    return `GDD 第 ${iteration} 轮内部评审未通过，需修订后重审。当前阻塞的是 artifact ${artifactId || 'unknown'}`;
-};
-
-export const getGddReviewReadinessLabel = (review: ReviewLike): string => {
-    if (isBlockerResolutionReview(review)) return 'Revision Required';
-    const reviewStatusMessage = localizeReviewMessage(review?.review_status);
-    if (reviewStatusMessage) return reviewStatusMessage;
-    return getReviewLifecycleLabel(review?.review_status) || 'Blocked';
-};
-
-export const getVerificationSummary = (review: ReviewLike): ReviewDisplayVerification => {
-    return review?.verification || {};
-};
-
-export const getProjectBaselineSummary = (projectStatus: ProjectRuntimeLike): string => {
-    const reviewStatusMessage = localizeReviewMessage(projectStatus?.review_status);
-    if (reviewStatusMessage) {
-        return reviewStatusMessage;
-    }
-    if (!projectStatus) return 'Baseline: unavailable';
-    const baseline = projectStatus.baseline;
-    const checkpoint = String(baseline?.checkpoint_id || '').trim();
-    if (checkpoint) {
-        return `Baseline: checkpoint ${checkpoint}`;
-    }
-    const artifactVersion = baseline?.artifact_version;
-    if (artifactVersion != null) {
-        return `Baseline: artifact v${artifactVersion}`;
-    }
-    const workspaceRef = String(baseline?.workspace_ref || baseline?.workspace_path || '').trim();
-    if (workspaceRef) {
-        return `Baseline: workspace ${workspaceRef}`;
-    }
-    if (String(baseline?.artifact_id || '').trim()) {
-        return `Baseline: artifact ${baseline?.artifact_id}`;
-    }
-    return 'Baseline: unavailable';
-};
-
-export const formatVerificationDecisionLabel = (decision?: VerificationDecision | ''): string => {
-    if (decision === 'blocked') return 'Blocked';
-    if (decision === 'warning') return 'Warning';
-    if (decision === 'pass') return 'Pass';
-    return 'Unavailable';
-};
-
-export const verificationDecisionClasses = (decision?: VerificationDecision | ''): string => {
-    if (decision === 'blocked') return 'border-rose-200 bg-rose-50/80 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200';
-    if (decision === 'warning') return 'border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200';
-    if (decision === 'pass') return 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200';
-    return 'border-zinc-200 bg-zinc-50/80 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200';
+    return `Review needs attention${artifactId ? `: ${artifactId}` : ''}.`;
 };
