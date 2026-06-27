@@ -68,6 +68,7 @@ import {
   type BeeGameUserContext,
   getLocalUserContext,
   hasBeeGamePermission,
+  listBeeGamePermissions,
 } from './auth/user-context'
 
 type JsonObject = Record<string, unknown>
@@ -170,6 +171,15 @@ export function createAgentWorkflowApp(
   app.use('/api/*', cors())
 
   app.get('/health', c => c.json({ status: 'ok' }))
+
+  app.get('/api/current-user', c => {
+    const user = getCurrentUser()
+    return c.json({
+      id: user.id,
+      role: user.role,
+      permissions: listBeeGamePermissions(user),
+    })
+  })
 
   app.get('/api/model-configs', c => {
     return c.json(listModelConfigs(getCurrentUser().id))

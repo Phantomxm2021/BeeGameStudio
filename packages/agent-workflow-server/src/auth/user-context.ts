@@ -40,6 +40,12 @@ export function hasBeeGamePermission(
   return getRolePermissions(user.role).has(permission)
 }
 
+export function listBeeGamePermissions(
+  user: BeeGameUserContext,
+): BeeGamePermission[] {
+  return [...getRolePermissions(user.role)]
+}
+
 function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {
   if (role === 'owner') return OWNER_PERMISSIONS
   if (role === 'developer') return DEVELOPER_PERMISSIONS

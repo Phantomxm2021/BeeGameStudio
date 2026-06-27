@@ -37,6 +37,44 @@ describe('agent workflow server routes', () => {
     ])
   })
 
+  test('returns the current user role and permissions', async () => {
+    const ownerRes = await app.request('/api/current-user')
+    expect(ownerRes.status).toBe(200)
+    expect(await ownerRes.json()).toEqual({
+      id: 'dashboard-local',
+      role: 'owner',
+      permissions: expect.arrayContaining([
+        'project.read',
+        'project.create',
+        'project.delete',
+        'agent.send_message',
+        'agent.approve_tool',
+        'model_config.manage',
+        'mcp.manage',
+        'runtime_settings.manage',
+        'secrets.manage',
+      ]),
+    })
+
+    const viewerApp = createAgentWorkflowApp({
+      currentUser: {
+        id: 'viewer-user',
+        role: 'viewer',
+      },
+    })
+    const viewerRes = await viewerApp.request('/api/current-user')
+    expect(viewerRes.status).toBe(200)
+    expect(await viewerRes.json()).toEqual({
+      id: 'viewer-user',
+      role: 'viewer',
+      permissions: [
+        'workspace.read',
+        'project.read',
+        'project.export',
+      ],
+    })
+  })
+
   test('derives the default local user for model configs without owner query parameters', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
