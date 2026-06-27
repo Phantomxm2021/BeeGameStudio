@@ -64,6 +64,57 @@ describe('agent workflow server routes', () => {
     })
   })
 
+  test('deletes the authenticated Supabase account through the admin API', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalFetch = globalThis.fetch
+    const calls: Array<{ url: string; method?: string; headers: Headers }> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      globalThis.fetch = (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method,
+          headers: new Headers(init?.headers),
+        })
+        return new Response(null, { status: 204 })
+      }) as typeof fetch
+      const authApp = createAgentWorkflowApp({
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000001',
+          role: 'owner',
+        },
+      })
+
+      const res = await authApp.request('/api/current-user', {
+        method: 'DELETE',
+      })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ deleted: true })
+      expect(calls).toHaveLength(1)
+      expect(calls[0].url).toBe(
+        'https://project.supabase.co/auth/v1/admin/users/00000000-0000-0000-0000-000000000001',
+      )
+      expect(calls[0].method).toBe('DELETE')
+      expect(calls[0].headers.get('apikey')).toBe('service-role-key')
+      expect(calls[0].headers.get('authorization')).toBe('Bearer service-role-key')
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+      }
+    }
+  })
+
   test('returns an owner-scoped credit balance with generation estimates', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-root-'))
     try {

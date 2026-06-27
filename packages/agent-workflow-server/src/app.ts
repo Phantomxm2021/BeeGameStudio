@@ -242,6 +242,27 @@ export function createAgentWorkflowApp(
     })
   })
 
+  app.delete('/api/current-user', async c => {
+    const user = getCurrentUser(c.req.raw)
+    if (!supabaseStore) {
+      return c.json({
+        error: 'Supabase Auth admin is not configured',
+        message: 'account deletion requires BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
+      }, 501)
+    }
+    await supabaseStore.deleteAuthUser(user.id)
+    appendAuditEvent({
+      actorId: user.id,
+      action: 'account.deleted',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: {},
+    }, {
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+    })
+    return c.json({ deleted: true })
+  })
+
   app.get('/api/audit-events', c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'audit.read')
     if (forbidden) return c.json(forbidden, 403)

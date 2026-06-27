@@ -15,6 +15,9 @@ const { runIdeaIntake } = vi.hoisted(() => ({
 const { getCreditBalance } = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
 }));
+const { deleteCurrentUser } = vi.hoisted(() => ({
+    deleteCurrentUser: vi.fn(),
+}));
 const {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
@@ -120,6 +123,10 @@ vi.mock('../../services/modelConfigApi', () => ({
 
 vi.mock('../../services/creditsApi', () => ({
     getCreditBalance,
+}));
+
+vi.mock('../../services/currentUserApi', () => ({
+    deleteCurrentUser,
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
@@ -232,6 +239,8 @@ beforeEach(() => {
     mockSetActiveProject.mockReset();
     mockLoadCurrentUser.mockReset();
     mockLoadCurrentUser.mockResolvedValue(undefined);
+    deleteCurrentUser.mockReset();
+    deleteCurrentUser.mockResolvedValue({ deleted: true });
     mockCurrentUser = {
         id: 'alice',
         role: 'owner',
@@ -381,6 +390,29 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
         await waitFor(() => expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith('https://cdn.example.com/alice.png'));
+        expect(mockLoadCurrentUser).toHaveBeenCalled();
+    });
+
+    it('requires confirmation before deleting the signed-in account', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
+        fireEvent.click(await screen.findByRole('button', { name: '注销账户' }));
+
+        expect(screen.getByText('注销账户会删除云端账号和关联数据。')).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('注销账户确认'), { target: { value: 'DELETE' } });
+        fireEvent.click(screen.getByRole('button', { name: '确认注销' }));
+
+        await waitFor(() => expect(deleteCurrentUser).toHaveBeenCalledTimes(1));
+        expect(clearSupabaseSession).toHaveBeenCalledTimes(1);
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
 

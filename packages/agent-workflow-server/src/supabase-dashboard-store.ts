@@ -23,6 +23,7 @@ type Env = Record<string, string | undefined>
 type SupabaseConfig = {
   url: string
   serviceRoleKey: string
+  fetchImpl?: typeof fetch
 }
 
 type JsonObject = Record<string, unknown>
@@ -99,11 +100,22 @@ export function createSupabaseDashboardStoreFromEnv(
 export class SupabaseDashboardStore {
   private readonly baseUrl: string
   private readonly serviceRoleKey: string
+  private readonly fetchImpl: typeof fetch
   private readonly workspaceIds = new Map<string, string>()
 
   constructor(config: SupabaseConfig) {
     this.baseUrl = config.url.replace(/\/+$/, '')
     this.serviceRoleKey = config.serviceRoleKey
+    this.fetchImpl = config.fetchImpl ?? fetch
+  }
+
+  async deleteAuthUser(userId: string): Promise<void> {
+    const id = userId.trim()
+    if (!id) throw new Error('User id is required')
+    await this.rest<void>(
+      `/auth/v1/admin/users/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    )
   }
 
   async loadModelConfigSnapshot(): Promise<ModelConfigSnapshotRecord[]> {
@@ -357,7 +369,7 @@ export class SupabaseDashboardStore {
     path: string,
     init: RequestInit = {},
   ): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
         apikey: this.serviceRoleKey,

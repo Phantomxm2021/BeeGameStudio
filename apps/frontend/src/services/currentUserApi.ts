@@ -37,6 +37,10 @@ export const getCurrentUser = (): Promise<BeeGameCurrentUser> => (
   })
 );
 
+export const deleteCurrentUser = (): Promise<{ deleted: true }> => (
+  apiClient.delete('/api/current-user')
+);
+
 export const hasPermission = (
   user: BeeGameCurrentUser | undefined | null,
   permission: BeeGamePermission,

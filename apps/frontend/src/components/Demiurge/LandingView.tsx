@@ -19,6 +19,7 @@ import {
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
 import { getCreditBalance, type BeeGameCreditBalance } from '../../services/creditsApi';
+import { deleteCurrentUser } from '../../services/currentUserApi';
 import {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
@@ -98,6 +99,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [profileError, setProfileError] = useState('');
     const [profileNotice, setProfileNotice] = useState('');
     const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+    const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
+    const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const t = translations[lang];
@@ -304,6 +308,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProfileError('');
         setProfileNotice('');
         setAvatarDraft(currentUser?.avatarUrl || '');
+        setIsDeleteAccountConfirmOpen(false);
+        setDeleteAccountConfirmation('');
         setIsProfileOpen(true);
     };
 
@@ -320,6 +326,29 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setProfileError(error instanceof Error ? error.message : '头像更新失败。');
         } finally {
             setIsSavingProfile(false);
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        if (isDeletingAccount) return;
+        if (deleteAccountConfirmation.trim() !== 'DELETE') {
+            setProfileError('请输入 DELETE 确认注销账户。');
+            return;
+        }
+        setProfileError('');
+        setProfileNotice('');
+        setIsDeletingAccount(true);
+        try {
+            await deleteCurrentUser();
+            clearSupabaseSession();
+            await loadCurrentUser();
+            setIsProfileOpen(false);
+            setIsDeleteAccountConfirmOpen(false);
+            setDeleteAccountConfirmation('');
+        } catch (error) {
+            setProfileError(error instanceof Error ? error.message : '账户注销失败。');
+        } finally {
+            setIsDeletingAccount(false);
         }
     };
 
@@ -570,10 +599,40 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             {profileError ? <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">{profileError}</div> : null}
                             {profileNotice ? <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">{profileNotice}</div> : null}
 
+                            {isDeleteAccountConfirmOpen ? (
+                                <div className="mt-5 rounded-3xl border border-red-300/20 bg-red-950/20 p-4">
+                                    <div className="text-sm font-semibold text-red-100">注销账户会删除云端账号和关联数据。</div>
+                                    <div className="mt-1 text-xs leading-5 text-red-100/70">
+                                        这一步无法撤销。请输入 DELETE 后确认注销。
+                                    </div>
+                                    <div className="mt-3 flex gap-2">
+                                        <input
+                                            aria-label="注销账户确认"
+                                            value={deleteAccountConfirmation}
+                                            onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
+                                            placeholder="DELETE"
+                                            className="h-11 min-w-0 flex-1 rounded-2xl border border-red-200/20 bg-black/20 px-3 text-white outline-none placeholder:text-red-100/35 focus:border-red-200/60"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleDeleteAccount}
+                                            disabled={isDeletingAccount}
+                                            className="rounded-2xl bg-red-100 px-4 text-sm font-bold text-red-950 transition hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {isDeletingAccount ? '注销中...' : '确认注销'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
+
                             <div className="mt-6 flex justify-between gap-3">
                                 <button
                                     type="button"
-                                    onClick={() => void handleSignOut()}
+                                    onClick={() => {
+                                        setProfileError('');
+                                        setProfileNotice('');
+                                        setIsDeleteAccountConfirmOpen(true);
+                                    }}
                                     className="rounded-full border border-red-300/25 px-5 py-2.5 text-sm font-bold text-red-100 transition hover:bg-red-500/10"
                                 >
                                     注销账户
