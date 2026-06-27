@@ -297,7 +297,7 @@ describe('useChat clarification gate handling', () => {
     expect(onTaskEvent).toHaveBeenCalledWith('status_failed', expect.any(Object));
   });
 
-  it('blocks sendMessage while waiting for gdd approval', async () => {
+  it('blocks sendMessage while waiting for an explicit review action', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',
       phase: 'DESIGN_IN_PROGRESS',
@@ -372,11 +372,11 @@ describe('useChat clarification gate handling', () => {
     expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
   });
 
-  it('blocks sendMessage while governance blockers remain unresolved', async () => {
+  it('does not block sendMessage on legacy governance metadata alone', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',
       phase: 'build',
-      blocked: true,
+      blocked: false,
       governance: {
         blocked: true,
         blocked_phase: 'build',
@@ -386,19 +386,22 @@ describe('useChat clarification gate handling', () => {
       },
     };
     const onError = vi.fn();
+    vi.mocked(api.sendMessage).mockResolvedValue({
+      task_id: 'task_1',
+      command_id: 'task_1',
+      state: 'running',
+    } as any);
     const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError }));
 
     await act(async () => {
       await result.current.sendMessage('please continue');
     });
 
-    expect(api.sendMessage).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
-      sender: 'system',
-      type: 'error',
-      content: expect.stringContaining('blocker'),
+    expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'please continue',
+      project_id: 'proj_1',
     }));
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('removes the pending review immediately after a successful approve submission', async () => {
