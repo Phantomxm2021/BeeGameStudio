@@ -267,6 +267,7 @@ beforeEach(() => {
     isSupabaseAuthConfigured.mockReturnValue(true);
     clearSupabaseSession.mockReset();
     sendSupabasePasswordReset.mockReset();
+    sendSupabasePasswordReset.mockResolvedValue(undefined);
     signInWithSupabaseOAuth.mockReset();
     signInWithSupabasePassword.mockReset();
     signInWithSupabasePassword.mockResolvedValue({
@@ -462,6 +463,25 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '忘记密码？' })).toBeInTheDocument();
+    });
+
+    it('opens a dedicated password reset view before sending reset email', async () => {
+        mockCurrentUser = null;
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('button', { name: '忘记密码？' }));
+
+        expect(await screen.findByText('重置密码')).toBeInTheDocument();
+        expect(screen.queryByLabelText('密码')).not.toBeInTheDocument();
+        expect(sendSupabasePasswordReset).not.toHaveBeenCalled();
+
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
+        fireEvent.click(screen.getByRole('button', { name: '发送重置邮件' }));
+
+        await waitFor(() => expect(sendSupabasePasswordReset).toHaveBeenCalledWith('player@example.com'));
+        expect(screen.getByText('重置密码邮件已发送，请检查邮箱。')).toBeInTheDocument();
     });
 
     it('switches to registration and creates a Supabase account', async () => {

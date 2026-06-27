@@ -165,7 +165,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [loginError, setLoginError] = useState('');
     const [loginNotice, setLoginNotice] = useState('');
     const [isSigningIn, setIsSigningIn] = useState(false);
-    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+    const [authMode, setAuthMode] = useState<'login' | 'register' | 'resetPassword'>('login');
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [avatarDraft, setAvatarDraft] = useState('');
     const [profileError, setProfileError] = useState('');
@@ -304,6 +304,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const handleLoginSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
+        if (authMode === 'resetPassword') {
+            await handleSendPasswordReset();
+            return;
+        }
         if (isSigningIn) return;
         setLoginError('');
         setLoginNotice('');
@@ -737,12 +741,18 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             <div className="flex items-start justify-between gap-4">
                                 <div>
                                     <h2 className="text-2xl font-semibold text-white">
-                                        {authMode === 'register' ? '创建 BeeGame 账号' : '欢迎回来'}
+                                        {authMode === 'resetPassword'
+                                            ? '重置密码'
+                                            : authMode === 'register'
+                                                ? '创建 BeeGame 账号'
+                                                : '欢迎回来'}
                                     </h2>
                                     <p className="mt-3 text-sm leading-6 text-zinc-300">
-                                        {authMode === 'register'
-                                            ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
-                                            : '登录后继续你的项目、模型设置和生成进度。'}
+                                        {authMode === 'resetPassword'
+                                            ? '输入注册邮箱，我们会发送密码重置邮件。'
+                                            : authMode === 'register'
+                                                ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
+                                                : '登录后继续你的项目、模型设置和生成进度。'}
                                     </p>
                                 </div>
                                 <button
@@ -758,30 +768,32 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     <X className="h-5 w-5" />
                                 </button>
                             </div>
-                            <div className="mt-6 grid grid-cols-2 gap-2 rounded-full border border-white/10 bg-black/10 p-1">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setAuthMode('login');
-                                        setLoginError('');
-                                        setLoginNotice('');
-                                    }}
-                                    className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
-                                >
-                                    登录
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setAuthMode('register');
-                                        setLoginError('');
-                                        setLoginNotice('');
-                                    }}
-                                    className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
-                                >
-                                    注册账号
-                                </button>
-                            </div>
+                            {authMode !== 'resetPassword' ? (
+                                <div className="mt-6 grid grid-cols-2 gap-2 rounded-full border border-white/10 bg-black/10 p-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAuthMode('login');
+                                            setLoginError('');
+                                            setLoginNotice('');
+                                        }}
+                                        className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                    >
+                                        登录
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAuthMode('register');
+                                            setLoginError('');
+                                            setLoginNotice('');
+                                        }}
+                                        className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                    >
+                                        注册账号
+                                    </button>
+                                </div>
+                            ) : null}
                             <div className="mt-6 space-y-3">
                                 {authMode === 'register' ? (
                                     <label className="block text-sm font-semibold text-zinc-200">
@@ -809,7 +821,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         placeholder="you@example.com"
                                     />
                                 </label>
-                                <label className="block text-sm font-semibold text-zinc-200">
+                                {authMode !== 'resetPassword' ? (
+                                    <label className="block text-sm font-semibold text-zinc-200">
                                     密码
                                     <input
                                         aria-label="密码"
@@ -820,11 +833,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                                         placeholder={authMode === 'register' ? '至少 6 位密码' : '输入密码'}
                                     />
-                                </label>
+                                    </label>
+                                ) : null}
                                 {authMode === 'login' ? (
                                     <button
                                         type="button"
-                                        onClick={() => void handleSendPasswordReset()}
+                                        onClick={() => {
+                                            setAuthMode('resetPassword');
+                                            setLoginError('');
+                                            setLoginNotice('');
+                                        }}
                                         disabled={isSigningIn}
                                         className="mx-auto block text-center text-sm font-semibold text-amber-200 transition hover:text-amber-100 disabled:opacity-60"
                                     >
@@ -897,12 +915,31 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </>
                             ) : null}
                             <div className="mt-6 flex items-center justify-end gap-3">
+                                {authMode === 'resetPassword' ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAuthMode('login');
+                                            setLoginError('');
+                                            setLoginNotice('');
+                                        }}
+                                        className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                                    >
+                                        返回登录
+                                    </button>
+                                ) : null}
                                 <button
                                     type="submit"
                                     disabled={isSigningIn}
                                     className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isSigningIn ? '处理中...' : authMode === 'register' ? '注册并继续' : '登录并继续'}
+                                    {isSigningIn
+                                        ? '处理中...'
+                                        : authMode === 'resetPassword'
+                                            ? '发送重置邮件'
+                                            : authMode === 'register'
+                                                ? '注册并继续'
+                                                : '登录并继续'}
                                 </button>
                             </div>
                         </form>
