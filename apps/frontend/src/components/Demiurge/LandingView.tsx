@@ -45,6 +45,78 @@ const styleOptions = ['Auto', 'Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-f
 const inputOptions = ['Auto', 'Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
 const scopeOptions = ['Prototype', 'Playable demo', 'Vertical slice', 'MVP'];
 
+type LegalDocumentKind = 'terms' | 'privacy';
+
+const legalDocuments: Record<LegalDocumentKind, {
+    title: string;
+    updatedAt: string;
+    intro: string;
+    sections: Array<{ title: string; body: string }>;
+}> = {
+    terms: {
+        title: 'BeeGame 用户协议',
+        updatedAt: '2026-06-27',
+        intro: '欢迎使用 BeeGame。本协议说明你在使用 BeeGame 生成、管理和预览游戏项目时的基本权利与责任。',
+        sections: [
+            {
+                title: '账号与安全',
+                body: '你需要提供真实可用的邮箱和昵称来创建账号。请妥善保管登录凭证，不要共享账号或用于规避系统限制。',
+            },
+            {
+                title: '生成服务与 Credit',
+                body: 'BeeGame 会根据你的输入调用模型、工具和项目运行环境生成游戏文档、代码、资源占位和预览。生成行为会消耗 credit，实际消耗可能因项目复杂度、模型、工具调用和重试次数变化。',
+            },
+            {
+                title: '内容与项目归属',
+                body: '你保留自己输入的 idea、上传资源和项目文件的权利。你需要确认输入、上传和分发的内容不侵犯第三方权利，也不违反适用法律或平台规则。',
+            },
+            {
+                title: '可用性与风险',
+                body: 'BeeGame 会尽力帮助你创建可运行的游戏项目，但生成内容可能包含错误、遗漏或不适合商业发布的部分。正式发布前，你应自行审查、测试并确认合规。',
+            },
+            {
+                title: '禁止行为',
+                body: '不得使用 BeeGame 生成恶意软件、规避安全策略、侵犯他人权益、违反法律法规或破坏服务稳定性的内容。',
+            },
+            {
+                title: '变更与终止',
+                body: 'BeeGame 可根据产品、安全或合规要求调整功能、计费和使用规则。你可以在个人主页注销账号；注销后云端账号和关联数据将按系统策略删除。',
+            },
+        ],
+    },
+    privacy: {
+        title: 'BeeGame 隐私条款',
+        updatedAt: '2026-06-27',
+        intro: '本条款说明 BeeGame 如何处理登录、生成游戏和管理项目过程中涉及的数据。',
+        sections: [
+            {
+                title: '我们收集的数据',
+                body: '我们会处理你的账号信息、邮箱、昵称、头像地址、模型配置、项目元数据、生成记录、工具日志、credit 记录以及你主动上传的资源。',
+            },
+            {
+                title: '数据用途',
+                body: '这些数据用于身份验证、保存项目、同步配置、执行生成任务、展示历史记录、计算 credit、排查错误和改进产品体验。',
+            },
+            {
+                title: '模型与第三方服务',
+                body: '当你配置第三方 LLM、搜索、MCP 或托管服务时，相关请求可能会发送到你选择的服务商。请确认这些服务商的隐私和数据处理规则符合你的需求。',
+            },
+            {
+                title: '资源与项目文件',
+                body: '你上传的素材和生成的项目文件会用于当前项目构建、预览和后续修改。请不要上传你无权使用的素材、敏感身份信息或密钥。',
+            },
+            {
+                title: '数据保留与删除',
+                body: '你可以在个人主页注销账号。注销会触发账号删除流程，并按数据库关联规则清理云端账号数据。部分本地工作目录、导出包或备份需要你自行管理。',
+            },
+            {
+                title: '安全',
+                body: 'BeeGame 会通过登录鉴权、权限控制和隔离的项目工作目录降低风险。你仍应避免在项目或提示词中写入未加保护的密钥、凭证和隐私信息。',
+            },
+        ],
+    },
+};
+
 interface LandingViewProps {
     onStart: (projectName: string, clarification?: Record<string, string>, brief?: BeeGameBuildBrief) => StartProjectResult | Promise<StartProjectResult>;
     lang: Language;
@@ -102,6 +174,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [isDeletingAccount, setIsDeletingAccount] = useState(false);
     const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
     const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
+    const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const t = translations[lang];
@@ -767,7 +840,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30"
                                         />
                                         <span>
-                                            我已阅读并同意 BeeGame 用户协议与隐私条款，理解生成内容会消耗 credit。
+                                            我已阅读并同意 BeeGame{' '}
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveLegalDocument('terms')}
+                                                className="font-semibold text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+                                            >
+                                                用户协议
+                                            </button>
+                                            {' '}与{' '}
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveLegalDocument('privacy')}
+                                                className="font-semibold text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+                                            >
+                                                隐私条款
+                                            </button>
+                                            ，理解生成内容会消耗 credit。
                                         </span>
                                     </label>
                                 )}
@@ -817,6 +906,59 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                ) : null}
+
+                {activeLegalDocument ? (
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={legalDocuments[activeLegalDocument].title}
+                        data-surface="frosted-glass"
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm"
+                    >
+                        <div className="input-surface flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-[30px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-7">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                    <h2 className="text-2xl font-semibold text-white">
+                                        {legalDocuments[activeLegalDocument].title}
+                                    </h2>
+                                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                        Updated {legalDocuments[activeLegalDocument].updatedAt}
+                                    </p>
+                                    <p className="mt-4 text-sm leading-6 text-zinc-300">
+                                        {legalDocuments[activeLegalDocument].intro}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label="关闭法律文档"
+                                    onClick={() => setActiveLegalDocument(null)}
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
+                                <div className="space-y-4">
+                                    {legalDocuments[activeLegalDocument].sections.map(section => (
+                                        <section key={section.title} className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+                                            <h3 className="text-sm font-bold text-white">{section.title}</h3>
+                                            <p className="mt-2 text-sm leading-6 text-zinc-300">{section.body}</p>
+                                        </section>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="mt-6 flex justify-end border-t border-white/10 pt-5">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveLegalDocument(null)}
+                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200"
+                                >
+                                    我已了解
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 

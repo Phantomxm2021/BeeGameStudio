@@ -482,6 +482,14 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
         expect(screen.queryByRole('button', { name: 'GitHub' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Google' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '用户协议' }));
+        expect(await screen.findByRole('dialog', { name: 'BeeGame 用户协议' })).toBeInTheDocument();
+        expect(screen.getByText('账号与安全')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '我已了解' }));
+        fireEvent.click(screen.getByRole('button', { name: '隐私条款' }));
+        expect(await screen.findByRole('dialog', { name: 'BeeGame 隐私条款' })).toBeInTheDocument();
+        expect(screen.getByText('我们收集的数据')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '我已了解' }));
         fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'New Player' } });
         fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'new@example.com' } });
         fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
