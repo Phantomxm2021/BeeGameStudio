@@ -22,7 +22,9 @@ import { getCreditBalance, type BeeGameCreditBalance } from '../../services/cred
 import {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
+    signInWithSupabaseOAuth,
     signInWithSupabasePassword,
+    signUpWithSupabasePassword,
 } from '../../services/supabaseAuthApi';
 
 type IntakePhase =
@@ -85,6 +87,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [loginPassword, setLoginPassword] = useState('');
     const [loginError, setLoginError] = useState('');
     const [isSigningIn, setIsSigningIn] = useState(false);
+    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const t = translations[lang];
@@ -129,6 +132,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOpenLogin = () => {
         setPendingIdeaAfterLogin(projectName.trim());
         setLoginError('');
+        setAuthMode('login');
         setIsLoginPromptOpen(true);
     };
 
@@ -225,7 +229,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
         setIsSigningIn(true);
         try {
-            await signInWithSupabasePassword({ email, password: loginPassword });
+            if (authMode === 'register') {
+                await signUpWithSupabasePassword({ email, password: loginPassword });
+            } else {
+                await signInWithSupabasePassword({ email, password: loginPassword });
+            }
             await loadCurrentUser();
             setIsLoginPromptOpen(false);
             setLoginPassword('');
@@ -242,6 +250,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setLoginError(error instanceof Error ? error.message : '登录失败，请重试。');
         } finally {
             setIsSigningIn(false);
+        }
+    };
+
+    const handleOAuthSignIn = (provider: 'github' | 'google') => {
+        setLoginError('');
+        try {
+            signInWithSupabaseOAuth(provider);
+        } catch (error) {
+            setLoginError(error instanceof Error ? error.message : '第三方登录启动失败。');
         }
     };
 
@@ -408,11 +425,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         role="dialog"
                         aria-modal="true"
                         aria-label="登录 / 注册 BeeGame"
+                        data-surface="frosted-glass"
                         className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
                     >
                         <form
                             onSubmit={handleLoginSubmit}
-                            className="w-full max-w-md rounded-[28px] border border-white/15 bg-zinc-950/90 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                            className="input-surface w-full max-w-md rounded-[28px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
@@ -428,10 +446,47 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         setIsLoginPromptOpen(false);
                                         setLoginError('');
                                     }}
-                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-zinc-300 transition hover:bg-white/15 hover:text-white"
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
+                            </div>
+                            <div className="mt-6 grid grid-cols-2 gap-2 rounded-full border border-white/10 bg-black/10 p-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setAuthMode('login')}
+                                    className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                >
+                                    登录
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setAuthMode('register')}
+                                    className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                >
+                                    注册账号
+                                </button>
+                            </div>
+                            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                                <button
+                                    type="button"
+                                    onClick={() => handleOAuthSignIn('github')}
+                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
+                                >
+                                    使用 GitHub 登录
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleOAuthSignIn('google')}
+                                    className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
+                                >
+                                    使用 Google 登录
+                                </button>
+                            </div>
+                            <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                <span className="h-px flex-1 bg-white/10" />
+                                <span>Email</span>
+                                <span className="h-px flex-1 bg-white/10" />
                             </div>
                             <div className="mt-6 space-y-3">
                                 <label className="block text-sm font-semibold text-zinc-200">
@@ -441,7 +496,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="email"
                                         value={loginEmail}
                                         onChange={(event) => setLoginEmail(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 text-white outline-none transition focus:border-amber-300/70"
+                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition focus:border-amber-300/70"
                                         autoComplete="email"
                                     />
                                 </label>
@@ -452,7 +507,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="password"
                                         value={loginPassword}
                                         onChange={(event) => setLoginPassword(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 text-white outline-none transition focus:border-amber-300/70"
+                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition focus:border-amber-300/70"
                                         autoComplete="current-password"
                                     />
                                 </label>
@@ -468,7 +523,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     disabled={isSigningIn}
                                     className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isSigningIn ? '登录中...' : '登录并继续'}
+                                    {isSigningIn ? '处理中...' : authMode === 'register' ? '注册并继续' : '登录并继续'}
                                 </button>
                             </div>
                         </form>

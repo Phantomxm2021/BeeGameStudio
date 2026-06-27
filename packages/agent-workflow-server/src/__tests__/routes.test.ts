@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
 
 describe('agent workflow server routes', () => {
-  const app = createAgentWorkflowApp()
+  const testOwner = { id: 'owner-user', role: 'owner' } as const
+  const app = createAgentWorkflowApp({
+    currentUser: testOwner,
+  })
 
   beforeEach(() => {
     resetAgentWorkflow()
@@ -38,7 +41,8 @@ describe('agent workflow server routes', () => {
   })
 
   test('returns the current user role and permissions', async () => {
-    const anonymousRes = await app.request('/api/current-user')
+    const anonymousApp = createAgentWorkflowApp()
+    const anonymousRes = await anonymousApp.request('/api/current-user')
     expect(anonymousRes.status).toBe(401)
 
     const viewerApp = createAgentWorkflowApp({
@@ -304,7 +308,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('derives the default local user for model configs without owner query parameters', async () => {
+  test('uses the authenticated owner for model configs without owner query parameters', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -343,6 +347,7 @@ describe('agent workflow server routes', () => {
     try {
       const firstApp = createAgentWorkflowApp({
         modelConfigStore: { dataDir },
+        currentUser: testOwner,
       })
       const createRes = await firstApp.request(
         '/api/model-configs',
@@ -365,6 +370,7 @@ describe('agent workflow server routes', () => {
       resetAgentWorkflow()
       const secondApp = createAgentWorkflowApp({
         modelConfigStore: { dataDir },
+        currentUser: testOwner,
       })
       const listRes = await secondApp.request(
         '/api/model-configs',
@@ -389,6 +395,7 @@ describe('agent workflow server routes', () => {
     try {
       const firstApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const saveRes = await firstApp.request('/api/runtime-settings', {
         method: 'PUT',
@@ -418,6 +425,7 @@ describe('agent workflow server routes', () => {
 
       const secondApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const listRes = await secondApp.request('/api/runtime-settings')
 
@@ -552,6 +560,7 @@ describe('agent workflow server routes', () => {
     try {
       const firstApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const createRes = await firstApp.request('/api/mcp-servers', {
         method: 'POST',
@@ -603,6 +612,7 @@ describe('agent workflow server routes', () => {
 
       const secondApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const listRes = await secondApp.request('/api/mcp-servers')
 
@@ -630,10 +640,12 @@ describe('agent workflow server routes', () => {
 
   test('discovers local MCP servers from structured config files', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-discover-'))
+    const ownerDataDir = join(dataDir, 'users', testOwner.id)
 
     try {
+      await mkdir(ownerDataDir, { recursive: true })
       await writeFile(
-        join(dataDir, '.mcp.json'),
+        join(ownerDataDir, '.mcp.json'),
         JSON.stringify({
           mcpServers: {
             'Local Tools': {
@@ -654,6 +666,7 @@ describe('agent workflow server routes', () => {
 
       const firstApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const discoverRes = await firstApp.request('/api/mcp-servers/discover')
       expect(discoverRes.status).toBe(200)
@@ -665,14 +678,14 @@ describe('agent workflow server routes', () => {
           command: 'npx',
           args: ['local-tools-mcp'],
           env: [{ key: 'LOCAL_TOKEN', valuePreview: 'loca…oken' }],
-          sourcePath: join(dataDir, '.mcp.json'),
+          sourcePath: join(ownerDataDir, '.mcp.json'),
           exists: false,
         }),
         expect.objectContaining({
           name: 'Remote Tools',
           transport: 'http',
           url: 'http://127.0.0.1:3030/mcp',
-          sourcePath: join(dataDir, '.mcp.json'),
+          sourcePath: join(ownerDataDir, '.mcp.json'),
           exists: false,
         }),
       ])
@@ -728,6 +741,7 @@ describe('agent workflow server routes', () => {
     try {
       const runtimeApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const endpoint = 'http://127.0.0.1:18081/mcp'
       const testRes = await runtimeApp.request('/api/mcp-servers/test', {
@@ -818,6 +832,7 @@ describe('agent workflow server routes', () => {
     try {
       const runtimeApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
       })
       const endpoint = 'http://127.0.0.1:18082/mcp'
       const testRes = await runtimeApp.request('/api/mcp-servers/test', {
@@ -854,6 +869,7 @@ describe('agent workflow server routes', () => {
     try {
       const firstApp = createAgentWorkflowApp({
         defaultWorkspacePath: workspace,
+        currentUser: testOwner,
       })
       const createRes = await firstApp.request('/api/projects', {
         method: 'POST',
@@ -880,6 +896,7 @@ describe('agent workflow server routes', () => {
 
       const secondApp = createAgentWorkflowApp({
         defaultWorkspacePath: workspace,
+        currentUser: testOwner,
       })
       const listRes = await secondApp.request('/api/projects')
 

@@ -77,7 +77,6 @@ import {
   type BeeGameUserResolver,
   createConfiguredUserResolver,
   DEFAULT_LOCAL_USER_ID,
-  getLocalUserContext,
   hasBeeGamePermission,
   listBeeGamePermissions,
 } from './auth/user-context'
@@ -154,10 +153,11 @@ export function createAgentWorkflowApp(
   const requestUsers = new WeakMap<Request, BeeGameUserContext>()
   const requestUserResolver =
     options.currentUserResolver ?? createConfiguredUserResolver()
-  const getCurrentUser = (request?: Request) =>
-    options.currentUser ??
-      (request ? requestUsers.get(request) : undefined) ??
-      getLocalUserContext()
+  const getCurrentUser = (request?: Request): BeeGameUserContext => {
+    const user = options.currentUser ?? (request ? requestUsers.get(request) : undefined)
+    if (!user) throw new Error('Authenticated BeeGame user is required')
+    return user
+  }
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
   const beeGameSessions = new BeeGameSessionManager(
@@ -198,11 +198,13 @@ export function createAgentWorkflowApp(
 
   app.use('/api/*', cors())
   app.use('/api/*', async (c, next) => {
-    if (options.currentUser || !requestUserResolver) {
+    if (options.currentUser) {
       await next()
       return
     }
-    const user = await requestUserResolver(c.req.raw)
+    const user = requestUserResolver
+      ? await requestUserResolver(c.req.raw)
+      : undefined
     if (!user) {
       return c.json({
         error: 'Unauthorized',

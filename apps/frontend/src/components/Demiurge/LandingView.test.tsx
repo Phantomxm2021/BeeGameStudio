@@ -15,10 +15,18 @@ const { runIdeaIntake } = vi.hoisted(() => ({
 const { getCreditBalance } = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
 }));
-const { clearSupabaseSession, isSupabaseAuthConfigured, signInWithSupabasePassword } = vi.hoisted(() => ({
+const {
+    clearSupabaseSession,
+    isSupabaseAuthConfigured,
+    signInWithSupabaseOAuth,
+    signInWithSupabasePassword,
+    signUpWithSupabasePassword,
+} = vi.hoisted(() => ({
     clearSupabaseSession: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
+    signInWithSupabaseOAuth: vi.fn(),
     signInWithSupabasePassword: vi.fn(),
+    signUpWithSupabasePassword: vi.fn(),
 }));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
@@ -110,7 +118,9 @@ vi.mock('../../services/creditsApi', () => ({
 vi.mock('../../services/supabaseAuthApi', () => ({
     clearSupabaseSession,
     isSupabaseAuthConfigured,
+    signInWithSupabaseOAuth,
     signInWithSupabasePassword,
+    signUpWithSupabasePassword,
 }));
 
 vi.mock('./DemiurgeLogo', () => ({
@@ -238,12 +248,20 @@ beforeEach(() => {
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
     clearSupabaseSession.mockReset();
+    signInWithSupabaseOAuth.mockReset();
     signInWithSupabasePassword.mockReset();
     signInWithSupabasePassword.mockResolvedValue({
         accessToken: 'supabase-access-token',
         refreshToken: 'supabase-refresh-token',
         expiresAt: Date.now() + 3600_000,
         user: { id: 'user-1', email: 'player@example.com' },
+    });
+    signUpWithSupabasePassword.mockReset();
+    signUpWithSupabasePassword.mockResolvedValue({
+        accessToken: 'signup-access-token',
+        refreshToken: 'signup-refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        user: { id: 'user-2', email: 'new@example.com' },
     });
     terminalRenderState.renderCount = 0;
 });
@@ -356,6 +374,48 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: '登录 / 注册 BeeGame' })).toHaveAttribute('data-surface', 'frosted-glass');
+        expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '使用 Google 登录' })).toBeInTheDocument();
+    });
+
+    it('switches to registration and creates a Supabase account', async () => {
+        mockCurrentUser = null;
+        mockLoadCurrentUser.mockImplementation(async () => {
+            if (signUpWithSupabasePassword.mock.calls.length > 0) {
+                mockCurrentUser = {
+                    id: 'user-2',
+                    role: 'owner',
+                    permissions: ['project.create', 'project.delete'],
+                };
+            }
+        });
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'new@example.com' } });
+        fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+        fireEvent.click(screen.getByRole('button', { name: '注册并继续' }));
+
+        await waitFor(() => expect(signUpWithSupabasePassword).toHaveBeenCalledWith({
+            email: 'new@example.com',
+            password: 'secret-password',
+        }));
+        expect(mockLoadCurrentUser).toHaveBeenCalled();
+    });
+
+    it('starts Supabase OAuth from third-party login buttons', async () => {
+        mockCurrentUser = null;
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('button', { name: '使用 GitHub 登录' }));
+
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
     });
 
     it('clears the Supabase session and reloads the current user when signing out', async () => {

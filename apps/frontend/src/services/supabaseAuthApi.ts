@@ -15,6 +15,8 @@ export type SupabasePasswordSignInInput = {
   password: string;
 };
 
+export type SupabaseOAuthProvider = 'github' | 'google';
+
 const SESSION_STORAGE_KEY = 'beegame_supabase_session';
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
@@ -59,6 +61,66 @@ export async function signInWithSupabasePassword(
   const session = toSupabaseSession(await response.json());
   saveSupabaseSession(session);
   return session;
+}
+
+export async function signUpWithSupabasePassword(
+  input: SupabasePasswordSignInInput,
+): Promise<BeeGameSupabaseSession | null> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/signup`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: input.email.trim(),
+      password: input.password,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await readSupabaseError(response));
+  }
+  const value = await response.json();
+  if (!isRecord(value) || typeof value.access_token !== 'string') return null;
+  const session = toSupabaseSession(value);
+  saveSupabaseSession(session);
+  return session;
+}
+
+export function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): void {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
+  url.searchParams.set('provider', provider);
+  url.searchParams.set('redirect_to', window.location.origin);
+  window.location.assign(url.toString());
+}
+
+export function consumeSupabaseRedirectSession(): boolean {
+  const hash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  if (!hash) return false;
+  const params = new URLSearchParams(hash);
+  const accessToken = params.get('access_token')?.trim() || '';
+  if (!accessToken) return false;
+  const expiresIn = Number.parseInt(params.get('expires_in') || '3600', 10);
+  saveSupabaseSession({
+    accessToken,
+    refreshToken: params.get('refresh_token') || undefined,
+    expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 3600) - 30) * 1000,
+    user: { id: 'oauth' },
+  });
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+  return true;
 }
 
 export function clearSupabaseSession(): void {
