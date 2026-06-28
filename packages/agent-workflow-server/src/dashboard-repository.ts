@@ -41,6 +41,7 @@ import type {
 } from './beegame/asset-contracts'
 import type {
   BeeGameSessionInternalMetadata,
+  BeeGameSessionCreditBackend,
 } from './beegame/session-manager'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import {
@@ -434,6 +435,26 @@ export class DashboardRepository {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  createSessionCreditBackend(): BeeGameSessionCreditBackend {
+    if (this.supabaseStore) {
+      return {
+        reserveCredits: (userId, input) =>
+          this.supabaseStore!.reserveCredits(userId, input),
+        settleCreditReservation: (userId, input) =>
+          this.supabaseStore!.settleCreditReservation(userId, input),
+        refundCreditReservation: (userId, input) =>
+          this.supabaseStore!.refundCreditReservation(userId, input),
+      }
+    }
+    return {
+      reserveCredits: (userId, input) => reserveCredits(userId, input),
+      settleCreditReservation: (userId, input) =>
+        settleCreditReservation(userId, input),
+      refundCreditReservation: (userId, input) =>
+        refundCreditReservation(userId, input),
+    }
   }
 
   async appendAuditEvent(

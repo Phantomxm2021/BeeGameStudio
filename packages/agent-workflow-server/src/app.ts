@@ -76,7 +76,6 @@ import {
 } from './local-runtime-service'
 import {
   createSupabaseDashboardStoreFromEnv,
-  type SupabaseDashboardStore,
 } from './supabase-dashboard-store'
 
 type JsonObject = Record<string, unknown>
@@ -176,16 +175,7 @@ export function createAgentWorkflowApp(
     dashboardDataRoot,
     (userDataRoot, userId) =>
       dashboardRepository.getRuntimeEnv(userDataRoot, userId),
-    supabaseStore
-      ? {
-          reserveCredits: (userId, creditOptions) =>
-            supabaseStore.reserveCredits(userId, creditOptions),
-          settleCreditReservation: (userId, creditOptions) =>
-            supabaseStore.settleCreditReservation(userId, creditOptions),
-          refundCreditReservation: (userId, creditOptions) =>
-            supabaseStore.refundCreditReservation(userId, creditOptions),
-        }
-      : undefined,
+    dashboardRepository.createSessionCreditBackend(),
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
