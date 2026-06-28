@@ -25,6 +25,13 @@ import {
   type CreditReservation,
 } from './credit-store'
 import {
+  deleteMcpServer,
+  listMcpServers,
+  upsertMcpServer,
+  type McpServerConfig,
+  type McpServerInput,
+} from './mcp-servers-store'
+import {
   loadRuntimeSettingsConfig,
   mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
@@ -88,6 +95,41 @@ export class DashboardRepository {
     return this.supabaseStore
       ? this.supabaseStore.getCreditBalance(user.id)
       : getCreditBalance(user.id, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async listMcpServers(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<McpServerConfig[]> {
+    return this.supabaseStore
+      ? this.supabaseStore.listMcpServers(user.id)
+      : listMcpServers({
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async upsertMcpServer(
+    request: Request,
+    user: BeeGameUserContext,
+    input: McpServerInput,
+  ): Promise<McpServerConfig> {
+    return this.supabaseStore
+      ? this.supabaseStore.upsertMcpServer(user.id, input)
+      : upsertMcpServer(input, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async deleteMcpServer(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<boolean> {
+    return this.supabaseStore
+      ? this.supabaseStore.deleteMcpServer(user.id, id)
+      : deleteMcpServer(id, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }

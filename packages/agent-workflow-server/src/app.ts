@@ -38,10 +38,7 @@ import {
   syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from './runtime-settings-store'
 import {
-  deleteMcpServer,
   discoverMcpServers,
-  listMcpServers,
-  upsertMcpServer,
   type McpServerScope,
   type McpServerTransport,
 } from './mcp-servers-store'
@@ -578,11 +575,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(supabaseStore
-      ? await supabaseStore.listMcpServers(user.id)
-      : listMcpServers({
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        }))
+    return c.json(await dashboardRepository.listMcpServers(c.req.raw, user))
   })
 
   app.get('/api/mcp-servers/discover', c => {
@@ -597,9 +590,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const user = getCurrentUser(c.req.raw)
-    const servers = supabaseStore
-      ? await supabaseStore.listMcpServers(user.id)
-      : listMcpServers({ dataDir: getCurrentUserDataRoot(c.req.raw) })
+    const servers = await dashboardRepository.listMcpServers(c.req.raw, user)
     return c.json(await discoverActiveMcpServers(servers, {
       ports: parsePortList(c.req.query('ports')),
     }))
@@ -621,11 +612,11 @@ export function createAgentWorkflowApp(
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
-    const saved = supabaseStore
-      ? await supabaseStore.upsertMcpServer(user.id, toMcpServerInput(body))
-      : upsertMcpServer(toMcpServerInput(body), {
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        })
+    const saved = await dashboardRepository.upsertMcpServer(
+      c.req.raw,
+      user,
+      toMcpServerInput(body),
+    )
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
@@ -647,17 +638,14 @@ export function createAgentWorkflowApp(
     const error = validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
-    const saved = supabaseStore
-      ? await supabaseStore.upsertMcpServer(user.id, {
+    const saved = await dashboardRepository.upsertMcpServer(
+      c.req.raw,
+      user,
+      {
           ...toMcpServerInput(body),
           id: c.req.param('id'),
-        })
-      : upsertMcpServer({
-          ...toMcpServerInput(body),
-          id: c.req.param('id'),
-        }, {
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        })
+      },
+    )
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
@@ -676,11 +664,11 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    const deleted = supabaseStore
-      ? await supabaseStore.deleteMcpServer(user.id, c.req.param('id'))
-      : deleteMcpServer(c.req.param('id'), {
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        })
+    const deleted = await dashboardRepository.deleteMcpServer(
+      c.req.raw,
+      user,
+      c.req.param('id'),
+    )
     if (deleted) {
       await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
