@@ -27,6 +27,7 @@ import type {
   AppendAuditEventInput,
   BeeGameAuditEvent,
 } from './audit-events-store'
+import type { BeeGameAssetManifest } from './beegame/asset-contracts'
 import type {
   WebFetchAdapter,
   WebSearchAdapter,
@@ -147,6 +148,15 @@ type SupabaseAuditEventRow = {
   action: string
   metadata: JsonObject
   created_at: string
+}
+
+type SupabaseAssetRow = {
+  id: string
+  project_id: string
+  owner_id: string
+  manifest: JsonObject
+  created_at: string
+  updated_at: string
 }
 
 export function createSupabaseDashboardStoreFromEnv(
@@ -615,6 +625,35 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_audit_events?actor_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
     return rows.map(rowToAuditEvent)
+  }
+
+  async upsertAssetManifest(
+    ownerId: string,
+    projectId: string,
+    manifest: BeeGameAssetManifest,
+  ): Promise<BeeGameAssetManifest> {
+    const row = await this.upsert<SupabaseAssetRow>(
+      'beegame_assets',
+      {
+        id: projectId,
+        owner_id: ownerId,
+        project_id: projectId,
+        manifest: manifest as unknown as JsonObject,
+        updated_at: new Date().toISOString(),
+      },
+      'id',
+    )
+    return normalizeAssetManifest(row.manifest)
+  }
+
+  async loadAssetManifest(
+    ownerId: string,
+    projectId: string,
+  ): Promise<BeeGameAssetManifest | undefined> {
+    const rows = await this.rest<SupabaseAssetRow[]>(
+      `/rest/v1/beegame_assets?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&select=manifest&limit=1`,
+    )
+    return rows[0] ? normalizeAssetManifest(rows[0].manifest) : undefined
   }
 
   private async getMcpServer(
@@ -1131,6 +1170,20 @@ function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {
       ? { metadata: eventMetadata }
       : {}),
     createdAt: row.created_at,
+  }
+}
+
+function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
+  if (!isObject(value)) return { version: 1, slots: [] }
+  const rawSlots = Array.isArray(value.slots) ? value.slots : []
+  return {
+    version: Number.isInteger(value.version) ? Number(value.version) : 1,
+    ...(isObject(value.project_target)
+      ? { project_target: value.project_target as BeeGameAssetManifest['project_target'] }
+      : {}),
+    slots: rawSlots
+      .filter(isObject)
+      .map(slot => slot as BeeGameAssetManifest['slots'][number]),
   }
 }
 

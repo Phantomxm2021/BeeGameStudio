@@ -1504,8 +1504,25 @@ function registerBeeGameSessionRoutes(
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
-      return c.json(await readBeeGameAssetManifest(workspacePath))
+      const manifest = await readBeeGameAssetManifest(workspacePath)
+      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
+      if (options.supabaseStore && projectId) {
+        await options.supabaseStore.upsertAssetManifest(
+          options.getCurrentUser(c.req.raw).id,
+          projectId,
+          manifest,
+        )
+      }
+      return c.json(manifest)
     } catch (err) {
+      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
+      if (options.supabaseStore && projectId) {
+        const manifest = await options.supabaseStore.loadAssetManifest(
+          options.getCurrentUser(c.req.raw).id,
+          projectId,
+        )
+        if (manifest) return c.json(manifest)
+      }
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1521,11 +1538,20 @@ function registerBeeGameSessionRoutes(
     const file = form.get('file')
     if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
     try {
-      return c.json(await uploadBeeGameAsset(
+      const result = await uploadBeeGameAsset(
         workspacePath,
         c.req.param('slotId'),
         file,
-      ))
+      )
+      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
+      if (options.supabaseStore && projectId) {
+        await options.supabaseStore.upsertAssetManifest(
+          options.getCurrentUser(c.req.raw).id,
+          projectId,
+          result.manifest,
+        )
+      }
+      return c.json(result)
     } catch (err) {
       const message = toErrorMessage(err)
       return c.json(

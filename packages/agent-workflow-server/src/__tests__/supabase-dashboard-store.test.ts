@@ -20,6 +20,7 @@ describe('SupabaseDashboardStore', () => {
     }
     const creditLedger: Array<Record<string, unknown>> = []
     const auditEvents: Array<Record<string, unknown>> = []
+    const assetRows: Array<Record<string, unknown>> = []
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
       calls.push({
@@ -113,6 +114,28 @@ describe('SupabaseDashboardStore', () => {
           return Response.json([row])
         }
         return Response.json(auditEvents)
+      }
+
+      if (requestUrl.includes('/beegame_assets')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          const existingIndex = assetRows.findIndex(row => row.id === body.id)
+          const row = {
+            created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
+            ...body,
+          }
+          if (existingIndex >= 0) {
+            assetRows[existingIndex] = row
+          } else {
+            assetRows.push(row)
+          }
+          return Response.json([row])
+        }
+        const projectId = decodeURIComponent(
+          requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
+        )
+        return Response.json(assetRows.filter(row => row.project_id === projectId))
       }
 
       if (requestUrl.includes('/beegame_workspaces')) {
@@ -285,6 +308,30 @@ describe('SupabaseDashboardStore', () => {
         targetId: ownerId,
       }),
     ])
+    await expect(store.upsertAssetManifest(ownerId, 'project_1', {
+      version: 1,
+      project_target: { integration_mode: 'filesystem' },
+      slots: [{
+        id: 'main_logo',
+        name: 'Main logo',
+        type: 'image_2d',
+        status: 'uploaded',
+        uploaded_files: ['public/assets/logo.png'],
+      }],
+    })).resolves.toEqual(expect.objectContaining({
+      version: 1,
+      slots: [
+        expect.objectContaining({
+          id: 'main_logo',
+          uploaded_files: ['public/assets/logo.png'],
+        }),
+      ],
+    }))
+    expect(await store.loadAssetManifest(ownerId, 'project_1')).toEqual(
+      expect.objectContaining({
+        slots: [expect.objectContaining({ id: 'main_logo' })],
+      }),
+    )
 
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_model_configs'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_runtime_settings'))).toBe(true)
@@ -300,5 +347,6 @@ describe('SupabaseDashboardStore', () => {
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_audit_events'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_assets'))).toBe(true)
   })
 })
