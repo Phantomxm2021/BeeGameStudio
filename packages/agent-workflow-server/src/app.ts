@@ -22,6 +22,7 @@ import {
 import {
   readBeeGameAssetManifest,
   uploadBeeGameAsset,
+  type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -836,11 +837,38 @@ export function createAgentWorkflowApp(
     beeGamePreviews,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
-      supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
+      persistSessionMetadata: (request, metadata) =>
+        dashboardRepository.upsertSessionMetadata(getCurrentUser(request), metadata),
+      deleteSessionMetadata: (request, metadata, sessionId) =>
+        dashboardRepository.deleteSessionMetadata(
+          getCurrentUser(request),
+          metadata,
+          sessionId,
+        ),
+      persistPreviewSnapshot: (request, metadata, snapshot) =>
+        dashboardRepository.upsertPreviewSnapshot(
+          getCurrentUser(request),
+          metadata,
+          snapshot,
+        ),
+      persistAssetManifest: (request, metadata, manifest) =>
+        dashboardRepository.upsertAssetManifest(
+          getCurrentUser(request),
+          metadata,
+          manifest,
+        ),
+      loadAssetManifest: (request, metadata) =>
+        dashboardRepository.loadAssetManifest(getCurrentUser(request), metadata),
+      uploadAssetFile: (request, metadata, file) =>
+        dashboardRepository.uploadAssetFile(
+          getCurrentUser(request),
+          metadata,
+          file,
+        ),
     },
   )
   registerBeeGameSessionRoutes(
@@ -850,11 +878,38 @@ export function createAgentWorkflowApp(
     beeGamePreviews,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
-      supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
+      persistSessionMetadata: (request, metadata) =>
+        dashboardRepository.upsertSessionMetadata(getCurrentUser(request), metadata),
+      deleteSessionMetadata: (request, metadata, sessionId) =>
+        dashboardRepository.deleteSessionMetadata(
+          getCurrentUser(request),
+          metadata,
+          sessionId,
+        ),
+      persistPreviewSnapshot: (request, metadata, snapshot) =>
+        dashboardRepository.upsertPreviewSnapshot(
+          getCurrentUser(request),
+          metadata,
+          snapshot,
+        ),
+      persistAssetManifest: (request, metadata, manifest) =>
+        dashboardRepository.upsertAssetManifest(
+          getCurrentUser(request),
+          metadata,
+          manifest,
+        ),
+      loadAssetManifest: (request, metadata) =>
+        dashboardRepository.loadAssetManifest(getCurrentUser(request), metadata),
+      uploadAssetFile: (request, metadata, file) =>
+        dashboardRepository.uploadAssetFile(
+          getCurrentUser(request),
+          metadata,
+          file,
+        ),
     },
   )
 
@@ -1290,13 +1345,40 @@ function registerBeeGameSessionRoutes(
   beeGamePreviews: BeeGamePreviewManager,
   options: {
     defaultWorkspacePath?: string
-    supabaseStore?: SupabaseDashboardStore
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getUserDataRoot: (request?: Request) => string
     appendAuditEvent: (
       request: Request,
       input: AppendAuditEventInput,
     ) => Promise<void>
+    persistSessionMetadata: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+    ) => Promise<void>
+    deleteSessionMetadata: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+      sessionId: string,
+    ) => Promise<void>
+    persistPreviewSnapshot: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+      snapshot: BeeGamePreviewSnapshot,
+    ) => Promise<void>
+    persistAssetManifest: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+      manifest: BeeGameAssetManifest,
+    ) => Promise<BeeGameAssetManifest | undefined>
+    loadAssetManifest: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+    ) => Promise<BeeGameAssetManifest | undefined>
+    uploadAssetFile: (
+      request: Request,
+      metadata: ReturnType<BeeGameSessionManager['metadata']>,
+      file: File,
+    ) => Promise<string | undefined>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -1350,11 +1432,9 @@ function registerBeeGameSessionRoutes(
           userId: currentUser.id,
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
-      await persistSupabaseSessionMetadata(
-        options.supabaseStore,
-        currentUser.id,
-        beeGameSessions,
-        session.id,
+      await options.persistSessionMetadata(
+        c.req.raw,
+        beeGameSessions.metadata(session.id),
       )
       return c.json(session)
     } catch (err) {
@@ -1483,24 +1563,18 @@ function registerBeeGameSessionRoutes(
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
       const manifest = await readBeeGameAssetManifest(workspacePath)
-      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
-      if (options.supabaseStore && projectId) {
-        await options.supabaseStore.upsertAssetManifest(
-          options.getCurrentUser(c.req.raw).id,
-          projectId,
-          manifest,
-        )
-      }
+      await options.persistAssetManifest(
+        c.req.raw,
+        beeGameSessions.metadata(c.req.param('id')),
+        manifest,
+      )
       return c.json(manifest)
     } catch (err) {
-      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
-      if (options.supabaseStore && projectId) {
-        const manifest = await options.supabaseStore.loadAssetManifest(
-          options.getCurrentUser(c.req.raw).id,
-          projectId,
-        )
-        if (manifest) return c.json(manifest)
-      }
+      const manifest = await options.loadAssetManifest(
+        c.req.raw,
+        beeGameSessions.metadata(c.req.param('id')),
+      )
+      if (manifest) return c.json(manifest)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1516,30 +1590,19 @@ function registerBeeGameSessionRoutes(
     const file = form.get('file')
     if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
     try {
-      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
-      const currentUser = options.getCurrentUser(c.req.raw)
-      const uploadedUrl = options.supabaseStore && projectId
-        ? await options.supabaseStore.uploadAssetFile({
-            ownerId: currentUser.id,
-            projectId,
-            fileName: file.name,
-            contentType: file.type,
-            body: file,
-          })
-        : undefined
+      const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
+      const uploadedUrl = await options.uploadAssetFile(
+        c.req.raw,
+        sessionMetadata,
+        file,
+      )
       const result = await uploadBeeGameAsset(
         workspacePath,
         c.req.param('slotId'),
         file,
         uploadedUrl,
       )
-      if (options.supabaseStore && projectId) {
-        await options.supabaseStore.upsertAssetManifest(
-          currentUser.id,
-          projectId,
-          result.manifest,
-        )
-      }
+      await options.persistAssetManifest(c.req.raw, sessionMetadata, result.manifest)
       return c.json(result)
     } catch (err) {
       const message = toErrorMessage(err)
@@ -1607,11 +1670,9 @@ function registerBeeGameSessionRoutes(
         sessionId: c.req.param('id'),
         workspacePath,
       })
-      await persistSupabasePreviewSnapshot(
-        options.supabaseStore,
-        options.getCurrentUser(c.req.raw).id,
-        beeGameSessions,
-        c.req.param('id'),
+      await options.persistPreviewSnapshot(
+        c.req.raw,
+        beeGameSessions.metadata(c.req.param('id')),
         snapshot,
       )
       return c.json(snapshot)
@@ -1635,11 +1696,9 @@ function registerBeeGameSessionRoutes(
         sessionId: c.req.param('id'),
         workspacePath,
       })
-      await persistSupabasePreviewSnapshot(
-        options.supabaseStore,
-        options.getCurrentUser(c.req.raw).id,
-        beeGameSessions,
-        c.req.param('id'),
+      await options.persistPreviewSnapshot(
+        c.req.raw,
+        beeGameSessions.metadata(c.req.param('id')),
         snapshot,
       )
       return c.json(snapshot)
@@ -1656,11 +1715,9 @@ function registerBeeGameSessionRoutes(
     const workspacePath = c.req.query('workspacePath')
     try {
       const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
-      await persistSupabasePreviewSnapshot(
-        options.supabaseStore,
-        options.getCurrentUser(c.req.raw).id,
-        beeGameSessions,
-        c.req.param('id'),
+      await options.persistPreviewSnapshot(
+        c.req.raw,
+        beeGameSessions.metadata(c.req.param('id')),
         snapshot,
       )
       return c.json(snapshot)
@@ -1745,11 +1802,9 @@ function registerBeeGameSessionRoutes(
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const session = beeGameSessions.stop(c.req.param('id'))
-      await persistSupabaseSessionMetadata(
-        options.supabaseStore,
-        options.getCurrentUser(c.req.raw).id,
-        beeGameSessions,
-        session.id,
+      await options.persistSessionMetadata(
+        c.req.raw,
+        beeGameSessions.metadata(session.id),
       )
       return c.json(session)
     } catch (err) {
@@ -1769,12 +1824,11 @@ function registerBeeGameSessionRoutes(
       const result = await beeGameSessions.delete(c.req.param('id'), {
         deleteArtifacts,
       })
-      if (options.supabaseStore && sessionMetadata?.projectId) {
-        await options.supabaseStore.deleteSession(
-          options.getCurrentUser(c.req.raw).id,
-          c.req.param('id'),
-        )
-      }
+      await options.deleteSessionMetadata(
+        c.req.raw,
+        sessionMetadata,
+        c.req.param('id'),
+      )
       await options.appendAuditEvent(c.req.raw, {
         actorId: options.getCurrentUser(c.req.raw).id,
         action: 'beegame_session.deleted',
@@ -1866,40 +1920,6 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
       ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
       : {}),
   }
-}
-
-async function persistSupabaseSessionMetadata(
-  supabaseStore: SupabaseDashboardStore | undefined,
-  ownerId: string,
-  beeGameSessions: BeeGameSessionManager,
-  sessionId: string,
-): Promise<void> {
-  if (!supabaseStore) return
-  const metadata = beeGameSessions.metadata(sessionId)
-  if (!metadata?.projectId) return
-  await supabaseStore.upsertSession(ownerId, {
-    id: metadata.id,
-    projectId: metadata.projectId,
-    workspacePath: metadata.workspacePath,
-    status: metadata.status,
-    transcriptPath: metadata.transcriptPath,
-    ...(metadata.modelConfigId ? { modelConfigId: metadata.modelConfigId } : {}),
-    createdAt: metadata.createdAt,
-    updatedAt: metadata.updatedAt,
-  })
-}
-
-async function persistSupabasePreviewSnapshot(
-  supabaseStore: SupabaseDashboardStore | undefined,
-  ownerId: string,
-  beeGameSessions: BeeGameSessionManager,
-  sessionId: string,
-  snapshot: BeeGamePreviewSnapshot,
-): Promise<void> {
-  if (!supabaseStore) return
-  const metadata = beeGameSessions.metadata(sessionId)
-  if (!metadata?.projectId) return
-  await supabaseStore.upsertPreviewSnapshot(ownerId, metadata.projectId, snapshot)
 }
 
 function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectMetadata['runtime_snapshot']> {

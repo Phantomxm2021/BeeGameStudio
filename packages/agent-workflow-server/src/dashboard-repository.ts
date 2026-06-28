@@ -36,6 +36,13 @@ import {
   getBeeGameProjectDatabasePath,
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
+import type {
+  BeeGameAssetManifest,
+} from './beegame/asset-contracts'
+import type {
+  BeeGameSessionInternalMetadata,
+} from './beegame/session-manager'
+import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import {
   loadRuntimeSettingsConfig,
   mapRuntimeSettingsToEnv,
@@ -165,6 +172,81 @@ export class DashboardRepository {
     return this.supabaseStore
       ? this.supabaseStore.deleteProject(user.id, id)
       : this.getProjectStore(request).deleteProject(id)
+  }
+
+  async upsertSessionMetadata(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+  ): Promise<void> {
+    if (!this.supabaseStore || !metadata?.projectId) return
+    await this.supabaseStore.upsertSession(user.id, {
+      id: metadata.id,
+      projectId: metadata.projectId,
+      workspacePath: metadata.workspacePath,
+      status: metadata.status,
+      transcriptPath: metadata.transcriptPath,
+      ...(metadata.modelConfigId ? { modelConfigId: metadata.modelConfigId } : {}),
+      createdAt: metadata.createdAt,
+      updatedAt: metadata.updatedAt,
+    })
+  }
+
+  async deleteSessionMetadata(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+    sessionId: string,
+  ): Promise<void> {
+    if (!this.supabaseStore || !metadata?.projectId) return
+    await this.supabaseStore.deleteSession(user.id, sessionId)
+  }
+
+  async upsertPreviewSnapshot(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+    snapshot: BeeGamePreviewSnapshot,
+  ): Promise<void> {
+    if (!this.supabaseStore || !metadata?.projectId) return
+    await this.supabaseStore.upsertPreviewSnapshot(
+      user.id,
+      metadata.projectId,
+      snapshot,
+    )
+  }
+
+  async upsertAssetManifest(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+    manifest: BeeGameAssetManifest,
+  ): Promise<BeeGameAssetManifest | undefined> {
+    if (!this.supabaseStore || !metadata?.projectId) return undefined
+    return this.supabaseStore.upsertAssetManifest(
+      user.id,
+      metadata.projectId,
+      manifest,
+    )
+  }
+
+  async loadAssetManifest(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+  ): Promise<BeeGameAssetManifest | undefined> {
+    if (!this.supabaseStore || !metadata?.projectId) return undefined
+    return this.supabaseStore.loadAssetManifest(user.id, metadata.projectId)
+  }
+
+  async uploadAssetFile(
+    user: BeeGameUserContext,
+    metadata: BeeGameSessionInternalMetadata | undefined,
+    file: File,
+  ): Promise<string | undefined> {
+    if (!this.supabaseStore || !metadata?.projectId) return undefined
+    return this.supabaseStore.uploadAssetFile({
+      ownerId: user.id,
+      projectId: metadata.projectId,
+      fileName: file.name,
+      contentType: file.type,
+      body: file,
+    })
   }
 
   async listMcpServers(
