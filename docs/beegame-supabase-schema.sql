@@ -4,6 +4,13 @@
 
 create extension if not exists pgcrypto;
 
+insert into storage.buckets (id, name, public)
+values
+  ('avatars', 'avatars', true),
+  ('beegame-assets', 'beegame-assets', true)
+on conflict (id) do update
+set public = excluded.public;
+
 create table if not exists public.beegame_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text,

@@ -1584,15 +1584,26 @@ function registerBeeGameSessionRoutes(
     const file = form.get('file')
     if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
     try {
+      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
+      const currentUser = options.getCurrentUser(c.req.raw)
+      const uploadedUrl = options.supabaseStore && projectId
+        ? await options.supabaseStore.uploadAssetFile({
+            ownerId: currentUser.id,
+            projectId,
+            fileName: file.name,
+            contentType: file.type,
+            body: file,
+          })
+        : undefined
       const result = await uploadBeeGameAsset(
         workspacePath,
         c.req.param('slotId'),
         file,
+        uploadedUrl,
       )
-      const projectId = beeGameSessions.metadata(c.req.param('id'))?.projectId
       if (options.supabaseStore && projectId) {
         await options.supabaseStore.upsertAssetManifest(
-          options.getCurrentUser(c.req.raw).id,
+          currentUser.id,
           projectId,
           result.manifest,
         )

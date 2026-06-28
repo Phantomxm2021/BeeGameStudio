@@ -3932,6 +3932,130 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('uploads asset file bodies to Supabase Storage when configured', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalAssetBucket = process.env.BEEGAME_SUPABASE_ASSET_BUCKET
+    const originalFetch = globalThis.fetch
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-assets-storage-'))
+    const workspace = join(projectsRoot, 'asset-storage-project')
+    const assetRows: Array<Record<string, unknown>> = []
+    const storageUploads: Array<{ url: string; contentType: string | null; text: string }> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      process.env.BEEGAME_SUPABASE_ASSET_BUCKET = 'beegame-assets'
+      globalThis.fetch = (async (input, init) => {
+        const requestUrl = String(input)
+        if (requestUrl.includes('/storage/v1/object/beegame-assets/')) {
+          storageUploads.push({
+            url: requestUrl,
+            contentType: new Headers(init?.headers).get('content-type'),
+            text: await new Response(init?.body as BodyInit).text(),
+          })
+          return Response.json({ Key: requestUrl.split('/storage/v1/object/')[1] })
+        }
+        if (requestUrl.includes('/rest/v1/beegame_sessions')) {
+          if (init?.method === 'POST') return Response.json([JSON.parse(String(init.body))])
+          return Response.json([])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_assets')) {
+          if (init?.method === 'POST') {
+            const row = JSON.parse(String(init.body)) as Record<string, unknown>
+            assetRows.push(row)
+            return Response.json([{
+              created_at: '2026-06-27T00:00:00.000Z',
+              updated_at: '2026-06-27T00:00:00.000Z',
+              ...row,
+            }])
+          }
+          return Response.json(assetRows)
+        }
+        return new Response('Not found', { status: 404 })
+      }) as typeof fetch
+      const app = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        sessionRunner: createFakeRunner().runner,
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000002',
+          role: 'owner',
+        },
+      })
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(workspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({
+          version: 1,
+          project_target: { integration_mode: 'filesystem' },
+          slots: [{
+            id: 'main_logo',
+            name: 'Main logo',
+            target: { path: 'public/assets/logo.png' },
+          }],
+        }),
+      )
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          projectId: 'project_asset_storage',
+        }),
+      })
+      const session = await sessionRes.json()
+      const form = new FormData()
+      form.set('file', new File(['logo-bytes'], 'logo.png', { type: 'image/png' }))
+
+      const res = await app.request(
+        `/api/beegame-sessions/${session.id}/assets/main_logo/upload?workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'POST', body: form },
+      )
+      const payload = await res.json()
+      const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
+
+      expect(res.status).toBe(200)
+      expect(storageUploads).toEqual([
+        expect.objectContaining({
+          contentType: 'image/png',
+          text: 'logo-bytes',
+        }),
+      ])
+      expect(storageUploads[0]?.url).toContain(
+        '/storage/v1/object/beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
+      )
+      expect(payload.slot.uploaded_urls).toEqual([
+        expect.stringContaining(
+          '/storage/v1/object/public/beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
+        ),
+      ])
+      expect(manifest.slots[0].uploaded_urls).toEqual(payload.slot.uploaded_urls)
+      expect(assetRows.at(-1)?.manifest).toEqual(expect.objectContaining({
+        slots: [expect.objectContaining({
+          id: 'main_logo',
+          uploaded_urls: payload.slot.uploaded_urls,
+        })],
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+      }
+      if (originalAssetBucket === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ASSET_BUCKET
+      } else {
+        process.env.BEEGAME_SUPABASE_ASSET_BUCKET = originalAssetBucket
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('packages the session workspace as a downloadable zip without dependencies', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner()

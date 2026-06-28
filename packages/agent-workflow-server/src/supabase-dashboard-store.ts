@@ -46,6 +46,7 @@ type Env = Record<string, string | undefined>
 type SupabaseConfig = {
   url: string
   serviceRoleKey: string
+  assetBucket?: string
   fetchImpl?: typeof fetch
 }
 
@@ -196,12 +197,21 @@ export function createSupabaseDashboardStoreFromEnv(
     ''
   ).trim()
   if (!url || !serviceRoleKey) return undefined
-  return new SupabaseDashboardStore({ url, serviceRoleKey })
+  return new SupabaseDashboardStore({
+    url,
+    serviceRoleKey,
+    assetBucket: (
+      env.BEEGAME_SUPABASE_ASSET_BUCKET ??
+      env.SUPABASE_ASSET_BUCKET ??
+      ''
+    ).trim() || undefined,
+  })
 }
 
 export class SupabaseDashboardStore {
   private readonly baseUrl: string
   private readonly serviceRoleKey: string
+  private readonly assetBucket: string
   private readonly fetchImpl: typeof fetch
   private readonly secretKey: Buffer
   private readonly workspaceIds = new Map<string, string>()
@@ -209,6 +219,7 @@ export class SupabaseDashboardStore {
   constructor(config: SupabaseConfig) {
     this.baseUrl = config.url.replace(/\/+$/, '')
     this.serviceRoleKey = config.serviceRoleKey
+    this.assetBucket = config.assetBucket || 'beegame-assets'
     this.fetchImpl = config.fetchImpl ?? fetch
     this.secretKey = deriveSecretKey(config.serviceRoleKey)
   }
@@ -688,6 +699,41 @@ export class SupabaseDashboardStore {
     return rows[0] ? normalizeAssetManifest(rows[0].manifest) : undefined
   }
 
+  async uploadAssetFile(input: {
+    ownerId: string
+    projectId: string
+    fileName: string
+    contentType?: string
+    body: BodyInit
+  }): Promise<string> {
+    const objectPath = [
+      'projects',
+      safeStoragePathSegment(input.ownerId),
+      safeStoragePathSegment(input.projectId),
+      `${Date.now()}-${safeStorageFileName(input.fileName)}`,
+    ].join('/')
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/storage/v1/object/${encodeURIComponent(this.assetBucket)}/${objectPath}`,
+      {
+        method: 'PUT',
+        headers: {
+          apikey: this.serviceRoleKey,
+          authorization: `Bearer ${this.serviceRoleKey}`,
+          'content-type': input.contentType || 'application/octet-stream',
+          'x-upsert': 'true',
+        },
+        body: input.body,
+      },
+    )
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(
+        `Supabase storage upload failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+      )
+    }
+    return `${this.baseUrl}/storage/v1/object/public/${encodeURIComponent(this.assetBucket)}/${objectPath}`
+  }
+
   async upsertPreviewSnapshot(
     ownerId: string,
     projectId: string,
@@ -898,6 +944,16 @@ export class SupabaseDashboardStore {
 
 function q(value: string): string {
   return encodeURIComponent(value)
+}
+
+function safeStoragePathSegment(value: string): string {
+  const segment = value.trim().replace(/[^A-Za-z0-9_.:-]+/g, '_')
+  return segment || 'unknown'
+}
+
+function safeStorageFileName(value: string): string {
+  const filename = value.trim().split(/[\\/]/).pop() || 'asset'
+  return filename.replace(/[^A-Za-z0-9_.-]+/g, '_') || 'asset'
 }
 
 function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {

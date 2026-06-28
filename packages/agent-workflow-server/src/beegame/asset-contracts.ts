@@ -33,6 +33,7 @@ export type BeeGameAssetSlot = {
   integration_provider?: BeeGameAssetIntegrationProvider
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed'
   uploaded_files?: string[]
+  uploaded_urls?: string[]
   updated_at?: string
 }
 
@@ -68,6 +69,7 @@ export async function uploadBeeGameAsset(
   workspacePath: string,
   slotId: string,
   file: File,
+  uploadedUrl?: string,
 ): Promise<BeeGameAssetUploadResult> {
   const root = normalizeWorkspacePath(workspacePath)
   const manifest = await readBeeGameAssetManifest(root)
@@ -85,6 +87,9 @@ export async function uploadBeeGameAsset(
     status: 'uploaded',
     placeholder: false,
     uploaded_files: [...new Set([...(slot.uploaded_files ?? []), relativePath])],
+    ...(uploadedUrl
+      ? { uploaded_urls: [...new Set([...(slot.uploaded_urls ?? []), uploadedUrl])] }
+      : {}),
     updated_at: new Date().toISOString(),
   }
   manifest.slots[slotIndex] = updatedSlot
@@ -153,6 +158,7 @@ function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
     },
     status: normalizeSlotStatus(record.status),
     uploaded_files: stringArray(record.uploaded_files),
+    uploaded_urls: stringArray(record.uploaded_urls),
     updated_at: trimString(record.updated_at),
   }
 }
