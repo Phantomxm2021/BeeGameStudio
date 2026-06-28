@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -20,6 +20,8 @@ import type {
   DashboardSDKMessage,
 } from '../beegame/session-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
+
+const testDashboardRoots: string[] = []
 
 type FakeRuntimeMode =
   | 'messages'
@@ -55,13 +57,27 @@ type FakeRuntimeMode =
 function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ) {
+  const dashboardDataRoot = options.dashboardDataRoot ??
+    options.defaultWorkspacePath ??
+    join(tmpdir(), `beegame-dashboard-test-${cryptoRandomSuffix()}`)
+  if (!options.dashboardDataRoot && !options.defaultWorkspacePath) {
+    testDashboardRoots.push(dashboardDataRoot)
+  }
   return createAgentWorkflowAppBase({
     ...options,
+    dashboardDataRoot,
     currentUser: options.currentUser ??
       (options.currentUserResolver
         ? undefined
         : { id: DEFAULT_LOCAL_USER_ID, role: 'owner' }),
   })
+}
+
+function cryptoRandomSuffix(): string {
+  return createHash('sha1')
+    .update(`${Date.now()}-${Math.random()}`)
+    .digest('hex')
+    .slice(0, 12)
 }
 
 class FakeBeeGameRuntime {
@@ -579,6 +595,13 @@ describe('beegame session routes', () => {
     delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
     delete process.env.SUPABASE_SERVICE_ROLE_KEY
     delete process.env.AGENT_WORKFLOW_WORKSPACE_PATH
+  })
+
+  afterEach(async () => {
+    const roots = testDashboardRoots.splice(0)
+    await Promise.all(roots.map(root =>
+      rm(root, { recursive: true, force: true }),
+    ))
   })
 
   test('creates a dashboard session without starting a BeeGame turn', async () => {

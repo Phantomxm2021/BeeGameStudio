@@ -155,6 +155,7 @@ export type AgentWorkflowAppOptions = {
   previewPortAllocator?: BeeGamePreviewPortAllocator
   previewReadinessProbe?: BeeGamePreviewReadinessProbe
   modelConfigStore?: ModelConfigStoreOptions | false
+  dashboardDataRoot?: string
   defaultWorkspacePath?: string
   currentUser?: BeeGameUserContext
   currentUserResolver?: BeeGameUserResolver
@@ -164,7 +165,9 @@ export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
   const app = new Hono()
-  const dashboardDataRoot = getDashboardDataRoot(options.defaultWorkspacePath)
+  const dashboardDataRoot = getDashboardDataRoot(
+    options.dashboardDataRoot ?? options.defaultWorkspacePath,
+  )
   const supabaseStore = createSupabaseDashboardStoreFromEnv()
   const requestUsers = new WeakMap<Request, BeeGameUserContext>()
   const requestUserResolver =
