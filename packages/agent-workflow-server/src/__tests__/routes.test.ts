@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,12 +7,20 @@ import { createAgentWorkflowApp } from '../app'
 
 describe('agent workflow server routes', () => {
   const testOwner = { id: 'owner-user', role: 'owner' } as const
-  const app = createAgentWorkflowApp({
-    currentUser: testOwner,
+  let testRoot = ''
+  let app: ReturnType<typeof createAgentWorkflowApp>
+
+  beforeEach(async () => {
+    resetAgentWorkflow()
+    testRoot = await mkdtemp(join(tmpdir(), 'beegame-routes-'))
+    app = createAgentWorkflowApp({
+      defaultWorkspacePath: testRoot,
+      currentUser: testOwner,
+    })
   })
 
-  beforeEach(() => {
-    resetAgentWorkflow()
+  afterEach(async () => {
+    await rm(testRoot, { recursive: true, force: true })
   })
 
   test('creates and lists masked model configs for the current user', async () => {

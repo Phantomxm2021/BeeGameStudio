@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { realpath, rm } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import {
   createModelConfig,
   deleteModelConfig,
@@ -43,13 +42,11 @@ import {
 } from './project-metadata-store'
 import {
   loadWebToolsConfig,
-  mapWebToolsConfigToRuntimeEnv,
   saveWebToolsConfig,
   toPublicWebToolsConfig,
 } from './web-tools-store'
 import {
   loadRuntimeSettingsConfig,
-  mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
   syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from './runtime-settings-store'
@@ -67,18 +64,10 @@ import {
   testMcpServerConnection,
 } from './mcp-active-discovery'
 import {
-  appendAuditEvent,
-  listAuditEvents,
   type AppendAuditEventInput,
 } from './audit-events-store'
 import {
-  getCreditBalance,
   hasEnoughCreditsForIdeaIntake,
-  listCreditLedger,
-  refundCreditReservation,
-  reserveCredits,
-  settleCreditReservation,
-  summarizeCreditLedger,
 } from './credit-store'
 import {
   getCreditTaskPolicy,
@@ -90,10 +79,18 @@ import {
   type BeeGameUserContext,
   type BeeGameUserResolver,
   createConfiguredUserResolver,
-  DEFAULT_LOCAL_USER_ID,
   hasBeeGamePermission,
   listBeeGamePermissions,
 } from './auth/user-context'
+import { createBeeGameAuthContext } from './auth/auth-context'
+import { DashboardRepository } from './dashboard-repository'
+import {
+  assertSessionWorkspaceIsProjectDirectory,
+  deleteWorkspaceDirectoryIfSafe,
+  getDashboardDataRoot,
+  getUserDashboardDataRoot,
+  resolveSessionWorkspacePath,
+} from './local-runtime-service'
 import {
   createSupabaseDashboardStoreFromEnv,
   type SupabaseDashboardStore,
@@ -172,85 +169,25 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const supabaseStore = createSupabaseDashboardStoreFromEnv()
-  const requestUsers = new WeakMap<Request, BeeGameUserContext>()
   const requestUserResolver =
     options.currentUserResolver ?? createConfiguredUserResolver()
-  const getCurrentUser = (request?: Request): BeeGameUserContext => {
-    const user = options.currentUser ?? (request ? requestUsers.get(request) : undefined)
-    if (!user) throw new Error('Authenticated BeeGame user is required')
-    return user
-  }
+  const authContext = createBeeGameAuthContext({
+    currentUser: options.currentUser,
+    currentUserResolver: requestUserResolver,
+  })
+  const getCurrentUser = authContext.getCurrentUser
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
-  const getUserCreditBalance = async (
-    request: Request,
-    user: BeeGameUserContext,
-  ) => supabaseStore
-    ? supabaseStore.getCreditBalance(user.id)
-    : getCreditBalance(user.id, {
-        dataDir: getCurrentUserDataRoot(request),
-      })
-  const listUserCreditLedger = async (
-    request: Request,
-    user: BeeGameUserContext,
-  ) => supabaseStore
-    ? supabaseStore.listCreditLedger(user.id)
-    : listCreditLedger(user.id, {
-        dataDir: getCurrentUserDataRoot(request),
-      })
-  const summarizeUserCreditLedger = async (
-    request: Request,
-    user: BeeGameUserContext,
-    projectId?: string,
-  ) => supabaseStore
-    ? supabaseStore.summarizeCreditLedger(user.id, projectId)
-    : summarizeCreditLedger(user.id, {
-        dataDir: getCurrentUserDataRoot(request),
-        ...(projectId ? { projectId } : {}),
-      })
-  const appendUserAuditEvent = async (
-    request: Request,
-    user: BeeGameUserContext,
-    input: AppendAuditEventInput,
-  ) => {
-    if (supabaseStore) {
-      await supabaseStore.appendAuditEvent(user.id, input)
-      return
-    }
-    appendAuditEvent(input, {
-      dataDir: getCurrentUserDataRoot(request),
-    })
-  }
-  const listUserAuditEvents = async (
-    request: Request,
-    user: BeeGameUserContext,
-  ) => supabaseStore
-    ? supabaseStore.listAuditEvents(user.id)
-    : listAuditEvents({
-        dataDir: getCurrentUserDataRoot(request),
-      })
+  const dashboardRepository = new DashboardRepository({
+    dashboardDataRoot,
+    supabaseStore,
+    getUserDataRoot: getCurrentUserDataRoot,
+  })
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
-    async (userDataRoot, userId) => {
-      const dataDir = userDataRoot ?? dashboardDataRoot
-      if (supabaseStore && userId) {
-        const [webTools, runtimeSettings] = await Promise.all([
-          supabaseStore.loadWebTools(userId),
-          supabaseStore.loadRuntimeSettings(userId),
-        ])
-        return {
-          ...mapWebToolsConfigToRuntimeEnv(webTools),
-          ...mapRuntimeSettingsToEnv(runtimeSettings, { dataDir }),
-        }
-      }
-      return {
-        ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
-        ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({ dataDir }), {
-          dataDir,
-        }),
-      }
-    },
+    (userDataRoot, userId) =>
+      dashboardRepository.getRuntimeEnv(userDataRoot, userId),
     supabaseStore
       ? {
           reserveCredits: (userId, creditOptions) =>
@@ -290,23 +227,20 @@ export function createAgentWorkflowApp(
       await next()
       return
     }
-    const user = requestUserResolver
-      ? await requestUserResolver(c.req.raw)
-      : undefined
+    const user = await authContext.resolveRequestUser(c.req.raw)
     if (!user) {
       return c.json({
         error: 'Unauthorized',
         message: 'authentication required',
       }, 401)
     }
-    requestUsers.set(c.req.raw, user)
     await next()
   })
 
   app.get('/health', c => c.json({ status: 'ok' }))
 
   app.get('/api/current-user', c => {
-    const user = options.currentUser ?? requestUsers.get(c.req.raw)
+    const user = options.currentUser ?? authContext.getCurrentUser(c.req.raw)
     if (!user) {
       return c.json({
         error: 'Unauthorized',
@@ -332,7 +266,7 @@ export function createAgentWorkflowApp(
       }, 501)
     }
     await supabaseStore.deleteAuthUser(user.id)
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'account.deleted',
       targetType: 'user',
@@ -373,7 +307,7 @@ export function createAgentWorkflowApp(
         userId: c.req.param('userId'),
         role,
       })
-      await appendUserAuditEvent(c.req.raw, user, {
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'workspace_member.upserted',
         targetType: 'workspace_member',
@@ -405,7 +339,7 @@ export function createAgentWorkflowApp(
         c.req.param('userId'),
       )
       if (deleted) {
-        await appendUserAuditEvent(c.req.raw, user, {
+        await dashboardRepository.appendAuditEvent(c.req.raw, user, {
           actorId: user.id,
           action: 'workspace_member.deleted',
           targetType: 'workspace_member',
@@ -422,23 +356,23 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'audit.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(await listUserAuditEvents(c.req.raw, user))
+    return c.json(await dashboardRepository.listAuditEvents(c.req.raw, user))
   })
 
   app.get('/api/credits', async c => {
     const user = getCurrentUser(c.req.raw)
-    return c.json(await getUserCreditBalance(c.req.raw, user))
+    return c.json(await dashboardRepository.getCreditBalance(c.req.raw, user))
   })
 
   app.get('/api/credits/ledger', async c => {
     const user = getCurrentUser(c.req.raw)
-    return c.json(await listUserCreditLedger(c.req.raw, user))
+    return c.json(await dashboardRepository.listCreditLedger(c.req.raw, user))
   })
 
   app.get('/api/credits/summary', async c => {
     const user = getCurrentUser(c.req.raw)
     const projectId = c.req.query('projectId')?.trim()
-    return c.json(await summarizeUserCreditLedger(
+    return c.json(await dashboardRepository.summarizeCreditLedger(
       c.req.raw,
       user,
       projectId || undefined,
@@ -448,7 +382,7 @@ export function createAgentWorkflowApp(
   app.post('/api/credits/quote', async c => {
     const user = getCurrentUser(c.req.raw)
     const body = await readJson(c.req.raw)
-    const balance = await getUserCreditBalance(c.req.raw, user)
+    const balance = await dashboardRepository.getCreditBalance(c.req.raw, user)
     return c.json(quoteCreditTask({
       taskType: isObject(body) ? body.taskType : undefined,
       balanceCredits: balance.balanceCredits,
@@ -481,7 +415,7 @@ export function createAgentWorkflowApp(
       isDefault: body.isDefault === true,
     })
     await persistModelConfig(supabaseStore, created.id, modelConfigStore)
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.created',
       targetType: 'model_config',
@@ -516,7 +450,7 @@ export function createAgentWorkflowApp(
     if (!updated) return c.json({ error: 'Config not found' }, 404)
 
     await persistModelConfig(supabaseStore, updated.id, modelConfigStore)
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.updated',
       targetType: 'model_config',
@@ -543,7 +477,7 @@ export function createAgentWorkflowApp(
       } else {
         persistModelConfigs(modelConfigStore)
       }
-      await appendUserAuditEvent(c.req.raw, user, {
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'model_config.deleted',
         targetType: 'model_config',
@@ -596,7 +530,7 @@ export function createAgentWorkflowApp(
       : saveWebToolsConfig(input, {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'web_tools.updated',
       targetType: 'web_tools',
@@ -659,7 +593,7 @@ export function createAgentWorkflowApp(
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
     })
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'runtime_settings.updated',
       targetType: 'runtime_settings',
@@ -721,7 +655,7 @@ export function createAgentWorkflowApp(
       : upsertMcpServer(toMcpServerInput(body), {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
@@ -753,7 +687,7 @@ export function createAgentWorkflowApp(
         }, {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    await appendUserAuditEvent(c.req.raw, user, {
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
@@ -777,7 +711,7 @@ export function createAgentWorkflowApp(
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
     if (deleted) {
-      await appendUserAuditEvent(c.req.raw, user, {
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'mcp_server.deleted',
         targetType: 'mcp_server',
@@ -876,7 +810,7 @@ export function createAgentWorkflowApp(
       ? await supabaseStore.deleteProject(user.id, c.req.param('id'))
       : getProjectStore(c.req.raw).deleteProject(c.req.param('id'))
     if (deleted) {
-      await appendUserAuditEvent(c.req.raw, user, {
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'project.deleted',
         targetType: 'project',
@@ -890,8 +824,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
-    const dataDir = getCurrentUserDataRoot(c.req.raw)
-    const creditBalance = await getUserCreditBalance(c.req.raw, user)
+    const creditBalance = await dashboardRepository.getCreditBalance(c.req.raw, user)
     if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
       return c.json({
         error: 'Insufficient credits',
@@ -907,26 +840,15 @@ export function createAgentWorkflowApp(
       await loadSupabaseModelConfigs(supabaseStore)
       const policy = getCreditTaskPolicy('idea_intake')
       const reservedCredits = policy.reservedCredits
-      reservation = supabaseStore
-        ? await supabaseStore.reserveCredits(user.id, {
-            credits: reservedCredits,
-            kind: policy.taskType,
-            metadata: {
-              taskType: policy.taskType,
-              displayName: policy.displayName,
-              language: typeof body.language === 'string' ? body.language : undefined,
-            },
-          })
-        : reserveCredits(user.id, {
-            dataDir,
-            credits: reservedCredits,
-            kind: policy.taskType,
-            metadata: {
-              taskType: policy.taskType,
-              displayName: policy.displayName,
-              language: typeof body.language === 'string' ? body.language : undefined,
-            },
-          })
+      reservation = await dashboardRepository.reserveCredits(c.req.raw, user, {
+        credits: reservedCredits,
+        kind: policy.taskType,
+        metadata: {
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+          language: typeof body.language === 'string' ? body.language : undefined,
+        },
+      })
       const intake = await generateBeeGameIntakeOptions({
         idea: String(body.idea),
         language:
@@ -935,44 +857,23 @@ export function createAgentWorkflowApp(
         modelConfigId:
           typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
       })
-      if (supabaseStore) {
-        await supabaseStore.settleCreditReservation(user.id, {
-          reservationId: reservation.id,
-          weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
-          metadata: {
-            kind: policy.taskType,
-            taskType: policy.taskType,
-            displayName: policy.displayName,
-          },
-        })
-      } else {
-        settleCreditReservation(user.id, {
-          dataDir,
-          reservationId: reservation.id,
-          weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
-          metadata: {
-            kind: policy.taskType,
-            taskType: policy.taskType,
-            displayName: policy.displayName,
-          },
-        })
-      }
+      await dashboardRepository.settleCreditReservation(c.req.raw, user, {
+        reservationId: reservation.id,
+        weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+        metadata: {
+          kind: policy.taskType,
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+        },
+      })
       return c.json({ ...intake })
     } catch (err) {
       if (reservation) {
         try {
-          if (supabaseStore) {
-            await supabaseStore.refundCreditReservation(user.id, {
-              reservationId: reservation.id,
-              metadata: { reason: 'idea_intake_failed' },
-            })
-          } else {
-            refundCreditReservation(user.id, {
-              dataDir,
-              reservationId: reservation.id,
-              metadata: { reason: 'idea_intake_failed' },
-            })
-          }
+          await dashboardRepository.refundCreditReservation(c.req.raw, user, {
+            reservationId: reservation.id,
+            metadata: { reason: 'idea_intake_failed' },
+          })
         } catch {
           // Keep the original intake failure visible to the caller.
         }
@@ -992,7 +893,7 @@ export function createAgentWorkflowApp(
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
-        appendUserAuditEvent(request, getCurrentUser(request), input),
+        dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
     },
   )
   registerBeeGameSessionRoutes(
@@ -1006,7 +907,7 @@ export function createAgentWorkflowApp(
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
-        appendUserAuditEvent(request, getCurrentUser(request), input),
+        dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
     },
   )
 
@@ -1983,40 +1884,6 @@ function registerBeeGameSessionRoutes(
   })
 }
 
-async function deleteWorkspaceDirectoryIfSafe(
-  workspacePath: string,
-  dashboardDataRoot: string,
-): Promise<string | undefined> {
-  const dataRoot = await realpath(resolve(dashboardDataRoot))
-  const resolvedWorkspace = resolve(workspacePath)
-  let workspaceRoot: string
-  try {
-    workspaceRoot = await realpath(resolvedWorkspace)
-  } catch (err) {
-    if (isNodeErrorCode(err, 'ENOENT')) {
-      if (resolvedWorkspace === dataRoot) return undefined
-      const rel = relative(dataRoot, resolvedWorkspace)
-      if (rel.startsWith('..') || isAbsolute(rel)) return undefined
-      return undefined
-    }
-    throw err
-  }
-  if (workspaceRoot === dataRoot) return undefined
-  const rel = relative(dataRoot, workspaceRoot)
-  if (rel.startsWith('..') || isAbsolute(rel)) return undefined
-  await rm(workspaceRoot, { recursive: true, force: true })
-  return workspaceRoot
-}
-
-function isNodeErrorCode(error: unknown, code: string): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code === code,
-  )
-}
-
 async function readTranscriptFromWorkspace(
   sessionId: string,
   workspacePath: string,
@@ -2038,107 +1905,6 @@ async function readTranscriptFromWorkspace(
   } catch (err) {
     return Response.json({ error: toErrorMessage(err) }, { status: 404 })
   }
-}
-
-async function assertSessionWorkspaceIsProjectDirectory(
-  workspacePath: string,
-  defaultWorkspacePath?: string,
-): Promise<void> {
-  if (!hasWorkspaceBoundary(defaultWorkspacePath)) return
-  const defaultWorkspace = resolve(
-    await getDefaultWorkspacePath({ defaultWorkspacePath }),
-  )
-  const resolvedWorkspace = resolve(workspacePath)
-  if (resolvedWorkspace !== defaultWorkspace) return
-  throw new Error(
-    `Workspace path must target a project directory under the default Projects directory, not the Projects root: ${defaultWorkspace}`,
-  )
-}
-
-function getDashboardDataRoot(defaultWorkspacePath?: string): string {
-  return resolve(
-    defaultWorkspacePath?.trim() ||
-      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      resolve(process.cwd(), 'Projects'),
-  )
-}
-
-function getUserDashboardDataRoot(
-  dashboardDataRoot: string,
-  userId: string,
-): string {
-  const normalizedUserId = normalizeUserDataDirName(userId)
-  if (!normalizedUserId || normalizedUserId === DEFAULT_LOCAL_USER_ID) {
-    return dashboardDataRoot
-  }
-  return join(dashboardDataRoot, 'users', normalizedUserId)
-}
-
-function normalizeUserDataDirName(userId: string): string {
-  return userId
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-}
-
-async function resolveSessionWorkspacePath(
-  workspacePath: string,
-  defaultWorkspacePath?: string,
-): Promise<string> {
-  const trimmed = workspacePath.trim()
-  if (!isAbsolute(trimmed)) {
-    throw new Error('Workspace path must be absolute')
-  }
-  const resolvedWorkspace = resolve(trimmed)
-  if (!hasWorkspaceBoundary(defaultWorkspacePath)) {
-    return resolvedWorkspace
-  }
-  const defaultWorkspace = resolve(
-    await getDefaultWorkspacePath({ defaultWorkspacePath }),
-  )
-  const canonicalWorkspace = canonicalizeWorkspaceCandidate(
-    resolvedWorkspace,
-    defaultWorkspace,
-    defaultWorkspacePath,
-  )
-  if (!isInsideOrEqual(canonicalWorkspace, defaultWorkspace)) {
-    throw new Error(
-      `Workspace path must stay inside the default Projects directory: ${defaultWorkspace}`,
-    )
-  }
-  return canonicalWorkspace
-}
-
-function hasWorkspaceBoundary(defaultWorkspacePath?: string): boolean {
-  return Boolean(
-    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      defaultWorkspacePath?.trim(),
-  )
-}
-
-function isInsideOrEqual(candidate: string, root: string): boolean {
-  const rel = relative(root, candidate)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function canonicalizeWorkspaceCandidate(
-  candidate: string,
-  canonicalRoot: string,
-  defaultWorkspacePath?: string,
-): string {
-  if (isInsideOrEqual(candidate, canonicalRoot)) return candidate
-  const configuredRoot = resolve(
-    defaultWorkspacePath?.trim() ||
-      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      resolve(process.cwd(), 'Projects'),
-  )
-  const rel = relative(configuredRoot, candidate)
-  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
-    return resolve(canonicalRoot, rel)
-  }
-  return candidate
 }
 
 function persistModelConfigs(
