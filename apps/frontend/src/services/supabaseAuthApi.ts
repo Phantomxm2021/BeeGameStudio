@@ -33,6 +33,7 @@ const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
+const getSupabaseAvatarBucket = (): string => String(import.meta.env.VITE_SUPABASE_AVATAR_BUCKET ?? 'beegame-avatars').trim() || 'beegame-avatars';
 
 export function isSupabaseAuthConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabaseAnonKey());
@@ -159,6 +160,41 @@ export async function updateSupabaseAvatarUrl(avatarUrl: string): Promise<void> 
   if (!response.ok) {
     throw new Error(await readSupabaseError(response));
   }
+}
+
+export async function uploadSupabaseAvatarImage(file: File): Promise<string> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  const accessToken = getSupabaseAccessToken();
+  const session = getStoredSupabaseSession();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  if (!accessToken || !session) {
+    throw new Error('Please sign in again before uploading your avatar.');
+  }
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Avatar must be an image file.');
+  }
+  const bucket = getSupabaseAvatarBucket();
+  const objectPath = `avatars/${encodeURIComponent(session.user.id)}/${Date.now()}-${slugifyFileName(file.name)}`;
+  const response = await fetch(
+    `${trimTrailingSlash(supabaseUrl)}/storage/v1/object/${encodeURIComponent(bucket)}/${objectPath}`,
+    {
+      method: 'PUT',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${accessToken}`,
+        'content-type': file.type || 'application/octet-stream',
+        'x-upsert': 'true',
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readSupabaseError(response));
+  }
+  return `${trimTrailingSlash(supabaseUrl)}/storage/v1/object/public/${encodeURIComponent(bucket)}/${objectPath}`;
 }
 
 export async function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): Promise<void> {
@@ -517,6 +553,19 @@ function base64UrlEncode(bytes: Uint8Array): string {
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function slugifyFileName(value: string): string {
+  const [rawName = 'avatar', ...extensionParts] = value.split('.');
+  const extension = extensionParts.pop()?.trim().toLowerCase();
+  const name = rawName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'avatar';
+  return extension
+    ? `${name}.${extension.replace(/[^a-z0-9]/g, '') || 'png'}`
+    : `${name}.png`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

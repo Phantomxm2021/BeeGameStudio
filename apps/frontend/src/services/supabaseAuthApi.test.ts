@@ -9,6 +9,7 @@ import {
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
+  uploadSupabaseAvatarImage,
 } from './supabaseAuthApi';
 
 describe('supabaseAuthApi', () => {
@@ -327,6 +328,42 @@ describe('supabaseAuthApi', () => {
       displayName: 'Discord Maker',
       avatarUrl: 'https://avatars.example.com/discord.png',
     });
+  });
+
+  it('uploads avatar images to Supabase Storage and returns a public URL', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    vi.stubEnv('VITE_SUPABASE_AVATAR_BUCKET', 'avatars');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'access-token',
+      expiresAt: Date.now() + 3600_000,
+      user: { id: 'user-1' },
+    }));
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const url = await uploadSupabaseAvatarImage(
+      new File(['avatar-bytes'], 'My Avatar.png', { type: 'image/png' }),
+    );
+
+    expect(url).toMatch(
+      /^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/avatars\/avatars\/user-1\/\d+-my-avatar\.png$/,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^https:\/\/project\.supabase\.co\/storage\/v1\/object\/avatars\/avatars\/user-1\/\d+-my-avatar\.png$/,
+      ),
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.any(File),
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          authorization: 'Bearer access-token',
+          'content-type': 'image/png',
+          'x-upsert': 'true',
+        }),
+      }),
+    );
   });
 
   it('clears expired sessions instead of returning stale access tokens', () => {

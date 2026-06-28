@@ -36,6 +36,7 @@ import {
     signUpWithSupabasePassword,
     type SupabaseOAuthProvider,
     updateSupabaseAvatarUrl,
+    uploadSupabaseAvatarImage,
 } from '../../services/supabaseAuthApi';
 
 type IntakePhase =
@@ -423,17 +424,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setProfileError('头像图片不能超过 2MB。');
             return;
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result !== 'string') {
-                setProfileError('头像读取失败，请换一张图片。');
-                return;
-            }
-            setAvatarDraft(reader.result);
-            setProfileNotice('头像已选择，点击完成后保存。');
-        };
-        reader.onerror = () => setProfileError('头像读取失败，请换一张图片。');
-        reader.readAsDataURL(file);
+        setIsSavingProfile(true);
+        void uploadSupabaseAvatarImage(file)
+            .then(url => {
+                setAvatarDraft(url);
+                setProfileNotice('头像已选择，点击完成后保存。');
+            })
+            .catch(error => {
+                setProfileError(error instanceof Error ? error.message : '头像上传失败，请换一张图片。');
+            })
+            .finally(() => setIsSavingProfile(false));
     };
 
     const handleFinishProfile = async () => {

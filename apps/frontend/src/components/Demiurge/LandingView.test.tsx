@@ -28,6 +28,7 @@ const {
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
     updateSupabaseAvatarUrl,
+    uploadSupabaseAvatarImage,
 } = vi.hoisted(() => ({
     clearSupabaseSession: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
@@ -36,6 +37,7 @@ const {
     signInWithSupabasePassword: vi.fn(),
     signUpWithSupabasePassword: vi.fn(),
     updateSupabaseAvatarUrl: vi.fn(),
+    uploadSupabaseAvatarImage: vi.fn(),
 }));
 const mockDeleteProject = vi.fn();
 const mockSetActiveProject = vi.fn();
@@ -141,6 +143,7 @@ vi.mock('../../services/supabaseAuthApi', () => ({
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
     updateSupabaseAvatarUrl,
+    uploadSupabaseAvatarImage,
 }));
 
 vi.mock('./DemiurgeLogo', () => ({
@@ -311,6 +314,8 @@ beforeEach(() => {
             avatarUrl: 'https://cdn.example.com/alice.png',
         },
     });
+    uploadSupabaseAvatarImage.mockReset();
+    uploadSupabaseAvatarImage.mockResolvedValue('https://cdn.example.com/avatars/alice.png');
     terminalRenderState.renderCount = 0;
 });
 
@@ -424,11 +429,14 @@ describe('LandingView bootstrap submission', () => {
         });
 
         expect(updateSupabaseAvatarUrl).not.toHaveBeenCalled();
+        await waitFor(() => {
+            expect(uploadSupabaseAvatarImage).toHaveBeenCalledWith(avatarFile);
+        });
         expect(await screen.findByText('头像已选择，点击完成后保存。')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '完成' }));
 
         await waitFor(() => {
-            expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith(expect.stringMatching(/^data:image\/png;base64,/));
+            expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith('https://cdn.example.com/avatars/alice.png');
         });
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
