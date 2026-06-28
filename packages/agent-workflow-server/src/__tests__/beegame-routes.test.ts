@@ -1768,6 +1768,36 @@ describe('beegame session routes', () => {
             },
           }])
         }
+        if (requestUrl.includes('/rest/v1/rpc/beegame_reserve_credits')) {
+          return Response.json({
+            reservation_id: '33333333-3333-3333-3333-333333333333',
+            reserved_credits: 50,
+            account: {
+              user_id: '00000000-0000-0000-0000-000000000001',
+              plan: 'free',
+              included_credits: 300,
+              consumed_credits: 0,
+              reserved_credits: 50,
+              updated_at: '2026-06-27T00:00:00.000Z',
+            },
+          })
+        }
+        if (requestUrl.includes('/rest/v1/rpc/beegame_settle_credit_reservation')) {
+          return Response.json({
+            reservation_id: '33333333-3333-3333-3333-333333333333',
+            reserved_credits: 50,
+            settled_credits: 1,
+            refunded_credits: 49,
+            account: {
+              user_id: '00000000-0000-0000-0000-000000000001',
+              plan: 'free',
+              included_credits: 300,
+              consumed_credits: 1,
+              reserved_credits: 0,
+              updated_at: '2026-06-27T00:00:00.000Z',
+            },
+          })
+        }
         if (requestUrl.includes('/rest/v1/beegame_credit_accounts')) {
           return Response.json([{
             user_id: '00000000-0000-0000-0000-000000000001',

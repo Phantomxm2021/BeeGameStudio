@@ -266,6 +266,316 @@ create trigger beegame_after_auth_user_created
   after insert on auth.users
   for each row execute function public.beegame_handle_new_user();
 
+create or replace function public.beegame_reserve_credits(
+  p_user_id uuid,
+  p_credits integer,
+  p_kind text default null,
+  p_project_id text default null,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  account_row public.beegame_credit_accounts%rowtype;
+  reservation_uuid uuid;
+  available_credits integer;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if p_credits is null or p_credits <= 0 then
+    raise exception 'Credits must be positive';
+  end if;
+
+  insert into public.beegame_credit_accounts (user_id)
+  values (p_user_id)
+  on conflict (user_id) do nothing;
+
+  select *
+  into account_row
+  from public.beegame_credit_accounts
+  where user_id = p_user_id
+  for update;
+
+  available_credits :=
+    account_row.included_credits -
+    account_row.consumed_credits -
+    account_row.reserved_credits;
+
+  if available_credits < p_credits then
+    raise exception 'Insufficient credits';
+  end if;
+
+  reservation_uuid := gen_random_uuid();
+
+  update public.beegame_credit_accounts
+  set reserved_credits = reserved_credits + p_credits,
+      updated_at = now()
+  where user_id = p_user_id
+  returning * into account_row;
+
+  insert into public.beegame_credit_ledger (
+    id,
+    user_id,
+    project_id,
+    reservation_id,
+    kind,
+    credits,
+    weighted_tokens,
+    metadata
+  )
+  values (
+    reservation_uuid,
+    p_user_id,
+    p_project_id,
+    reservation_uuid::text,
+    'reserve',
+    p_credits,
+    null,
+    coalesce(p_metadata, '{}'::jsonb) ||
+      case
+        when p_kind is null or p_kind = '' then '{}'::jsonb
+        else jsonb_build_object('kind', p_kind)
+      end
+  );
+
+  return jsonb_build_object(
+    'reservation_id', reservation_uuid::text,
+    'reserved_credits', p_credits,
+    'account', to_jsonb(account_row)
+  );
+end
+$$;
+
+create or replace function public.beegame_settle_credit_reservation(
+  p_user_id uuid,
+  p_reservation_id text,
+  p_weighted_tokens integer,
+  p_credit_unit_weighted_tokens integer default 10000,
+  p_project_id text default null,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  account_row public.beegame_credit_accounts%rowtype;
+  reservation_row public.beegame_credit_ledger%rowtype;
+  reservation_credits integer;
+  weighted_tokens integer;
+  credit_unit integer;
+  settled_credits integer;
+  refunded_credits integer;
+  target_project_id text;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
+    raise exception 'Reservation id is required';
+  end if;
+
+  insert into public.beegame_credit_accounts (user_id)
+  values (p_user_id)
+  on conflict (user_id) do nothing;
+
+  select *
+  into account_row
+  from public.beegame_credit_accounts
+  where user_id = p_user_id
+  for update;
+
+  select *
+  into reservation_row
+  from public.beegame_credit_ledger
+  where user_id = p_user_id
+    and reservation_id = p_reservation_id
+    and kind = 'reserve'
+  order by created_at asc
+  limit 1;
+
+  if not found then
+    raise exception 'Credit reservation not found';
+  end if;
+
+  if exists (
+    select 1
+    from public.beegame_credit_ledger
+    where user_id = p_user_id
+      and reservation_id = p_reservation_id
+      and kind in ('settle', 'refund')
+  ) then
+    raise exception 'Credit reservation already settled';
+  end if;
+
+  reservation_credits := reservation_row.credits;
+  weighted_tokens := greatest(coalesce(p_weighted_tokens, 0), 0);
+  credit_unit := greatest(coalesce(p_credit_unit_weighted_tokens, 10000), 1);
+  settled_credits := least(
+    reservation_credits,
+    greatest(1, ceil(weighted_tokens::numeric / credit_unit::numeric)::integer)
+  );
+  refunded_credits := greatest(0, reservation_credits - settled_credits);
+  target_project_id := coalesce(p_project_id, reservation_row.project_id);
+
+  update public.beegame_credit_accounts
+  set consumed_credits = consumed_credits + settled_credits,
+      reserved_credits = greatest(
+        0,
+        public.beegame_credit_accounts.reserved_credits - reservation_credits
+      ),
+      updated_at = now()
+  where user_id = p_user_id
+  returning * into account_row;
+
+  insert into public.beegame_credit_ledger (
+    user_id,
+    project_id,
+    reservation_id,
+    kind,
+    credits,
+    weighted_tokens,
+    metadata
+  )
+  values (
+    p_user_id,
+    target_project_id,
+    p_reservation_id,
+    'settle',
+    settled_credits,
+    weighted_tokens,
+    coalesce(p_metadata, '{}'::jsonb)
+  );
+
+  if refunded_credits > 0 then
+    insert into public.beegame_credit_ledger (
+      user_id,
+      project_id,
+      reservation_id,
+      kind,
+      credits,
+      weighted_tokens,
+      metadata
+    )
+    values (
+      p_user_id,
+      target_project_id,
+      p_reservation_id,
+      'refund',
+      refunded_credits,
+      null,
+      jsonb_build_object('reason', 'unused_reservation')
+    );
+  end if;
+
+  return jsonb_build_object(
+    'reservation_id', p_reservation_id,
+    'reserved_credits', reservation_credits,
+    'settled_credits', settled_credits,
+    'refunded_credits', refunded_credits,
+    'account', to_jsonb(account_row)
+  );
+end
+$$;
+
+create or replace function public.beegame_refund_credit_reservation(
+  p_user_id uuid,
+  p_reservation_id text,
+  p_project_id text default null,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  account_row public.beegame_credit_accounts%rowtype;
+  reservation_row public.beegame_credit_ledger%rowtype;
+  target_project_id text;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
+    raise exception 'Reservation id is required';
+  end if;
+
+  insert into public.beegame_credit_accounts (user_id)
+  values (p_user_id)
+  on conflict (user_id) do nothing;
+
+  select *
+  into account_row
+  from public.beegame_credit_accounts
+  where user_id = p_user_id
+  for update;
+
+  select *
+  into reservation_row
+  from public.beegame_credit_ledger
+  where user_id = p_user_id
+    and reservation_id = p_reservation_id
+    and kind = 'reserve'
+  order by created_at asc
+  limit 1;
+
+  if not found then
+    raise exception 'Credit reservation not found';
+  end if;
+
+  if exists (
+    select 1
+    from public.beegame_credit_ledger
+    where user_id = p_user_id
+      and reservation_id = p_reservation_id
+      and kind in ('settle', 'refund')
+  ) then
+    raise exception 'Credit reservation already settled';
+  end if;
+
+  target_project_id := coalesce(p_project_id, reservation_row.project_id);
+
+  update public.beegame_credit_accounts
+  set reserved_credits = greatest(0, reserved_credits - reservation_row.credits),
+      updated_at = now()
+  where user_id = p_user_id
+  returning * into account_row;
+
+  insert into public.beegame_credit_ledger (
+    user_id,
+    project_id,
+    reservation_id,
+    kind,
+    credits,
+    weighted_tokens,
+    metadata
+  )
+  values (
+    p_user_id,
+    target_project_id,
+    p_reservation_id,
+    'refund',
+    reservation_row.credits,
+    null,
+    coalesce(p_metadata, jsonb_build_object('reason', 'reservation_refunded'))
+  );
+
+  return jsonb_build_object(
+    'reservation_id', p_reservation_id,
+    'reserved_credits', reservation_row.credits,
+    'settled_credits', 0,
+    'refunded_credits', reservation_row.credits,
+    'account', to_jsonb(account_row)
+  );
+end
+$$;
+
 do $$
 begin
   if not exists (

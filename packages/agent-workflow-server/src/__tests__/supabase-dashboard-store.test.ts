@@ -77,6 +77,84 @@ describe('SupabaseDashboardStore', () => {
         return Response.json([])
       }
 
+      if (requestUrl.includes('/rpc/beegame_reserve_credits')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        const reservationId = '33333333-3333-3333-3333-333333333333'
+        const credits = Number(body.p_credits)
+        creditAccount.reserved_credits += credits
+        creditLedger.push({
+          id: reservationId,
+          user_id: body.p_user_id,
+          project_id: body.p_project_id,
+          reservation_id: reservationId,
+          kind: 'reserve',
+          credits,
+          weighted_tokens: null,
+          metadata: {
+            ...(body.p_kind ? { kind: body.p_kind } : {}),
+            ...((body.p_metadata as Record<string, unknown> | undefined) ?? {}),
+          },
+          created_at: '2026-06-27T00:00:00.000Z',
+        })
+        return Response.json({
+          reservation_id: reservationId,
+          reserved_credits: credits,
+          account: creditAccount,
+        })
+      }
+
+      if (requestUrl.includes('/rpc/beegame_settle_credit_reservation')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        const reservationId = String(body.p_reservation_id)
+        const reservation = creditLedger.find(row =>
+          row.reservation_id === reservationId && row.kind === 'reserve'
+        )
+        const reservedCredits = Number(reservation?.credits ?? 0)
+        const weightedTokens = Number(body.p_weighted_tokens ?? 0)
+        const creditUnit = Number(body.p_credit_unit_weighted_tokens ?? 10_000)
+        const settledCredits = Math.min(
+          reservedCredits,
+          Math.max(1, Math.ceil(weightedTokens / creditUnit)),
+        )
+        const refundedCredits = Math.max(0, reservedCredits - settledCredits)
+        creditAccount.consumed_credits += settledCredits
+        creditAccount.reserved_credits = Math.max(
+          0,
+          creditAccount.reserved_credits - reservedCredits,
+        )
+        creditLedger.push({
+          id: '44444444-4444-4444-4444-444444444444',
+          user_id: body.p_user_id,
+          project_id: body.p_project_id,
+          reservation_id: reservationId,
+          kind: 'settle',
+          credits: settledCredits,
+          weighted_tokens: weightedTokens,
+          metadata: body.p_metadata ?? {},
+          created_at: '2026-06-27T00:00:00.000Z',
+        })
+        if (refundedCredits > 0) {
+          creditLedger.push({
+            id: '55555555-5555-5555-5555-555555555555',
+            user_id: body.p_user_id,
+            project_id: body.p_project_id,
+            reservation_id: reservationId,
+            kind: 'refund',
+            credits: refundedCredits,
+            weighted_tokens: null,
+            metadata: { reason: 'unused_reservation' },
+            created_at: '2026-06-27T00:00:00.000Z',
+          })
+        }
+        return Response.json({
+          reservation_id: reservationId,
+          reserved_credits: reservedCredits,
+          settled_credits: settledCredits,
+          refunded_credits: refundedCredits,
+          account: creditAccount,
+        })
+      }
+
       if (requestUrl.includes('/beegame_credit_accounts')) {
         if (init?.method === 'POST') {
           Object.assign(creditAccount, JSON.parse(String(init.body)))
@@ -415,7 +493,8 @@ describe('SupabaseDashboardStore', () => {
       call.url.includes('/rest/v1/beegame_sessions') &&
       call.url.includes(`project_id=eq.${encodeURIComponent('project_1')}`),
     )).toBe(true)
-    expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/rpc/beegame_reserve_credits'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/rpc/beegame_settle_credit_reservation'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
     expect(calls.some(call =>
       call.url.includes('/rest/v1/beegame_credit_ledger') &&

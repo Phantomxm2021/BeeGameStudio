@@ -169,6 +169,14 @@ type SupabaseCreditSummaryRow = Pick<
   'kind' | 'credits' | 'weighted_tokens'
 >
 
+type SupabaseCreditMutationRow = {
+  reservation_id: string
+  reserved_credits: number
+  settled_credits?: number
+  refunded_credits?: number
+  account: SupabaseCreditAccountRow
+}
+
 type SupabaseAuditEventRow = {
   id: string
   actor_id: string | null
@@ -543,41 +551,21 @@ export class SupabaseDashboardStore {
     },
   ): Promise<CreditReservation> {
     const credits = normalizePositiveInteger(options.credits)
-    const account = await this.ensureCreditAccount(ownerId)
-    const balance = toCreditBalance(ownerId, account)
-    if (balance.balanceCredits < credits) {
-      throw new Error('Insufficient credits')
-    }
-    const reservationId = randomUUID()
-    const nextAccount = await this.upsert<SupabaseCreditAccountRow>(
-      'beegame_credit_accounts',
+    const result = await this.rpc<SupabaseCreditMutationRow>(
+      'beegame_reserve_credits',
       {
-        user_id: ownerId,
-        plan: account.plan,
-        included_credits: account.included_credits,
-        consumed_credits: account.consumed_credits,
-        reserved_credits: account.reserved_credits + credits,
-        updated_at: new Date().toISOString(),
+        p_user_id: ownerId,
+        p_credits: credits,
+        p_kind: options.kind ?? null,
+        p_project_id: options.projectId ?? null,
+        p_metadata: options.metadata ?? {},
       },
-      'user_id',
     )
-    await this.insertCreditLedger({
-      id: reservationId,
-      user_id: ownerId,
-      project_id: options.projectId ?? null,
-      reservation_id: reservationId,
-      kind: 'reserve',
-      credits,
-      weighted_tokens: null,
-      metadata: {
-        ...(options.kind ? { kind: options.kind } : {}),
-        ...(options.metadata ?? {}),
-      },
-    })
+    const account = normalizeCreditAccountRow(ownerId, result.account)
     return {
-      id: reservationId,
-      reservedCredits: credits,
-      balance: toCreditBalance(ownerId, nextAccount),
+      id: result.reservation_id,
+      reservedCredits: normalizePositiveInteger(result.reserved_credits),
+      balance: toCreditBalance(ownerId, account),
     }
   }
 
@@ -590,54 +578,24 @@ export class SupabaseDashboardStore {
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditSettlement> {
-    const reservation = await this.getOpenReservation(ownerId, options.reservationId)
-    const account = await this.ensureCreditAccount(ownerId)
-    const reservedCredits = reservation.credits
-    const weightedTokens = normalizeNonNegativeInteger(options.weightedTokens)
-    const settledCredits = Math.min(
-      reservedCredits,
-      Math.max(1, Math.ceil(weightedTokens / CREDIT_UNIT_WEIGHTED_TOKENS)),
-    )
-    const refundedCredits = Math.max(0, reservedCredits - settledCredits)
-    const projectId = options.projectId ?? reservation.project_id ?? undefined
-    const nextAccount = await this.upsert<SupabaseCreditAccountRow>(
-      'beegame_credit_accounts',
+    const result = await this.rpc<SupabaseCreditMutationRow>(
+      'beegame_settle_credit_reservation',
       {
-        user_id: ownerId,
-        plan: account.plan,
-        included_credits: account.included_credits,
-        consumed_credits: account.consumed_credits + settledCredits,
-        reserved_credits: Math.max(0, account.reserved_credits - reservedCredits),
-        updated_at: new Date().toISOString(),
+        p_user_id: ownerId,
+        p_reservation_id: options.reservationId,
+        p_weighted_tokens: normalizeNonNegativeInteger(options.weightedTokens),
+        p_credit_unit_weighted_tokens: CREDIT_UNIT_WEIGHTED_TOKENS,
+        p_project_id: options.projectId ?? null,
+        p_metadata: options.metadata ?? {},
       },
-      'user_id',
     )
-    await this.insertCreditLedger({
-      user_id: ownerId,
-      project_id: projectId ?? null,
-      reservation_id: reservation.reservation_id,
-      kind: 'settle',
-      credits: settledCredits,
-      weighted_tokens: weightedTokens,
-      metadata: options.metadata ?? {},
-    })
-    if (refundedCredits > 0) {
-      await this.insertCreditLedger({
-        user_id: ownerId,
-        project_id: projectId ?? null,
-        reservation_id: reservation.reservation_id,
-        kind: 'refund',
-        credits: refundedCredits,
-        weighted_tokens: null,
-        metadata: { reason: 'unused_reservation' },
-      })
-    }
+    const account = normalizeCreditAccountRow(ownerId, result.account)
     return {
-      reservationId: reservation.reservation_id ?? options.reservationId,
-      reservedCredits,
-      settledCredits,
-      refundedCredits,
-      balance: toCreditBalance(ownerId, nextAccount),
+      reservationId: result.reservation_id,
+      reservedCredits: normalizeNonNegativeInteger(result.reserved_credits),
+      settledCredits: normalizeNonNegativeInteger(result.settled_credits),
+      refundedCredits: normalizeNonNegativeInteger(result.refunded_credits),
+      balance: toCreditBalance(ownerId, account),
     }
   }
 
@@ -649,36 +607,25 @@ export class SupabaseDashboardStore {
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditSettlement> {
-    const reservation = await this.getOpenReservation(ownerId, options.reservationId)
-    const account = await this.ensureCreditAccount(ownerId)
-    const projectId = options.projectId ?? reservation.project_id ?? undefined
-    const nextAccount = await this.upsert<SupabaseCreditAccountRow>(
-      'beegame_credit_accounts',
+    const result = await this.rpc<SupabaseCreditMutationRow>(
+      'beegame_refund_credit_reservation',
       {
-        user_id: ownerId,
-        plan: account.plan,
-        included_credits: account.included_credits,
-        consumed_credits: account.consumed_credits,
-        reserved_credits: Math.max(0, account.reserved_credits - reservation.credits),
-        updated_at: new Date().toISOString(),
+        p_user_id: ownerId,
+        p_reservation_id: options.reservationId,
+        p_project_id: options.projectId ?? null,
+        p_metadata: options.metadata ?? { reason: 'reservation_refunded' },
       },
-      'user_id',
     )
-    await this.insertCreditLedger({
-      user_id: ownerId,
-      project_id: projectId ?? null,
-      reservation_id: reservation.reservation_id,
-      kind: 'refund',
-      credits: reservation.credits,
-      weighted_tokens: null,
-      metadata: options.metadata ?? { reason: 'reservation_refunded' },
-    })
+    const account = normalizeCreditAccountRow(ownerId, result.account)
+    const reservedCredits = normalizeNonNegativeInteger(result.reserved_credits)
     return {
-      reservationId: reservation.reservation_id ?? options.reservationId,
-      reservedCredits: reservation.credits,
+      reservationId: result.reservation_id,
+      reservedCredits,
       settledCredits: 0,
-      refundedCredits: reservation.credits,
-      balance: toCreditBalance(ownerId, nextAccount),
+      refundedCredits: normalizeNonNegativeInteger(
+        result.refunded_credits ?? reservedCredits,
+      ),
+      balance: toCreditBalance(ownerId, account),
     }
   }
 
@@ -872,39 +819,15 @@ export class SupabaseDashboardStore {
     )
   }
 
-  private async getOpenReservation(
-    ownerId: string,
-    reservationId: string,
-  ): Promise<SupabaseCreditLedgerRow> {
-    const id = reservationId.trim()
-    if (!id) throw new Error('Reservation id is required')
-    const rows = await this.rest<SupabaseCreditLedgerRow[]>(
-      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}&reservation_id=eq.${q(id)}&select=*&order=created_at.asc`,
-    )
-    const reservation = rows.find(row => row.kind === 'reserve')
-    if (!reservation) throw new Error('Credit reservation not found')
-    if (rows.some(row => row.kind === 'settle' || row.kind === 'refund')) {
-      throw new Error('Credit reservation already settled')
-    }
-    return reservation
-  }
-
-  private async insertCreditLedger(
-    payload: Omit<SupabaseCreditLedgerRow, 'id' | 'created_at'> & {
-      id?: string
-    },
-  ): Promise<SupabaseCreditLedgerRow> {
-    return this.insert<SupabaseCreditLedgerRow>(
-      'beegame_credit_ledger',
+  private async rpc<T = JsonObject>(
+    functionName: string,
+    payload: JsonObject,
+  ): Promise<T> {
+    return this.rest<T>(
+      `/rest/v1/rpc/${functionName}`,
       {
-        id: payload.id ?? randomUUID(),
-        user_id: payload.user_id,
-        project_id: payload.project_id,
-        reservation_id: payload.reservation_id,
-        kind: payload.kind,
-        credits: payload.credits,
-        weighted_tokens: payload.weighted_tokens,
-        metadata: payload.metadata,
+        method: 'POST',
+        body: JSON.stringify(payload),
       },
     )
   }
