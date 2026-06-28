@@ -111,17 +111,27 @@ Cons:
 The code should not care whether Supabase is managed or self-hosted. It should use environment/config values:
 
 ```text
-SUPABASE_URL
-SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
+BEEGAME_SUPABASE_URL
+BEEGAME_SUPABASE_ANON_KEY
+BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+BEEGAME_SECRETS_KEY
+BEEGAME_SUPABASE_ASSET_BUCKET
 SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL
 BEEGAME_DATA_DIR
 BEEGAME_PROJECTS_ROOT
 ```
 
-Frontend uses the anon key and Supabase client for login/session handling.
+Frontend uses the anon key and Supabase client for login/session handling:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+VITE_SUPABASE_AVATAR_BUCKET
+```
 
 Backend uses service role only for trusted server-side metadata operations. The service role key must never be exposed to frontend code.
+
+`BEEGAME_SECRETS_KEY` is the server-side encryption key for model API keys, web search keys, and MCP environment secrets before they are written to Supabase. It should be generated once per deployment and kept stable across service-role key rotation. If it is omitted, BeeGame falls back to service-role-derived encryption for local development and reads legacy rows written that way, but production deployments should set it explicitly.
 
 ## Data Model
 

@@ -539,4 +539,83 @@ describe('SupabaseDashboardStore', () => {
       (call.body as Record<string, unknown>).role === 'developer',
     )).toBe(true)
   })
+
+  test('uses a dedicated secrets key while preserving service-role encrypted secrets', async () => {
+    let row = {
+      id: 'llm_1',
+      owner_id: '00000000-0000-0000-0000-000000000001',
+      name: 'Default LLM',
+      provider: 'openai-compatible',
+      base_url: 'https://llm.example/v1',
+      api_key_ciphertext: 'sk-legacy-secret',
+      models: { balanced: 'balanced-model' },
+      is_default: true,
+      created_at: '2026-06-27T00:00:00.000Z',
+      updated_at: '2026-06-27T00:00:00.000Z',
+    }
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.includes('/beegame_model_configs')) {
+        if (init?.method === 'POST') {
+          row = JSON.parse(String(init.body)) as typeof row
+          return Response.json([row])
+        }
+        return Response.json([row])
+      }
+      return new Response('Not found', { status: 404 })
+    }) as typeof fetch
+
+    const legacyStore = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      serviceRoleKey: 'service-role-key-v1',
+    })
+    await legacyStore.upsertModelConfig({
+      id: 'llm_1',
+      ownerId: row.owner_id,
+      name: row.name,
+      provider: 'openai-compatible',
+      baseUrl: row.base_url,
+      apiKey: 'sk-legacy-secret',
+      models: row.models,
+      isDefault: true,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })
+    const legacyCiphertext = row.api_key_ciphertext
+    expect(legacyCiphertext).not.toContain('sk-legacy-secret')
+
+    const storeWithDedicatedKey = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      serviceRoleKey: 'service-role-key-v1',
+      secretKey: 'stable-beegame-secret-key',
+    })
+    expect(await storeWithDedicatedKey.loadModelConfigSnapshot()).toEqual([
+      expect.objectContaining({ apiKey: 'sk-legacy-secret' }),
+    ])
+
+    await storeWithDedicatedKey.upsertModelConfig({
+      id: 'llm_1',
+      ownerId: row.owner_id,
+      name: row.name,
+      provider: 'openai-compatible',
+      baseUrl: row.base_url,
+      apiKey: 'sk-new-secret',
+      models: row.models,
+      isDefault: true,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })
+    const dedicatedCiphertext = row.api_key_ciphertext
+    expect(dedicatedCiphertext).not.toBe(legacyCiphertext)
+    expect(dedicatedCiphertext).not.toContain('sk-new-secret')
+
+    const rotatedServiceRoleStore = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      serviceRoleKey: 'service-role-key-v2',
+      secretKey: 'stable-beegame-secret-key',
+    })
+    expect(await rotatedServiceRoleStore.loadModelConfigSnapshot()).toEqual([
+      expect.objectContaining({ apiKey: 'sk-new-secret' }),
+    ])
+  })
 })

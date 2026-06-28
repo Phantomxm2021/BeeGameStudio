@@ -33,7 +33,7 @@ const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
-const getSupabaseAvatarBucket = (): string => String(import.meta.env.VITE_SUPABASE_AVATAR_BUCKET ?? 'beegame-avatars').trim() || 'beegame-avatars';
+const getSupabaseAvatarBucket = (): string => String(import.meta.env.VITE_SUPABASE_AVATAR_BUCKET ?? 'avatars').trim() || 'avatars';
 
 export function isSupabaseAuthConfigured(): boolean {
   return Boolean(getSupabaseUrl() && getSupabaseAnonKey());

@@ -333,7 +333,6 @@ describe('supabaseAuthApi', () => {
   it('uploads avatar images to Supabase Storage and returns a public URL', async () => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
-    vi.stubEnv('VITE_SUPABASE_AVATAR_BUCKET', 'avatars');
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'access-token',
       expiresAt: Date.now() + 3600_000,
