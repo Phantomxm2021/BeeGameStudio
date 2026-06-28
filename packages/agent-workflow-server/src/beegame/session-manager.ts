@@ -12,6 +12,7 @@ import {
   reserveCredits,
   settleCreditReservation,
   type CreditReservation,
+  type CreditSettlement,
 } from '../credit-store'
 import {
   getCreditTaskPolicy,
@@ -171,6 +172,44 @@ export type StartBeeGameSessionInput = {
   userDataRoot?: string
 }
 
+export type BeeGameSessionCreditBackend = {
+  reserveCredits: (
+    userId: string,
+    options: {
+      dataDir: string
+      credits: number
+      kind?: string
+      projectId?: string
+      metadata?: Record<string, unknown>
+    },
+  ) => CreditReservation | Promise<CreditReservation>
+  settleCreditReservation: (
+    userId: string,
+    options: {
+      dataDir: string
+      reservationId: string
+      weightedTokens: number
+      projectId?: string
+      metadata?: Record<string, unknown>
+    },
+  ) => CreditSettlement | Promise<CreditSettlement>
+  refundCreditReservation: (
+    userId: string,
+    options: {
+      dataDir: string
+      reservationId: string
+      projectId?: string
+      metadata?: Record<string, unknown>
+    },
+  ) => CreditSettlement | Promise<CreditSettlement>
+}
+
+const localCreditBackend: BeeGameSessionCreditBackend = {
+  reserveCredits,
+  settleCreditReservation,
+  refundCreditReservation,
+}
+
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -179,6 +218,7 @@ export class BeeGameSessionManager {
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
     dashboardDataRoot?: string,
     private readonly getAdditionalRuntimeEnv: (userDataRoot?: string) => Record<string, string> = () => ({}),
+    private readonly creditBackend: BeeGameSessionCreditBackend = localCreditBackend,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -368,7 +408,7 @@ export class BeeGameSessionManager {
     }
 
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
-    const creditReservation = this.reserveTurnCredits(record, creditPolicy, display)
+    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     record.nextTurnIndex += 1
     record.session.turnStatus = 'running'
@@ -508,7 +548,7 @@ export class BeeGameSessionManager {
         const toolUseCountBeforeTurn = record.toolUses.size
         await this.submitToRunner(record, runner, prompt, signal)
         if (creditReservation) {
-          shouldRefundReservation = !this.settleTurnCredits(
+          shouldRefundReservation = !await this.settleTurnCredits(
             record,
             creditReservation,
             creditPolicy ?? getCreditTaskPolicy('agent_turn'),
@@ -540,7 +580,7 @@ export class BeeGameSessionManager {
       }
     } catch (err) {
       if (creditReservation) {
-        shouldRefundReservation = !this.settleTurnCredits(
+        shouldRefundReservation = !await this.settleTurnCredits(
           record,
           creditReservation,
           creditPolicy ?? getCreditTaskPolicy('agent_turn'),
@@ -551,7 +591,7 @@ export class BeeGameSessionManager {
       }
     } finally {
       if (creditReservation && shouldRefundReservation) {
-        this.refundTurnCredits(record, creditReservation)
+        await this.refundTurnCredits(record, creditReservation)
       }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
@@ -869,14 +909,14 @@ export class BeeGameSessionManager {
     }
   }
 
-  private reserveTurnCredits(
+  private async reserveTurnCredits(
     record: SessionRecord,
     policy: BeeGameCreditTaskPolicy,
     display?: { displayText?: string; displayKind?: string },
-  ): CreditReservation | undefined {
+  ): Promise<CreditReservation | undefined> {
     const dataDir = record.userDataRoot ?? this.dashboardDataRoot
     try {
-      return reserveCredits(record.userId, {
+      return await this.creditBackend.reserveCredits(record.userId, {
         dataDir,
         credits: policy.reservedCredits,
         kind: policy.taskType,
@@ -898,18 +938,18 @@ export class BeeGameSessionManager {
     }
   }
 
-  private settleTurnCredits(
+  private async settleTurnCredits(
     record: SessionRecord,
     reservation: CreditReservation,
     policy: BeeGameCreditTaskPolicy,
-  ): boolean {
+  ): Promise<boolean> {
     const usage = this.deriveRuntimeSnapshot(record).usage
     const tokenDelta = Math.max(
       0,
       usage.total_tokens - record.lastSettledTotalTokens,
     )
     if (tokenDelta <= 0) return false
-    const settlement = settleCreditReservation(record.userId, {
+    const settlement = await this.creditBackend.settleCreditReservation(record.userId, {
       dataDir: record.userDataRoot ?? this.dashboardDataRoot,
       reservationId: reservation.id,
       weightedTokens: tokenDelta,
@@ -935,12 +975,12 @@ export class BeeGameSessionManager {
     return true
   }
 
-  private refundTurnCredits(
+  private async refundTurnCredits(
     record: SessionRecord,
     reservation: CreditReservation,
-  ): void {
+  ): Promise<void> {
     try {
-      const refund = refundCreditReservation(record.userId, {
+      const refund = await this.creditBackend.refundCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: reservation.id,
         projectId: record.session.id,

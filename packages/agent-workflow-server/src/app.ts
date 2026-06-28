@@ -215,6 +215,16 @@ export function createAgentWorkflowApp(
         dataDir: userDataRoot ?? dashboardDataRoot,
       }),
     }),
+    supabaseStore
+      ? {
+          reserveCredits: (userId, creditOptions) =>
+            supabaseStore.reserveCredits(userId, creditOptions),
+          settleCreditReservation: (userId, creditOptions) =>
+            supabaseStore.settleCreditReservation(userId, creditOptions),
+          refundCreditReservation: (userId, creditOptions) =>
+            supabaseStore.refundCreditReservation(userId, creditOptions),
+        }
+      : undefined,
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
