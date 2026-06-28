@@ -897,6 +897,7 @@ export function createAgentWorkflowApp(
     beeGamePreviews,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
     },
@@ -908,6 +909,7 @@ export function createAgentWorkflowApp(
     beeGamePreviews,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
     },
@@ -1300,6 +1302,7 @@ function registerBeeGameSessionRoutes(
   beeGamePreviews: BeeGamePreviewManager,
   options: {
     defaultWorkspacePath?: string
+    supabaseStore?: SupabaseDashboardStore
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getUserDataRoot: (request?: Request) => string
   },
@@ -1329,9 +1332,11 @@ function registerBeeGameSessionRoutes(
         workspacePath,
         defaultWorkspacePath,
       )
-      return c.json(
-        beeGameSessions.start({
+      const session = beeGameSessions.start({
           workspacePath,
+          ...(typeof body.projectId === 'string' && body.projectId
+            ? { projectId: body.projectId }
+            : {}),
           ...(typeof body.modelConfigId === 'string' && body.modelConfigId
             ? { modelConfigId: body.modelConfigId }
             : {}),
@@ -1340,8 +1345,14 @@ function registerBeeGameSessionRoutes(
             : {}),
           userId: options.getCurrentUser(c.req.raw).id,
           userDataRoot: options.getUserDataRoot(c.req.raw),
-        }),
+        })
+      await persistSupabaseSessionMetadata(
+        options.supabaseStore,
+        options.getCurrentUser(c.req.raw).id,
+        beeGameSessions,
+        session.id,
       )
+      return c.json(session)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -1628,11 +1639,18 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.post(`${basePath}/:id/stop`, c => {
+  app.post(`${basePath}/:id/stop`, async c => {
     const forbidden = check(c.req.raw, 'agent.cancel')
     if (forbidden) return c.json(forbidden, 403)
     try {
-      return c.json(beeGameSessions.stop(c.req.param('id')))
+      const session = beeGameSessions.stop(c.req.param('id'))
+      await persistSupabaseSessionMetadata(
+        options.supabaseStore,
+        options.getCurrentUser(c.req.raw).id,
+        beeGameSessions,
+        session.id,
+      )
+      return c.json(session)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 404)
     }
@@ -1644,9 +1662,16 @@ function registerBeeGameSessionRoutes(
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
     const workspacePathQuery = c.req.query('workspacePath')
     try {
+      const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
       const result = await beeGameSessions.delete(c.req.param('id'), {
         deleteArtifacts,
       })
+      if (options.supabaseStore && sessionMetadata?.projectId) {
+        await options.supabaseStore.deleteSession(
+          options.getCurrentUser(c.req.raw).id,
+          c.req.param('id'),
+        )
+      }
       appendAuditEvent({
         actorId: options.getCurrentUser(c.req.raw).id,
         action: 'beegame_session.deleted',
@@ -1905,6 +1930,27 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
       ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
       : {}),
   }
+}
+
+async function persistSupabaseSessionMetadata(
+  supabaseStore: SupabaseDashboardStore | undefined,
+  ownerId: string,
+  beeGameSessions: BeeGameSessionManager,
+  sessionId: string,
+): Promise<void> {
+  if (!supabaseStore) return
+  const metadata = beeGameSessions.metadata(sessionId)
+  if (!metadata?.projectId) return
+  await supabaseStore.upsertSession(ownerId, {
+    id: metadata.id,
+    projectId: metadata.projectId,
+    workspacePath: metadata.workspacePath,
+    status: metadata.status,
+    transcriptPath: metadata.transcriptPath,
+    ...(metadata.modelConfigId ? { modelConfigId: metadata.modelConfigId } : {}),
+    createdAt: metadata.createdAt,
+    updatedAt: metadata.updatedAt,
+  })
 }
 
 function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectMetadata['runtime_snapshot']> {

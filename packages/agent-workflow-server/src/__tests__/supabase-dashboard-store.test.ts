@@ -124,6 +124,25 @@ describe('SupabaseDashboardStore', () => {
         return Response.json([])
       }
 
+      if (requestUrl.includes('/beegame_sessions')) {
+        if (init?.method === 'POST') {
+          return Response.json([JSON.parse(String(init.body))])
+        }
+        return Response.json([
+          {
+            id: 'session_1',
+            project_id: 'project_1',
+            owner_id: ownerId,
+            workspace_path: '/tmp/project-one',
+            status: 'running',
+            transcript_path: '/tmp/project-one/transcripts/project-one__abcd1234.jsonl',
+            model_config_id: 'llm_1',
+            created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
+          },
+        ])
+      }
+
       return new Response('Not found', { status: 404 })
     }) as typeof fetch
 
@@ -172,6 +191,27 @@ describe('SupabaseDashboardStore', () => {
       id: 'project_1',
       name: 'Project One',
     }))
+    expect(await store.upsertSession(ownerId, {
+      id: 'session_2',
+      projectId: 'project_1',
+      workspacePath: '/tmp/project-one',
+      status: 'running',
+      transcriptPath: '/tmp/project-one/transcripts/project-one__efgh5678.jsonl',
+      modelConfigId: 'llm_1',
+      createdAt: new Date('2026-06-27T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-27T00:00:00.000Z'),
+    })).toEqual(expect.objectContaining({
+      id: 'session_2',
+      projectId: 'project_1',
+      transcriptPath: '/tmp/project-one/transcripts/project-one__efgh5678.jsonl',
+    }))
+    expect(await store.listSessions(ownerId)).toEqual([
+      expect.objectContaining({
+        id: 'session_1',
+        projectId: 'project_1',
+        transcriptPath: '/tmp/project-one/transcripts/project-one__abcd1234.jsonl',
+      }),
+    ])
     const reservation = await store.reserveCredits(ownerId, {
       credits: 5,
       kind: 'edit_turn',
@@ -207,6 +247,7 @@ describe('SupabaseDashboardStore', () => {
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_web_tools'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_mcp_servers'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_projects'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_sessions'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
   })

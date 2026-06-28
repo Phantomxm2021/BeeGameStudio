@@ -559,6 +559,10 @@ describe('beegame session routes', () => {
 
   beforeEach(() => {
     resetAgentWorkflow()
+    delete process.env.BEEGAME_SUPABASE_URL
+    delete process.env.SUPABASE_URL
+    delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY
   })
 
   test('creates a dashboard session without starting a BeeGame turn', async () => {
@@ -906,6 +910,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
 
     try {
@@ -933,6 +938,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
@@ -1072,6 +1078,7 @@ describe('beegame session routes', () => {
       const restartedApp = createAgentWorkflowApp({
         sessionRunner: createFakeRunner().runner,
         defaultWorkspacePath: projectsRoot,
+        currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
       })
       const transcriptRes = await restartedApp.request(
         `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}`,

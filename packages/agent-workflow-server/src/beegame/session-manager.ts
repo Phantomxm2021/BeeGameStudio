@@ -146,6 +146,7 @@ type SessionRecord = {
   session: BeeGameSession
   runtime: RuntimeModelConfig | undefined
   userId: string
+  projectId?: string
   userDataRoot?: string
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
@@ -166,10 +167,22 @@ type SessionRecord = {
 
 export type StartBeeGameSessionInput = {
   workspacePath: string
+  projectId?: string
   modelConfigId?: string
   transcriptSessionId?: string
   userId: string
   userDataRoot?: string
+}
+
+export type BeeGameSessionInternalMetadata = {
+  id: string
+  projectId?: string
+  workspacePath: string
+  status: BeeGameSessionStatus
+  transcriptPath: string
+  modelConfigId?: string
+  createdAt: Date
+  updatedAt: Date
 }
 
 export type BeeGameSessionCreditBackend = {
@@ -264,6 +277,7 @@ export class BeeGameSessionManager {
       session,
       runtime,
       userId: input.userId,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
       transcriptPath: recoveredTranscript?.path ??
         getSessionTranscriptPath(
@@ -309,6 +323,23 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
+  }
+
+  metadata(sessionId: string): BeeGameSessionInternalMetadata | undefined {
+    const record = this.sessions.get(sessionId)
+    if (!record) return undefined
+    return {
+      id: record.session.id,
+      ...(record.projectId ? { projectId: record.projectId } : {}),
+      workspacePath: record.session.cwd,
+      status: record.session.status,
+      transcriptPath: record.transcriptPath,
+      ...(record.session.modelConfigId
+        ? { modelConfigId: record.session.modelConfigId }
+        : {}),
+      createdAt: record.session.createdAt,
+      updatedAt: record.session.updatedAt,
+    }
   }
 
   updateModel(sessionId: string, modelConfigId: string): BeeGameSession {

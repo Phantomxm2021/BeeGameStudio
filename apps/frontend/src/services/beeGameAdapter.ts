@@ -275,10 +275,10 @@ export const beeGameAdapter = {
   }> {
     const title = getBriefDisplayTitle(data);
     const workspacePath = await resolveProjectWorkspacePath(data.root_path, getBriefFolderName(data, title));
-    const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(title, workspacePath, `project_${session.id}`);
+    const project = createLocalProject(title, workspacePath);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
+    const session = await startBeeGameSession(workspacePath, undefined, project.id);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -307,10 +307,10 @@ export const beeGameAdapter = {
   }> {
     const title = data.title || summarizeTitle(data.idea);
     const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
-    const session = await startBeeGameSession(workspacePath);
-    const project = createLocalProject(title, workspacePath, `project_${session.id}`);
+    const project = createLocalProject(title, workspacePath);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
+    const session = await startBeeGameSession(workspacePath, undefined, project.id);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -750,7 +750,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
       if (session.status !== 'running') {
         const recoveredEvents = await fetchBeeGameTranscriptIfAvailable(binding);
         const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
-        const restored = await startBeeGameSession(workspacePath, binding.sessionId);
+        const restored = await startBeeGameSession(workspacePath, binding.sessionId, projectId);
         saveBinding({ projectId, sessionId: restored.id, workspacePath });
         return {
           session: restored,
@@ -766,7 +766,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
       if (!isSessionNotFoundError(error)) throw error;
       const recoveredEvents = await fetchBeeGameTranscriptIfAvailable(binding);
       const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
-      const session = await startBeeGameSession(workspacePath, binding.sessionId);
+      const session = await startBeeGameSession(workspacePath, binding.sessionId, projectId);
       saveBinding({ projectId, sessionId: session.id, workspacePath });
       return {
         session,
@@ -777,7 +777,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
   }
 
   const workspacePath = await resolveExistingProjectWorkspacePath(project);
-  const session = await startBeeGameSession(workspacePath);
+  const session = await startBeeGameSession(workspacePath, undefined, projectId);
   saveBinding({ projectId, sessionId: session.id, workspacePath });
   return { session, recoveredEvents: [] };
 }
@@ -917,7 +917,11 @@ function getWorkspaceDisplayName(workspacePath: string, fallback: string): strin
   return segments.at(-1) || fallback.trim() || 'BeeGame Project';
 }
 
-async function startBeeGameSession(workspacePath: string, transcriptSessionId?: string): Promise<BeeGameSession> {
+async function startBeeGameSession(
+  workspacePath: string,
+  transcriptSessionId?: string,
+  projectId?: string,
+): Promise<BeeGameSession> {
   const modelConfigId = await getDefaultModelConfigId();
   if (!modelConfigId) {
     throw new Error('请先在模型设置中配置 BeeGame LLM API Key、Base URL 和 Model，并设为默认模型。');
@@ -925,6 +929,7 @@ async function startBeeGameSession(workspacePath: string, transcriptSessionId?: 
   return postJson('/api/beegame-sessions', {
     workspacePath,
     modelConfigId,
+    ...(projectId ? { projectId } : {}),
     ...(transcriptSessionId ? { transcriptSessionId } : {}),
   });
 }

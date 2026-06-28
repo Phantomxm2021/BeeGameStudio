@@ -91,6 +91,29 @@ type SupabaseProjectRow = {
   updated_at: string
 }
 
+type SupabaseSessionRow = {
+  id: string
+  project_id: string
+  owner_id: string
+  workspace_path: string
+  status: string
+  transcript_path: string | null
+  model_config_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type BeeGameSessionMetadata = {
+  id: string
+  projectId: string
+  workspacePath: string
+  status: string
+  transcriptPath?: string
+  modelConfigId?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 type SupabaseCreditAccountRow = {
   user_id: string
   plan: 'free'
@@ -316,6 +339,43 @@ export class SupabaseDashboardStore {
 
   async deleteProject(ownerId: string, id: string): Promise<boolean> {
     return this.deleteWhere('beegame_projects', {
+      owner_id: ownerId,
+      id,
+    })
+  }
+
+  async listSessions(ownerId: string): Promise<BeeGameSessionMetadata[]> {
+    const rows = await this.rest<SupabaseSessionRow[]>(
+      `/rest/v1/beegame_sessions?owner_id=eq.${q(ownerId)}&select=*&order=updated_at.desc,created_at.desc`,
+    )
+    return rows.map(rowToSessionMetadata)
+  }
+
+  async upsertSession(
+    ownerId: string,
+    session: BeeGameSessionMetadata,
+  ): Promise<BeeGameSessionMetadata> {
+    const normalized = normalizeSessionMetadata(session)
+    const row = await this.upsert<SupabaseSessionRow>(
+      'beegame_sessions',
+      {
+        id: normalized.id,
+        owner_id: ownerId,
+        project_id: normalized.projectId,
+        workspace_path: normalized.workspacePath,
+        status: normalized.status,
+        transcript_path: normalized.transcriptPath ?? null,
+        model_config_id: normalized.modelConfigId ?? null,
+        created_at: normalized.createdAt.toISOString(),
+        updated_at: normalized.updatedAt.toISOString(),
+      },
+      'id',
+    )
+    return rowToSessionMetadata(row)
+  }
+
+  async deleteSession(ownerId: string, id: string): Promise<boolean> {
+    return this.deleteWhere('beegame_sessions', {
       owner_id: ownerId,
       id,
     })
@@ -899,6 +959,53 @@ function normalizeProjectRuntimeSnapshot(
   return Object.keys(normalized).length > 0
     ? { runtime_snapshot: normalized }
     : {}
+}
+
+function normalizeSessionMetadata(
+  session: BeeGameSessionMetadata,
+): BeeGameSessionMetadata {
+  const id = session.id.trim()
+  const projectId = session.projectId.trim()
+  const workspacePath = session.workspacePath.trim()
+  const status = session.status.trim() || 'idle'
+  if (!id) throw new Error('Session id is required')
+  if (!projectId) throw new Error('Session project id is required')
+  if (!workspacePath) throw new Error('Session workspace path is required')
+  return {
+    id,
+    projectId,
+    workspacePath,
+    status,
+    ...(session.transcriptPath?.trim()
+      ? { transcriptPath: session.transcriptPath.trim() }
+      : {}),
+    ...(session.modelConfigId?.trim()
+      ? { modelConfigId: session.modelConfigId.trim() }
+      : {}),
+    createdAt: session.createdAt instanceof Date &&
+      Number.isFinite(session.createdAt.getTime())
+      ? session.createdAt
+      : new Date(),
+    updatedAt: session.updatedAt instanceof Date &&
+      Number.isFinite(session.updatedAt.getTime())
+      ? session.updatedAt
+      : new Date(),
+  }
+}
+
+function rowToSessionMetadata(
+  row: SupabaseSessionRow,
+): BeeGameSessionMetadata {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workspacePath: row.workspace_path,
+    status: row.status,
+    ...(row.transcript_path ? { transcriptPath: row.transcript_path } : {}),
+    ...(row.model_config_id ? { modelConfigId: row.model_config_id } : {}),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
 }
 
 function normalizeCreditAccountRow(
