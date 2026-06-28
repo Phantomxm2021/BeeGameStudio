@@ -927,6 +927,19 @@ function requirePermission(
     : { error: 'Forbidden' }
 }
 
+function requireBeeGameSessionOwner(
+  request: Request,
+  sessionId: string,
+  beeGameSessions: BeeGameSessionManager,
+  getCurrentUser: (request?: Request) => BeeGameUserContext,
+): { error: string } | undefined {
+  const metadata = beeGameSessions.metadata(sessionId)
+  if (!metadata) return undefined
+  return metadata.userId === getCurrentUser(request).id
+    ? undefined
+    : { error: 'Session not found' }
+}
+
 async function generateBeeGameIntakeOptions(input: {
   idea: string
   language?: string
@@ -1310,11 +1323,18 @@ function registerBeeGameSessionRoutes(
   const defaultWorkspacePath = options.defaultWorkspacePath
   const check = (request: Request, permission: BeeGamePermission) =>
     requirePermission(options.getCurrentUser(request), permission)
+  const checkSession = (request: Request, sessionId: string) =>
+    requireBeeGameSessionOwner(
+      request,
+      sessionId,
+      beeGameSessions,
+      options.getCurrentUser,
+    )
 
   app.get(basePath, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(beeGameSessions.list())
+    return c.json(beeGameSessions.list(options.getCurrentUser(c.req.raw).id))
   })
 
   app.post(basePath, async c => {
@@ -1361,6 +1381,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id`, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const session = beeGameSessions.get(c.req.param('id'))
     return session
       ? c.json(session)
@@ -1370,6 +1392,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/events`, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       return c.json(beeGameSessions.events(c.req.param('id'), after))
@@ -1381,6 +1405,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/runtime-snapshot`, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       return c.json(
         beeGameSessions.runtimeSnapshot(
@@ -1396,6 +1422,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/transcript`, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
     } catch (err) {
@@ -1415,6 +1443,8 @@ function registerBeeGameSessionRoutes(
   app.patch(`${basePath}/:id/model`, async c => {
     const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['modelConfigId'])
     if (error) return c.json({ error }, 400)
@@ -1437,6 +1467,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/artifacts`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
     try {
@@ -1455,6 +1487,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/assets`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
@@ -1467,6 +1501,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
     const forbidden = check(c.req.raw, 'assets.upload')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     const form = await c.req.raw.formData()
@@ -1490,6 +1526,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/package`, async c => {
     const forbidden = check(c.req.raw, 'project.export')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
         c.req.param('id'),
@@ -1516,6 +1554,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/preview`, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const workspacePath = c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
@@ -1528,6 +1568,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/preview`, async c => {
     const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
       ? body.workspacePath
@@ -1546,6 +1588,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/preview/restart`, async c => {
     const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
     const workspacePath = typeof body.workspacePath === 'string'
       ? body.workspacePath
@@ -1564,6 +1608,8 @@ function registerBeeGameSessionRoutes(
   app.delete(`${basePath}/:id/preview`, async c => {
     const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const workspacePath = c.req.query('workspacePath')
     try {
       return c.json(beeGamePreviews.stop(c.req.param('id'), workspacePath))
@@ -1575,6 +1621,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/input`, async c => {
     const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['text'])
     if (error) return c.json({ error }, 400)
@@ -1603,6 +1651,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/permissions/:toolUseID`, async c => {
     const forbidden = check(c.req.raw, 'agent.approve_tool')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
     const decision = body.decision
     if (decision !== 'allow' && decision !== 'deny') {
@@ -1642,6 +1692,8 @@ function registerBeeGameSessionRoutes(
   app.post(`${basePath}/:id/stop`, async c => {
     const forbidden = check(c.req.raw, 'agent.cancel')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const session = beeGameSessions.stop(c.req.param('id'))
       await persistSupabaseSessionMetadata(
@@ -1659,6 +1711,8 @@ function registerBeeGameSessionRoutes(
   app.delete(`${basePath}/:id`, async c => {
     const forbidden = check(c.req.raw, 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
     const workspacePathQuery = c.req.query('workspacePath')
     try {

@@ -176,6 +176,7 @@ export type StartBeeGameSessionInput = {
 
 export type BeeGameSessionInternalMetadata = {
   id: string
+  userId: string
   projectId?: string
   workspacePath: string
   status: BeeGameSessionStatus
@@ -314,10 +315,12 @@ export class BeeGameSessionManager {
     return cloneSession(record.session)
   }
 
-  list(): BeeGameSession[] {
-    return [...this.sessions.values()].map(record =>
-      cloneSession(record.session),
-    )
+  list(userId?: string): BeeGameSession[] {
+    return [...this.sessions.values()]
+      .filter(record => !userId || record.userId === userId)
+      .map(record =>
+        cloneSession(record.session),
+      )
   }
 
   get(sessionId: string): BeeGameSession | undefined {
@@ -330,6 +333,7 @@ export class BeeGameSessionManager {
     if (!record) return undefined
     return {
       id: record.session.id,
+      userId: record.userId,
       ...(record.projectId ? { projectId: record.projectId } : {}),
       workspacePath: record.session.cwd,
       status: record.session.status,

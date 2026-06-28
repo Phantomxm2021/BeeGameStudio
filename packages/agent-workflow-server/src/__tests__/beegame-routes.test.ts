@@ -774,6 +774,81 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('blocks cross-owner BeeGame session access even when the session id and workspace are known', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'owner-a-game')
+    const fake = createFakeRunner()
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(workspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({ version: 1, slots: [] }),
+        'utf8',
+      )
+
+      const app = createAgentWorkflowApp({
+        sessionRunner: fake.runner,
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => {
+          const token = request.headers.get('authorization')
+          if (token === 'Bearer owner-a-token') return { id: 'owner-a', role: 'owner' }
+          if (token === 'Bearer owner-b-token') return { id: 'owner-b', role: 'owner' }
+          return undefined
+        },
+      })
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer owner-a-token',
+        },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          projectId: 'owner-a-project',
+        }),
+      })
+      expect(sessionRes.status).toBe(200)
+      const session = await sessionRes.json()
+
+      const ownerBHeaders = { authorization: 'Bearer owner-b-token' }
+      const ownerBJsonHeaders = {
+        ...ownerBHeaders,
+        'content-type': 'application/json',
+      }
+
+      expect((await app.request(
+        `/api/beegame-sessions/${session.id}/events`,
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        `/api/beegame-sessions/${session.id}/assets?workspacePath=${encodeURIComponent(workspace)}`,
+        { headers: ownerBHeaders },
+      )).status).toBe(404)
+      expect((await app.request(
+        `/api/beegame-sessions/${session.id}/preview`,
+        {
+          method: 'POST',
+          headers: ownerBJsonHeaders,
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )).status).toBe(404)
+      expect((await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: ownerBJsonHeaders,
+          body: JSON.stringify({ text: 'Continue' }),
+        },
+      )).status).toBe(404)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('injects bearer authenticated user runtime settings into BeeGame turns', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
