@@ -1,4 +1,13 @@
 import {
+  createModelConfig,
+  deleteModelConfig,
+  exportModelConfigSnapshot,
+  importModelConfigSnapshot,
+  listModelConfigs,
+  updateModelConfig,
+  type ModelProviderKind,
+} from '@claude-code-best/agent-workflow'
+import {
   appendAuditEvent,
   listAuditEvents,
   type AppendAuditEventInput,
@@ -20,6 +29,10 @@ import {
   mapRuntimeSettingsToEnv,
 } from './runtime-settings-store'
 import type { BeeGameUserContext } from './auth/user-context'
+import {
+  saveModelConfigsToStore,
+  type ModelConfigStoreOptions,
+} from './model-config-store'
 import type { SupabaseDashboardStore } from './supabase-dashboard-store'
 import {
   loadWebToolsConfig,
@@ -30,6 +43,7 @@ export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
   getUserDataRoot: (request?: Request) => string
+  modelConfigStore?: ModelConfigStoreOptions | false
 }
 
 type CreditReserveInput = Omit<Parameters<typeof reserveCredits>[1], 'dataDir'>
@@ -41,6 +55,19 @@ type CreditRefundInput = Omit<
   Parameters<typeof refundCreditReservation>[1],
   'dataDir'
 >
+type CreateModelConfigInput = {
+  name: string
+  provider: ModelProviderKind
+  baseUrl?: string
+  apiKey: string
+  models: {
+    fast?: string
+    balanced?: string
+    strong?: string
+  }
+  isDefault?: boolean
+}
+type UpdateModelConfigInput = Partial<CreateModelConfigInput>
 
 export class DashboardRepository {
   readonly supabaseStore?: SupabaseDashboardStore
@@ -58,6 +85,48 @@ export class DashboardRepository {
       : getCreditBalance(user.id, {
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  async listModelConfigs(user: BeeGameUserContext) {
+    await this.syncModelConfigs()
+    return listModelConfigs(user.id)
+  }
+
+  async syncModelConfigs(): Promise<void> {
+    if (!this.supabaseStore) return
+    importModelConfigSnapshot(await this.supabaseStore.loadModelConfigSnapshot())
+  }
+
+  async createModelConfig(
+    user: BeeGameUserContext,
+    input: CreateModelConfigInput,
+  ) {
+    await this.syncModelConfigs()
+    const created = createModelConfig(user.id, input)
+    await this.persistModelConfig(created.id)
+    return created
+  }
+
+  async updateModelConfig(id: string, input: UpdateModelConfigInput) {
+    await this.syncModelConfigs()
+    const updated = updateModelConfig(id, input)
+    if (updated) await this.persistModelConfig(updated.id)
+    return updated
+  }
+
+  async deleteModelConfig(
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<boolean> {
+    await this.syncModelConfigs()
+    const deleted = deleteModelConfig(id)
+    if (!deleted) return false
+    if (this.supabaseStore) {
+      await this.supabaseStore.deleteModelConfig(user.id, id)
+    } else {
+      this.persistLocalModelConfigs()
+    }
+    return true
   }
 
   async listCreditLedger(
@@ -168,6 +237,22 @@ export class DashboardRepository {
       ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({ dataDir }), {
         dataDir,
       }),
+    }
+  }
+
+  private async persistModelConfig(id: string): Promise<void> {
+    if (!this.supabaseStore) {
+      this.persistLocalModelConfigs()
+      return
+    }
+    const record = exportModelConfigSnapshot().find(config => config.id === id)
+    if (record) await this.supabaseStore.upsertModelConfig(record)
+  }
+
+  private persistLocalModelConfigs(): void {
+    const modelConfigStore = this.options.modelConfigStore
+    if (modelConfigStore !== false && modelConfigStore !== undefined) {
+      saveModelConfigsToStore(modelConfigStore)
     }
   }
 }

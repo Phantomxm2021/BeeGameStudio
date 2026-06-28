@@ -2,13 +2,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { join } from 'node:path'
 import {
-  createModelConfig,
-  deleteModelConfig,
-  exportModelConfigSnapshot,
-  importModelConfigSnapshot,
   listModelConfigs,
   mapModelConfigToRuntime,
-  updateModelConfig,
   type ModelProviderKind,
 } from '@claude-code-best/agent-workflow'
 import {
@@ -32,7 +27,6 @@ import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
   loadModelConfigsFromStore,
-  saveModelConfigsToStore,
   type ModelConfigStoreOptions,
 } from './model-config-store'
 import {
@@ -178,10 +172,15 @@ export function createAgentWorkflowApp(
   const getCurrentUser = authContext.getCurrentUser
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
+  const modelConfigStore = options.modelConfigStore
+  if (modelConfigStore !== false && modelConfigStore !== undefined) {
+    loadModelConfigsFromStore(modelConfigStore)
+  }
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
     getUserDataRoot: getCurrentUserDataRoot,
+    modelConfigStore,
   })
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
@@ -215,10 +214,6 @@ export function createAgentWorkflowApp(
     )
     projectStores.set(dataRoot, created)
     return created
-  }
-  const modelConfigStore = options.modelConfigStore
-  if (modelConfigStore !== false && modelConfigStore !== undefined) {
-    loadModelConfigsFromStore(modelConfigStore)
   }
 
   app.use('/api/*', cors())
@@ -390,8 +385,9 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/model-configs', async c => {
-    await loadSupabaseModelConfigs(supabaseStore)
-    return c.json(listModelConfigs(getCurrentUser(c.req.raw).id))
+    return c.json(await dashboardRepository.listModelConfigs(
+      getCurrentUser(c.req.raw),
+    ))
   })
 
   app.post('/api/model-configs', async c => {
@@ -403,8 +399,7 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
 
-    await loadSupabaseModelConfigs(supabaseStore)
-    const created = createModelConfig(user.id, {
+    const created = await dashboardRepository.createModelConfig(user, {
       name: String(body.name),
       provider: body.provider as ModelProviderKind,
       ...(typeof body.baseUrl === 'string' && body.baseUrl
@@ -414,7 +409,6 @@ export function createAgentWorkflowApp(
       models: toModelMap(body.models),
       isDefault: body.isDefault === true,
     })
-    await persistModelConfig(supabaseStore, created.id, modelConfigStore)
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.created',
@@ -434,8 +428,7 @@ export function createAgentWorkflowApp(
       return c.json({ error: 'Forbidden' }, 403)
     }
     const body = await readJson(c.req.raw)
-    await loadSupabaseModelConfigs(supabaseStore)
-    const updated = updateModelConfig(c.req.param('id'), {
+    const updated = await dashboardRepository.updateModelConfig(c.req.param('id'), {
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(typeof body.provider === 'string'
         ? { provider: body.provider as ModelProviderKind }
@@ -449,7 +442,6 @@ export function createAgentWorkflowApp(
     })
     if (!updated) return c.json({ error: 'Config not found' }, 404)
 
-    await persistModelConfig(supabaseStore, updated.id, modelConfigStore)
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.updated',
@@ -469,14 +461,11 @@ export function createAgentWorkflowApp(
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    await loadSupabaseModelConfigs(supabaseStore)
-    const deleted = deleteModelConfig(c.req.param('id'))
+    const deleted = await dashboardRepository.deleteModelConfig(
+      user,
+      c.req.param('id'),
+    )
     if (deleted) {
-      if (supabaseStore) {
-        await supabaseStore.deleteModelConfig(user.id, c.req.param('id'))
-      } else {
-        persistModelConfigs(modelConfigStore)
-      }
       await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'model_config.deleted',
@@ -837,7 +826,7 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     let reservation: { id: string } | undefined
     try {
-      await loadSupabaseModelConfigs(supabaseStore)
+      await dashboardRepository.syncModelConfigs()
       const policy = getCreditTaskPolicy('idea_intake')
       const reservedCredits = policy.reservedCredits
       reservation = await dashboardRepository.reserveCredits(c.req.raw, user, {
@@ -1905,34 +1894,6 @@ async function readTranscriptFromWorkspace(
   } catch (err) {
     return Response.json({ error: toErrorMessage(err) }, { status: 404 })
   }
-}
-
-function persistModelConfigs(
-  modelConfigStore: ModelConfigStoreOptions | false | undefined,
-): void {
-  if (modelConfigStore !== false && modelConfigStore !== undefined) {
-    saveModelConfigsToStore(modelConfigStore)
-  }
-}
-
-async function loadSupabaseModelConfigs(
-  supabaseStore: SupabaseDashboardStore | undefined,
-): Promise<void> {
-  if (!supabaseStore) return
-  importModelConfigSnapshot(await supabaseStore.loadModelConfigSnapshot())
-}
-
-async function persistModelConfig(
-  supabaseStore: SupabaseDashboardStore | undefined,
-  id: string,
-  modelConfigStore: ModelConfigStoreOptions | false | undefined,
-): Promise<void> {
-  if (!supabaseStore) {
-    persistModelConfigs(modelConfigStore)
-    return
-  }
-  const record = exportModelConfigSnapshot().find(config => config.id === id)
-  if (record) await supabaseStore.upsertModelConfig(record)
 }
 
 function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
