@@ -18,7 +18,14 @@ import {
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
-import { getCreditBalance, type BeeGameCreditBalance } from '../../services/creditsApi';
+import {
+    getCreditBalance,
+    getCreditLedger,
+    getCreditQuote,
+    type BeeGameCreditBalance,
+    type BeeGameCreditLedgerEntry,
+    type BeeGameCreditQuote,
+} from '../../services/creditsApi';
 import { deleteCurrentUser } from '../../services/currentUserApi';
 import {
     clearSupabaseSession,
@@ -27,6 +34,7 @@ import {
     signInWithSupabaseOAuth,
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
+    type SupabaseOAuthProvider,
     updateSupabaseAvatarUrl,
 } from '../../services/supabaseAuthApi';
 
@@ -177,6 +185,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
+    const [creditLedger, setCreditLedger] = useState<BeeGameCreditLedgerEntry[]>([]);
+    const [isCreditLedgerLoading, setIsCreditLedgerLoading] = useState(false);
+    const [isCreditLedgerExpanded, setIsCreditLedgerExpanded] = useState(false);
+    const [buildCreditQuote, setBuildCreditQuote] = useState<BeeGameCreditQuote | null>(null);
+    const [pendingBuildBrief, setPendingBuildBrief] = useState<BeeGameBuildBrief | null>(null);
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -387,7 +400,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setAvatarDraft(currentUser?.avatarUrl || '');
         setIsDeleteAccountConfirmOpen(false);
         setDeleteAccountConfirmation('');
+        setIsCreditLedgerExpanded(false);
         setIsProfileOpen(true);
+        setIsCreditLedgerLoading(true);
+        void getCreditLedger()
+            .then(entries => setCreditLedger(entries))
+            .catch(() => setCreditLedger([]))
+            .finally(() => setIsCreditLedgerLoading(false));
     };
 
     const handleAvatarFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -462,10 +481,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
     };
 
-    const handleOAuthSignIn = (provider: 'github' | 'google') => {
+    const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
-            signInWithSupabaseOAuth(provider);
+            await signInWithSupabaseOAuth(provider);
         } catch (error) {
             setLoginError(error instanceof Error ? error.message : '第三方登录启动失败。');
         }
@@ -545,19 +564,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setClarificationDraft('');
     };
 
-    const handleStartBuild = async () => {
-        if (!selectedOption || !settings || isTransitioning || isPreparing) return;
+    const startConfirmedBuild = async (brief: BeeGameBuildBrief) => {
         setIntakeError('');
         setIsPreparing(true);
         setIntakePhase('starting_build');
         try {
-            const brief: BeeGameBuildBrief = {
-                idea: projectName.trim(),
-                option: selectedOption,
-                settings,
-                title: selectedOption.title,
-                language: lang,
-            };
             await onStart(projectName.trim(), undefined, brief);
             setIsTransitioning(true);
         } catch (error) {
@@ -566,6 +577,47 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIntakeError(error instanceof Error ? error.message : '项目启动失败，请检查服务后重试。');
             console.error('Failed to start confirmed project:', error);
         }
+    };
+
+    const handleStartBuild = async () => {
+        if (!selectedOption || !settings || isTransitioning || isPreparing) return;
+        const brief: BeeGameBuildBrief = {
+            idea: projectName.trim(),
+            option: selectedOption,
+            settings,
+            title: selectedOption.title,
+            language: lang,
+        };
+        setIntakeError('');
+        setIsPreparing(true);
+        try {
+            const quote = await getCreditQuote('full_build');
+            if (!quote.canStart) {
+                setIntakeError(`Credit 不足。本次构建需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
+                return;
+            }
+            setPendingBuildBrief(brief);
+            setBuildCreditQuote(quote);
+        } catch (error) {
+            setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
+            console.error('Failed to quote build credits:', error);
+        } finally {
+            setIsPreparing(false);
+        }
+    };
+
+    const handleConfirmBuildCredit = () => {
+        const brief = pendingBuildBrief;
+        setBuildCreditQuote(null);
+        setPendingBuildBrief(null);
+        if (brief) {
+            void startConfirmedBuild(brief);
+        }
+    };
+
+    const handleCancelBuildCredit = () => {
+        setBuildCreditQuote(null);
+        setPendingBuildBrief(null);
     };
 
     const handleSelectProject = async (id: string) => {
@@ -686,6 +738,49 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                             {profileError ? <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">{profileError}</div> : null}
                             {profileNotice ? <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">{profileNotice}</div> : null}
+
+                            <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-left">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-sm font-semibold text-white">Credit 记录</div>
+                                    {creditBalance ? (
+                                        <div className="text-xs font-bold text-emerald-200">
+                                            {creditBalance.balanceCredits} credits
+                                        </div>
+                                    ) : null}
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                    {isCreditLedgerLoading ? (
+                                        <div className="text-sm text-zinc-500">正在加载...</div>
+                                    ) : creditLedger.length > 0 ? (
+                                        (isCreditLedgerExpanded ? creditLedger : creditLedger.slice(0, 5)).map(entry => (
+                                            <div key={entry.id} className="flex items-center justify-between gap-3 rounded-2xl bg-black/20 px-3 py-2">
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
+                                                        {formatCreditLedgerKind(entry.kind)}
+                                                    </div>
+                                                    <div className="mt-0.5 truncate text-xs text-zinc-500">
+                                                        {formatCreditLedgerMeta(entry)}
+                                                    </div>
+                                                </div>
+                                                <div className={`shrink-0 text-sm font-black ${entry.credits >= 0 ? 'text-emerald-200' : 'text-amber-200'}`}>
+                                                    {entry.credits >= 0 ? '+' : ''}{entry.credits}
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-sm text-zinc-500">暂无记录</div>
+                                    )}
+                                </div>
+                                {!isCreditLedgerLoading && creditLedger.length > 5 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCreditLedgerExpanded(value => !value)}
+                                        className="mt-3 rounded-full border border-white/15 px-4 py-2 text-xs font-bold text-zinc-200 transition hover:bg-white/10"
+                                    >
+                                        {isCreditLedgerExpanded ? '收起' : '查看全部'}
+                                    </button>
+                                ) : null}
+                            </div>
 
                             {isDeleteAccountConfirmOpen ? (
                                 <div className="mt-5 rounded-3xl border border-red-300/20 bg-red-950/20 p-4">
@@ -856,7 +951,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginNotice('');
                                         }}
                                         disabled={isSigningIn}
-                                        className="mx-auto block text-center text-sm font-semibold text-amber-200 transition hover:text-amber-100 disabled:opacity-60"
+                                        className="mx-auto block text-center text-sm font-semibold text-zinc-300 transition hover:text-white disabled:opacity-60"
                                     >
                                         忘记密码？
                                     </button>
@@ -909,20 +1004,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         <span className="h-px flex-1 bg-white/10" />
                                     </div>
                                     <div className="grid gap-2 sm:grid-cols-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleOAuthSignIn('github')}
-                                            className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
-                                        >
-                                            GitHub
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleOAuthSignIn('google')}
-                                            className="rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
-                                        >
-                                            Google
-                                        </button>
+                                        <OAuthButton provider="github" label="GitHub" onClick={handleOAuthSignIn} />
+                                        <OAuthButton provider="google" label="Google" onClick={handleOAuthSignIn} />
+                                        <OAuthButton provider="facebook" label="Facebook" onClick={handleOAuthSignIn} />
+                                        <OAuthButton provider="x" label="X" onClick={handleOAuthSignIn} iconOnly />
+                                        <OAuthButton provider="discord" label="Discord" onClick={handleOAuthSignIn} wide />
                                     </div>
                                 </>
                             ) : null}
@@ -1244,6 +1330,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     </div>
                 ) : null}
 
+                {buildCreditQuote ? (
+                    <BuildCreditConfirmDialog
+                        quote={buildCreditQuote}
+                        lang={lang}
+                        onCancel={handleCancelBuildCredit}
+                        onConfirm={handleConfirmBuildCredit}
+                    />
+                ) : null}
+
                 {intakeError ? (
                     <div className="relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-sm text-red-100 shadow-lg backdrop-blur">
                         {intakeError}
@@ -1251,6 +1346,165 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 ) : null}
             </motion.div>
         </AnimatePresence>
+    );
+}
+
+function BuildCreditConfirmDialog({
+    quote,
+    lang,
+    onCancel,
+    onConfirm,
+}: {
+    quote: BeeGameCreditQuote;
+    lang: Language;
+    onCancel: () => void;
+    onConfirm: () => void;
+}) {
+    const isZh = lang === 'zh' || lang === 'zh-TW';
+    return (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 px-6 backdrop-blur-md">
+            <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-zinc-950/80 p-7 text-left text-white shadow-2xl shadow-black/50 backdrop-blur-2xl">
+                <div className="text-[11px] font-black uppercase tracking-[0.45em] text-amber-300">
+                    Credits
+                </div>
+                <h2 className="mt-4 text-3xl font-black">
+                    {isZh ? '确认开始构建' : 'Confirm build'}
+                </h2>
+                <p className="mt-4 text-base leading-7 text-zinc-300">
+                    {isZh
+                        ? `本次构建将预扣 ${quote.reservedCredits} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。`
+                        : `This build will reserve ${quote.reservedCredits} credits. It settles against actual token and tool usage, and unused credits are refunded.`}
+                </p>
+                <div className="mt-6 grid gap-3 rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:grid-cols-2">
+                    <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">
+                            {isZh ? '当前余额' : 'Balance'}
+                        </div>
+                        <div className="mt-2 text-2xl font-black text-emerald-200">
+                            {quote.balanceCredits} credits
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">
+                            {isZh ? '本次预扣' : 'Reserved'}
+                        </div>
+                        <div className="mt-2 text-2xl font-black text-white">
+                            {quote.reservedCredits} credits
+                        </div>
+                    </div>
+                </div>
+                <div className="mt-7 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="rounded-full border border-white/15 px-6 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10"
+                    >
+                        {isZh ? '取消' : 'Cancel'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onConfirm}
+                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
+                    >
+                        {isZh ? '确认构建' : 'Start build'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function formatCreditLedgerKind(kind: BeeGameCreditLedgerEntry['kind']): string {
+    switch (kind) {
+        case 'estimate':
+            return '预估';
+        case 'reserve':
+            return '预扣';
+        case 'settle':
+            return '结算';
+        case 'refund':
+            return '退回';
+        case 'grant':
+            return '发放';
+        default:
+            return kind;
+    }
+}
+
+function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
+    const displayName = typeof entry.metadata?.displayName === 'string'
+        ? entry.metadata.displayName
+        : undefined;
+    const taskType = typeof entry.metadata?.taskType === 'string'
+        ? entry.metadata.taskType
+        : undefined;
+    if (displayName) return displayName;
+    if (taskType) return taskType.replaceAll('_', ' ');
+    return new Date(entry.createdAt).toLocaleString();
+}
+
+function OAuthButton({
+    provider,
+    label,
+    onClick,
+    wide = false,
+    iconOnly = false,
+}: {
+    provider: SupabaseOAuthProvider;
+    label: string;
+    onClick: (provider: SupabaseOAuthProvider) => void | Promise<void>;
+    wide?: boolean;
+    iconOnly?: boolean;
+}) {
+    return (
+        <button
+            type="button"
+            aria-label={label}
+            onClick={() => void onClick(provider)}
+            className={`inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10 ${iconOnly ? 'gap-0' : 'gap-2.5'} ${wide ? 'sm:col-span-2' : ''}`}
+        >
+            <OAuthProviderIcon provider={provider} />
+            {iconOnly ? <span className="sr-only">{label}</span> : <span>{label}</span>}
+        </button>
+    );
+}
+
+function OAuthProviderIcon({ provider }: { provider: SupabaseOAuthProvider }) {
+    if (provider === 'github') {
+        return (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-current text-white">
+                <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.05c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.74.08-.74 1.21.09 1.85 1.24 1.85 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.46-1.33-5.46-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.63-5.48 5.93.43.37.82 1.1.82 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5Z" />
+            </svg>
+        );
+    }
+    if (provider === 'google') {
+        return (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]">
+                <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.53-.2-2.27H12v4.29h6.47a5.54 5.54 0 0 1-2.4 3.63v2.96h3.88c2.27-2.09 3.54-5.17 3.54-8.61Z" />
+                <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.88-2.96c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.95H1.26v3.05A12 12 0 0 0 12 24Z" />
+                <path fill="#FBBC05" d="M5.27 14.33a7.2 7.2 0 0 1 0-4.66V6.62H1.26a12 12 0 0 0 0 10.76l4.01-3.05Z" />
+                <path fill="#EA4335" d="M12 4.72c1.76 0 3.34.61 4.58 1.79l3.44-3.44A11.55 11.55 0 0 0 12 0 12 12 0 0 0 1.26 6.62l4.01 3.05C6.22 6.83 8.87 4.72 12 4.72Z" />
+            </svg>
+        );
+    }
+    if (provider === 'facebook') {
+        return (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-[#1877F2]">
+                <path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.1 4.39 23.09 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.03 1.79-4.7 4.53-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.89v2.26h3.32l-.53 3.49h-2.79V24C19.61 23.09 24 18.1 24 12.07Z" />
+            </svg>
+        );
+    }
+    if (provider === 'x') {
+        return (
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[17px] w-[17px] fill-current text-white">
+                <path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.59-6.64 7.59H.47l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93Zm-1.29 19.5h2.04L6.48 3.23H4.29l13.32 17.42Z" />
+            </svg>
+        );
+    }
+    return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[19px] w-[19px] fill-[#5865F2]">
+            <path d="M20.32 4.37A19.8 19.8 0 0 0 15.36 2.8a13.9 13.9 0 0 0-.64 1.32 18.4 18.4 0 0 0-5.44 0 13.9 13.9 0 0 0-.65-1.32 19.7 19.7 0 0 0-4.96 1.57C.53 9.04-.32 13.59.1 18.08a20 20 0 0 0 6.08 3.11 15 15 0 0 0 1.3-2.13 12.9 12.9 0 0 1-2.05-.99c.17-.13.34-.26.5-.39a14.2 14.2 0 0 0 12.14 0c.16.13.33.26.5.39-.65.39-1.33.72-2.05.99.38.76.82 1.48 1.3 2.13a20 20 0 0 0 6.08-3.11c.5-5.2-.84-9.7-3.58-13.71ZM8.02 15.33c-1.18 0-2.15-1.09-2.15-2.43s.95-2.43 2.15-2.43c1.2 0 2.17 1.1 2.15 2.43 0 1.34-.95 2.43-2.15 2.43Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.43s.95-2.43 2.15-2.43c1.2 0 2.17 1.1 2.15 2.43 0 1.34-.95 2.43-2.15 2.43Z" />
+        </svg>
     );
 }
 

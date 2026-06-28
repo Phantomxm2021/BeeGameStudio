@@ -23,6 +23,11 @@ import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
 import { isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
+import {
+  getCreditQuote,
+  type BeeGameCreditQuote,
+  type BeeGameCreditTaskType,
+} from '../services/creditsApi';
 
 const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -46,6 +51,7 @@ export interface UseChatOptions {
 
   showToastError?: (message: string) => void;
   showToastSuccess?: (message: string) => void;
+  confirmCreditQuote?: (quote: BeeGameCreditQuote) => Promise<boolean>;
 }
 
 /**
@@ -56,7 +62,11 @@ export interface UseChatReturn {
    * Send a message to the backend
    * @param content - The message content to send
    */
-  sendMessage: (content: string, terminationNode?: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    terminationNode?: string,
+    taskType?: BeeGameCreditTaskType,
+  ) => Promise<void>;
 
   /**
    * Continue a paused task
@@ -161,6 +171,7 @@ export const useChat = ({
   onTaskEvent,
   showToastError,
   showToastSuccess,
+  confirmCreditQuote,
 }: UseChatOptions): UseChatReturn => {
   // State management
   const [isLoading, setIsLoading] = useState(false);
@@ -721,17 +732,36 @@ export const useChat = ({
     showToastError
   });
 
+  const confirmTaskCredits = useCallback(async (
+    taskType: BeeGameCreditTaskType,
+  ): Promise<boolean> => {
+    if (!isBeeGameAdapterEnabled()) return true;
+    const quote = await getCreditQuote(taskType);
+    if (!quote.canStart) {
+      showToastError?.(`Credit 不足。本次请求需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
+      return false;
+    }
+    if (!confirmCreditQuote) return true;
+    return confirmCreditQuote(quote);
+  }, [confirmCreditQuote, showToastError]);
+
 
   /**
    * Send a message to the backend
    * Requirements: 1.1, 6.1
    */
-  const sendMessage = useCallback(async (content: string, terminationNode?: string) => {
+  const sendMessage = useCallback(async (
+    content: string,
+    terminationNode?: string,
+    taskType: BeeGameCreditTaskType = 'edit_turn',
+  ) => {
     if (waitingApproval.isBlockingChat) {
       emitWaitingApprovalBlock(waitingApproval.message);
       return;
     }
     try {
+      const confirmed = await confirmTaskCredits(taskType);
+      if (!confirmed) return;
       setIsLoading(true);
       setCanContinue(false);
       if (wsState !== 'connected') {
@@ -759,6 +789,7 @@ export const useChat = ({
         project_id: projectId,
         termination_node: terminationNode,
         client_message_id: clientMessageId,
+        taskType,
       }) as SendMessageResponse;
 
       setCurrentTaskId(response.task_id);
@@ -786,7 +817,7 @@ export const useChat = ({
 
       onError?.(error as Error);
     }
-  }, [projectId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock]);
+  }, [projectId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Continue a paused task
@@ -798,6 +829,8 @@ export const useChat = ({
       return;
     }
     try {
+      const confirmed = await confirmTaskCredits('continue_turn');
+      if (!confirmed) return;
       setIsLoading(true);
       setCanContinue(false);
       if (wsState !== 'connected') {
@@ -837,7 +870,7 @@ export const useChat = ({
 
       onError?.(error as Error);
     }
-  }, [projectId, currentTaskId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock]);
+  }, [projectId, currentTaskId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Stop the current task

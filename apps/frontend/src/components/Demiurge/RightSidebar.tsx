@@ -5,6 +5,7 @@ import { type Language, translations } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
+import type { BeeGameCreditTaskType } from '../../services/creditsApi';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
 import type { WaitingApprovalState } from '../../utils/waitingApproval';
@@ -22,7 +23,7 @@ interface RightSidebarProps {
     lang: Language;
     messages: ChatDisplayMessage[];
     progress: number;
-    onSendMessage: (msg: string) => void;
+    onSendMessage: (msg: string, taskType?: BeeGameCreditTaskType) => void;
     isLoading: boolean;
     isRuntimeBusy?: boolean;
     onApprovePlan?: (
@@ -196,12 +197,12 @@ export function RightSidebar({
     const handleRequestAssetIntegration = (slot: BeeGameAssetSlotPayload) => {
         if (!canSendMessage || !canIntegrateAssets) return;
         const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
-        onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage);
+        onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage, 'asset_integration');
     };
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
         if (!canSendMessage || !canIntegrateAssets) return;
-        onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang));
+        onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang), 'asset_integration');
     };
 
     // Auto-resize search input

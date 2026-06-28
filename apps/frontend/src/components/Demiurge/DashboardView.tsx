@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
@@ -18,6 +18,12 @@ import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
 import { isBeeGameAdapterEnabled } from '../../services/beeGameAdapter';
 import { listModelConfigs, type ModelConfig } from '../../services/modelConfigApi';
+import {
+    getCreditSummary,
+    type BeeGameCreditQuote,
+    type BeeGameCreditSummary,
+    type BeeGameCreditTaskType,
+} from '../../services/creditsApi';
 
 interface DashboardViewProps {
     projectId: string;
@@ -271,7 +277,10 @@ const getModelDisplayName = (config?: ModelConfig): string => {
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
     const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
+    const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
+    const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
     const hasSentInitialPrompt = useRef(false);
+    const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const runtimeSnapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastPersistedRuntimeSnapshotRef = useRef('');
@@ -296,6 +305,29 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const { messages } = useChatStore();
     const { showSuccess, showError } = useToast();
 
+    const confirmCreditQuote = useCallback((quote: BeeGameCreditQuote): Promise<boolean> => {
+        setCreditQuote(quote);
+        return new Promise(resolve => {
+            creditQuoteResolverRef.current = resolve;
+        });
+    }, []);
+
+    const resolveCreditQuote = useCallback((confirmed: boolean) => {
+        const resolve = creditQuoteResolverRef.current;
+        creditQuoteResolverRef.current = null;
+        setCreditQuote(null);
+        resolve?.(confirmed);
+    }, []);
+
+    const refreshCreditSummary = useCallback(async () => {
+        if (!isBeeGameMode) return;
+        try {
+            setCreditSummary(await getCreditSummary(projectId));
+        } catch (error) {
+            console.error('Failed to load credit summary:', error);
+        }
+    }, [isBeeGameMode, projectId]);
+
     // Custom Hook for WebSocket & REST
     const {
         sendMessage, stopTask, continueTask, approvePlan,
@@ -306,6 +338,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         onError: (err) => console.error(err),
         showToastError: showError,
         showToastSuccess: showSuccess,
+        confirmCreditQuote,
         // Trigger data refreshes on significant task events
         onTaskEvent: (type) => {
             if (
@@ -335,6 +368,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     }
                     loadPendingReviews(projectId).catch(console.error);
                     loadProjectStatus(projectId).catch(console.error);
+                    refreshCreditSummary().catch(console.error);
                     refreshTimerRef.current = null;
                 }, 2000);
             }
@@ -344,7 +378,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     useEffect(() => {
         hasSentInitialPrompt.current = false;
         setInitialGateStateReady(false);
-    }, [projectId]);
+        setCreditSummary(null);
+        void refreshCreditSummary();
+    }, [projectId, refreshCreditSummary]);
 
     useEffect(() => {
         if (!isBeeGameMode) return;
@@ -707,6 +743,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
                 phaseLabel={phaseLabel}
                 tokens={displayedTokenTotal}
+                credits={creditSummary}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}
@@ -723,7 +760,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 lang={lang}
                 messages={displayMessages}
                 progress={progressPercent}
-                onSendMessage={sendMessage}
+                onSendMessage={(message, taskType?: BeeGameCreditTaskType) =>
+                    sendMessage(message, undefined, taskType)
+                }
                 isLoading={isLoading}
                 isRuntimeBusy={currentStatus === 'running'}
                 onApprovePlan={hasPendingPlanReview && canApproveTool ? approvePlan : undefined}
@@ -741,6 +780,84 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 canExportProject={canExportProject}
                 variant={isBeeGameMode ? 'beegame' : 'legacy'}
             />
+            {creditQuote ? (
+                <CreditQuoteDialog
+                    quote={creditQuote}
+                    lang={lang}
+                    onCancel={() => resolveCreditQuote(false)}
+                    onConfirm={() => resolveCreditQuote(true)}
+                />
+            ) : null}
+        </div>
+    );
+}
+
+function CreditQuoteDialog({
+    quote,
+    lang,
+    onCancel,
+    onConfirm,
+}: {
+    quote: BeeGameCreditQuote;
+    lang: Language;
+    onCancel: () => void;
+    onConfirm: () => void;
+}) {
+    const isZh = lang === 'zh' || lang === 'zh-TW';
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-6 backdrop-blur-md">
+            <div className="w-full max-w-xl rounded-[36px] border border-white/20 bg-zinc-950/80 p-8 text-white shadow-2xl shadow-black/50 backdrop-blur-2xl">
+                <div className="text-xs font-black uppercase tracking-[0.45em] text-amber-300">
+                    Credits
+                </div>
+                <h2 className="mt-4 text-3xl font-black">
+                    {isZh ? '确认本次请求' : 'Confirm request'}
+                </h2>
+                <p className="mt-4 text-lg leading-relaxed text-zinc-300">
+                    {isZh
+                        ? `本次请求将预扣 ${quote.reservedCredits} credits。完成后按实际消耗结算，未使用部分会自动退回。`
+                        : `This request will reserve ${quote.reservedCredits} credits. It will settle against actual usage, and unused credits will be refunded.`}
+                </p>
+                <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                    <div className="text-sm font-bold uppercase tracking-[0.28em] text-zinc-500">
+                        {quote.displayName}
+                    </div>
+                    <div className="mt-3 flex items-end justify-between gap-4">
+                        <div>
+                            <div className="text-sm text-zinc-500">
+                                {isZh ? '当前余额' : 'Balance'}
+                            </div>
+                            <div className="mt-1 text-2xl font-black text-emerald-200">
+                                {quote.balanceCredits} credits
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-sm text-zinc-500">
+                                {isZh ? '预扣' : 'Reserved'}
+                            </div>
+                            <div className="mt-1 text-2xl font-black text-white">
+                                {quote.reservedCredits}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div className="mt-8 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="rounded-full border border-white/15 px-6 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10"
+                    >
+                        {isZh ? '取消' : 'Cancel'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onConfirm}
+                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
+                    >
+                        {isZh ? '确认并发送' : 'Confirm and send'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

@@ -12,6 +12,7 @@ import type {
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
+import type { BeeGameCreditTaskType } from './creditsApi';
 
 type BeeGameSession = {
   id: string;
@@ -284,6 +285,7 @@ export const beeGameAdapter = {
     await sendBeeGameInput(session.id, prompt, {
       displayText: data.idea,
       displayKind: 'confirmed_brief',
+      taskType: 'full_build',
     });
     return {
       project,
@@ -315,6 +317,7 @@ export const beeGameAdapter = {
     await sendBeeGameInput(session.id, prompt, {
       displayText: data.idea,
       displayKind: 'initial_idea',
+      taskType: 'full_build',
     });
     return {
       project,
@@ -365,12 +368,15 @@ export const beeGameAdapter = {
     content: string;
     project_id: string;
     client_message_id?: string;
+    taskType?: BeeGameCreditTaskType;
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
     const prompt = data.content;
     rememberSentDisplayText(session.id, prompt, data.content);
-    await sendBeeGameInput(session.id, prompt);
+    await sendBeeGameInput(session.id, prompt, {
+      taskType: data.taskType || 'edit_turn',
+    });
     return {
       command_id: session.id,
       task_id: session.id,
@@ -384,7 +390,9 @@ export const beeGameAdapter = {
     const { session } = handle;
     const prompt = '继续任务';
     rememberSentDisplayText(session.id, prompt, '继续任务');
-    await sendBeeGameInput(session.id, prompt);
+    await sendBeeGameInput(session.id, prompt, {
+      taskType: 'continue_turn',
+    });
     return {
       command_id: session.id,
       resume_task_id: session.id,
@@ -1010,12 +1018,17 @@ async function syncBeeGameSessionModel(session: BeeGameSession): Promise<BeeGame
 async function sendBeeGameInput(
   sessionId: string,
   text: string,
-  display?: { displayText?: string; displayKind?: string },
+  display?: {
+    displayText?: string;
+    displayKind?: string;
+    taskType?: BeeGameCreditTaskType;
+  },
 ): Promise<BeeGameSession> {
   return postJson(`/api/beegame-sessions/${sessionId}/input`, {
     text,
     ...(display?.displayText ? { displayText: display.displayText } : {}),
     ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
+    ...(display?.taskType ? { taskType: display.taskType } : {}),
   });
 }
 

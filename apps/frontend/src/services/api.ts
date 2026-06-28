@@ -721,7 +721,13 @@ export const api = {
    * @param data - 包含消息内容和项目 ID
    * @returns 返回任务 ID 和状态
    */
-  sendMessage: (data: { content: string; project_id: string; termination_node?: string; client_message_id?: string }) =>
+  sendMessage: (data: {
+    content: string;
+    project_id: string;
+    termination_node?: string;
+    client_message_id?: string;
+    taskType?: import('./creditsApi').BeeGameCreditTaskType;
+  }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.sendMessage(data)
       : apiClient.post('/api/chat/message', data) as Promise<SendMessageResponse>,

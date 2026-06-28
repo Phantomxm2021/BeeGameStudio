@@ -56,6 +56,13 @@ let mockedProjectStatus: ProjectBaselineStatusPayload = {
 };
 let mockedProjects: Array<{ id: string; name: string; root_path?: string; created_at: number }> = [];
 let mockedHasPermission = vi.fn(() => true);
+let mockedCurrentUser: Record<string, any> | null = {
+    id: 'user_1',
+    displayName: 'Nova Player',
+    email: 'nova@example.com',
+    avatarUrl: '',
+    permissions: [],
+};
 
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: (selector?: (state: Record<string, any>) => unknown) => {
@@ -74,6 +81,7 @@ vi.mock('../../store/systemStore', () => ({
             isDark: true,
             toggleTheme,
             hasPermission: mockedHasPermission,
+            currentUser: mockedCurrentUser,
         };
         return selector ? selector(state) : state;
     },
@@ -212,6 +220,13 @@ describe('DashboardView runtime loading', () => {
         };
         mockedProjects = [];
         mockedHasPermission = vi.fn(() => true);
+        mockedCurrentUser = {
+            id: 'user_1',
+            displayName: 'Nova Player',
+            email: 'nova@example.com',
+            avatarUrl: '',
+            permissions: [],
+        };
     });
 
     it('loads runtime status immediately when mounted', async () => {
@@ -430,6 +445,7 @@ describe('DashboardView runtime loading', () => {
 
         const userSettingsMenu = screen.getByTestId('beegame-user-settings-menu');
         expect(userSettingsMenu).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByText('Nova Player')).toBeInTheDocument();
         expect(within(userSettingsMenu).queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
 
         await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '设置' }));
@@ -450,7 +466,7 @@ describe('DashboardView runtime loading', () => {
 
         await user.click(screen.getByRole('button', { name: '设置' }));
 
-        expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[80]');
+        expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[140]');
         expect(capturedRightSidebarProps?.variant).toBe('beegame');
     });
 

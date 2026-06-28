@@ -109,15 +109,20 @@ export function createSupabaseUserResolver(
 export function createConfiguredUserResolver(
   env: NodeJS.ProcessEnv = process.env,
 ): BeeGameUserResolver | undefined {
-  return createEnvTokenUserResolver(env) ??
-    createSupabaseUserResolver({
-      url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL,
-      apiKey:
-        env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
-        env.BEEGAME_SUPABASE_ANON_KEY ??
-        env.SUPABASE_SERVICE_ROLE_KEY ??
-        env.SUPABASE_ANON_KEY,
-    })
+  const envResolver = createEnvTokenUserResolver(env)
+  const supabaseResolver = createSupabaseUserResolver({
+    url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL,
+    apiKey:
+      env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
+      env.BEEGAME_SUPABASE_ANON_KEY ??
+      env.SUPABASE_SERVICE_ROLE_KEY ??
+      env.SUPABASE_ANON_KEY,
+  })
+  if (!envResolver) return supabaseResolver
+  if (!supabaseResolver) return envResolver
+  return async request => (
+    (await envResolver(request)) ?? (await supabaseResolver(request))
+  )
 }
 
 export function getBearerToken(request: Request): string | undefined {
@@ -142,13 +147,17 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
     'display_name',
     'full_name',
     'name',
+    'username',
     'user_name',
     'preferred_username',
     'nickname',
+    'screen_name',
+    'global_name',
   ])
   const avatarUrl = firstMetadataString(metadataRecords, [
     'avatar_url',
     'picture',
+    'image',
     'photo_url',
   ])
   return {
@@ -166,6 +175,8 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
 
 function getSupabaseMetadataRecords(value: Record<string, unknown>): JsonObject[] {
   const records: JsonObject[] = []
+  if (isRecord(value.data)) records.push(value.data)
+  if (isRecord(value.metadata)) records.push(value.metadata)
   if (isRecord(value.user_metadata)) records.push(value.user_metadata)
   if (isRecord(value.raw_user_meta_data)) records.push(value.raw_user_meta_data)
   if (Array.isArray(value.identities)) {

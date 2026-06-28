@@ -21,9 +21,15 @@ export type SupabasePasswordSignUpInput = SupabasePasswordSignInInput & {
   displayName: string;
 };
 
-export type SupabaseOAuthProvider = 'github' | 'google';
+export type SupabaseOAuthProvider =
+  | 'github'
+  | 'google'
+  | 'facebook'
+  | 'x'
+  | 'discord';
 
 const SESSION_STORAGE_KEY = 'beegame_supabase_session';
+const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
@@ -40,6 +46,10 @@ export function getSupabaseAccessToken(): string {
     return '';
   }
   return session.accessToken;
+}
+
+export function getSupabaseSessionUser(): BeeGameSupabaseUser | null {
+  return getStoredSupabaseSession()?.user ?? null;
 }
 
 export async function signInWithSupabasePassword(
@@ -151,34 +161,60 @@ export async function updateSupabaseAvatarUrl(avatarUrl: string): Promise<void> 
   }
 }
 
-export function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): void {
+export async function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): Promise<void> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
   if (!supabaseUrl || !anonKey) {
     throw new Error('Supabase Auth is not configured.');
   }
+  const codeVerifier = createPkceCodeVerifier();
+  const codeChallenge = await createPkceCodeChallenge(codeVerifier);
+  sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify({
+    provider,
+    codeVerifier,
+    createdAt: Date.now(),
+  }));
   const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
   url.searchParams.set('provider', provider);
   url.searchParams.set('redirect_to', window.location.origin);
+  url.searchParams.set('flow_type', 'pkce');
+  url.searchParams.set('code_challenge', codeChallenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  if (provider === 'discord') {
+    url.searchParams.set('scopes', 'identify email');
+  }
   window.location.assign(url.toString());
 }
 
-export function consumeSupabaseRedirectSession(): boolean {
+export async function consumeSupabaseRedirectSession(): Promise<boolean> {
   const hash = window.location.hash.startsWith('#')
     ? window.location.hash.slice(1)
     : window.location.hash;
-  if (!hash) return false;
-  const params = new URLSearchParams(hash);
-  const accessToken = params.get('access_token')?.trim() || '';
-  if (!accessToken) return false;
-  const expiresIn = Number.parseInt(params.get('expires_in') || '3600', 10);
-  saveSupabaseSession({
-    accessToken,
-    refreshToken: params.get('refresh_token') || undefined,
-    expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 3600) - 30) * 1000,
-    user: { id: 'oauth' },
-  });
-  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+  const hashParams = new URLSearchParams(hash);
+  const searchParams = new URLSearchParams(window.location.search);
+  const pkce = readStoredPkceContext();
+  const error = readOAuthError(hashParams) ?? readOAuthError(searchParams);
+  if (error) {
+    clearOAuthCallbackUrl();
+    sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
+    throw new Error(toUserFacingOAuthError(error, pkce?.provider));
+  }
+  const accessToken = hashParams.get('access_token')?.trim() || '';
+  if (accessToken) {
+    const expiresIn = Number.parseInt(hashParams.get('expires_in') || '3600', 10);
+    saveSupabaseSession({
+      accessToken,
+      refreshToken: hashParams.get('refresh_token') || undefined,
+      expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 3600) - 30) * 1000,
+      user: { id: 'oauth' },
+    });
+    clearOAuthCallbackUrl();
+    return true;
+  }
+  const authCode = searchParams.get('code')?.trim() || '';
+  if (!authCode) return false;
+  await exchangeSupabaseOAuthCode(authCode);
+  clearOAuthCallbackUrl();
   return true;
 }
 
@@ -218,6 +254,57 @@ export function clearSupabaseSession(): void {
 
 function saveSupabaseSession(session: BeeGameSupabaseSession): void {
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+async function exchangeSupabaseOAuthCode(authCode: string): Promise<void> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase Auth is not configured.');
+  }
+  const pkce = readStoredPkceContext();
+  if (!pkce?.codeVerifier) {
+    throw new Error('OAuth session expired. Please try signing in again.');
+  }
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/token?grant_type=pkce`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      auth_code: authCode,
+      code_verifier: pkce.codeVerifier,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(toUserFacingOAuthError(await readSupabaseError(response), pkce.provider));
+  }
+  saveSupabaseSession(toSupabaseSession(await response.json()));
+  sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
+}
+
+function readStoredPkceContext(): {
+  provider?: SupabaseOAuthProvider
+  codeVerifier?: string
+} | undefined {
+  const raw = sessionStorage.getItem(OAUTH_PKCE_STORAGE_KEY);
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!isRecord(value)) return undefined;
+    const codeVerifier = typeof value.codeVerifier === 'string'
+      ? value.codeVerifier.trim()
+      : '';
+    const createdAt = typeof value.createdAt === 'number' ? value.createdAt : 0;
+    if (!codeVerifier || Date.now() - createdAt > 10 * 60 * 1000) return undefined;
+    const provider = isSupabaseOAuthProvider(value.provider)
+      ? value.provider
+      : undefined;
+    return { provider, codeVerifier };
+  } catch {
+    return undefined;
+  }
 }
 
 function getStoredSupabaseSession(): BeeGameSupabaseSession | null {
@@ -277,14 +364,18 @@ function readUserDisplayName(user: Record<string, unknown>): string | undefined 
   return readUserMetadataString(user, 'display_name') ??
     readUserMetadataString(user, 'full_name') ??
     readUserMetadataString(user, 'name') ??
+    readUserMetadataString(user, 'username') ??
     readUserMetadataString(user, 'user_name') ??
     readUserMetadataString(user, 'preferred_username') ??
-    readUserMetadataString(user, 'nickname');
+    readUserMetadataString(user, 'nickname') ??
+    readUserMetadataString(user, 'screen_name') ??
+    readUserMetadataString(user, 'global_name');
 }
 
 function readUserAvatarUrl(user: Record<string, unknown>): string | undefined {
   return readUserMetadataString(user, 'avatar_url') ??
     readUserMetadataString(user, 'picture') ??
+    readUserMetadataString(user, 'image') ??
     readUserMetadataString(user, 'photo_url');
 }
 
@@ -311,6 +402,8 @@ function getSupabaseMetadataRecords(
   user: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
   const records: Array<Record<string, unknown>> = [];
+  if (isRecord(user.data)) records.push(user.data);
+  if (isRecord(user.metadata)) records.push(user.metadata);
   if (isRecord(user.user_metadata)) records.push(user.user_metadata);
   if (isRecord(user.raw_user_meta_data)) records.push(user.raw_user_meta_data);
   if (Array.isArray(user.identities)) {
@@ -340,6 +433,86 @@ async function readSupabaseError(response: Response): Promise<string> {
   }
   const text = await response.text().catch(() => '');
   return text.trim() || `Supabase Auth failed (${response.status})`;
+}
+
+function readOAuthError(params: URLSearchParams): string | undefined {
+  const error = params.get('error')?.trim() || '';
+  const description = params.get('error_description')?.trim() ||
+    params.get('error_code')?.trim() ||
+    params.get('error_message')?.trim() ||
+    '';
+  if (!error && !description) return undefined;
+  return decodeOAuthErrorText(description || `OAuth sign-in failed: ${error}`);
+}
+
+function toUserFacingOAuthError(
+  message: string,
+  provider?: SupabaseOAuthProvider,
+): string {
+  const decoded = decodeOAuthErrorText(message);
+  if (decoded.toLowerCase().includes('unable to exchange external code')) {
+    const label = provider ? getOAuthProviderLabel(provider) : 'Third-party';
+    return `${label} sign-in reached BeeGame, but Supabase could not exchange the provider code. Check the provider client ID/secret and callback URL in Supabase Auth, then try again.`;
+  }
+  return decoded;
+}
+
+function decodeOAuthErrorText(value: string): string {
+  let decoded = value.trim();
+  for (let index = 0; index < 3; index += 1) {
+    try {
+      const next = decodeURIComponent(decoded.replace(/\+/g, ' ')).trim();
+      if (!next || next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded;
+}
+
+function getOAuthProviderLabel(provider: SupabaseOAuthProvider): string {
+  if (provider === 'github') return 'GitHub';
+  if (provider === 'google') return 'Google';
+  if (provider === 'facebook') return 'Facebook';
+  if (provider === 'x') return 'X';
+  if (provider === 'discord') return 'Discord';
+  return 'Third-party';
+}
+
+function isSupabaseOAuthProvider(value: unknown): value is SupabaseOAuthProvider {
+  return value === 'github' ||
+    value === 'google' ||
+    value === 'facebook' ||
+    value === 'x' ||
+    value === 'discord';
+}
+
+function clearOAuthCallbackUrl(): void {
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function createPkceCodeVerifier(): string {
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+async function createPkceCodeChallenge(codeVerifier: string): Promise<string> {
+  const bytes = new TextEncoder().encode(codeVerifier);
+  const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let value = '';
+  for (const byte of bytes) {
+    value += String.fromCharCode(byte);
+  }
+  return btoa(value)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function trimTrailingSlash(value: string): string {

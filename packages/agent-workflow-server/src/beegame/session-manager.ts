@@ -7,6 +7,17 @@ import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
 } from '@claude-code-best/agent-workflow'
+import {
+  refundCreditReservation,
+  reserveCredits,
+  settleCreditReservation,
+  type CreditReservation,
+} from '../credit-store'
+import {
+  getCreditTaskPolicy,
+  type BeeGameCreditTaskPolicy,
+  type BeeGameCreditTaskType,
+} from '../credit-policy'
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameSessionStatus = 'running' | 'stopped' | 'failed'
@@ -133,6 +144,7 @@ type PendingPermission = DashboardPermissionRequest & {
 type SessionRecord = {
   session: BeeGameSession
   runtime: RuntimeModelConfig | undefined
+  userId: string
   userDataRoot?: string
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
@@ -148,12 +160,14 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
+  lastSettledTotalTokens: number
 }
 
 export type StartBeeGameSessionInput = {
   workspacePath: string
   modelConfigId?: string
   transcriptSessionId?: string
+  userId: string
   userDataRoot?: string
 }
 
@@ -209,6 +223,7 @@ export class BeeGameSessionManager {
     const record: SessionRecord = {
       session,
       runtime,
+      userId: input.userId,
       ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
       transcriptPath: recoveredTranscript?.path ??
         getSessionTranscriptPath(
@@ -232,6 +247,9 @@ export class BeeGameSessionManager {
         ? getNextTurnIndex(session.id, recoveredTranscript.events)
         : 1,
       currentTurnId: null,
+      lastSettledTotalTokens: recoveredTranscript
+        ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
+        : 0,
     }
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
@@ -334,7 +352,11 @@ export class BeeGameSessionManager {
   async sendWithDisplay(
     sessionId: string,
     text: string,
-    display?: { displayText?: string; displayKind?: string },
+    display?: {
+      displayText?: string
+      displayKind?: string
+      taskType?: BeeGameCreditTaskType
+    },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
@@ -345,10 +367,12 @@ export class BeeGameSessionManager {
       throw new Error('Session is already processing a prompt')
     }
 
-    record.session.turnStatus = 'running'
-    record.abortController = new AbortController()
+    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
+    const creditReservation = this.reserveTurnCredits(record, creditPolicy, display)
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     record.nextTurnIndex += 1
+    record.session.turnStatus = 'running'
+    record.abortController = new AbortController()
     this.append(record, 'turn.started', text)
     this.append(
       record,
@@ -361,7 +385,7 @@ export class BeeGameSessionManager {
       },
     )
 
-    void this.runDirectTurn(record, text)
+    void this.runDirectTurn(record, text, creditReservation, creditPolicy)
     return cloneSession(record.session)
   }
 
@@ -462,7 +486,10 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: string,
+    creditReservation?: CreditReservation,
+    creditPolicy?: BeeGameCreditTaskPolicy,
   ): Promise<void> {
+    let shouldRefundReservation = Boolean(creditReservation)
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -480,6 +507,13 @@ export class BeeGameSessionManager {
         const eventCountBeforeTurn = record.events.length
         const toolUseCountBeforeTurn = record.toolUses.size
         await this.submitToRunner(record, runner, prompt, signal)
+        if (creditReservation) {
+          shouldRefundReservation = !this.settleTurnCredits(
+            record,
+            creditReservation,
+            creditPolicy ?? getCreditTaskPolicy('agent_turn'),
+          )
+        }
         const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
         const hadRuntimeActivity = hadToolUse || record.events
           .slice(eventCountBeforeTurn)
@@ -505,10 +539,20 @@ export class BeeGameSessionManager {
         if (record.runner === runner) record.runner = null
       }
     } catch (err) {
+      if (creditReservation) {
+        shouldRefundReservation = !this.settleTurnCredits(
+          record,
+          creditReservation,
+          creditPolicy ?? getCreditTaskPolicy('agent_turn'),
+        )
+      }
       if (record.session.status === 'running') {
         this.append(record, 'turn.failed', toErrorMessage(err))
       }
     } finally {
+      if (creditReservation && shouldRefundReservation) {
+        this.refundTurnCredits(record, creditReservation)
+      }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
@@ -822,6 +866,101 @@ export class BeeGameSessionManager {
       )
     } catch {
       return undefined
+    }
+  }
+
+  private reserveTurnCredits(
+    record: SessionRecord,
+    policy: BeeGameCreditTaskPolicy,
+    display?: { displayText?: string; displayKind?: string },
+  ): CreditReservation | undefined {
+    const dataDir = record.userDataRoot ?? this.dashboardDataRoot
+    try {
+      return reserveCredits(record.userId, {
+        dataDir,
+        credits: policy.reservedCredits,
+        kind: policy.taskType,
+        projectId: record.session.id,
+        metadata: {
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
+        },
+      })
+    } catch (err) {
+      this.append(record, 'system.status', toErrorMessage(err), {
+        type: 'credit.reserve_failed',
+        error: toErrorMessage(err),
+      })
+      throw err
+    }
+  }
+
+  private settleTurnCredits(
+    record: SessionRecord,
+    reservation: CreditReservation,
+    policy: BeeGameCreditTaskPolicy,
+  ): boolean {
+    const usage = this.deriveRuntimeSnapshot(record).usage
+    const tokenDelta = Math.max(
+      0,
+      usage.total_tokens - record.lastSettledTotalTokens,
+    )
+    if (tokenDelta <= 0) return false
+    const settlement = settleCreditReservation(record.userId, {
+      dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+      reservationId: reservation.id,
+      weightedTokens: tokenDelta,
+      projectId: record.session.id,
+      metadata: {
+        taskType: policy.taskType,
+        displayName: policy.displayName,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        totalTokens: usage.total_tokens,
+        previousSettledTotalTokens: record.lastSettledTotalTokens,
+      },
+    })
+    record.lastSettledTotalTokens = usage.total_tokens
+    this.append(record, 'system.status', 'Credit settled', {
+      type: 'credit.settled',
+      reservationId: reservation.id,
+      credits: settlement.settledCredits,
+      refundedCredits: settlement.refundedCredits,
+      weightedTokens: tokenDelta,
+      balanceCredits: settlement.balance.balanceCredits,
+    })
+    return true
+  }
+
+  private refundTurnCredits(
+    record: SessionRecord,
+    reservation: CreditReservation,
+  ): void {
+    try {
+      const refund = refundCreditReservation(record.userId, {
+        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+        reservationId: reservation.id,
+        projectId: record.session.id,
+        metadata: {
+          sessionId: record.session.id,
+          reason: 'turn_finished_without_billable_usage',
+        },
+      })
+      this.append(record, 'system.status', 'Credit reservation refunded', {
+        type: 'credit.refunded',
+        reservationId: reservation.id,
+        credits: refund.refundedCredits,
+        balanceCredits: refund.balance.balanceCredits,
+      })
+    } catch (err) {
+      this.append(record, 'system.status', toErrorMessage(err), {
+        type: 'credit.refund_failed',
+        reservationId: reservation.id,
+        error: toErrorMessage(err),
+      })
     }
   }
 

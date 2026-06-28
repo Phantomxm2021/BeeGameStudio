@@ -9,6 +9,7 @@ import {
 } from '@claude-code-best/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
 import { DEFAULT_LOCAL_USER_ID } from '../auth/user-context'
+import { listCreditLedger } from '../credit-store'
 import type {
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -44,6 +45,9 @@ type FakeRuntimeMode =
   | 'async_agent_complete'
   | 'short_final_after_partials'
   | 'result_only'
+  | 'runtime_failure_after_usage'
+  | 'runtime_failure_no_usage'
+  | 'wait_after_usage'
 
 class FakeBeeGameRuntime {
   readonly submits: BeeGameSessionSubmitInput[] = []
@@ -448,6 +452,27 @@ class FakeBeeGameRuntime {
       input.onMessage({ type: 'result', result: `bash before spec ${decision.behavior}` })
       return
     }
+    if (this.mode === 'runtime_failure_after_usage') {
+      for (const message of this.messages) {
+        if (input.signal.aborted) return
+        input.onMessage(message)
+      }
+      throw new Error('runtime failed after usage')
+    }
+    if (this.mode === 'runtime_failure_no_usage') {
+      throw new Error('runtime failed before usage')
+    }
+    if (this.mode === 'wait_after_usage') {
+      for (const message of this.messages) {
+        if (input.signal.aborted) return
+        input.onMessage(message)
+      }
+      if (input.signal.aborted) return
+      await new Promise<void>(resolve => {
+        input.signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return
+    }
 
     for (const message of this.messages) {
       if (input.signal.aborted) return
@@ -829,6 +854,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     try {
       const resolvedProjectsRoot = await realpath(projectsRoot)
@@ -856,6 +882,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
 
     try {
@@ -1058,6 +1085,388 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('reserves turn credits and settles them from runtime token usage', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-turn-'))
+    const workspace = join(projectsRoot, 'credit-game')
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Built with usage.' }] },
+      },
+      {
+        type: 'result',
+        result: 'Done',
+        usage: {
+          input_tokens: 20_000,
+          output_tokens: 3_001,
+          total_tokens: 23_001,
+        },
+      },
+    ])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Build the game.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { payload?: { type?: string } }) =>
+          event.payload?.type === 'credit.settled',
+        )
+      })
+
+      const creditsRes = await app.request('/api/credits')
+      expect(await creditsRes.json()).toEqual(expect.objectContaining({
+        balanceCredits: 297,
+        consumedCredits: 3,
+        reservedCredits: 0,
+      }))
+      const ledgerRes = await app.request('/api/credits/ledger')
+      expect((await ledgerRes.json()).map((entry: {
+        kind: string
+        credits: number
+        weightedTokens?: number
+        projectId?: string
+      }) => ({
+        kind: entry.kind,
+        credits: entry.credits,
+        weightedTokens: entry.weightedTokens,
+        projectId: entry.projectId,
+      }))).toEqual([
+        {
+          kind: 'reserve',
+          credits: 50,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+        {
+          kind: 'settle',
+          credits: 3,
+          weightedTokens: 23_001,
+          projectId: session.id,
+        },
+        {
+          kind: 'refund',
+          credits: 47,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+      ])
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
+        .map(entry => ({
+          kind: entry.kind,
+          credits: entry.credits,
+          weightedTokens: entry.weightedTokens,
+          projectId: entry.projectId,
+        }))).toEqual([
+        {
+          kind: 'reserve',
+          credits: 50,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+        {
+          kind: 'settle',
+          credits: 3,
+          weightedTokens: 23_001,
+          projectId: session.id,
+        },
+        {
+          kind: 'refund',
+          credits: 47,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('settles actual usage and refunds the remainder when a turn fails after token usage', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-failed-turn-'))
+    const workspace = join(projectsRoot, 'credit-failed-game')
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Working before failure.' }] },
+      },
+      {
+        type: 'result',
+        result: 'Partial result',
+        usage: {
+          input_tokens: 10_000,
+          output_tokens: 2_500,
+          total_tokens: 12_500,
+        },
+      },
+    ], 'runtime_failure_after_usage')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue the project.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type?: string }) => event.type === 'turn.failed')
+      })
+
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
+        .map(entry => ({
+          kind: entry.kind,
+          credits: entry.credits,
+          weightedTokens: entry.weightedTokens,
+          projectId: entry.projectId,
+        }))).toEqual([
+        {
+          kind: 'reserve',
+          credits: 50,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+        {
+          kind: 'settle',
+          credits: 2,
+          weightedTokens: 12_500,
+          projectId: session.id,
+        },
+        {
+          kind: 'refund',
+          credits: 48,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('refunds the full reservation when a turn fails before token usage', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-no-usage-failure-'))
+    const workspace = join(projectsRoot, 'credit-no-usage-game')
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner([], 'runtime_failure_no_usage')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue the project.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type?: string }) => event.type === 'turn.failed')
+      })
+
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
+        .map(entry => ({ kind: entry.kind, credits: entry.credits, projectId: entry.projectId })))
+        .toEqual([
+          { kind: 'reserve', credits: 50, projectId: session.id },
+          { kind: 'refund', credits: 50, projectId: session.id },
+        ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('settles actual usage and refunds the remainder when the user stops a running turn', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-stopped-turn-'))
+    const workspace = join(projectsRoot, 'credit-stopped-game')
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner([
+      {
+        type: 'result',
+        result: 'Partial result',
+        usage: {
+          input_tokens: 15_000,
+          output_tokens: 2_500,
+          total_tokens: 17_500,
+        },
+      },
+    ], 'wait_after_usage')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue the project.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { payload?: { usage?: unknown } }) => Boolean(event.payload?.usage))
+      })
+
+      const stopRes = await app.request(
+        `/api/beegame-sessions/${session.id}/stop`,
+        { method: 'POST' },
+      )
+      expect(stopRes.status).toBe(200)
+
+      await waitFor(() => listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot }).length >= 3)
+
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
+        .map(entry => ({
+          kind: entry.kind,
+          credits: entry.credits,
+          weightedTokens: entry.weightedTokens,
+          projectId: entry.projectId,
+        }))).toEqual([
+        {
+          kind: 'reserve',
+          credits: 50,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+        {
+          kind: 'settle',
+          credits: 2,
+          weightedTokens: 17_500,
+          projectId: session.id,
+        },
+        {
+          kind: 'refund',
+          credits: 48,
+          weightedTokens: undefined,
+          projectId: session.id,
+        },
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('refunds the reservation when the user stops during a permission wait', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-permission-stop-'))
+    const workspace = join(projectsRoot, 'credit-permission-game')
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Continue the project.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string }) => event.type === 'permission.requested',
+        )
+      })
+
+      const stopRes = await app.request(
+        `/api/beegame-sessions/${session.id}/stop`,
+        { method: 'POST' },
+      )
+      expect(stopRes.status).toBe(200)
+
+      await waitFor(() => listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot }).length >= 2)
+
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
+        .map(entry => ({ kind: entry.kind, credits: entry.credits, projectId: entry.projectId })))
+        .toEqual([
+          { kind: 'reserve', credits: 50, projectId: session.id },
+          { kind: 'refund', credits: 50, projectId: session.id },
+        ])
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

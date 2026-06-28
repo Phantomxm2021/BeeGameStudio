@@ -18,6 +18,7 @@ import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
   consumeSupabaseRedirectSession,
+  getSupabaseAccessToken,
   hydrateSupabaseSessionUser,
 } from './services/supabaseAuthApi';
 
@@ -63,10 +64,11 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        const consumedRedirect = consumeSupabaseRedirectSession();
-        if (consumedRedirect) {
+        const consumedRedirect = await consumeSupabaseRedirectSession();
+        if (consumedRedirect || getSupabaseAccessToken()) {
           await hydrateSupabaseSessionUser();
         }
+        if (!getSupabaseAccessToken()) return;
         const currentUser = await loadCurrentUser();
         if (!currentUser) return;
         await Promise.all([
@@ -77,10 +79,11 @@ function App() {
         ]);
       } catch (error) {
         console.error('Failed to initialize app:', error);
+        showError(error instanceof Error ? error.message : '登录状态初始化失败');
       }
     };
     initializeApp();
-  }, [loadProjects, loadCurrentUser, loadStatus, loadAgents, loadActivities]);
+  }, [loadProjects, loadCurrentUser, loadStatus, loadAgents, loadActivities, showError]);
 
   // Load chat history when active project changes
   useEffect(() => {

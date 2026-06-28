@@ -134,4 +134,49 @@ describe('BeeGame user context', () => {
       ),
     ).toEqual({ id: 'static-user', role: 'reviewer' })
   })
+
+  test('falls through to Supabase when static tokens are configured but do not match', async () => {
+    const originalFetch = globalThis.fetch
+    const calls: string[] = []
+    globalThis.fetch = (async (url, init) => {
+      calls.push(String(url))
+      expect(new Headers(init?.headers).get('authorization')).toBe(
+        'Bearer supabase-token',
+      )
+      return Response.json({
+        id: 'oauth-user',
+        email: 'oauth@example.com',
+        metadata: {
+          global_name: 'OAuth Maker',
+          image: 'https://avatars.example.com/oauth.png',
+        },
+      })
+    }) as typeof fetch
+    try {
+      const resolver = createConfiguredUserResolver({
+        BEEGAME_AUTH_TOKENS: JSON.stringify({
+          'static-token': { id: 'static-user', role: 'reviewer' },
+        }),
+        BEEGAME_SUPABASE_URL: 'https://project.supabase.co',
+        BEEGAME_SUPABASE_ANON_KEY: 'anon-key',
+      } as NodeJS.ProcessEnv)
+
+      expect(
+        await resolver?.(
+          new Request('https://beegame.test/api/current-user', {
+            headers: { authorization: 'Bearer supabase-token' },
+          }),
+        ),
+      ).toEqual({
+        id: 'oauth-user',
+        role: 'owner',
+        email: 'oauth@example.com',
+        displayName: 'OAuth Maker',
+        avatarUrl: 'https://avatars.example.com/oauth.png',
+      })
+      expect(calls).toEqual(['https://project.supabase.co/auth/v1/user'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

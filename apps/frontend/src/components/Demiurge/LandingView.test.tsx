@@ -12,8 +12,10 @@ const { generateIntakeOptions } = vi.hoisted(() => ({
 const { runIdeaIntake } = vi.hoisted(() => ({
     runIdeaIntake: vi.fn(),
 }));
-const { getCreditBalance } = vi.hoisted(() => ({
+const { getCreditBalance, getCreditLedger, getCreditQuote } = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
+    getCreditLedger: vi.fn(),
+    getCreditQuote: vi.fn(),
 }));
 const { deleteCurrentUser } = vi.hoisted(() => ({
     deleteCurrentUser: vi.fn(),
@@ -123,6 +125,8 @@ vi.mock('../../services/modelConfigApi', () => ({
 
 vi.mock('../../services/creditsApi', () => ({
     getCreditBalance,
+    getCreditLedger,
+    getCreditQuote,
 }));
 
 vi.mock('../../services/currentUserApi', () => ({
@@ -256,12 +260,24 @@ beforeEach(() => {
         reservedCredits: 0,
         creditUnitWeightedTokens: 10000,
         estimates: {
-            ideaIntake: { minCredits: 1, maxCredits: 3 },
+            ideaIntake: { minCredits: 3, maxCredits: 3 },
             planningDocs: { minCredits: 8, maxCredits: 30 },
             smallPlayableGame: { minCredits: 80, maxCredits: 200 },
             standardGame: { minCredits: 200, maxCredits: 600 },
             complexGame: { minCredits: 600, maxCredits: 1500 },
         },
+    });
+    getCreditLedger.mockReset();
+    getCreditLedger.mockResolvedValue([]);
+    getCreditQuote.mockReset();
+    getCreditQuote.mockResolvedValue({
+        taskType: 'full_build',
+        reservedCredits: 200,
+        displayName: 'Full game build',
+        description: 'Create a complete game project from a confirmed brief.',
+        balanceCredits: 300,
+        canStart: true,
+        message: '200 credits reserved before the build starts. Unused credits are refunded after settlement.',
     });
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
@@ -378,7 +394,7 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
 
-        expect(screen.getByText('已登录')).toBeInTheDocument();
+        expect(screen.getByText('账号资料同步中')).toBeInTheDocument();
         expect(screen.queryByText('00000000-0000-0000-0000-000000000001')).not.toBeInTheDocument();
     });
 
@@ -415,6 +431,37 @@ describe('LandingView bootstrap submission', () => {
             expect(updateSupabaseAvatarUrl).toHaveBeenCalledWith(expect.stringMatching(/^data:image\/png;base64,/));
         });
         expect(mockLoadCurrentUser).toHaveBeenCalled();
+    });
+
+    it('shows recent credit ledger entries and expands to all entries', async () => {
+        mockCurrentUser = {
+            id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        getCreditLedger.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
+            id: `ledger-${index}`,
+            userId: 'alice',
+            kind: index === 0 ? 'refund' : 'settle',
+            credits: index + 1,
+            metadata: { displayName: `Task ${index + 1}` },
+            createdAt: new Date(1710000000000 + index).toISOString(),
+        })));
+
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
+
+        expect(await screen.findByText('Task 1')).toBeInTheDocument();
+        expect(screen.queryByText('Task 6')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: '查看全部' }));
+
+        expect(await screen.findByText('Task 6')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
     });
 
     it('requires confirmation before deleting the signed-in account', async () => {
@@ -485,6 +532,9 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Facebook' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'X' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Discord' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '忘记密码？' })).toBeInTheDocument();
     });
 
@@ -525,6 +575,9 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
         expect(screen.queryByRole('button', { name: 'GitHub' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Google' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Facebook' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'X' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Discord' })).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '用户协议' }));
         expect(await screen.findByRole('dialog', { name: 'BeeGame 用户协议' })).toBeInTheDocument();
         expect(screen.getByText('账号与安全')).toBeInTheDocument();
@@ -556,6 +609,12 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: 'GitHub' }));
 
         expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
+
+        fireEvent.click(screen.getByRole('button', { name: 'X' }));
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('x');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Discord' }));
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('discord');
     });
 
     it('clears the Supabase session and reloads the current user when signing out', async () => {
@@ -578,7 +637,7 @@ describe('LandingView bootstrap submission', () => {
             reservedCredits: 0,
             creditUnitWeightedTokens: 10000,
             estimates: {
-                ideaIntake: { minCredits: 1, maxCredits: 3 },
+                ideaIntake: { minCredits: 3, maxCredits: 3 },
                 planningDocs: { minCredits: 8, maxCredits: 30 },
                 smallPlayableGame: { minCredits: 80, maxCredits: 200 },
                 standardGame: { minCredits: 200, maxCredits: 600 },
@@ -592,7 +651,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
         fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-        expect(await screen.findByText('Credit 不足，生成方案预计至少需要 1 credit。')).toBeInTheDocument();
+        expect(await screen.findByText('Credit 不足，生成方案预计至少需要 3 credit。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
     });
 
@@ -790,6 +849,9 @@ describe('LandingView bootstrap submission', () => {
 
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+
+        expect(await screen.findByRole('button', { name: '确认构建' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '确认构建' }));
 
         await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
         const [, clarification, brief] = onStart.mock.calls[0];

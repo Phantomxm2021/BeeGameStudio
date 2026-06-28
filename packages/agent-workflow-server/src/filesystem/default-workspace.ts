@@ -8,10 +8,13 @@ export type DefaultWorkspaceOptions = {
 export async function getDefaultWorkspacePath(
   options: DefaultWorkspaceOptions = {},
 ): Promise<string> {
-  const configured =
-    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
+  const configuredRaw =
     options.defaultWorkspacePath?.trim() ||
+    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
     resolve(process.cwd(), 'Projects')
+  const configured = isAbsolute(configuredRaw)
+    ? configuredRaw
+    : resolve(process.cwd(), configuredRaw)
   if (!isAbsolute(configured)) {
     throw new Error('Default workspace path must be absolute')
   }

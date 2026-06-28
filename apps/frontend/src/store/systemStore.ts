@@ -14,6 +14,10 @@ import { create } from 'zustand';
 import type { Agent, SystemStatus, Activity, TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
+import {
+  getSupabaseAccessToken,
+  getSupabaseSessionUser,
+} from '../services/supabaseAuthApi';
 import type {
   BeeGameCurrentUser,
   BeeGamePermission,
@@ -192,7 +196,7 @@ export const useSystemStore = create<SystemState>()(
 
       loadCurrentUser: async () => {
         try {
-          const currentUser = await api.getCurrentUser();
+          const currentUser = mergeSupabaseSessionProfile(await api.getCurrentUser());
           set({ currentUser });
           return currentUser;
         } catch (error) {
@@ -344,3 +348,14 @@ export const useSystemStore = create<SystemState>()(
     }
   )
 );
+
+function mergeSupabaseSessionProfile(user: BeeGameCurrentUser): BeeGameCurrentUser {
+  const sessionUser = getSupabaseSessionUser();
+  if (!sessionUser || !getSupabaseAccessToken()) return user;
+  return {
+    ...user,
+    email: user.email ?? sessionUser.email,
+    displayName: user.displayName ?? sessionUser.displayName,
+    avatarUrl: user.avatarUrl ?? sessionUser.avatarUrl,
+  };
+}

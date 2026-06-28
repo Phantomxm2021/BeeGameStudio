@@ -600,20 +600,23 @@ export function SettingsMenu({
                         exit={{ opacity: 0, y: 16, scale: 0.98 }}
                         transition={{ duration: 0.22, ease: 'easeOut' }}
                         onClick={(event) => event.stopPropagation()}
+                        data-surface="frosted-glass"
+                        data-style-source="pixelfork"
+                        data-glass-density="reinforced"
                         data-testid="settings-modal-shell"
-                        className="h-[min(620px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-zinc-800 bg-[#202124] shadow-2xl shadow-black/45"
+                        className="input-surface h-[min(620px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] overflow-hidden rounded-[32px] border border-white/20 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]"
                     >
-                        <div className="flex h-full min-h-0">
+                        <div className="relative z-10 flex h-full min-h-0">
                             <aside
                                 data-testid="settings-modal-sidebar"
-                                className="flex w-44 shrink-0 flex-col border-r border-zinc-700/70 bg-[#222326] p-3"
+                                className="flex w-44 shrink-0 flex-col border-r border-white/10 bg-white/[0.025] p-3 backdrop-blur-xl"
                             >
                                 <div className="mb-4 flex items-center justify-between">
                                     <button
                                         type="button"
                                         aria-label={text.closeSettings}
                                         onClick={onClose}
-                                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-800/80 text-zinc-200 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
+                                        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition-colors hover:bg-[#757575]/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                                     >
                                         <X className="h-4 w-4" />
                                     </button>
@@ -629,7 +632,7 @@ export function SettingsMenu({
                                                 role="tab"
                                                 aria-selected={selected}
                                                 onClick={() => setActiveTab(tab.id)}
-                                                className={`flex h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60 ${selected ? 'bg-zinc-700/70 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100'}`}
+                                                className={`flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
                                             >
                                                 <Icon className="h-4 w-4" />
                                                 {tab.label}
@@ -662,7 +665,7 @@ export function SettingsMenu({
                                                         setIsMcpActionMenuOpen((current) => !current);
                                                         event.currentTarget.dataset.anchor = 'mcp-actions';
                                                     }}
-                                                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-700 bg-[#222326] text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-zinc-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
+                                                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                                                 >
                                                     <Plus className="h-4 w-4" />
                                                 </button>
@@ -674,7 +677,7 @@ export function SettingsMenu({
                                                     />
                                                     <div
                                                         role="menu"
-                                                        className="absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-2xl border border-zinc-700 bg-[#2b2c2f] p-1.5 shadow-2xl shadow-black/40"
+                                                        className="input-surface absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
                                                         onMouseDown={(event) => event.stopPropagation()}
                                                     >
                                                         <button
@@ -685,12 +688,12 @@ export function SettingsMenu({
                                                                 void handleDiscoverActiveMcpServers();
                                                             }}
                                                             disabled={isScanningActiveMcp}
-                                                            className="flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-bold text-zinc-100 transition-colors hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-sm font-bold text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             <Network className="h-4 w-4 text-orange-300" />
                                                             {isScanningActiveMcp ? mcpCopy.form.scanning : mcpCopy.form.scanActive}
                                                         </button>
-                                                        <div className="my-1 h-px bg-zinc-700/70" />
+                                                        <div className="my-1 h-px bg-white/10" />
                                                         <button
                                                             type="button"
                                                             role="menuitem"
@@ -704,7 +707,7 @@ export function SettingsMenu({
                                                                     rect: toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()),
                                                                 });
                                                             }}
-                                                            className="flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-bold text-zinc-100 transition-colors hover:bg-zinc-800/80"
+                                                            className="flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-sm font-bold text-zinc-100 transition-colors hover:bg-white/10"
                                                         >
                                                             <Plus className="h-4 w-4 text-zinc-400" />
                                                             {mcpCopy.newServer}
@@ -733,14 +736,14 @@ export function SettingsMenu({
                                     </div>
                                 </header>
 
-                                <div className="mx-6 h-px shrink-0 bg-zinc-700/70" />
+                                <div className="mx-6 h-px shrink-0 bg-white/10" />
 
                                 <div
                                     data-testid="settings-modal-scroll-area"
                                     className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 [scrollbar-gutter:stable]"
                                 >
                                 {activeTab === 'general' ? (
-                                    <div className="divide-y divide-zinc-700/60">
+                                    <div className="divide-y divide-white/10">
                                         <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <Globe className="h-4 w-4 text-zinc-400" />
@@ -749,7 +752,7 @@ export function SettingsMenu({
                                             <select
                                                 value={lang}
                                                 onChange={(event) => onSetLang(event.target.value as Language)}
-                                                className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm font-bold text-zinc-100 outline-none transition-colors focus:border-orange-500/70"
+                                                className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                             >
                                                 {LANGUAGE_OPTIONS.map((option) => (
                                                     <option key={option.code} value={option.code}>
@@ -772,7 +775,7 @@ export function SettingsMenu({
                                                         value={workspacePath}
                                                         onChange={(event) => setWorkspacePath(event.target.value)}
                                                         placeholder="/absolute/path/to/Projects"
-                                                        className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-700 bg-[#18191d] px-3 font-mono text-xs text-zinc-100 outline-none focus:border-orange-500/70"
+                                                        className="h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-white/[0.04] px-3 font-mono text-xs text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                     />
                                                     <button
                                                         type="button"
@@ -780,7 +783,7 @@ export function SettingsMenu({
                                                         title={text.resetDefault}
                                                         onClick={handleResetWorkspace}
                                                         disabled={isSavingWorkspace}
-                                                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-700 bg-[#18191d] text-zinc-300 transition-colors hover:bg-[#24252a] disabled:cursor-not-allowed disabled:opacity-50"
+                                                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.04] text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                                                     >
                                                         <RotateCcw className="h-4 w-4" />
                                                     </button>
@@ -804,7 +807,7 @@ export function SettingsMenu({
                                                         aria-label={text.searchBackend}
                                                         value={webSearchAdapter}
                                                         onChange={(event) => setWebSearchAdapter(event.target.value as WebSearchAdapter)}
-                                                        className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                        className="h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                     >
                                                         <option value="tavily">Tavily</option>
                                                         <option value="api">Anthropic API</option>
@@ -826,7 +829,7 @@ export function SettingsMenu({
                                                             }
                                                         }}
                                                         placeholder={webSearchKeyPreview ? `${savedPrefix}${webSearchKeyPreview}` : (webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY')}
-                                                        className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                        className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                     />
                                                 ) : null}
                                                 {webToolsStatus ? (
@@ -839,7 +842,7 @@ export function SettingsMenu({
                                 ) : null}
 
                                 {activeTab === 'runtime' && canManageRuntimeSettings ? (
-                                    <div className="divide-y divide-zinc-700/60">
+                                    <div className="divide-y divide-white/10">
                                         <CapabilityToggleRow
                                             item={{
                                                 key: 'subagents',
@@ -867,14 +870,14 @@ export function SettingsMenu({
 
                                 {activeTab === 'model' && canManageModelConfig ? (
                                     <>
-                                        <div className="divide-y divide-zinc-700/60">
+                                        <div className="divide-y divide-white/10">
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                                 <span className="text-sm font-medium text-zinc-100">{text.provider}</span>
                                                 <select
                                                     aria-label={text.provider}
                                                     value={provider}
                                                     onChange={(event) => setProvider(event.target.value as ModelProviderKind)}
-                                                    className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                    className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                 >
                                                     <option value="openai-compatible">OpenAI Compatible</option>
                                                     <option value="anthropic-compatible">Anthropic API Compatible</option>
@@ -890,7 +893,7 @@ export function SettingsMenu({
                                                     value={baseUrl}
                                                     onChange={(event) => setBaseUrl(event.target.value)}
                                                     placeholder="https://api.example.com/v1"
-                                                    className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                    className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                 />
                                             </label>
 
@@ -902,7 +905,7 @@ export function SettingsMenu({
                                                     value={apiKey}
                                                     onChange={(event) => setApiKey(event.target.value)}
                                                     placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'}
-                                                    className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                    className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                 />
                                             </label>
 
@@ -916,7 +919,7 @@ export function SettingsMenu({
                                                             value={fastModel}
                                                             onChange={(event) => setFastModel(event.target.value)}
                                                             placeholder="qwen3.5-flash"
-                                                            className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                            className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                         />
                                                     </label>
                                                     <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
@@ -926,7 +929,7 @@ export function SettingsMenu({
                                                             value={balancedModel}
                                                             onChange={(event) => setBalancedModel(event.target.value)}
                                                             placeholder="qwen3.7-plus"
-                                                            className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                            className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                         />
                                                     </label>
                                                     <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
@@ -936,7 +939,7 @@ export function SettingsMenu({
                                                             value={strongModel}
                                                             onChange={(event) => setStrongModel(event.target.value)}
                                                             placeholder="qwen3.7-max"
-                                                            className="h-10 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                            className="h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                         />
                                                     </label>
                                                 </div>
@@ -987,13 +990,13 @@ export function SettingsMenu({
                                 ) : null}
                                 </div>
                                 {activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
-                                <div className="flex items-center justify-end border-t border-zinc-700/70 px-6 py-4">
+                                <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"
                                         aria-label={text.saveSettings}
                                         onClick={handleSaveSettings}
                                         disabled={isSaveDisabled}
-                                        className="inline-flex h-10 items-center rounded-xl bg-zinc-100 px-5 text-sm font-black text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="inline-flex h-11 items-center rounded-full bg-white px-6 text-sm font-black text-zinc-950 transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isSavingCurrentTab ? text.saving : text.saveSettings}
                                     </button>
@@ -1824,7 +1827,7 @@ function Switch({
             aria-label={label}
             aria-checked={checked}
             onClick={onClick}
-            className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60 ${checked ? 'border-orange-500/70 bg-orange-500' : 'border-zinc-700 bg-zinc-800'}`}
+            className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${checked ? 'border-emerald-300/60 bg-emerald-400' : 'border-white/15 bg-white/[0.04]'}`}
         >
             <span
                 className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
@@ -1879,7 +1882,7 @@ function McpSettingsPanel({
         <div className="space-y-4 py-2">
             <p className="max-w-2xl text-sm leading-6 text-zinc-400">{copy.intro}</p>
 
-            <div className="divide-y divide-zinc-700/60 border-y border-zinc-700/60">
+            <div className="divide-y divide-white/10 border-y border-white/10">
                 <div className="py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-500">
                     {copy.configured}
                 </div>
@@ -1888,10 +1891,10 @@ function McpSettingsPanel({
                         <button
                             type="button"
                             onClick={(event) => onEdit(server, toPopoverAnchorRect(event.currentTarget.getBoundingClientRect()))}
-                            className="min-w-0 flex-1 rounded-lg px-2 py-1 text-left transition-colors hover:bg-zinc-800/60"
+                            className="min-w-0 flex-1 rounded-2xl px-2 py-1 text-left transition-colors hover:bg-white/5"
                         >
                             <div className="flex items-center gap-2">
-                                <span className={`h-2 w-2 shrink-0 rounded-full ${server.enabled ? 'bg-orange-500' : 'bg-zinc-600'}`} />
+                                <span className={`h-2 w-2 shrink-0 rounded-full ${server.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                                 <span className="truncate text-sm font-bold text-zinc-100">{server.name}</span>
                             </div>
                             <div className="mt-1 truncate pl-4 text-xs text-zinc-500">
@@ -1914,7 +1917,7 @@ function McpSettingsPanel({
                                 aria-expanded={activeServerMenuId === server.id}
                                 data-mcp-row-action={server.id}
                                 onClick={() => setActiveServerMenuId((current) => current === server.id ? '' : server.id)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700 text-zinc-300 transition-colors hover:bg-zinc-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                             >
                                 <MoreHorizontal className="h-4 w-4" />
                             </button>
@@ -1926,7 +1929,7 @@ function McpSettingsPanel({
                                     />
                                     <div
                                         role="menu"
-                                        className="absolute right-0 top-10 z-[260] w-44 overflow-hidden rounded-2xl border border-zinc-700 bg-[#2b2c2f] p-1.5 shadow-2xl shadow-black/40"
+                                        className="input-surface absolute right-0 top-10 z-[260] w-44 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
                                         onMouseDown={(event) => event.stopPropagation()}
                                     >
                                         <button
@@ -1937,7 +1940,7 @@ function McpSettingsPanel({
                                                 onTest(server);
                                             }}
                                             disabled={isSaving || testingServerId === server.id}
-                                            className="flex h-9 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-bold text-zinc-100 transition-colors hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-xs font-bold text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             <Network className="h-3.5 w-3.5 text-orange-300" />
                                             {testingServerId === server.id ? copy.form.testingConnection : copy.form.testConnection}
@@ -1951,12 +1954,12 @@ function McpSettingsPanel({
                                                 setActiveServerMenuId('');
                                                 onEdit(server, toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()));
                                             }}
-                                            className="flex h-9 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-bold text-zinc-100 transition-colors hover:bg-zinc-800/80"
+                                            className="flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-xs font-bold text-zinc-100 transition-colors hover:bg-white/10"
                                         >
                                             <FolderOpen className="h-3.5 w-3.5 text-zinc-400" />
                                             {copy.form.edit}
                                         </button>
-                                        <div className="my-1 h-px bg-zinc-700/70" />
+                                        <div className="my-1 h-px bg-white/10" />
                                         <button
                                             type="button"
                                             role="menuitem"
@@ -1965,7 +1968,7 @@ function McpSettingsPanel({
                                                 onDelete(server.id);
                                             }}
                                             disabled={isSaving}
-                                            className="flex h-9 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-bold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-xs font-bold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             <Trash2 className="h-3.5 w-3.5" />
                                             {copy.form.delete}
@@ -1994,7 +1997,7 @@ function McpSettingsPanel({
             </div>
 
             {activeDiscovered.length ? (
-                <div className="divide-y divide-zinc-700/60 border-y border-zinc-700/60">
+                <div className="divide-y divide-white/10 border-y border-white/10">
                     <div className="py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-500">
                         {copy.form.activeDiscovered}
                     </div>
@@ -2014,7 +2017,7 @@ function McpSettingsPanel({
                                 type="button"
                                 onClick={() => onImportActive(server)}
                                 disabled={isSaving || server.exists}
-                                className="h-8 shrink-0 rounded-lg border border-zinc-700 px-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="h-8 shrink-0 rounded-full border border-white/15 px-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {server.exists ? copy.form.existing : copy.form.importServer}
                             </button>
@@ -2024,7 +2027,7 @@ function McpSettingsPanel({
             ) : null}
 
             {discovered.length ? (
-                <div className="divide-y divide-zinc-700/60 border-y border-zinc-700/60">
+                <div className="divide-y divide-white/10 border-y border-white/10">
                     <div className="py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-500">
                         {copy.form.discovered}
                     </div>
@@ -2032,7 +2035,7 @@ function McpSettingsPanel({
                         <div key={`${server.sourcePath}:${server.name}`} className="flex items-center justify-between gap-3 py-3">
                             <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                    <span className={`h-2 w-2 shrink-0 rounded-full ${server.exists ? 'bg-zinc-600' : 'bg-orange-500'}`} />
+                                    <span className={`h-2 w-2 shrink-0 rounded-full ${server.exists ? 'bg-zinc-600' : 'bg-emerald-400'}`} />
                                     <span className="truncate text-sm font-bold text-zinc-100">{server.name}</span>
                                 </div>
                                 <div className="mt-1 truncate pl-4 text-xs text-zinc-500">
@@ -2043,7 +2046,7 @@ function McpSettingsPanel({
                                 type="button"
                                 onClick={() => onImport(server)}
                                 disabled={isSaving || server.exists}
-                                className="h-8 shrink-0 rounded-lg border border-zinc-700 px-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="h-8 shrink-0 rounded-full border border-white/15 px-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {server.exists ? copy.form.existing : copy.form.importServer}
                             </button>
@@ -2096,19 +2099,19 @@ function McpServerFormPopover({
                 onClick={(event) => event.stopPropagation()}
             >
                 <div
-                    className="absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-zinc-700 bg-[#2b2c2f]"
+                    className="absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-white/15 bg-zinc-950/80"
                     style={{ left: placement.arrowLeft }}
                 />
-                <div className="relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-2xl border border-zinc-700 bg-[#2b2c2f] shadow-2xl shadow-black/50">
+                <div className="input-surface relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-3xl border border-white/15 shadow-2xl shadow-black/50">
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 [scrollbar-gutter:stable]">
-                        <div className="divide-y divide-zinc-700/60">
+                        <div className="relative z-10 divide-y divide-white/10">
                             <label className="grid gap-2 py-3">
                                 <span className="text-xs font-bold text-zinc-400">{copy.form.name}</span>
                                 <input
                                     aria-label={copy.form.name}
                                     value={form.name}
                                     onChange={(event) => update({ name: event.target.value })}
-                                    className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                    className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                 />
                             </label>
 
@@ -2123,7 +2126,7 @@ function McpServerFormPopover({
                                     aria-label={copy.form.transport}
                                     value={form.transport}
                                     onChange={(event) => update({ transport: event.target.value as McpServerTransport })}
-                                    className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                    className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                 >
                                     <option value="stdio">{copy.form.stdio}</option>
                                     <option value="sse">{copy.form.sse}</option>
@@ -2139,7 +2142,7 @@ function McpServerFormPopover({
                                         value={form.url}
                                         onChange={(event) => update({ url: event.target.value })}
                                         placeholder="http://127.0.0.1:3000/mcp"
-                                        className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                        className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                     />
                                 </label>
                             ) : null}
@@ -2149,13 +2152,13 @@ function McpServerFormPopover({
                                     type="button"
                                     aria-expanded={advancedOpen}
                                     onClick={() => setAdvancedOpen((current) => !current)}
-                                    className="flex h-9 w-full items-center justify-between rounded-xl px-1 text-left text-sm font-bold text-zinc-200 transition-colors hover:bg-zinc-800/50"
+                                    className="flex h-9 w-full items-center justify-between rounded-2xl px-2 text-left text-sm font-bold text-zinc-200 transition-colors hover:bg-white/5"
                                 >
                                     <span>{copy.form.advanced}</span>
                                     <span className={`text-zinc-500 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>⌄</span>
                                 </button>
                                 {advancedOpen ? (
-                                    <div className="mt-1 divide-y divide-zinc-700/60">
+                                    <div className="mt-1 divide-y divide-white/10">
                                         {form.transport === 'stdio' ? (
                                             <>
                                                 <label className="grid gap-2 py-3">
@@ -2165,7 +2168,7 @@ function McpServerFormPopover({
                                                         value={form.command}
                                                         onChange={(event) => update({ command: event.target.value })}
                                                         placeholder="npx"
-                                                        className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 font-mono text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                        className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                     />
                                                 </label>
                                                 <label className="grid gap-2 py-3">
@@ -2176,7 +2179,7 @@ function McpServerFormPopover({
                                                             value={form.argsText}
                                                             onChange={(event) => update({ argsText: event.target.value })}
                                                             rows={3}
-                                                            className="w-full resize-none rounded-xl border border-zinc-700 bg-[#18191d] px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                            className="w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                         />
                                                         <div className="text-xs text-zinc-500">{copy.form.argsHint}</div>
                                                     </div>
@@ -2189,7 +2192,7 @@ function McpServerFormPopover({
                                                 aria-label={copy.form.scope}
                                                 value={form.scope}
                                                 onChange={(event) => update({ scope: event.target.value as McpServerScope })}
-                                                className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                             >
                                                 <option value="beegame">{copy.form.beegame}</option>
                                                 <option value="project">{copy.form.project}</option>
@@ -2203,7 +2206,7 @@ function McpServerFormPopover({
                                                 aria-label={copy.form.cwd}
                                                 value={form.cwd}
                                                 onChange={(event) => update({ cwd: event.target.value })}
-                                                className="h-9 w-full rounded-xl border border-zinc-700 bg-[#18191d] px-3 font-mono text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                className="h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                             />
                                         </label>
 
@@ -2215,7 +2218,7 @@ function McpServerFormPopover({
                                                     value={form.envText}
                                                     onChange={(event) => update({ envText: event.target.value })}
                                                     rows={3}
-                                                    className="w-full resize-none rounded-xl border border-zinc-700 bg-[#18191d] px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-orange-500/70"
+                                                    className="w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                                                 />
                                                 <div className="text-xs text-zinc-500">{copy.form.envHint}</div>
                                             </div>
@@ -2228,11 +2231,11 @@ function McpServerFormPopover({
                     </div>
 
                     {mode === 'create' ? (
-                        <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-700/70 px-4 py-3">
+                        <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-white/10 bg-white/[0.02] px-4 py-3">
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="h-9 rounded-xl border border-zinc-700 px-3 text-sm font-bold text-zinc-200 transition-colors hover:bg-zinc-800/70"
+                                className="h-9 rounded-full border border-white/15 px-4 text-sm font-bold text-zinc-200 transition-colors hover:bg-white/10"
                             >
                                 {copy.form.cancel}
                             </button>
@@ -2240,7 +2243,7 @@ function McpServerFormPopover({
                                 type="button"
                                 onClick={onSave}
                                 disabled={saveDisabled}
-                                className="h-9 rounded-xl bg-zinc-100 px-4 text-sm font-black text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="h-9 rounded-full bg-white px-4 text-sm font-black text-zinc-950 transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {isSaving ? copy.form.saving : copy.form.save}
                             </button>
@@ -2385,7 +2388,7 @@ function CapabilityToggleRow({
                 aria-label={item.label}
                 aria-checked={checked}
                 onClick={onToggle}
-                className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60 ${checked ? 'border-orange-500/70 bg-orange-500' : 'border-zinc-700 bg-zinc-800'}`}
+                className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${checked ? 'border-emerald-300/60 bg-emerald-400' : 'border-white/15 bg-white/[0.04]'}`}
             >
                 <span
                     className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}

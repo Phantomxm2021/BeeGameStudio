@@ -171,6 +171,6 @@ describe('RightSidebar tabs', () => {
         expect(onSendMessage).not.toHaveBeenCalled();
 
         await user.click(screen.getByRole('button', { name: '让 BeeGame 集成' }));
-        expect(onSendMessage).toHaveBeenCalledWith('Integrate uploaded asset');
+        expect(onSendMessage).toHaveBeenCalledWith('Integrate uploaded asset', 'asset_integration');
     });
 });

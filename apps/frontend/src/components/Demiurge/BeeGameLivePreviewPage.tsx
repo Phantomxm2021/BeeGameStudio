@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square, User } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -16,6 +16,10 @@ interface BeeGameLivePreviewPageProps {
     status: DashboardStatus;
     phaseLabel: string;
     tokens: number;
+    credits?: {
+        settledCredits: number;
+        outstandingReservedCredits: number;
+    } | null;
     modelName: string;
     isSyncing: boolean;
     buildReport?: BuildReportPayload | null;
@@ -44,6 +48,8 @@ const LABELS: Record<Language, {
     entrypoint: string;
     unavailable: string;
     tokens: string;
+    credits: string;
+    reserved: string;
     phase: string;
     model: string;
     syncing: string;
@@ -68,6 +74,8 @@ const LABELS: Record<Language, {
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消耗',
+        credits: 'Credits',
+        reserved: '预扣',
         phase: '阶段',
         model: '模型',
         syncing: '同步中',
@@ -92,6 +100,8 @@ const LABELS: Record<Language, {
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消耗',
+        credits: 'Credits',
+        reserved: '預扣',
         phase: '階段',
         model: '模型',
         syncing: '同步中',
@@ -116,6 +126,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Entrypoint',
         unavailable: 'Unavailable',
         tokens: 'Tokens',
+        credits: 'Credits',
+        reserved: 'Reserved',
         phase: 'Phase',
         model: 'Model',
         syncing: 'Syncing',
@@ -140,6 +152,8 @@ const LABELS: Record<Language, {
         entrypoint: '入口',
         unavailable: '未提供',
         tokens: '消費',
+        credits: 'Credits',
+        reserved: '予約',
         phase: 'フェーズ',
         model: 'モデル',
         syncing: '同期中',
@@ -164,6 +178,8 @@ const LABELS: Record<Language, {
         entrypoint: '진입점',
         unavailable: '없음',
         tokens: '토큰',
+        credits: 'Credits',
+        reserved: '예약',
         phase: '단계',
         model: '모델',
         syncing: '동기화 중',
@@ -188,6 +204,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Entrée',
         unavailable: 'Indisponible',
         tokens: 'Tokens',
+        credits: 'Credits',
+        reserved: 'Réservé',
         phase: 'Phase',
         model: 'Modèle',
         syncing: 'Synchronisation',
@@ -212,6 +230,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Einstieg',
         unavailable: 'Nicht verfügbar',
         tokens: 'Tokens',
+        credits: 'Credits',
+        reserved: 'Reserviert',
         phase: 'Phase',
         model: 'Modell',
         syncing: 'Synchronisierung',
@@ -236,6 +256,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Entrada',
         unavailable: 'No disponible',
         tokens: 'Tokens',
+        credits: 'Credits',
+        reserved: 'Reservado',
         phase: 'Fase',
         model: 'Modelo',
         syncing: 'Sincronizando',
@@ -260,6 +282,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Entrypoint',
         unavailable: 'Non disponibile',
         tokens: 'Token',
+        credits: 'Credits',
+        reserved: 'Riservato',
         phase: 'Fase',
         model: 'Modello',
         syncing: 'Sincronizzazione',
@@ -284,6 +308,8 @@ const LABELS: Record<Language, {
         entrypoint: 'Entrada',
         unavailable: 'Indisponível',
         tokens: 'Tokens',
+        credits: 'Credits',
+        reserved: 'Reservado',
         phase: 'Fase',
         model: 'Modelo',
         syncing: 'Sincronizando',
@@ -316,6 +342,7 @@ export function BeeGameLivePreviewPage({
     status,
     phaseLabel,
     tokens,
+    credits,
     modelName,
     isSyncing,
     buildReport,
@@ -335,6 +362,7 @@ export function BeeGameLivePreviewPage({
     const labels = LABELS[lang] || LABELS.en;
     const uiText = getBeeGameText(lang);
     const hasPermission = useSystemStore(state => state.hasPermission);
+    const currentUser = useSystemStore(state => state.currentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
@@ -368,7 +396,10 @@ export function BeeGameLivePreviewPage({
         setStoppedPreviewUrl('');
         await onRestartPreview?.();
     };
-    const currentLanguageLabel = LANGUAGE_OPTIONS.find(option => option.code === lang)?.label || LANGUAGE_OPTIONS[0]?.label || '';
+    const userLabel = currentUser?.displayName || currentUser?.email || '';
+    const userEmail = currentUser?.email || '';
+    const userInitial = getUserInitial(userLabel);
+    const userAvatarUrl = currentUser?.avatarUrl || '';
 
     useEffect(() => {
         setStoppedPreviewUrl('');
@@ -412,6 +443,11 @@ export function BeeGameLivePreviewPage({
                         <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
                         {statusText}
                     </div>
+                    {credits ? (
+                        <div className="flex items-center gap-2 rounded-xl bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200">
+                            {labels.credits}: {credits.settledCredits.toLocaleString()}
+                        </div>
+                    ) : null}
                     {isSyncing ? (
                         <div className="rounded-xl bg-zinc-800/80 px-3 py-1 text-xs font-bold text-zinc-400">
                             {labels.syncing}
@@ -425,6 +461,12 @@ export function BeeGameLivePreviewPage({
                             className="absolute left-5 top-12 z-50 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
                         >
                             <ProjectHintRow label={labels.tokens} value={tokens.toLocaleString()} />
+                            {credits ? (
+                                <>
+                                    <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />
+                                    <ProjectHintRow label={labels.reserved} value={credits.outstandingReservedCredits.toLocaleString()} />
+                                </>
+                            ) : null}
                             <ProjectHintRow label={labels.phase} value={phaseLabel} />
                             <ProjectHintRow label={labels.model} value={modelName || labels.unavailable} />
                         </div>
@@ -444,24 +486,46 @@ export function BeeGameLivePreviewPage({
                         aria-label={labels.settings}
                         aria-expanded={isUserMenuOpen}
                         onClick={() => setUserMenuOpen(open => !open)}
-                        className="flex h-11 items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-2 pl-3 text-zinc-200 transition hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none"
+                        className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-full border border-white/25 bg-white/[0.06] text-zinc-100 shadow-[0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition hover:border-emerald-300/45 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
                     >
-                        <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-800 text-sm font-black text-zinc-100">
-                            N
-                        </span>
-                        <ChevronDown className={`h-4 w-4 text-zinc-500 transition ${isUserMenuOpen ? 'rotate-180' : ''}`} />
+                        {userAvatarUrl ? (
+                            <img
+                                src={userAvatarUrl}
+                                alt=""
+                                className="absolute inset-0 h-full w-full rounded-full object-cover"
+                            />
+                        ) : (
+                            <span className="grid h-8 w-8 place-items-center rounded-full border border-white/15 bg-white/[0.08] text-sm font-black text-white">
+                                {currentUser ? userInitial : (
+                                <User className="h-5 w-5" />
+                                )}
+                            </span>
+                        )}
                     </button>
                     {isUserMenuOpen ? (
                         <div
                             role="menu"
                             data-testid="beegame-user-settings-menu"
-                            className="absolute right-0 top-14 z-[80] w-72 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 text-zinc-100 shadow-2xl shadow-black/50 backdrop-blur-xl"
+                            data-surface="frosted-glass"
+                            className="input-surface absolute right-0 top-14 z-[140] w-72 overflow-hidden rounded-[28px] border border-white/25 bg-zinc-950/75 p-3 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.62)] backdrop-blur-2xl"
                         >
                             <div className="flex items-center gap-3 px-2 pb-3">
-                                <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-sm font-black">N</div>
+                                <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/[0.08] text-sm font-black">
+                                    {userAvatarUrl ? (
+                                        <img
+                                            src={userAvatarUrl}
+                                            alt=""
+                                            className="h-full w-full rounded-full object-cover"
+                                        />
+                                    ) : currentUser ? userInitial : (
+                                        <User className="h-5 w-5" />
+                                    )}
+                                </div>
                                 <div className="min-w-0">
-                                    <div className="text-sm font-black">N</div>
-                                    <div className="truncate text-xs font-bold text-zinc-500">{currentLanguageLabel}</div>
+                                    <div className="truncate text-sm font-black">{userLabel || labels.settings}</div>
+                                    {userEmail ? (
+                                        <div className="truncate text-xs font-bold text-zinc-500">{userEmail}</div>
+                                    ) : null}
                                 </div>
                             </div>
                             <button
@@ -477,14 +541,13 @@ export function BeeGameLivePreviewPage({
                                     setUserMenuOpen(false);
                                     setSettingsOpen(true);
                                 }}
-                                className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 text-left transition hover:border-zinc-700 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/50"
+                                className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
                             >
-                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-800 text-zinc-300">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/[0.08] text-zinc-300">
                                     <Settings className="h-4 w-4" />
                                 </span>
                                 <div className="min-w-0">
                                     <div className="text-sm font-black">{labels.settings}</div>
-                                    <div className="truncate text-xs font-bold text-zinc-500">{currentLanguageLabel}</div>
                                 </div>
                             </button>
                         </div>
@@ -607,6 +670,11 @@ function ProjectHintRow({ label, value }: { label: string; value: string }) {
             </div>
         </div>
     );
+}
+
+function getUserInitial(value: string): string {
+    const first = Array.from(value.trim() || 'U')[0] || 'U';
+    return first.toLocaleUpperCase();
 }
 
 function PreviewControlButton({

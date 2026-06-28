@@ -22,6 +22,63 @@ export type BeeGameCreditBalance = {
   };
 };
 
+export type BeeGameCreditTaskType =
+  | 'idea_intake'
+  | 'full_build'
+  | 'edit_turn'
+  | 'continue_turn'
+  | 'asset_integration'
+  | 'large_build'
+  | 'agent_turn';
+
+export type BeeGameCreditQuote = {
+  taskType: BeeGameCreditTaskType;
+  reservedCredits: number;
+  displayName: string;
+  description: string;
+  balanceCredits: number;
+  canStart: boolean;
+  message: string;
+};
+
+export type BeeGameCreditLedgerEntry = {
+  id: string;
+  userId: string;
+  kind: 'estimate' | 'reserve' | 'settle' | 'grant' | 'refund';
+  credits: number;
+  projectId?: string;
+  reservationId?: string;
+  weightedTokens?: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type BeeGameCreditSummary = {
+  entriesCount: number;
+  reservedCredits: number;
+  settledCredits: number;
+  refundedCredits: number;
+  outstandingReservedCredits: number;
+  weightedTokens: number;
+};
+
 export const getCreditBalance = (): Promise<BeeGameCreditBalance> => (
   apiClient.get('/api/credits')
 );
+
+export const getCreditQuote = (
+  taskType: BeeGameCreditTaskType,
+): Promise<BeeGameCreditQuote> => (
+  apiClient.post('/api/credits/quote', { taskType })
+);
+
+export const getCreditLedger = (): Promise<BeeGameCreditLedgerEntry[]> => (
+  apiClient.get('/api/credits/ledger')
+);
+
+export const getCreditSummary = (
+  projectId?: string,
+): Promise<BeeGameCreditSummary> => {
+  const params = projectId ? { projectId } : undefined;
+  return apiClient.get('/api/credits/summary', { params });
+};

@@ -68,6 +68,62 @@ describe('systemStore token usage', () => {
     expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
   });
 
+  it('merges Supabase session profile details into the current user', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'access-token',
+      expiresAt: Date.now() + 3600_000,
+      user: {
+        id: 'oauth-user',
+        email: 'oauth@example.com',
+        displayName: 'OAuth Maker',
+        avatarUrl: 'https://avatars.example.com/oauth.png',
+      },
+    }));
+    vi.mocked(api.getCurrentUser).mockResolvedValue({
+      id: 'oauth-user',
+      role: 'owner',
+      permissions: ['project.read'],
+    });
+
+    await useSystemStore.getState().loadCurrentUser();
+
+    expect(useSystemStore.getState().currentUser).toEqual({
+      id: 'oauth-user',
+      role: 'owner',
+      email: 'oauth@example.com',
+      displayName: 'OAuth Maker',
+      avatarUrl: 'https://avatars.example.com/oauth.png',
+      permissions: ['project.read'],
+    });
+  });
+
+  it('uses Supabase session profile details even when the backend user id differs', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'access-token',
+      expiresAt: Date.now() + 3600_000,
+      user: {
+        id: 'supabase-auth-user',
+        email: 'player@example.com',
+        displayName: 'Player One',
+      },
+    }));
+    vi.mocked(api.getCurrentUser).mockResolvedValue({
+      id: 'backend-owner-id',
+      role: 'owner',
+      permissions: ['project.read'],
+    });
+
+    await useSystemStore.getState().loadCurrentUser();
+
+    expect(useSystemStore.getState().currentUser).toEqual({
+      id: 'backend-owner-id',
+      role: 'owner',
+      email: 'player@example.com',
+      displayName: 'Player One',
+      permissions: ['project.read'],
+    });
+  });
+
   it('clears current user when loading permissions fails', async () => {
     useSystemStore.setState({
       currentUser: {

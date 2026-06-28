@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
@@ -6,6 +6,7 @@ import { translations, type Language } from '../AgentsConfig';
 import { getBeeGameText } from '../BeeGameI18n';
 import { useProjectStore } from '../../../store/projectStore';
 import { useSystemStore } from '../../../store/systemStore';
+import { getCreditSummary, type BeeGameCreditSummary } from '../../../services/creditsApi';
 
 interface ProjectHistoryModalProps {
     isOpen: boolean;
@@ -30,6 +31,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+    const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameCreditSummary>>({});
     const t = translations[lang];
     const text = getBeeGameText(lang);
 
@@ -70,6 +72,28 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
         ? projects.find(project => project.id === activeMenuId)
         : undefined;
 
+    useEffect(() => {
+        if (!isOpen || projects.length === 0) {
+            setCreditSummaries({});
+            return;
+        }
+        let cancelled = false;
+        void Promise.all(projects.map(async project => {
+            try {
+                const summary = await getCreditSummary(project.id);
+                return [project.id, summary] as const;
+            } catch {
+                return null;
+            }
+        })).then(entries => {
+            if (cancelled) return;
+            setCreditSummaries(Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, BeeGameCreditSummary]>));
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, projects]);
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -92,14 +116,17 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 18, scale: 0.96 }}
                         transition={{ duration: 0.24, ease: 'easeOut' }}
-                        className="fixed left-1/2 top-1/2 z-[70] flex max-h-[min(620px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white/90 p-5 shadow-[0_32px_120px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/90"
+                        data-surface="frosted-glass"
+                        data-style-source="pixelfork"
+                        data-glass-density="reinforced"
+                        className="input-surface fixed left-1/2 top-1/2 z-[70] flex max-h-[min(620px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-white/20 p-5 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]"
                     >
-                        <div className="mb-4 flex items-center justify-between">
+                        <div className="relative z-10 mb-5 flex items-center justify-between">
                             <div>
-                                <h2 className="text-lg font-semibold tracking-normal text-zinc-950 dark:text-white">
+                                <h2 className="text-2xl font-semibold tracking-normal text-white">
                                     {t.historyProjects}
                                 </h2>
-                                <p className="mt-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                                <p className="mt-2 text-sm font-medium text-zinc-400">
                                     {projects.length} {t.recentProjects}
                                 </p>
                             </div>
@@ -110,15 +137,15 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                     closeMenu();
                                     onClose();
                                 }}
-                                className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-white/30"
+                                className="flex h-10 w-10 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition-colors hover:bg-[#757575]/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
 
-                        <div className="min-h-48 flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-premium">
+                        <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-premium">
                             {projects.length === 0 ? (
-                                <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-zinc-200 text-zinc-400 dark:border-white/10 dark:text-zinc-500">
+                                <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] text-zinc-400">
                                     <Clock className="h-8 w-8 stroke-1" />
                                     <span className="text-xs font-bold uppercase tracking-widest">{text.noProjectsFound}</span>
                                 </div>
@@ -136,22 +163,32 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                                     onSelectProject(project.id);
                                                 }
                                             }}
-                                            className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-transparent bg-white/60 p-4 text-left outline-none transition-all hover:border-zinc-200 hover:bg-white focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:bg-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 dark:focus-visible:ring-white/30"
+                                            className="flex w-full cursor-pointer items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all hover:border-white/20 hover:bg-white/[0.075] focus-visible:ring-2 focus-visible:ring-white/35"
                                         >
                                             <div className="min-w-0 pr-4">
-                                                <span className="block truncate text-sm font-semibold text-zinc-950 dark:text-white">
+                                                <span className="block truncate text-base font-semibold text-white">
                                                     {project.name || text.untitledProject}
                                                 </span>
-                                                <span className="mt-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-zinc-400">
+                                                <span className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
                                                     <Clock className="h-3 w-3" />
                                                     {formatProjectDate(project.created_at)}
                                                 </span>
+                                                {creditSummaries[project.id] ? (
+                                                    <span className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-amber-200">
+                                                        <span>{creditSummaries[project.id].settledCredits.toLocaleString()} credits</span>
+                                                        {creditSummaries[project.id].outstandingReservedCredits > 0 ? (
+                                                            <span className="text-zinc-500">
+                                                                {creditSummaries[project.id].outstandingReservedCredits.toLocaleString()} reserved
+                                                            </span>
+                                                        ) : null}
+                                                    </span>
+                                                ) : null}
                                             </div>
                                             <button
                                                 type="button"
                                                 aria-label={`${text.moreActionsFor} ${project.name || text.untitledProject}`}
                                                 onClick={(event) => toggleMenu(event, project.id)}
-                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/20 dark:hover:bg-white/10 dark:hover:text-white dark:focus-visible:ring-white/30"
+                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                                             >
                                                 <MoreHorizontal className="h-4 w-4" />
                                             </button>
@@ -169,15 +206,16 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                     animate={{ opacity: 1, y: 0, scale: 1 }}
                                     exit={{ opacity: 0, y: -4, scale: 0.96 }}
                                     style={{ left: menuPosition.left, top: menuPosition.top }}
-                                    className="fixed z-[90] min-w-[150px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
+                                    data-surface="frosted-glass"
+                                    className="input-surface fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl border border-white/15 p-1.5 text-zinc-100 shadow-xl"
                                 >
                                     {canDeleteProject ? (
                                         <button
                                             type="button"
                                             onClick={(event) => handleDelete(event, activeProject.id)}
-                                            className={`flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
+                                            className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
                                                 ? 'bg-rose-500 text-white'
-                                                : 'text-zinc-600 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-300 dark:hover:bg-rose-950/30 dark:hover:text-rose-300'
+                                                : 'text-zinc-300 hover:bg-rose-500/10 hover:text-rose-200'
                                                 }`}
                                         >
                                             <Trash2 className="h-3.5 w-3.5" />

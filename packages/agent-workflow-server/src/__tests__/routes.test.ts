@@ -141,12 +141,41 @@ describe('agent workflow server routes', () => {
         reservedCredits: 0,
         creditUnitWeightedTokens: 10000,
         estimates: {
-          ideaIntake: { minCredits: 1, maxCredits: 3 },
+          ideaIntake: { minCredits: 3, maxCredits: 3 },
           planningDocs: { minCredits: 8, maxCredits: 30 },
           smallPlayableGame: { minCredits: 80, maxCredits: 200 },
           standardGame: { minCredits: 200, maxCredits: 600 },
           complexGame: { minCredits: 600, maxCredits: 1500 },
         },
+      })
+
+      const quoteRes = await authApp.request('/api/credits/quote', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-a-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ taskType: 'edit_turn' }),
+      })
+      expect(quoteRes.status).toBe(200)
+      expect(await quoteRes.json()).toEqual(expect.objectContaining({
+        taskType: 'edit_turn',
+        reservedCredits: 50,
+        balanceCredits: 300,
+        canStart: true,
+      }))
+
+      const summaryRes = await authApp.request('/api/credits/summary?projectId=project-a', {
+        headers: { authorization: 'Bearer owner-a-token' },
+      })
+      expect(summaryRes.status).toBe(200)
+      expect(await summaryRes.json()).toEqual({
+        entriesCount: 0,
+        reservedCredits: 0,
+        settledCredits: 0,
+        refundedCredits: 0,
+        outstandingReservedCredits: 0,
+        weightedTokens: 0,
       })
 
       const ownerBRes = await authApp.request('/api/credits', {
@@ -1046,6 +1075,8 @@ describe('agent workflow server routes', () => {
     }) as typeof fetch
 
     try {
+      const ledgerBeforeRes = await app.request('/api/credits/ledger')
+      const ledgerBefore = await ledgerBeforeRes.json()
       const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1081,6 +1112,18 @@ describe('agent workflow server routes', () => {
         riskComplexity: 'LLM generated complexity.',
         recommendedPlatform: 'Web',
       }))
+      const ledgerAfterRes = await app.request('/api/credits/ledger')
+      const ledgerAfter = await ledgerAfterRes.json()
+      expect(ledgerAfter.slice(ledgerBefore.length).map((entry: {
+        kind: string
+        credits: number
+      }) => ({
+        kind: entry.kind,
+        credits: entry.credits,
+      }))).toEqual([
+        { kind: 'reserve', credits: 3 },
+        { kind: 'settle', credits: 3 },
+      ])
       expect(fetchCalls[0]?.url).toBe('https://llm.example.invalid/v1/chat/completions')
       expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
         model: 'balanced-model',

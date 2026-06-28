@@ -41,7 +41,7 @@ export function LandingActions({
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
-    const fallbackUserLabel = lang === 'en' ? 'Signed in' : '已登录';
+    const fallbackUserLabel = lang === 'en' ? 'Syncing profile' : '账号资料同步中';
     const userLabel = currentUserDisplayName || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
 
@@ -99,19 +99,21 @@ export function LandingActions({
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={handleUserButtonClick}
-                className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-colors hover:border-amber-300/50 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''
+                className={`relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-colors hover:border-amber-300/50 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''
                     }`}
             >
                 {currentUserId ? (
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-black text-white">
-                        {currentUserAvatarUrl ? (
-                            <img
-                                src={currentUserAvatarUrl}
-                                alt=""
-                                className="h-8 w-8 rounded-full object-cover"
-                            />
-                        ) : userInitial}
-                    </span>
+                    currentUserAvatarUrl ? (
+                        <img
+                            src={currentUserAvatarUrl}
+                            alt=""
+                            className="absolute inset-0 h-full w-full rounded-full object-cover"
+                        />
+                    ) : (
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-black text-white">
+                            {userInitial}
+                        </span>
+                    )
                 ) : (
                     <User className="h-6 w-6" />
                 )}

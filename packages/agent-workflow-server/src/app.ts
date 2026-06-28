@@ -72,7 +72,16 @@ import {
 import {
   getCreditBalance,
   hasEnoughCreditsForIdeaIntake,
+  listCreditLedger,
+  refundCreditReservation,
+  reserveCredits,
+  settleCreditReservation,
+  summarizeCreditLedger,
 } from './credit-store'
+import {
+  getCreditTaskPolicy,
+  quoteCreditTask,
+} from './credit-policy'
 import {
   type BeeGamePermission,
   type BeeGameUserContext,
@@ -275,6 +284,34 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     return c.json(getCreditBalance(user.id, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
+    }))
+  })
+
+  app.get('/api/credits/ledger', c => {
+    const user = getCurrentUser(c.req.raw)
+    return c.json(listCreditLedger(user.id, {
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+    }))
+  })
+
+  app.get('/api/credits/summary', c => {
+    const user = getCurrentUser(c.req.raw)
+    const projectId = c.req.query('projectId')?.trim()
+    return c.json(summarizeCreditLedger(user.id, {
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+      ...(projectId ? { projectId } : {}),
+    }))
+  })
+
+  app.post('/api/credits/quote', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const body = await readJson(c.req.raw)
+    const balance = getCreditBalance(user.id, {
+      dataDir: getCurrentUserDataRoot(c.req.raw),
+    })
+    return c.json(quoteCreditTask({
+      taskType: isObject(body) ? body.taskType : undefined,
+      balanceCredits: balance.balanceCredits,
     }))
   })
 
@@ -731,8 +768,9 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
+    const dataDir = getCurrentUserDataRoot(c.req.raw)
     const creditBalance = getCreditBalance(user.id, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
+      dataDir,
     })
     if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
       return c.json({
@@ -744,19 +782,52 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)
+    let reservation: { id: string } | undefined
     try {
       await loadSupabaseModelConfigs(supabaseStore)
-      return c.json({
-        ...(await generateBeeGameIntakeOptions({
-          idea: String(body.idea),
-          language:
-            typeof body.language === 'string' ? body.language : undefined,
-          ownerId: getCurrentUser(c.req.raw).id,
-          modelConfigId:
-            typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
-        })),
+      const policy = getCreditTaskPolicy('idea_intake')
+      const reservedCredits = policy.reservedCredits
+      reservation = reserveCredits(user.id, {
+        dataDir,
+        credits: reservedCredits,
+        kind: policy.taskType,
+        metadata: {
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+          language: typeof body.language === 'string' ? body.language : undefined,
+        },
       })
+      const intake = await generateBeeGameIntakeOptions({
+        idea: String(body.idea),
+        language:
+          typeof body.language === 'string' ? body.language : undefined,
+        ownerId: user.id,
+        modelConfigId:
+          typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+      })
+      settleCreditReservation(user.id, {
+        dataDir,
+        reservationId: reservation.id,
+        weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+        metadata: {
+          kind: policy.taskType,
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+        },
+      })
+      return c.json({ ...intake })
     } catch (err) {
+      if (reservation) {
+        try {
+          refundCreditReservation(user.id, {
+            dataDir,
+            reservationId: reservation.id,
+            metadata: { reason: 'idea_intake_failed' },
+          })
+        } catch {
+          // Keep the original intake failure visible to the caller.
+        }
+      }
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1209,6 +1280,7 @@ function registerBeeGameSessionRoutes(
           ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
             ? { transcriptSessionId: body.transcriptSessionId }
             : {}),
+          userId: options.getCurrentUser(c.req.raw).id,
           userDataRoot: options.getUserDataRoot(c.req.raw),
         }),
       )
@@ -1444,10 +1516,14 @@ function registerBeeGameSessionRoutes(
       const displayKind = typeof body.displayKind === 'string'
         ? body.displayKind
         : undefined
+      const taskType = typeof body.taskType === 'string'
+        ? getCreditTaskPolicy(body.taskType).taskType
+        : undefined
       return c.json(
         await beeGameSessions.sendWithDisplay(c.req.param('id'), String(body.text), {
           displayText,
           displayKind,
+          taskType,
         }),
       )
     } catch (err) {
@@ -1720,8 +1796,8 @@ function canonicalizeWorkspaceCandidate(
 ): string {
   if (isInsideOrEqual(candidate, canonicalRoot)) return candidate
   const configuredRoot = resolve(
-    process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
-      defaultWorkspacePath?.trim() ||
+    defaultWorkspacePath?.trim() ||
+      process.env.AGENT_WORKFLOW_WORKSPACE_PATH?.trim() ||
       resolve(process.cwd(), 'Projects'),
   )
   const rel = relative(configuredRoot, candidate)
