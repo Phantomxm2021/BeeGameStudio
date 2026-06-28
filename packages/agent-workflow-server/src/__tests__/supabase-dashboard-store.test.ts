@@ -21,6 +21,7 @@ describe('SupabaseDashboardStore', () => {
     const creditLedger: Array<Record<string, unknown>> = []
     const auditEvents: Array<Record<string, unknown>> = []
     const assetRows: Array<Record<string, unknown>> = []
+    const previewRows: Array<Record<string, unknown>> = []
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
       calls.push({
@@ -136,6 +137,28 @@ describe('SupabaseDashboardStore', () => {
           requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
         )
         return Response.json(assetRows.filter(row => row.project_id === projectId))
+      }
+
+      if (requestUrl.includes('/beegame_previews')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          const existingIndex = previewRows.findIndex(row => row.id === body.id)
+          const row = {
+            created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
+            ...body,
+          }
+          if (existingIndex >= 0) {
+            previewRows[existingIndex] = row
+          } else {
+            previewRows.push(row)
+          }
+          return Response.json([row])
+        }
+        const projectId = decodeURIComponent(
+          requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
+        )
+        return Response.json(previewRows.filter(row => row.project_id === projectId))
       }
 
       if (requestUrl.includes('/beegame_workspaces')) {
@@ -332,6 +355,31 @@ describe('SupabaseDashboardStore', () => {
         slots: [expect.objectContaining({ id: 'main_logo' })],
       }),
     )
+    await expect(store.upsertPreviewSnapshot(ownerId, 'project_1', {
+      sessionId: 'session_1',
+      workspacePath: '/tmp/project-one',
+      status: 'running',
+      url: 'http://127.0.0.1:63100/',
+      port: 63100,
+      command: 'npm run dev -- --port 63100',
+      script: 'dev',
+      entrypoint: 'package.json',
+      message: 'Preview running',
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    })).resolves.toEqual(expect.objectContaining({
+      sessionId: 'session_1',
+      status: 'running',
+      url: 'http://127.0.0.1:63100/',
+      port: 63100,
+    }))
+    expect(await store.loadPreviewSnapshot(ownerId, 'project_1', 'session_1')).toEqual(
+      expect.objectContaining({
+        sessionId: 'session_1',
+        workspacePath: '/tmp/project-one',
+        status: 'running',
+        command: 'npm run dev -- --port 63100',
+      }),
+    )
 
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_model_configs'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_runtime_settings'))).toBe(true)
@@ -348,5 +396,6 @@ describe('SupabaseDashboardStore', () => {
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_audit_events'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_assets'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_previews'))).toBe(true)
   })
 })

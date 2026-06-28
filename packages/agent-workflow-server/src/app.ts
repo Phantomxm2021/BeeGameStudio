@@ -20,6 +20,7 @@ import {
 } from './beegame/session-manager'
 import {
   BeeGamePreviewManager,
+  type BeeGamePreviewSnapshot,
   type BeeGamePreviewPortAllocator,
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
@@ -1614,10 +1615,18 @@ function registerBeeGameSessionRoutes(
       : c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
     try {
-      return c.json(await beeGamePreviews.start({
+      const snapshot = await beeGamePreviews.start({
         sessionId: c.req.param('id'),
         workspacePath,
-      }))
+      })
+      await persistSupabasePreviewSnapshot(
+        options.supabaseStore,
+        options.getCurrentUser(c.req.raw).id,
+        beeGameSessions,
+        c.req.param('id'),
+        snapshot,
+      )
+      return c.json(snapshot)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -1634,10 +1643,18 @@ function registerBeeGameSessionRoutes(
       : c.req.query('workspacePath')
     if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
     try {
-      return c.json(await beeGamePreviews.restart({
+      const snapshot = await beeGamePreviews.restart({
         sessionId: c.req.param('id'),
         workspacePath,
-      }))
+      })
+      await persistSupabasePreviewSnapshot(
+        options.supabaseStore,
+        options.getCurrentUser(c.req.raw).id,
+        beeGameSessions,
+        c.req.param('id'),
+        snapshot,
+      )
+      return c.json(snapshot)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -1650,7 +1667,15 @@ function registerBeeGameSessionRoutes(
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     const workspacePath = c.req.query('workspacePath')
     try {
-      return c.json(beeGamePreviews.stop(c.req.param('id'), workspacePath))
+      const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
+      await persistSupabasePreviewSnapshot(
+        options.supabaseStore,
+        options.getCurrentUser(c.req.raw).id,
+        beeGameSessions,
+        c.req.param('id'),
+        snapshot,
+      )
+      return c.json(snapshot)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -2037,6 +2062,19 @@ async function persistSupabaseSessionMetadata(
     createdAt: metadata.createdAt,
     updatedAt: metadata.updatedAt,
   })
+}
+
+async function persistSupabasePreviewSnapshot(
+  supabaseStore: SupabaseDashboardStore | undefined,
+  ownerId: string,
+  beeGameSessions: BeeGameSessionManager,
+  sessionId: string,
+  snapshot: BeeGamePreviewSnapshot,
+): Promise<void> {
+  if (!supabaseStore) return
+  const metadata = beeGameSessions.metadata(sessionId)
+  if (!metadata?.projectId) return
+  await supabaseStore.upsertPreviewSnapshot(ownerId, metadata.projectId, snapshot)
 }
 
 function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectMetadata['runtime_snapshot']> {

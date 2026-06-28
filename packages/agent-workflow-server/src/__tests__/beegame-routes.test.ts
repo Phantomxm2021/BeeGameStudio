@@ -3888,6 +3888,124 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('mirrors managed preview snapshots to Supabase when configured', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalFetch = globalThis.fetch
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-preview-supabase-'))
+    const workspace = join(projectsRoot, 'preview-metadata-project')
+    const previewRows: Array<Record<string, unknown>> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      globalThis.fetch = (async (input, init) => {
+        const requestUrl = String(input)
+        if (requestUrl.includes('/rest/v1/beegame_sessions')) {
+          if (init?.method === 'POST') return Response.json([JSON.parse(String(init.body))])
+          return Response.json([])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_previews')) {
+          if (init?.method === 'POST') {
+            const row = JSON.parse(String(init.body)) as Record<string, unknown>
+            previewRows.push(row)
+            return Response.json([{
+              created_at: '2026-06-27T00:00:00.000Z',
+              updated_at: '2026-06-27T00:00:00.000Z',
+              ...row,
+            }])
+          }
+          return Response.json(previewRows)
+        }
+        return new Response('Not found', { status: 404 })
+      }) as typeof fetch
+      await mkdir(workspace, { recursive: true })
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^5.0.0' },
+        }),
+      )
+      const previewRunner: BeeGamePreviewRunner = () => ({
+        kill: () => {},
+      })
+      const app = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        sessionRunner: createFakeRunner().runner,
+        previewRunner,
+        previewPortAllocator: async () => 63100,
+        previewReadinessProbe: async () => true,
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000001',
+          role: 'owner',
+        },
+      })
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          projectId: 'project_preview_metadata',
+        }),
+      })
+      const session = await sessionRes.json()
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/${session.id}/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const stopRes = await app.request(
+        `/api/beegame-sessions/${session.id}/preview?workspacePath=${encodeURIComponent(workspace)}`,
+        { method: 'DELETE' },
+      )
+
+      expect(startRes.status).toBe(200)
+      expect(stopRes.status).toBe(200)
+      expect(previewRows).toEqual([
+        expect.objectContaining({
+          id: session.id,
+          owner_id: '00000000-0000-0000-0000-000000000001',
+          project_id: 'project_preview_metadata',
+          status: 'running',
+          url: 'http://127.0.0.1:63100/',
+          metadata: expect.objectContaining({
+            workspacePath: workspace,
+            port: 63100,
+            script: 'dev',
+            entrypoint: 'package.json',
+          }),
+        }),
+        expect.objectContaining({
+          id: session.id,
+          owner_id: '00000000-0000-0000-0000-000000000001',
+          project_id: 'project_preview_metadata',
+          status: 'stopped',
+          metadata: expect.objectContaining({
+            workspacePath: workspace,
+            message: 'Preview stopped',
+          }),
+        }),
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('starts client and server processes for split multiplayer web projects', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-fullstack-'))
     const starts: Array<{ command: string[]; cwd: string; env: Record<string, string> }> = []

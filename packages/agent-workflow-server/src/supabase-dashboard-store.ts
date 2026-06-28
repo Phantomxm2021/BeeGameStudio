@@ -28,6 +28,7 @@ import type {
   BeeGameAuditEvent,
 } from './audit-events-store'
 import type { BeeGameAssetManifest } from './beegame/asset-contracts'
+import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import type {
   WebFetchAdapter,
   WebSearchAdapter,
@@ -155,6 +156,17 @@ type SupabaseAssetRow = {
   project_id: string
   owner_id: string
   manifest: JsonObject
+  created_at: string
+  updated_at: string
+}
+
+type SupabasePreviewRow = {
+  id: string
+  project_id: string
+  owner_id: string
+  status: string
+  url: string | null
+  metadata: JsonObject
   created_at: string
   updated_at: string
 }
@@ -654,6 +666,38 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_assets?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&select=manifest&limit=1`,
     )
     return rows[0] ? normalizeAssetManifest(rows[0].manifest) : undefined
+  }
+
+  async upsertPreviewSnapshot(
+    ownerId: string,
+    projectId: string,
+    snapshot: BeeGamePreviewSnapshot,
+  ): Promise<BeeGamePreviewSnapshot> {
+    const row = await this.upsert<SupabasePreviewRow>(
+      'beegame_previews',
+      {
+        id: snapshot.sessionId,
+        owner_id: ownerId,
+        project_id: projectId,
+        status: snapshot.status,
+        url: snapshot.url || null,
+        metadata: previewSnapshotToMetadata(snapshot),
+        updated_at: snapshot.updatedAt,
+      },
+      'id',
+    )
+    return rowToPreviewSnapshot(row)
+  }
+
+  async loadPreviewSnapshot(
+    ownerId: string,
+    projectId: string,
+    sessionId: string,
+  ): Promise<BeeGamePreviewSnapshot | undefined> {
+    const rows = await this.rest<SupabasePreviewRow[]>(
+      `/rest/v1/beegame_previews?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&id=eq.${q(sessionId)}&select=*&limit=1`,
+    )
+    return rows[0] ? rowToPreviewSnapshot(rows[0]) : undefined
   }
 
   private async getMcpServer(
@@ -1185,6 +1229,47 @@ function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
       .filter(isObject)
       .map(slot => slot as BeeGameAssetManifest['slots'][number]),
   }
+}
+
+function previewSnapshotToMetadata(
+  snapshot: BeeGamePreviewSnapshot,
+): JsonObject {
+  return {
+    workspacePath: snapshot.workspacePath,
+    ...(snapshot.port !== undefined ? { port: snapshot.port } : {}),
+    ...(snapshot.command ? { command: snapshot.command } : {}),
+    ...(snapshot.script ? { script: snapshot.script } : {}),
+    ...(snapshot.entrypoint ? { entrypoint: snapshot.entrypoint } : {}),
+    ...(snapshot.message ? { message: snapshot.message } : {}),
+    updatedAt: snapshot.updatedAt,
+  }
+}
+
+function rowToPreviewSnapshot(row: SupabasePreviewRow): BeeGamePreviewSnapshot {
+  const metadata = isObject(row.metadata) ? row.metadata : {}
+  return {
+    sessionId: row.id,
+    workspacePath: trimString(metadata.workspacePath),
+    status: normalizePreviewStatus(row.status),
+    url: row.url ?? '',
+    ...(Number.isInteger(metadata.port) ? { port: Number(metadata.port) } : {}),
+    ...(trimString(metadata.command) ? { command: trimString(metadata.command) } : {}),
+    ...(trimString(metadata.script) ? { script: trimString(metadata.script) } : {}),
+    ...(trimString(metadata.entrypoint) ? { entrypoint: trimString(metadata.entrypoint) } : {}),
+    ...(trimString(metadata.message) ? { message: trimString(metadata.message) } : {}),
+    updatedAt: trimString(metadata.updatedAt) || row.updated_at,
+  }
+}
+
+function normalizePreviewStatus(value: unknown): BeeGamePreviewSnapshot['status'] {
+  return value === 'idle' ||
+    value === 'starting' ||
+    value === 'running' ||
+    value === 'stopped' ||
+    value === 'failed' ||
+    value === 'unsupported'
+    ? value
+    : 'idle'
 }
 
 function sumCreditKind(
