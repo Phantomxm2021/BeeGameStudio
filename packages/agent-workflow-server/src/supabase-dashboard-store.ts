@@ -24,6 +24,10 @@ import type {
 } from './project-metadata-store'
 import type { RuntimeSettingsConfig } from './runtime-settings-store'
 import type {
+  AppendAuditEventInput,
+  BeeGameAuditEvent,
+} from './audit-events-store'
+import type {
   WebFetchAdapter,
   WebSearchAdapter,
   WebToolsConfig,
@@ -131,6 +135,16 @@ type SupabaseCreditLedgerRow = {
   kind: CreditLedgerKind
   credits: number
   weighted_tokens: number | null
+  metadata: JsonObject
+  created_at: string
+}
+
+type SupabaseAuditEventRow = {
+  id: string
+  actor_id: string | null
+  workspace_id: string | null
+  project_id: string | null
+  action: string
   metadata: JsonObject
   created_at: string
 }
@@ -572,6 +586,35 @@ export class SupabaseDashboardStore {
         0,
       ),
     }
+  }
+
+  async appendAuditEvent(
+    ownerId: string,
+    input: AppendAuditEventInput,
+  ): Promise<BeeGameAuditEvent> {
+    const metadata = {
+      ...(input.metadata ?? {}),
+      targetType: input.targetType,
+      targetId: input.targetId,
+    }
+    const row = await this.insert<SupabaseAuditEventRow>(
+      'beegame_audit_events',
+      {
+        actor_id: input.actorId || ownerId,
+        workspace_id: null,
+        project_id: input.targetType === 'project' ? input.targetId : null,
+        action: input.action,
+        metadata,
+      },
+    )
+    return rowToAuditEvent(row)
+  }
+
+  async listAuditEvents(ownerId: string): Promise<BeeGameAuditEvent[]> {
+    const rows = await this.rest<SupabaseAuditEventRow[]>(
+      `/rest/v1/beegame_audit_events?actor_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
+    )
+    return rows.map(rowToAuditEvent)
   }
 
   private async getMcpServer(
@@ -1069,6 +1112,24 @@ function rowToCreditLedgerEntry(
       ? { weightedTokens: normalizeNonNegativeInteger(row.weighted_tokens) }
       : {}),
     metadata: isObject(row.metadata) ? row.metadata : {},
+    createdAt: row.created_at,
+  }
+}
+
+function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {
+  const metadata = isObject(row.metadata) ? row.metadata : {}
+  const targetType = trimString(metadata.targetType) || 'unknown'
+  const targetId = trimString(metadata.targetId) || row.project_id || 'unknown'
+  const { targetType: _targetType, targetId: _targetId, ...eventMetadata } = metadata
+  return {
+    id: row.id,
+    actorId: row.actor_id ?? '',
+    action: row.action,
+    targetType,
+    targetId,
+    ...(Object.keys(eventMetadata).length > 0
+      ? { metadata: eventMetadata }
+      : {}),
     createdAt: row.created_at,
   }
 }

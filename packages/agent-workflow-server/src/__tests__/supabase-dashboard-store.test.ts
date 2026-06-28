@@ -19,6 +19,7 @@ describe('SupabaseDashboardStore', () => {
       updated_at: '2026-06-27T00:00:00.000Z',
     }
     const creditLedger: Array<Record<string, unknown>> = []
+    const auditEvents: Array<Record<string, unknown>> = []
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
       calls.push({
@@ -98,6 +99,20 @@ describe('SupabaseDashboardStore', () => {
           )
         }
         return Response.json(creditLedger)
+      }
+
+      if (requestUrl.includes('/beegame_audit_events')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          const row = {
+            id: '22222222-2222-2222-2222-222222222222',
+            created_at: '2026-06-27T00:00:00.000Z',
+            ...body,
+          }
+          auditEvents.push(row)
+          return Response.json([row])
+        }
+        return Response.json(auditEvents)
       }
 
       if (requestUrl.includes('/beegame_workspaces')) {
@@ -248,6 +263,28 @@ describe('SupabaseDashboardStore', () => {
       outstandingReservedCredits: 0,
       weightedTokens: 12_500,
     })
+    expect(await store.appendAuditEvent(ownerId, {
+      actorId: ownerId,
+      action: 'web_tools.updated',
+      targetType: 'web_tools',
+      targetId: ownerId,
+      metadata: { webSearchAdapter: 'brave' },
+    })).toEqual(expect.objectContaining({
+      id: '22222222-2222-2222-2222-222222222222',
+      actorId: ownerId,
+      action: 'web_tools.updated',
+      targetType: 'web_tools',
+      targetId: ownerId,
+      metadata: { webSearchAdapter: 'brave' },
+    }))
+    expect(await store.listAuditEvents(ownerId)).toEqual([
+      expect.objectContaining({
+        actorId: ownerId,
+        action: 'web_tools.updated',
+        targetType: 'web_tools',
+        targetId: ownerId,
+      }),
+    ])
 
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_model_configs'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_runtime_settings'))).toBe(true)
@@ -262,5 +299,6 @@ describe('SupabaseDashboardStore', () => {
     )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_audit_events'))).toBe(true)
   })
 })

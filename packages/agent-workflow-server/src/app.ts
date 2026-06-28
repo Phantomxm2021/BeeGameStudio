@@ -68,6 +68,7 @@ import {
 import {
   appendAuditEvent,
   listAuditEvents,
+  type AppendAuditEventInput,
 } from './audit-events-store'
 import {
   getCreditBalance,
@@ -205,6 +206,27 @@ export function createAgentWorkflowApp(
         dataDir: getCurrentUserDataRoot(request),
         ...(projectId ? { projectId } : {}),
       })
+  const appendUserAuditEvent = async (
+    request: Request,
+    user: BeeGameUserContext,
+    input: AppendAuditEventInput,
+  ) => {
+    if (supabaseStore) {
+      await supabaseStore.appendAuditEvent(user.id, input)
+      return
+    }
+    appendAuditEvent(input, {
+      dataDir: getCurrentUserDataRoot(request),
+    })
+  }
+  const listUserAuditEvents = async (
+    request: Request,
+    user: BeeGameUserContext,
+  ) => supabaseStore
+    ? supabaseStore.listAuditEvents(user.id)
+    : listAuditEvents({
+        dataDir: getCurrentUserDataRoot(request),
+      })
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -299,24 +321,21 @@ export function createAgentWorkflowApp(
       }, 501)
     }
     await supabaseStore.deleteAuthUser(user.id)
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'account.deleted',
       targetType: 'user',
       targetId: user.id,
       metadata: {},
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json({ deleted: true })
   })
 
-  app.get('/api/audit-events', c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'audit.read')
+  app.get('/api/audit-events', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(listAuditEvents({
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }))
+    return c.json(await listUserAuditEvents(c.req.raw, user))
   })
 
   app.get('/api/credits', async c => {
@@ -375,7 +394,7 @@ export function createAgentWorkflowApp(
       isDefault: body.isDefault === true,
     })
     await persistModelConfig(supabaseStore, created.id, modelConfigStore)
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.created',
       targetType: 'model_config',
@@ -384,8 +403,6 @@ export function createAgentWorkflowApp(
         provider: created.provider,
         isDefault: created.isDefault,
       },
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(created)
   })
@@ -412,7 +429,7 @@ export function createAgentWorkflowApp(
     if (!updated) return c.json({ error: 'Config not found' }, 404)
 
     await persistModelConfig(supabaseStore, updated.id, modelConfigStore)
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'model_config.updated',
       targetType: 'model_config',
@@ -422,8 +439,6 @@ export function createAgentWorkflowApp(
         isDefault: updated.isDefault,
         apiKeyChanged: typeof body.apiKey === 'string',
       },
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(updated)
   })
@@ -441,13 +456,11 @@ export function createAgentWorkflowApp(
       } else {
         persistModelConfigs(modelConfigStore)
       }
-      appendAuditEvent({
+      await appendUserAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'model_config.deleted',
         targetType: 'model_config',
         targetId: c.req.param('id'),
-      }, {
-        dataDir: getCurrentUserDataRoot(c.req.raw),
       })
     }
     return c.json({ deleted })
@@ -496,7 +509,7 @@ export function createAgentWorkflowApp(
       : saveWebToolsConfig(input, {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'web_tools.updated',
       targetType: 'web_tools',
@@ -508,8 +521,6 @@ export function createAgentWorkflowApp(
         braveApiKeyChanged: typeof body.braveApiKey === 'string',
         exaApiKeyChanged: typeof body.exaApiKey === 'string',
       },
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(saved)
   })
@@ -561,14 +572,12 @@ export function createAgentWorkflowApp(
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
     })
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'runtime_settings.updated',
       targetType: 'runtime_settings',
       targetId: user.id,
       metadata: saved,
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(saved)
   })
@@ -625,7 +634,7 @@ export function createAgentWorkflowApp(
       : upsertMcpServer(toMcpServerInput(body), {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
@@ -635,8 +644,6 @@ export function createAgentWorkflowApp(
         scope: saved.scope,
         enabled: saved.enabled,
       },
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(saved)
   })
@@ -659,7 +666,7 @@ export function createAgentWorkflowApp(
         }, {
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
-    appendAuditEvent({
+    await appendUserAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'mcp_server.upserted',
       targetType: 'mcp_server',
@@ -669,8 +676,6 @@ export function createAgentWorkflowApp(
         scope: saved.scope,
         enabled: saved.enabled,
       },
-    }, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
     })
     return c.json(saved)
   })
@@ -685,13 +690,11 @@ export function createAgentWorkflowApp(
           dataDir: getCurrentUserDataRoot(c.req.raw),
         })
     if (deleted) {
-      appendAuditEvent({
+      await appendUserAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'mcp_server.deleted',
         targetType: 'mcp_server',
         targetId: c.req.param('id'),
-      }, {
-        dataDir: getCurrentUserDataRoot(c.req.raw),
       })
     }
     return c.json({
@@ -786,13 +789,11 @@ export function createAgentWorkflowApp(
       ? await supabaseStore.deleteProject(user.id, c.req.param('id'))
       : getProjectStore(c.req.raw).deleteProject(c.req.param('id'))
     if (deleted) {
-      appendAuditEvent({
+      await appendUserAuditEvent(c.req.raw, user, {
         actorId: user.id,
         action: 'project.deleted',
         targetType: 'project',
         targetId: c.req.param('id'),
-      }, {
-        dataDir: getCurrentUserDataRoot(c.req.raw),
       })
     }
     return c.json({ deleted })
@@ -903,6 +904,8 @@ export function createAgentWorkflowApp(
       supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
+      appendAuditEvent: (request, input) =>
+        appendUserAuditEvent(request, getCurrentUser(request), input),
     },
   )
   registerBeeGameSessionRoutes(
@@ -915,6 +918,8 @@ export function createAgentWorkflowApp(
       supabaseStore,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
+      appendAuditEvent: (request, input) =>
+        appendUserAuditEvent(request, getCurrentUser(request), input),
     },
   )
 
@@ -1321,6 +1326,10 @@ function registerBeeGameSessionRoutes(
     supabaseStore?: SupabaseDashboardStore
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getUserDataRoot: (request?: Request) => string
+    appendAuditEvent: (
+      request: Request,
+      input: AppendAuditEventInput,
+    ) => Promise<void>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -1673,7 +1682,7 @@ function registerBeeGameSessionRoutes(
             : {}),
         },
       )
-      appendAuditEvent({
+      await options.appendAuditEvent(c.req.raw, {
         actorId: options.getCurrentUser(c.req.raw).id,
         action: 'agent_permission.resolved',
         targetType: 'beegame_session',
@@ -1683,8 +1692,6 @@ function registerBeeGameSessionRoutes(
           decision,
           remember: body.remember === true,
         },
-      }, {
-        dataDir: options.getUserDataRoot(c.req.raw),
       })
       return c.json(resolved)
     } catch (err) {
@@ -1729,7 +1736,7 @@ function registerBeeGameSessionRoutes(
           c.req.param('id'),
         )
       }
-      appendAuditEvent({
+      await options.appendAuditEvent(c.req.raw, {
         actorId: options.getCurrentUser(c.req.raw).id,
         action: 'beegame_session.deleted',
         targetType: 'beegame_session',
@@ -1738,8 +1745,6 @@ function registerBeeGameSessionRoutes(
           deleteArtifacts,
           deletedArtifactCount: result.deletedArtifactPaths.length,
         },
-      }, {
-        dataDir: options.getUserDataRoot(c.req.raw),
       })
       return c.json(result)
     } catch (err) {
@@ -1766,7 +1771,7 @@ function registerBeeGameSessionRoutes(
             deleted: true,
             deletedArtifactPaths,
           }
-          appendAuditEvent({
+          await options.appendAuditEvent(c.req.raw, {
             actorId: options.getCurrentUser(c.req.raw).id,
             action: 'beegame_session.deleted',
             targetType: 'beegame_session',
@@ -1776,8 +1781,6 @@ function registerBeeGameSessionRoutes(
               recoveredFromTranscript: true,
               deletedArtifactCount: deletedArtifactPaths.length,
             },
-          }, {
-            dataDir: options.getUserDataRoot(c.req.raw),
           })
           return c.json(result)
         } catch (fallbackErr) {

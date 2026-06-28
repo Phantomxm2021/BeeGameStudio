@@ -73,6 +73,17 @@ describe('agent workflow server routes', () => {
       process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
       process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
       globalThis.fetch = (async (input, init) => {
+        if (String(input).includes('/rest/v1/beegame_audit_events')) {
+          return Response.json([{
+            id: '22222222-2222-2222-2222-222222222222',
+            actor_id: '00000000-0000-0000-0000-000000000001',
+            workspace_id: null,
+            project_id: null,
+            action: 'account.deleted',
+            metadata: { targetType: 'user', targetId: '00000000-0000-0000-0000-000000000001' },
+            created_at: '2026-06-27T00:00:00.000Z',
+          }])
+        }
         calls.push({
           url: String(input),
           method: init?.method,
@@ -313,6 +324,83 @@ describe('agent workflow server routes', () => {
       ])
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('stores audit events in Supabase when configured', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalFetch = globalThis.fetch
+    const auditRows: Array<Record<string, unknown>> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      globalThis.fetch = (async (input, init) => {
+        const requestUrl = String(input)
+        if (requestUrl.includes('/rest/v1/beegame_web_tools')) {
+          if (init?.method === 'POST') {
+            return Response.json([JSON.parse(String(init.body))])
+          }
+          return Response.json([])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_audit_events')) {
+          if (init?.method === 'POST') {
+            const body = JSON.parse(String(init.body)) as Record<string, unknown>
+            const row = {
+              id: '33333333-3333-3333-3333-333333333333',
+              created_at: '2026-06-27T00:00:00.000Z',
+              ...body,
+            }
+            auditRows.push(row)
+            return Response.json([row])
+          }
+          return Response.json(auditRows)
+        }
+        return new Response('Not found', { status: 404 })
+      }) as typeof fetch
+      const authApp = createAgentWorkflowApp({
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000001',
+          role: 'owner',
+        },
+      })
+
+      const saveRes = await authApp.request('/api/web-tools', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          webSearchAdapter: 'brave',
+          braveApiKey: 'bsa-secret',
+        }),
+      })
+      expect(saveRes.status).toBe(200)
+
+      const auditRes = await authApp.request('/api/audit-events')
+      expect(auditRes.status).toBe(200)
+      expect(await auditRes.json()).toEqual([
+        expect.objectContaining({
+          actorId: '00000000-0000-0000-0000-000000000001',
+          action: 'web_tools.updated',
+          targetType: 'web_tools',
+          targetId: '00000000-0000-0000-0000-000000000001',
+          metadata: expect.objectContaining({
+            webSearchAdapter: 'brave',
+            braveApiKeyChanged: true,
+          }),
+        }),
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+      }
     }
   })
 
