@@ -444,7 +444,7 @@ describe('LandingView bootstrap submission', () => {
         getCreditLedger.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
             id: `ledger-${index}`,
             userId: 'alice',
-            kind: index === 0 ? 'refund' : 'settle',
+            kind: index === 0 ? 'refund' : index === 1 ? 'settle' : 'reserve',
             credits: index + 1,
             metadata: { displayName: `Task ${index + 1}` },
             createdAt: new Date(1710000000000 + index).toISOString(),
@@ -456,6 +456,8 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
         expect(await screen.findByText('Task 1')).toBeInTheDocument();
+        expect(screen.getByText('+1')).toBeInTheDocument();
+        expect(screen.getByText('-2')).toBeInTheDocument();
         expect(screen.queryByText('Task 6')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: '查看全部' }));

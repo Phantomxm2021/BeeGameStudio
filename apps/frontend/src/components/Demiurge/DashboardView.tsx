@@ -804,13 +804,21 @@ function CreditQuoteDialog({
     onConfirm: () => void;
 }) {
     const isZh = lang === 'zh' || lang === 'zh-TW';
+    const settlementNote = isZh
+        ? '修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。'
+        : 'Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.';
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-6 backdrop-blur-md">
-            <div className="w-full max-w-xl rounded-[36px] border border-white/20 bg-zinc-950/80 p-8 text-white shadow-2xl shadow-black/50 backdrop-blur-2xl">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="beegame-credit-quote-title"
+                className="w-full max-w-xl rounded-[36px] border border-white/20 bg-zinc-950/80 p-8 text-white shadow-2xl shadow-black/50 backdrop-blur-2xl"
+            >
                 <div className="text-xs font-black uppercase tracking-[0.45em] text-amber-300">
                     Credits
                 </div>
-                <h2 className="mt-4 text-3xl font-black">
+                <h2 id="beegame-credit-quote-title" className="mt-4 text-3xl font-black">
                     {isZh ? '确认本次请求' : 'Confirm request'}
                 </h2>
                 <p className="mt-4 text-lg leading-relaxed text-zinc-300">
@@ -822,6 +830,11 @@ function CreditQuoteDialog({
                     <div className="text-sm font-bold uppercase tracking-[0.28em] text-zinc-500">
                         {quote.displayName}
                     </div>
+                    {quote.description ? (
+                        <div className="mt-2 text-sm leading-relaxed text-zinc-400">
+                            {quote.description}
+                        </div>
+                    ) : null}
                     <div className="mt-3 flex items-end justify-between gap-4">
                         <div>
                             <div className="text-sm text-zinc-500">
@@ -836,11 +849,14 @@ function CreditQuoteDialog({
                                 {isZh ? '预扣' : 'Reserved'}
                             </div>
                             <div className="mt-1 text-2xl font-black text-white">
-                                {quote.reservedCredits}
+                                {quote.reservedCredits} credits
                             </div>
                         </div>
                     </div>
                 </div>
+                <p className="mt-5 rounded-3xl border border-amber-300/15 bg-amber-300/[0.06] px-5 py-4 text-sm font-semibold leading-relaxed text-amber-100">
+                    {settlementNote}
+                </p>
                 <div className="mt-8 flex justify-end gap-3">
                     <button
                         type="button"

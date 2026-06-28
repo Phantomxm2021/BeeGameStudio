@@ -762,8 +762,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                                         {formatCreditLedgerMeta(entry)}
                                                     </div>
                                                 </div>
-                                                <div className={`shrink-0 text-sm font-black ${entry.credits >= 0 ? 'text-emerald-200' : 'text-amber-200'}`}>
-                                                    {entry.credits >= 0 ? '+' : ''}{entry.credits}
+                                                <div className={`shrink-0 text-sm font-black ${getCreditLedgerAmountClass(entry.kind)}`}>
+                                                    {formatCreditLedgerAmount(entry)}
                                                 </div>
                                             </div>
                                         ))
@@ -1441,6 +1441,23 @@ function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
     if (displayName) return displayName;
     if (taskType) return taskType.replaceAll('_', ' ');
     return new Date(entry.createdAt).toLocaleString();
+}
+
+function formatCreditLedgerAmount(entry: BeeGameCreditLedgerEntry): string {
+    const amount = Math.abs(entry.credits);
+    if (entry.kind === 'grant' || entry.kind === 'refund') {
+        return `+${amount}`;
+    }
+    if (entry.kind === 'reserve' || entry.kind === 'settle') {
+        return `-${amount}`;
+    }
+    return String(entry.credits);
+}
+
+function getCreditLedgerAmountClass(kind: BeeGameCreditLedgerEntry['kind']): string {
+    if (kind === 'grant' || kind === 'refund') return 'text-emerald-200';
+    if (kind === 'reserve' || kind === 'settle') return 'text-amber-200';
+    return 'text-zinc-300';
 }
 
 function OAuthButton({

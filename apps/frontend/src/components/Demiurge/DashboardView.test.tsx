@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
@@ -32,6 +32,7 @@ const status = {
 let capturedRightSidebarProps: Record<string, any> | null = null;
 let capturedTopBarProps: Record<string, any> | null = null;
 let capturedSideMenuProps: Record<string, any> | null = null;
+let capturedUseChatOptions: Record<string, any> | null = null;
 let mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] as Array<{ phase: number; name: string; timestamp: number }> };
 let mockedMessages: Array<{ id: string; sender: string; content: string; timestamp: number }> = [];
 let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
@@ -116,7 +117,9 @@ vi.mock('../../store/chatStore', () => ({
 }));
 
 vi.mock('../../hooks/useChat', () => ({
-    useChat: () => ({
+    useChat: (options: Record<string, any>) => {
+        capturedUseChatOptions = options;
+        return ({
         sendMessage: vi.fn(),
         stopTask,
         continueTask: vi.fn(),
@@ -132,7 +135,8 @@ vi.mock('../../hooks/useChat', () => ({
         isLoading: false,
         canContinue: true,
         wsState: 'connected',
-    }),
+    });
+    },
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -153,6 +157,17 @@ vi.mock('../../services/api', () => ({
 vi.mock('../../services/modelConfigApi', () => ({
     listModelConfigs: vi.fn(() => Promise.resolve(mockedModelConfigs)),
     createModelConfig: vi.fn(() => Promise.resolve(mockedModelConfigs[0])),
+}));
+
+vi.mock('../../services/creditsApi', () => ({
+    getCreditSummary: vi.fn(() => Promise.resolve({
+        entriesCount: 3,
+        reservedCredits: 50,
+        settledCredits: 12,
+        refundedCredits: 38,
+        outstandingReservedCredits: 0,
+        weightedTokens: 120000,
+    })),
 }));
 
 vi.mock('../../services/beeGameAdapter', () => ({
@@ -196,6 +211,7 @@ describe('DashboardView runtime loading', () => {
         capturedRightSidebarProps = null;
         capturedTopBarProps = null;
         capturedSideMenuProps = null;
+        capturedUseChatOptions = null;
         mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] };
         mockedMessages = [];
         mockedTokenUsage = {};
@@ -562,5 +578,30 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
         expect(capturedSideMenuProps).toBeNull();
+    });
+
+    it('explains edit and continue requests use reserved credits with automatic refund settlement', async () => {
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(capturedUseChatOptions?.confirmCreditQuote).toEqual(expect.any(Function)));
+
+        await act(async () => {
+            void capturedUseChatOptions?.confirmCreditQuote({
+                taskType: 'edit_turn',
+                reservedCredits: 50,
+                displayName: '修改 / 继续任务',
+                description: 'User follow-up turn',
+                balanceCredits: 300,
+                canStart: true,
+                message: 'This request reserves credits.',
+            });
+        });
+
+        expect(await screen.findByRole('dialog')).toHaveTextContent('修改 / 继续任务');
+        expect(screen.getByText('当前余额')).toBeInTheDocument();
+        expect(screen.getByText('300 credits')).toBeInTheDocument();
+        expect(screen.getByText('预扣')).toBeInTheDocument();
+        expect(screen.getByText('50 credits')).toBeInTheDocument();
+        expect(screen.getByText('修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。')).toBeInTheDocument();
     });
 });
