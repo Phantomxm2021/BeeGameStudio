@@ -86,6 +86,7 @@ import {
 } from './credit-policy'
 import {
   type BeeGamePermission,
+  type BeeGameRole,
   type BeeGameUserContext,
   type BeeGameUserResolver,
   createConfiguredUserResolver,
@@ -339,6 +340,82 @@ export function createAgentWorkflowApp(
       metadata: {},
     })
     return c.json({ deleted: true })
+  })
+
+  app.get('/api/workspace/members', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'workspace.manage_members')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!supabaseStore) {
+      return c.json({
+        error: 'Supabase repository is not configured',
+        message: 'workspace member management requires Supabase storage',
+      }, 501)
+    }
+    return c.json(await supabaseStore.listWorkspaceMembers(user.id))
+  })
+
+  app.put('/api/workspace/members/:userId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'workspace.manage_members')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!supabaseStore) {
+      return c.json({
+        error: 'Supabase repository is not configured',
+        message: 'workspace member management requires Supabase storage',
+      }, 501)
+    }
+    const body = await readJson(c.req.raw)
+    const role = isBeeGameRole(body.role) ? body.role : undefined
+    if (!role) return c.json({ error: 'Invalid member role' }, 400)
+    try {
+      const member = await supabaseStore.upsertWorkspaceMember(user.id, {
+        userId: c.req.param('userId'),
+        role,
+      })
+      await appendUserAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'workspace_member.upserted',
+        targetType: 'workspace_member',
+        targetId: member.userId,
+        metadata: {
+          workspaceId: member.workspaceId,
+          role: member.role,
+        },
+      })
+      return c.json(member)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.delete('/api/workspace/members/:userId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'workspace.manage_members')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!supabaseStore) {
+      return c.json({
+        error: 'Supabase repository is not configured',
+        message: 'workspace member management requires Supabase storage',
+      }, 501)
+    }
+    try {
+      const deleted = await supabaseStore.deleteWorkspaceMember(
+        user.id,
+        c.req.param('userId'),
+      )
+      if (deleted) {
+        await appendUserAuditEvent(c.req.raw, user, {
+          actorId: user.id,
+          action: 'workspace_member.deleted',
+          targetType: 'workspace_member',
+          targetId: c.req.param('userId'),
+        })
+      }
+      return c.json({ deleted })
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
   })
 
   app.get('/api/audit-events', async c => {
@@ -943,6 +1020,13 @@ function requirePermission(
   return hasBeeGamePermission(user, permission)
     ? undefined
     : { error: 'Forbidden' }
+}
+
+function isBeeGameRole(value: unknown): value is BeeGameRole {
+  return value === 'owner' ||
+    value === 'developer' ||
+    value === 'reviewer' ||
+    value === 'viewer'
 }
 
 function requireBeeGameSessionOwner(

@@ -404,6 +404,140 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('lets owners manage Supabase workspace members and blocks non-owners', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalFetch = globalThis.fetch
+    const workspace = {
+      id: '11111111-1111-1111-1111-111111111111',
+      owner_id: '00000000-0000-0000-0000-000000000001',
+      name: 'Default Workspace',
+    }
+    const members: Array<Record<string, unknown>> = [{
+      workspace_id: workspace.id,
+      user_id: '00000000-0000-0000-0000-000000000001',
+      role: 'owner',
+      created_at: '2026-06-27T00:00:00.000Z',
+    }]
+    const auditRows: Array<Record<string, unknown>> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      globalThis.fetch = (async (input, init) => {
+        const requestUrl = String(input)
+        if (requestUrl.includes('/rest/v1/beegame_workspaces')) {
+          return Response.json([workspace])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_workspace_members')) {
+          if (init?.method === 'POST') {
+            const body = JSON.parse(String(init.body)) as Record<string, unknown>
+            const index = members.findIndex(row =>
+              row.workspace_id === body.workspace_id &&
+              row.user_id === body.user_id
+            )
+            const row = {
+              created_at: '2026-06-27T00:00:00.000Z',
+              ...body,
+            }
+            if (index >= 0) {
+              members[index] = row
+            } else {
+              members.push(row)
+            }
+            return Response.json([row])
+          }
+          if (init?.method === 'DELETE') {
+            const userId = decodeURIComponent(
+              requestUrl.split('user_id=eq.')[1]?.split('&')[0] ?? '',
+            )
+            const deleted = members.filter(row => row.user_id === userId)
+            for (const row of deleted) members.splice(members.indexOf(row), 1)
+            return Response.json(deleted)
+          }
+          return Response.json(members)
+        }
+        if (requestUrl.includes('/rest/v1/beegame_audit_events')) {
+          if (init?.method === 'POST') {
+            const row = {
+              id: '44444444-4444-4444-4444-444444444444',
+              created_at: '2026-06-27T00:00:00.000Z',
+              ...JSON.parse(String(init.body)),
+            }
+            auditRows.push(row)
+            return Response.json([row])
+          }
+          return Response.json(auditRows)
+        }
+        return new Response('Not found', { status: 404 })
+      }) as typeof fetch
+      const ownerApp = createAgentWorkflowApp({
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000001',
+          role: 'owner',
+        },
+      })
+
+      const listRes = await ownerApp.request('/api/workspace/members')
+      expect(listRes.status).toBe(200)
+      expect(await listRes.json()).toEqual([
+        {
+          workspaceId: workspace.id,
+          userId: '00000000-0000-0000-0000-000000000001',
+          role: 'owner',
+          createdAt: '2026-06-27T00:00:00.000Z',
+        },
+      ])
+
+      const upsertRes = await ownerApp.request(
+        '/api/workspace/members/00000000-0000-0000-0000-000000000002',
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ role: 'developer' }),
+        },
+      )
+      expect(upsertRes.status).toBe(200)
+      expect(await upsertRes.json()).toEqual({
+        workspaceId: workspace.id,
+        userId: '00000000-0000-0000-0000-000000000002',
+        role: 'developer',
+        createdAt: '2026-06-27T00:00:00.000Z',
+      })
+
+      const deleteRes = await ownerApp.request(
+        '/api/workspace/members/00000000-0000-0000-0000-000000000002',
+        { method: 'DELETE' },
+      )
+      expect(deleteRes.status).toBe(200)
+      expect(await deleteRes.json()).toEqual({ deleted: true })
+      expect(auditRows.map(row => row.action)).toEqual([
+        'workspace_member.upserted',
+        'workspace_member.deleted',
+      ])
+
+      const developerApp = createAgentWorkflowApp({
+        currentUser: {
+          id: '00000000-0000-0000-0000-000000000003',
+          role: 'developer',
+        },
+      })
+      const forbiddenRes = await developerApp.request('/api/workspace/members')
+      expect(forbiddenRes.status).toBe(403)
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+      }
+    }
+  })
+
   test('scopes project metadata by bearer authenticated user', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auth-projects-'))

@@ -675,6 +675,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
                     canManageMcp={hasPermission('mcp.manage')}
                     canManageModelConfig={hasPermission('model_config.manage')}
+                    canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
                 />
 
                 <ProjectHistoryModal

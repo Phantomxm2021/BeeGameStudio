@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, RotateCcw, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, RotateCcw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { LANGUAGE_OPTIONS, translations, type Language } from '../AgentsConfig';
 import { getBeeGameText } from '../BeeGameI18n';
 import {
@@ -43,6 +43,13 @@ import {
     type McpServerScope,
     type McpServerTransport,
 } from '../../../services/mcpServersApi';
+import {
+    deleteWorkspaceMember,
+    listWorkspaceMembers,
+    upsertWorkspaceMember,
+    type BeeGameWorkspaceMember,
+    type BeeGameWorkspaceMemberRole,
+} from '../../../services/workspaceMembersApi';
 
 interface SettingsMenuProps {
     isOpen: boolean;
@@ -54,9 +61,10 @@ interface SettingsMenuProps {
     canManageRuntimeSettings?: boolean;
     canManageMcp?: boolean;
     canManageModelConfig?: boolean;
+    canManageWorkspaceMembers?: boolean;
 }
 
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model';
+type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model' | 'members';
 type PopoverAnchorRect = {
     top: number;
     right: number;
@@ -93,6 +101,7 @@ export function SettingsMenu({
     canManageRuntimeSettings = true,
     canManageMcp = true,
     canManageModelConfig = true,
+    canManageWorkspaceMembers = false,
 }: SettingsMenuProps) {
     const t = translations[lang];
     const text = getBeeGameText(lang);
@@ -135,6 +144,11 @@ export function SettingsMenu({
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
+    const [workspaceMembers, setWorkspaceMembers] = useState<BeeGameWorkspaceMember[]>([]);
+    const [memberUserId, setMemberUserId] = useState('');
+    const [memberRole, setMemberRole] = useState<BeeGameWorkspaceMemberRole>('developer');
+    const [memberStatus, setMemberStatus] = useState('');
+    const [isSavingMember, setIsSavingMember] = useState(false);
     const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -226,6 +240,20 @@ export function SettingsMenu({
                     }
                 });
         }
+        if (canManageWorkspaceMembers) {
+            void listWorkspaceMembers()
+                .then((members) => {
+                    if (cancelled) return;
+                    setWorkspaceMembers(members);
+                    setMemberStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setWorkspaceMembers([]);
+                        setMemberStatus(error instanceof Error ? error.message : 'Members unavailable');
+                    }
+                });
+        }
         return () => {
             cancelled = true;
             if (mcpAutoSaveTimerRef.current !== null) {
@@ -238,6 +266,7 @@ export function SettingsMenu({
         canManageModelConfig,
         canManageRuntimeSettings,
         canManageSecrets,
+        canManageWorkspaceMembers,
         canManageWorkspace,
         isOpen,
         text.webToolsReadFailed,
@@ -500,6 +529,47 @@ export function SettingsMenu({
         }
     };
 
+    const reloadWorkspaceMembers = async () => {
+        const members = await listWorkspaceMembers();
+        setWorkspaceMembers(members);
+    };
+
+    const handleSaveMember = async () => {
+        const userId = memberUserId.trim();
+        const memberCopy = getWorkspaceMemberCopy(lang);
+        if (!userId) {
+            setMemberStatus(memberCopy.userIdRequired);
+            return;
+        }
+        setIsSavingMember(true);
+        setMemberStatus('');
+        try {
+            await upsertWorkspaceMember(userId, memberRole);
+            setMemberUserId('');
+            await reloadWorkspaceMembers();
+            setMemberStatus(memberCopy.saved);
+        } catch (error) {
+            setMemberStatus(error instanceof Error ? error.message : memberCopy.saveFailed);
+        } finally {
+            setIsSavingMember(false);
+        }
+    };
+
+    const handleDeleteMember = async (userId: string) => {
+        const memberCopy = getWorkspaceMemberCopy(lang);
+        setIsSavingMember(true);
+        setMemberStatus('');
+        try {
+            await deleteWorkspaceMember(userId);
+            await reloadWorkspaceMembers();
+            setMemberStatus(memberCopy.removed);
+        } catch (error) {
+            setMemberStatus(error instanceof Error ? error.message : memberCopy.removeFailed);
+        } finally {
+            setIsSavingMember(false);
+        }
+    };
+
     const webSearchKeyField = getWebSearchKeyField(webSearchAdapter);
     const webSearchKeyPreview = webSearchKeyField === 'brave'
         ? braveApiKeyPreview
@@ -514,8 +584,10 @@ export function SettingsMenu({
     const savedPrefix = `${text.savedPrefix}${lang.startsWith('zh') ? '：' : ': '}`;
     const capabilityCopy = getRuntimeCapabilityCopy(lang);
     const mcpCopy = getMcpSettingsCopy(lang);
+    const memberCopy = getWorkspaceMemberCopy(lang);
     const tabs = useMemo(() => [
         { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
+        ...(canManageWorkspaceMembers ? [{ id: 'members' as const, label: memberCopy.title, icon: Users }] : []),
         ...(canManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
         ...(canManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
         ...(canManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
@@ -523,13 +595,17 @@ export function SettingsMenu({
         canManageMcp,
         canManageModelConfig,
         canManageRuntimeSettings,
+        canManageWorkspaceMembers,
         capabilityCopy.title,
+        memberCopy.title,
         mcpCopy.title,
         text.settingsGeneral,
         text.settingsModel,
     ]);
     const activeTabLabel = activeTab === 'general'
         ? text.settingsGeneral
+        : activeTab === 'members'
+            ? memberCopy.title
         : activeTab === 'runtime'
             ? capabilityCopy.title
             : activeTab === 'mcp'
@@ -539,6 +615,8 @@ export function SettingsMenu({
         ? (canManageWorkspace && isSavingWorkspace) || (canManageSecrets && isSavingWebTools)
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
+        : activeTab === 'members'
+                ? isSavingMember
         : activeTab === 'mcp'
                 ? false
             : isSaving;
@@ -550,6 +628,8 @@ export function SettingsMenu({
             (canManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
         : activeTab === 'runtime'
             ? isSavingCurrentTab
+        : activeTab === 'members'
+                ? false
         : activeTab === 'mcp'
                 ? false
             : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
@@ -565,6 +645,7 @@ export function SettingsMenu({
             if (saved) onClose();
             return;
         }
+        if (activeTab === 'members') return;
         if (activeTab === 'mcp') return;
         const workspaceSaved = canManageWorkspace ? handleSaveWorkspace() : true;
         const webToolsSaved = canManageSecrets ? await handleSaveWebTools() : true;
@@ -951,6 +1032,71 @@ export function SettingsMenu({
                                         </div>
                                     </>
                                 ) : null}
+                                {activeTab === 'members' && canManageWorkspaceMembers ? (
+                                    <div className="space-y-4 py-3">
+                                        <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+                                            <div className="grid gap-3 sm:grid-cols-[1fr_9rem_7rem]">
+                                                <input
+                                                    aria-label={memberCopy.userIdLabel}
+                                                    value={memberUserId}
+                                                    onChange={(event) => setMemberUserId(event.target.value)}
+                                                    placeholder={memberCopy.userIdPlaceholder}
+                                                    className="h-11 min-w-0 rounded-2xl border border-white/15 bg-white/[0.04] px-3 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
+                                                />
+                                                <select
+                                                    aria-label={memberCopy.roleLabel}
+                                                    value={memberRole}
+                                                    onChange={(event) => setMemberRole(event.target.value as BeeGameWorkspaceMemberRole)}
+                                                    className="h-11 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
+                                                >
+                                                    <option value="developer">developer</option>
+                                                    <option value="reviewer">reviewer</option>
+                                                    <option value="viewer">viewer</option>
+                                                    <option value="owner">owner</option>
+                                                </select>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleSaveMember()}
+                                                    disabled={isSavingMember || !memberUserId.trim()}
+                                                    className="inline-flex h-11 items-center justify-center rounded-full bg-white px-4 text-sm font-black text-zinc-950 transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {memberCopy.save}
+                                                </button>
+                                            </div>
+                                            {memberStatus ? (
+                                                <div className="mt-3 text-xs text-emerald-400">{memberStatus}</div>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            {workspaceMembers.map((member) => (
+                                                <div
+                                                    key={member.userId}
+                                                    className="flex items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.035] px-4 py-3"
+                                                >
+                                                    <div className="min-w-0">
+                                                        <div className="truncate font-mono text-sm font-bold text-zinc-100">{member.userId}</div>
+                                                        <div className="mt-1 text-xs font-black uppercase tracking-[0.14em] text-zinc-500">{member.role}</div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        aria-label={`${memberCopy.remove} ${member.userId}`}
+                                                        onClick={() => void handleDeleteMember(member.userId)}
+                                                        disabled={isSavingMember || member.role === 'owner'}
+                                                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 transition-colors hover:bg-red-500/15 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-35"
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {!workspaceMembers.length ? (
+                                                <div className="rounded-3xl border border-white/10 bg-white/[0.035] px-4 py-6 text-center text-sm text-zinc-500">
+                                                    {memberCopy.empty}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {activeTab === 'mcp' && canManageMcp ? (
                                     <McpSettingsPanel
                                         copy={mcpCopy}
@@ -989,7 +1135,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
                                 </div>
-                                {activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
+                                {activeTab !== 'mcp' && activeTab !== 'members' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"
@@ -1015,6 +1161,39 @@ function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null
     if (adapter === 'brave') return 'brave';
     if (adapter === 'exa') return 'exa';
     return null;
+}
+
+function getWorkspaceMemberCopy(lang: Language) {
+    if (lang.startsWith('zh')) {
+        return {
+            title: '成员',
+            userIdLabel: '成员 User ID',
+            userIdPlaceholder: 'Supabase user id',
+            roleLabel: '成员角色',
+            save: '保存成员',
+            remove: '移除',
+            empty: '暂无成员',
+            saved: '成员已保存',
+            removed: '成员已移除',
+            userIdRequired: '请填写成员 User ID',
+            saveFailed: '成员保存失败',
+            removeFailed: '成员移除失败',
+        };
+    }
+    return {
+        title: 'Members',
+        userIdLabel: 'Member User ID',
+        userIdPlaceholder: 'Supabase user id',
+        roleLabel: 'Member role',
+        save: 'Save member',
+        remove: 'Remove',
+        empty: 'No members yet',
+        saved: 'Member saved',
+        removed: 'Member removed',
+        userIdRequired: 'Member User ID is required',
+        saveFailed: 'Member save failed',
+        removeFailed: 'Member remove failed',
+    };
 }
 
 function normalizeRuntimeSettings(config: RuntimeSettingsConfig): Required<RuntimeSettingsConfig> {

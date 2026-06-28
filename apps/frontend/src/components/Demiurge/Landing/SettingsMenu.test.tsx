@@ -25,6 +25,9 @@ const {
     testMcpServer,
     updateMcpServer,
     updateModelConfig,
+    listWorkspaceMembers,
+    upsertWorkspaceMember,
+    deleteWorkspaceMember,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
     createMcpServer: vi.fn(),
@@ -45,6 +48,9 @@ const {
     testMcpServer: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
+    listWorkspaceMembers: vi.fn(),
+    upsertWorkspaceMember: vi.fn(),
+    deleteWorkspaceMember: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -83,6 +89,12 @@ vi.mock('../../../services/mcpServersApi', () => ({
     listMcpServers,
     testMcpServer,
     updateMcpServer,
+}));
+
+vi.mock('../../../services/workspaceMembersApi', () => ({
+    listWorkspaceMembers,
+    upsertWorkspaceMember,
+    deleteWorkspaceMember,
 }));
 
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
@@ -137,6 +149,17 @@ describe('SettingsMenu model settings', () => {
         resetBeeGameWorkspaceRoot.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
+        listWorkspaceMembers.mockReset();
+        listWorkspaceMembers.mockResolvedValue([]);
+        upsertWorkspaceMember.mockReset();
+        upsertWorkspaceMember.mockResolvedValue({
+            workspaceId: 'workspace-1',
+            userId: 'user-2',
+            role: 'developer',
+            createdAt: '2026-06-27T00:00:00.000Z',
+        });
+        deleteWorkspaceMember.mockReset();
+        deleteWorkspaceMember.mockResolvedValue({ deleted: true });
     });
 
     it('renders the settings panel as a centered modal overlay', () => {
@@ -159,6 +182,7 @@ describe('SettingsMenu model settings', () => {
         expect(settingsScrollArea).toHaveClass('min-h-0');
         expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
@@ -197,6 +221,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
@@ -206,6 +231,43 @@ describe('SettingsMenu model settings', () => {
         expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
+        expect(listWorkspaceMembers).not.toHaveBeenCalled();
+    });
+
+    it('manages workspace members when the user has member permissions', async () => {
+        listWorkspaceMembers.mockResolvedValue([
+            {
+                workspaceId: 'workspace-1',
+                userId: 'user-1',
+                role: 'owner',
+                createdAt: '2026-06-27T00:00:00.000Z',
+            },
+            {
+                workspaceId: 'workspace-1',
+                userId: 'user-2',
+                role: 'developer',
+                createdAt: '2026-06-27T00:00:00.000Z',
+            },
+        ]);
+        renderSettings({ canManageWorkspaceMembers: true });
+
+        await userEvent.click(screen.getByRole('tab', { name: '成员' }));
+
+        expect(await screen.findByText('user-1')).toBeInTheDocument();
+        expect(screen.getByText('user-2')).toBeInTheDocument();
+        expect(screen.getAllByText('developer').length).toBeGreaterThan(0);
+
+        await userEvent.type(screen.getByLabelText('成员 User ID'), 'user-3');
+        await userEvent.selectOptions(screen.getByLabelText('成员角色'), 'reviewer');
+        await userEvent.click(screen.getByRole('button', { name: '保存成员' }));
+
+        expect(upsertWorkspaceMember).toHaveBeenCalledWith('user-3', 'reviewer');
+        await waitFor(() => {
+            expect(listWorkspaceMembers).toHaveBeenCalledTimes(2);
+        });
+
+        await userEvent.click(screen.getByRole('button', { name: '移除 user-2' }));
+        expect(deleteWorkspaceMember).toHaveBeenCalledWith('user-2');
     });
 
     it('keeps the settings chrome and controls visually consistent', async () => {

@@ -33,6 +33,7 @@ import type {
   AppendAuditEventInput,
   BeeGameAuditEvent,
 } from './audit-events-store'
+import type { BeeGameRole } from './auth/user-context'
 import type { BeeGameAssetManifest } from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import type {
@@ -91,6 +92,20 @@ type SupabaseWorkspaceRow = {
   id: string
   owner_id: string
   name: string
+}
+
+type SupabaseWorkspaceMemberRow = {
+  workspace_id: string
+  user_id: string
+  role: BeeGameRole
+  created_at: string
+}
+
+export type BeeGameWorkspaceMember = {
+  workspaceId: string
+  userId: string
+  role: BeeGameRole
+  createdAt: string
 }
 
 type SupabaseProjectRow = {
@@ -367,6 +382,52 @@ export class SupabaseDashboardStore {
     return this.deleteWhere('beegame_mcp_servers', {
       owner_id: ownerId,
       id,
+    })
+  }
+
+  async listWorkspaceMembers(ownerId: string): Promise<BeeGameWorkspaceMember[]> {
+    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
+    const rows = await this.rest<SupabaseWorkspaceMemberRow[]>(
+      `/rest/v1/beegame_workspace_members?workspace_id=eq.${q(workspaceId)}&select=*&order=created_at.asc`,
+    )
+    return rows.map(rowToWorkspaceMember)
+  }
+
+  async upsertWorkspaceMember(
+    ownerId: string,
+    input: { userId: string; role: BeeGameRole },
+  ): Promise<BeeGameWorkspaceMember> {
+    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
+    const memberUserId = input.userId.trim()
+    if (!memberUserId) throw new Error('Member user id is required')
+    if (memberUserId === ownerId && input.role !== 'owner') {
+      throw new Error('Workspace owner must keep the owner role')
+    }
+    const row = await this.upsert<SupabaseWorkspaceMemberRow>(
+      'beegame_workspace_members',
+      {
+        workspace_id: workspaceId,
+        user_id: memberUserId,
+        role: input.role,
+      },
+      'workspace_id,user_id',
+    )
+    return rowToWorkspaceMember(row)
+  }
+
+  async deleteWorkspaceMember(
+    ownerId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const memberUserId = userId.trim()
+    if (!memberUserId) throw new Error('Member user id is required')
+    if (memberUserId === ownerId) {
+      throw new Error('Cannot remove the workspace owner')
+    }
+    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
+    return this.deleteWhere('beegame_workspace_members', {
+      workspace_id: workspaceId,
+      user_id: memberUserId,
     })
   }
 
@@ -1042,6 +1103,17 @@ function rowToMcpServer(
   })
 }
 
+function rowToWorkspaceMember(
+  row: SupabaseWorkspaceMemberRow,
+): BeeGameWorkspaceMember {
+  return {
+    workspaceId: row.workspace_id,
+    userId: row.user_id,
+    role: isBeeGameRole(row.role) ? row.role : 'viewer',
+    createdAt: row.created_at,
+  }
+}
+
 function normalizeMcpServerInput(
   input: McpServerInput,
   existing?: McpServerConfig,
@@ -1481,6 +1553,13 @@ function trimString(value: unknown): string {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isBeeGameRole(value: unknown): value is BeeGameRole {
+  return value === 'owner' ||
+    value === 'developer' ||
+    value === 'reviewer' ||
+    value === 'viewer'
 }
 
 function isMcpServerTransport(value: unknown): value is McpServerTransport {

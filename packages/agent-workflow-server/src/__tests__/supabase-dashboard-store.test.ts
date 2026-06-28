@@ -443,4 +443,100 @@ describe('SupabaseDashboardStore', () => {
     expect(postedBodies).not.toContain('brave-key')
     expect(postedBodies).not.toContain('secret-token')
   })
+
+  test('manages default workspace members through Supabase REST', async () => {
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const workspace = {
+      id: '11111111-1111-1111-1111-111111111111',
+      owner_id: '00000000-0000-0000-0000-000000000001',
+      name: 'Default Workspace',
+    }
+    const members: Array<Record<string, unknown>> = [{
+      workspace_id: workspace.id,
+      user_id: '00000000-0000-0000-0000-000000000001',
+      role: 'owner',
+      created_at: '2026-06-27T00:00:00.000Z',
+    }]
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      calls.push({
+        url: requestUrl,
+        method: init?.method ?? 'GET',
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+      })
+      if (requestUrl.includes('/beegame_workspaces')) {
+        return Response.json([workspace])
+      }
+      if (requestUrl.includes('/beegame_workspace_members')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          const index = members.findIndex(row =>
+            row.workspace_id === body.workspace_id &&
+            row.user_id === body.user_id
+          )
+          const row = {
+            created_at: '2026-06-27T00:00:00.000Z',
+            ...body,
+          }
+          if (index >= 0) {
+            members[index] = row
+          } else {
+            members.push(row)
+          }
+          return Response.json([row])
+        }
+        if (init?.method === 'DELETE') {
+          const userId = decodeURIComponent(
+            requestUrl.split('user_id=eq.')[1]?.split('&')[0] ?? '',
+          )
+          const deleted = members.filter(row => row.user_id === userId)
+          for (const row of deleted) members.splice(members.indexOf(row), 1)
+          return Response.json(deleted)
+        }
+        return Response.json(members)
+      }
+      return new Response('Not found', { status: 404 })
+    }) as typeof fetch
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      serviceRoleKey: 'service-role-key',
+    })
+
+    await expect(
+      store.listWorkspaceMembers('00000000-0000-0000-0000-000000000001'),
+    ).resolves.toEqual([
+      {
+        workspaceId: workspace.id,
+        userId: '00000000-0000-0000-0000-000000000001',
+        role: 'owner',
+        createdAt: '2026-06-27T00:00:00.000Z',
+      },
+    ])
+    await expect(store.upsertWorkspaceMember(
+      '00000000-0000-0000-0000-000000000001',
+      {
+        userId: '00000000-0000-0000-0000-000000000002',
+        role: 'developer',
+      },
+    )).resolves.toEqual({
+      workspaceId: workspace.id,
+      userId: '00000000-0000-0000-0000-000000000002',
+      role: 'developer',
+      createdAt: '2026-06-27T00:00:00.000Z',
+    })
+    await expect(store.deleteWorkspaceMember(
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000002',
+    )).resolves.toBe(true)
+    await expect(store.deleteWorkspaceMember(
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+    )).rejects.toThrow('Cannot remove the workspace owner')
+
+    expect(calls.some(call =>
+      call.url.includes('/rest/v1/beegame_workspace_members') &&
+      call.method === 'POST' &&
+      (call.body as Record<string, unknown>).role === 'developer',
+    )).toBe(true)
+  })
 })
