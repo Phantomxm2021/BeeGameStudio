@@ -30,8 +30,6 @@ import {
   type ModelConfigStoreOptions,
 } from './model-config-store'
 import {
-  BeeGameProjectMetadataStore,
-  getBeeGameProjectDatabasePath,
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
 import {
@@ -194,18 +192,6 @@ export function createAgentWorkflowApp(
     options.previewPortAllocator,
     options.previewReadinessProbe,
   )
-  const projectStores = new Map<string, BeeGameProjectMetadataStore>()
-  const getProjectStore = (request: Request) => {
-    const dataRoot = getCurrentUserDataRoot(request)
-    const existing = projectStores.get(dataRoot)
-    if (existing) return existing
-    const created = new BeeGameProjectMetadataStore(
-      getBeeGameProjectDatabasePath(dataRoot),
-    )
-    projectStores.set(dataRoot, created)
-    return created
-  }
-
   app.use('/api/*', cors())
   app.use('/api/*', async (c, next) => {
     if (options.currentUser) {
@@ -710,9 +696,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(supabaseStore
-      ? await supabaseStore.listProjects(user.id)
-      : getProjectStore(c.req.raw).listProjects())
+    return c.json(await dashboardRepository.listProjects(c.req.raw, user))
   })
 
   app.post('/api/projects', async c => {
@@ -723,9 +707,11 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     try {
       const user = getCurrentUser(c.req.raw)
-      return c.json(supabaseStore
-        ? await supabaseStore.upsertProject(user.id, toProjectMetadata(body))
-        : getProjectStore(c.req.raw).upsertProject(toProjectMetadata(body)))
+      return c.json(await dashboardRepository.upsertProject(
+        c.req.raw,
+        user,
+        toProjectMetadata(body),
+      ))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -736,9 +722,7 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const user = getCurrentUser(c.req.raw)
-    const projects = supabaseStore
-      ? await supabaseStore.listProjects(user.id)
-      : getProjectStore(c.req.raw).listProjects()
+    const projects = await dashboardRepository.listProjects(c.req.raw, user)
     const existing = projects
       .find(project => project.id === c.req.param('id'))
     if (!existing) return c.json({ error: 'Project not found' }, 404)
@@ -753,9 +737,11 @@ export function createAgentWorkflowApp(
           ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
           : {}),
       }
-      return c.json(supabaseStore
-        ? await supabaseStore.upsertProject(user.id, nextProject)
-        : getProjectStore(c.req.raw).upsertProject(nextProject))
+      return c.json(await dashboardRepository.upsertProject(
+        c.req.raw,
+        user,
+        nextProject,
+      ))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -765,9 +751,11 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.delete')
     if (forbidden) return c.json(forbidden, 403)
-    const deleted = supabaseStore
-      ? await supabaseStore.deleteProject(user.id, c.req.param('id'))
-      : getProjectStore(c.req.raw).deleteProject(c.req.param('id'))
+    const deleted = await dashboardRepository.deleteProject(
+      c.req.raw,
+      user,
+      c.req.param('id'),
+    )
     if (deleted) {
       await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id,

@@ -32,6 +32,11 @@ import {
   type McpServerInput,
 } from './mcp-servers-store'
 import {
+  BeeGameProjectMetadataStore,
+  getBeeGameProjectDatabasePath,
+  type BeeGameProjectMetadata,
+} from './project-metadata-store'
+import {
   loadRuntimeSettingsConfig,
   mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
@@ -83,6 +88,7 @@ type UpdateModelConfigInput = Partial<CreateModelConfigInput>
 
 export class DashboardRepository {
   readonly supabaseStore?: SupabaseDashboardStore
+  private readonly projectStores = new Map<string, BeeGameProjectMetadataStore>()
 
   constructor(private readonly options: DashboardRepositoryOptions) {
     this.supabaseStore = options.supabaseStore
@@ -97,6 +103,35 @@ export class DashboardRepository {
       : getCreditBalance(user.id, {
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  async listProjects(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<BeeGameProjectMetadata[]> {
+    return this.supabaseStore
+      ? this.supabaseStore.listProjects(user.id)
+      : this.getProjectStore(request).listProjects()
+  }
+
+  async upsertProject(
+    request: Request,
+    user: BeeGameUserContext,
+    project: BeeGameProjectMetadata,
+  ): Promise<BeeGameProjectMetadata> {
+    return this.supabaseStore
+      ? this.supabaseStore.upsertProject(user.id, project)
+      : this.getProjectStore(request).upsertProject(project)
+  }
+
+  async deleteProject(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<boolean> {
+    return this.supabaseStore
+      ? this.supabaseStore.deleteProject(user.id, id)
+      : this.getProjectStore(request).deleteProject(id)
   }
 
   async listMcpServers(
@@ -348,5 +383,16 @@ export class DashboardRepository {
     if (modelConfigStore !== false && modelConfigStore !== undefined) {
       saveModelConfigsToStore(modelConfigStore)
     }
+  }
+
+  private getProjectStore(request: Request): BeeGameProjectMetadataStore {
+    const dataRoot = this.options.getUserDataRoot(request)
+    const existing = this.projectStores.get(dataRoot)
+    if (existing) return existing
+    const created = new BeeGameProjectMetadataStore(
+      getBeeGameProjectDatabasePath(dataRoot),
+    )
+    this.projectStores.set(dataRoot, created)
+    return created
   }
 }
