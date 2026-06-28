@@ -231,16 +231,25 @@ export function createAgentWorkflowApp(
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
-    userDataRoot => ({
-      ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({
-        dataDir: userDataRoot ?? dashboardDataRoot,
-      })),
-      ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({
-        dataDir: userDataRoot ?? dashboardDataRoot,
-      }), {
-        dataDir: userDataRoot ?? dashboardDataRoot,
-      }),
-    }),
+    async (userDataRoot, userId) => {
+      const dataDir = userDataRoot ?? dashboardDataRoot
+      if (supabaseStore && userId) {
+        const [webTools, runtimeSettings] = await Promise.all([
+          supabaseStore.loadWebTools(userId),
+          supabaseStore.loadRuntimeSettings(userId),
+        ])
+        return {
+          ...mapWebToolsConfigToRuntimeEnv(webTools),
+          ...mapRuntimeSettingsToEnv(runtimeSettings, { dataDir }),
+        }
+      }
+      return {
+        ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
+        ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({ dataDir }), {
+          dataDir,
+        }),
+      }
+    },
     supabaseStore
       ? {
           reserveCredits: (userId, creditOptions) =>

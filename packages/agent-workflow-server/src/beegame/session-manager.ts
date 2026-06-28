@@ -231,7 +231,10 @@ export class BeeGameSessionManager {
   constructor(
     private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
     dashboardDataRoot?: string,
-    private readonly getAdditionalRuntimeEnv: (userDataRoot?: string) => Record<string, string> = () => ({}),
+    private readonly getAdditionalRuntimeEnv: (
+      userDataRoot?: string,
+      userId?: string,
+    ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly creditBackend: BeeGameSessionCreditBackend = localCreditBackend,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
@@ -574,7 +577,7 @@ export class BeeGameSessionManager {
         cwd: record.session.cwd,
         env: buildRuntimeEnv(
           record.runtime,
-          this.getAdditionalRuntimeEnv(record.userDataRoot),
+          await this.getAdditionalRuntimeEnv(record.userDataRoot, record.userId),
         ),
       })
       record.runner = runner
