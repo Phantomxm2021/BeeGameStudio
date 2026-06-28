@@ -32,7 +32,10 @@ describe('SupabaseDashboardStore', () => {
           : {}),
       })
 
-      if (requestUrl.includes('/beegame_model_configs?select=*')) {
+      if (requestUrl.includes('/beegame_model_configs')) {
+        if (init?.method === 'POST') {
+          return Response.json([JSON.parse(String(init.body))])
+        }
         return Response.json([
           {
             id: 'llm_1',
@@ -234,6 +237,18 @@ describe('SupabaseDashboardStore', () => {
         apiKey: 'sk-secret',
       }),
     ])
+    await store.upsertModelConfig({
+      id: 'llm_2',
+      ownerId,
+      name: 'Encrypted LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://secure-llm.example/v1',
+      apiKey: 'sk-new-secret',
+      models: { balanced: 'secure-model' },
+      isDefault: false,
+      createdAt: '2026-06-27T00:00:00.000Z',
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    })
     expect(await store.loadRuntimeSettings(ownerId)).toEqual({
       skillSearchEnabled: true,
     })
@@ -420,5 +435,12 @@ describe('SupabaseDashboardStore', () => {
     )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_assets'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_previews'))).toBe(true)
+    const postedBodies = calls
+      .filter(call => call.method === 'POST')
+      .map(call => JSON.stringify(call.body))
+      .join('\n')
+    expect(postedBodies).not.toContain('sk-new-secret')
+    expect(postedBodies).not.toContain('brave-key')
+    expect(postedBodies).not.toContain('secret-token')
   })
 })

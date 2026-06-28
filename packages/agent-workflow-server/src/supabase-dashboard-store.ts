@@ -1,4 +1,10 @@
-import { randomUUID } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto'
 import type { ModelConfigSnapshotRecord } from '@claude-code-best/agent-workflow'
 import {
   CREDIT_UNIT_WEIGHTED_TOKENS,
@@ -197,12 +203,14 @@ export class SupabaseDashboardStore {
   private readonly baseUrl: string
   private readonly serviceRoleKey: string
   private readonly fetchImpl: typeof fetch
+  private readonly secretKey: Buffer
   private readonly workspaceIds = new Map<string, string>()
 
   constructor(config: SupabaseConfig) {
     this.baseUrl = config.url.replace(/\/+$/, '')
     this.serviceRoleKey = config.serviceRoleKey
     this.fetchImpl = config.fetchImpl ?? fetch
+    this.secretKey = deriveSecretKey(config.serviceRoleKey)
   }
 
   async deleteAuthUser(userId: string): Promise<void> {
@@ -224,7 +232,7 @@ export class SupabaseDashboardStore {
       name: row.name,
       provider: row.provider as ModelConfigSnapshotRecord['provider'],
       ...(row.base_url ? { baseUrl: row.base_url } : {}),
-      apiKey: row.api_key_ciphertext ?? '',
+      apiKey: decryptSecret(row.api_key_ciphertext ?? '', this.secretKey),
       models: toModelMap(row.models),
       isDefault: row.is_default,
       createdAt: row.created_at,
@@ -239,7 +247,7 @@ export class SupabaseDashboardStore {
       name: record.name,
       provider: record.provider,
       base_url: record.baseUrl ?? null,
-      api_key_ciphertext: record.apiKey,
+      api_key_ciphertext: encryptSecret(record.apiKey, this.secretKey),
       models: record.models,
       is_default: record.isDefault,
       created_at: record.createdAt,
@@ -279,7 +287,10 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseWebToolsRow[]>(
       `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
     )
-    return normalizeWebTools(rows[0]?.config ?? {})
+    return normalizeWebTools(decryptWebToolsConfig(
+      rows[0]?.config ?? {},
+      this.secretKey,
+    ))
   }
 
   async saveWebTools(
@@ -295,7 +306,7 @@ export class SupabaseDashboardStore {
     })
     await this.upsert('beegame_web_tools', {
       owner_id: ownerId,
-      config: normalized,
+      config: encryptWebToolsConfig(normalized, this.secretKey),
       updated_at: new Date().toISOString(),
     }, 'owner_id')
     return normalized
@@ -305,7 +316,9 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
-    return rows.map(row => toPublicMcpServerConfig(rowToMcpServer(row)))
+    return rows.map(row => toPublicMcpServerConfig(
+      rowToMcpServer(row, this.secretKey),
+    ))
   }
 
   async upsertMcpServer(
@@ -331,7 +344,7 @@ export class SupabaseDashboardStore {
         autoStart: normalized.autoStart,
       },
       env_ciphertext: {
-        env: normalized.env ?? [],
+        env: encryptMcpEnv(normalized.env ?? [], this.secretKey),
       },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -714,7 +727,7 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
     )
-    return rows[0] ? rowToMcpServer(rows[0]) : undefined
+    return rows[0] ? rowToMcpServer(rows[0], this.secretKey) : undefined
   }
 
   private async ensureCreditAccount(
@@ -950,7 +963,10 @@ function resolveSecretInput(
   return trimString(next) || undefined
 }
 
-function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
+function rowToMcpServer(
+  row: SupabaseMcpServerRow,
+  secretKey: Buffer,
+): McpServerConfig {
   const config = isObject(row.config) ? row.config : {}
   const envPayload = isObject(row.env_ciphertext) ? row.env_ciphertext : {}
   return normalizeMcpServerInput({
@@ -965,7 +981,7 @@ function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
     ...(Array.isArray(config.args) ? { args: config.args.map(String) } : {}),
     ...(typeof config.url === 'string' ? { url: config.url } : {}),
     ...(typeof config.cwd === 'string' ? { cwd: config.cwd } : {}),
-    env: normalizeEnvFromUnknown(envPayload.env),
+    env: decryptMcpEnv(normalizeEnvFromUnknown(envPayload.env), secretKey),
     autoStart: config.autoStart !== false,
   })
 }
@@ -1052,6 +1068,98 @@ function normalizeEnvFromUnknown(value: unknown): McpServerEnvVar[] {
       }
     })
     .filter((item): item is McpServerEnvVar => item !== undefined)
+}
+
+const ENCRYPTED_SECRET_PREFIX = 'bgenc:v1:'
+
+function deriveSecretKey(secret: string): Buffer {
+  return createHash('sha256').update(secret).digest()
+}
+
+function encryptSecret(value: string | undefined, key: Buffer): string {
+  const secret = trimString(value)
+  if (!secret || secret.startsWith(ENCRYPTED_SECRET_PREFIX)) return secret
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const encrypted = Buffer.concat([
+    cipher.update(secret, 'utf8'),
+    cipher.final(),
+  ])
+  const tag = cipher.getAuthTag()
+  return [
+    ENCRYPTED_SECRET_PREFIX,
+    iv.toString('base64url'),
+    tag.toString('base64url'),
+    encrypted.toString('base64url'),
+  ].join('.')
+}
+
+function decryptSecret(value: string | undefined, key: Buffer): string {
+  const secret = trimString(value)
+  if (!secret || !secret.startsWith(ENCRYPTED_SECRET_PREFIX)) return secret
+  const parts = secret.slice(ENCRYPTED_SECRET_PREFIX.length).split('.')
+  if (parts.length !== 3) throw new Error('Invalid encrypted secret')
+  const [ivText, tagText, encryptedText] = parts
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    key,
+    Buffer.from(ivText, 'base64url'),
+  )
+  decipher.setAuthTag(Buffer.from(tagText, 'base64url'))
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedText, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8')
+}
+
+function encryptWebToolsConfig(
+  config: WebToolsConfig,
+  key: Buffer,
+): JsonObject {
+  return {
+    ...config,
+    ...(config.braveApiKey
+      ? { braveApiKey: encryptSecret(config.braveApiKey, key) }
+      : {}),
+    ...(config.exaApiKey
+      ? { exaApiKey: encryptSecret(config.exaApiKey, key) }
+      : {}),
+  } as JsonObject
+}
+
+function decryptWebToolsConfig(
+  config: JsonObject,
+  key: Buffer,
+): JsonObject {
+  return {
+    ...config,
+    ...(typeof config.braveApiKey === 'string'
+      ? { braveApiKey: decryptSecret(config.braveApiKey, key) }
+      : {}),
+    ...(typeof config.exaApiKey === 'string'
+      ? { exaApiKey: decryptSecret(config.exaApiKey, key) }
+      : {}),
+  }
+}
+
+function encryptMcpEnv(
+  env: McpServerEnvVar[],
+  key: Buffer,
+): McpServerEnvVar[] {
+  return env.map(item => ({
+    key: item.key,
+    ...(item.value ? { value: encryptSecret(item.value, key) } : {}),
+  }))
+}
+
+function decryptMcpEnv(
+  env: McpServerEnvVar[],
+  key: Buffer,
+): McpServerEnvVar[] {
+  return env.map(item => ({
+    key: item.key,
+    ...(item.value ? { value: decryptSecret(item.value, key) } : {}),
+  }))
 }
 
 function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetadata {
