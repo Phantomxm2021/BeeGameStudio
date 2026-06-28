@@ -141,6 +141,11 @@ type SupabaseCreditLedgerRow = {
   created_at: string
 }
 
+type SupabaseCreditSummaryRow = Pick<
+  SupabaseCreditLedgerRow,
+  'kind' | 'credits' | 'weighted_tokens'
+>
+
 type SupabaseAuditEventRow = {
   id: string
   actor_id: string | null
@@ -580,7 +585,7 @@ export class SupabaseDashboardStore {
 
   async listCreditLedger(ownerId: string): Promise<CreditLedgerEntry[]> {
     const rows = await this.rest<SupabaseCreditLedgerRow[]>(
-      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
+      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}&select=*&order=created_at.asc&limit=100`,
     )
     return rows.map(rowToCreditLedgerEntry)
   }
@@ -589,13 +594,15 @@ export class SupabaseDashboardStore {
     ownerId: string,
     projectId?: string,
   ): Promise<CreditLedgerSummary> {
-    const entries = (await this.listCreditLedger(ownerId))
-      .filter(entry => !projectId || entry.projectId === projectId)
-    const reservedCredits = sumCreditKind(entries, 'reserve')
-    const settledCredits = sumCreditKind(entries, 'settle')
-    const refundedCredits = sumCreditKind(entries, 'refund')
+    const projectFilter = projectId ? `&project_id=eq.${q(projectId)}` : ''
+    const rows = await this.rest<SupabaseCreditSummaryRow[]>(
+      `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}${projectFilter}&select=kind%2Ccredits%2Cweighted_tokens&order=created_at.asc`,
+    )
+    const reservedCredits = sumCreditSummaryKind(rows, 'reserve')
+    const settledCredits = sumCreditSummaryKind(rows, 'settle')
+    const refundedCredits = sumCreditSummaryKind(rows, 'refund')
     return {
-      entriesCount: entries.length,
+      entriesCount: rows.length,
       reservedCredits,
       settledCredits,
       refundedCredits,
@@ -603,8 +610,8 @@ export class SupabaseDashboardStore {
         0,
         reservedCredits - settledCredits - refundedCredits,
       ),
-      weightedTokens: entries.reduce(
-        (sum, entry) => sum + normalizeNonNegativeInteger(entry.weightedTokens),
+      weightedTokens: rows.reduce(
+        (sum, row) => sum + normalizeNonNegativeInteger(row.weighted_tokens),
         0,
       ),
     }
@@ -634,7 +641,7 @@ export class SupabaseDashboardStore {
 
   async listAuditEvents(ownerId: string): Promise<BeeGameAuditEvent[]> {
     const rows = await this.rest<SupabaseAuditEventRow[]>(
-      `/rest/v1/beegame_audit_events?actor_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
+      `/rest/v1/beegame_audit_events?actor_id=eq.${q(ownerId)}&select=*&order=created_at.desc&limit=100`,
     )
     return rows.map(rowToAuditEvent)
   }
@@ -1272,13 +1279,13 @@ function normalizePreviewStatus(value: unknown): BeeGamePreviewSnapshot['status'
     : 'idle'
 }
 
-function sumCreditKind(
-  entries: CreditLedgerEntry[],
+function sumCreditSummaryKind(
+  rows: SupabaseCreditSummaryRow[],
   kind: CreditLedgerKind,
 ): number {
-  return entries
-    .filter(entry => entry.kind === kind)
-    .reduce((sum, entry) => sum + entry.credits, 0)
+  return rows
+    .filter(row => row.kind === kind)
+    .reduce((sum, row) => sum + normalizeNonNegativeInteger(row.credits), 0)
 }
 
 function normalizeNonNegativeInteger(value: unknown, fallback = 0): number {

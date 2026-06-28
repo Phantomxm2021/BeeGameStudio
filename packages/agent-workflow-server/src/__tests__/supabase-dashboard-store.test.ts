@@ -100,6 +100,14 @@ describe('SupabaseDashboardStore', () => {
             creditLedger.filter(row => row.reservation_id === reservationId),
           )
         }
+        if (requestUrl.includes('project_id=eq.')) {
+          const projectId = decodeURIComponent(
+            requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
+          )
+          return Response.json(
+            creditLedger.filter(row => row.project_id === projectId),
+          )
+        }
         return Response.json(creditLedger)
       }
 
@@ -394,7 +402,22 @@ describe('SupabaseDashboardStore', () => {
     )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
+    expect(calls.some(call =>
+      call.url.includes('/rest/v1/beegame_credit_ledger') &&
+      call.url.includes('order=created_at.asc') &&
+      call.url.includes('limit=100'),
+    )).toBe(true)
+    expect(calls.some(call =>
+      call.url.includes('/rest/v1/beegame_credit_ledger') &&
+      call.url.includes(`project_id=eq.${encodeURIComponent('session_1')}`) &&
+      call.url.includes('select=kind%2Ccredits%2Cweighted_tokens'),
+    )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_audit_events'))).toBe(true)
+    expect(calls.some(call =>
+      call.url.includes('/rest/v1/beegame_audit_events') &&
+      call.url.includes('order=created_at.desc') &&
+      call.url.includes('limit=100'),
+    )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_assets'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_previews'))).toBe(true)
   })
