@@ -133,6 +133,14 @@ Backend uses service role only for trusted server-side metadata operations. The 
 
 `BEEGAME_SECRETS_KEY` is the server-side encryption key for model API keys, web search keys, and MCP environment secrets before they are written to Supabase. It should be generated once per deployment and kept stable across service-role key rotation. If it is omitted, BeeGame falls back to service-role-derived encryption for local development and reads legacy rows written that way, but production deployments should set it explicitly.
 
+Local dashboard data can be migrated into the authenticated Supabase owner scope with:
+
+```bash
+bun scripts/migrate-beegame-local-to-supabase.ts --owner-id <supabase-user-id> --data-dir <local-dashboard-data-dir>
+```
+
+The command is dry-run by default. Add `--apply` only after the printed summary is correct. It migrates the local project index, model configs, runtime settings, web tool settings, and MCP servers. Transcript files remain in project folders and are not inserted into Postgres.
+
 ## Data Model
 
 ### profiles

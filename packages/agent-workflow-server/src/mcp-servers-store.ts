@@ -65,6 +65,12 @@ export function listMcpServers(
   return loadMcpServers(options).map(toPublicMcpServerConfig)
 }
 
+export function exportMcpServersSnapshot(
+  options: McpServersStoreOptions = {},
+): McpServerConfig[] {
+  return loadMcpServers(options)
+}
+
 export function upsertMcpServer(
   input: McpServerInput,
   options: McpServersStoreOptions = {},
