@@ -27,6 +27,8 @@ import {
 import {
   loadRuntimeSettingsConfig,
   mapRuntimeSettingsToEnv,
+  saveRuntimeSettingsConfig,
+  type RuntimeSettingsConfig,
 } from './runtime-settings-store'
 import type { BeeGameUserContext } from './auth/user-context'
 import {
@@ -37,6 +39,9 @@ import type { SupabaseDashboardStore } from './supabase-dashboard-store'
 import {
   loadWebToolsConfig,
   mapWebToolsConfigToRuntimeEnv,
+  saveWebToolsConfig,
+  toPublicWebToolsConfig,
+  type WebToolsConfig,
 } from './web-tools-store'
 
 export type DashboardRepositoryOptions = {
@@ -83,6 +88,53 @@ export class DashboardRepository {
     return this.supabaseStore
       ? this.supabaseStore.getCreditBalance(user.id)
       : getCreditBalance(user.id, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async loadWebTools(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<WebToolsConfig> {
+    const config = this.supabaseStore
+      ? await this.supabaseStore.loadWebTools(user.id)
+      : loadWebToolsConfig({
+          dataDir: this.options.getUserDataRoot(request),
+        })
+    return toPublicWebToolsConfig(config)
+  }
+
+  async saveWebTools(
+    request: Request,
+    user: BeeGameUserContext,
+    input: WebToolsConfig,
+  ): Promise<WebToolsConfig> {
+    return this.supabaseStore
+      ? this.supabaseStore.saveWebTools(user.id, input)
+      : saveWebToolsConfig(input, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async loadRuntimeSettings(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<RuntimeSettingsConfig> {
+    return this.supabaseStore
+      ? this.supabaseStore.loadRuntimeSettings(user.id)
+      : loadRuntimeSettingsConfig({
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async saveRuntimeSettings(
+    request: Request,
+    user: BeeGameUserContext,
+    input: RuntimeSettingsConfig,
+  ): Promise<RuntimeSettingsConfig> {
+    return this.supabaseStore
+      ? this.supabaseStore.saveRuntimeSettings(user.id, input)
+      : saveRuntimeSettingsConfig(input, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }

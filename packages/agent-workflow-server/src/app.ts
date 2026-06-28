@@ -35,13 +35,6 @@ import {
   type BeeGameProjectMetadata,
 } from './project-metadata-store'
 import {
-  loadWebToolsConfig,
-  saveWebToolsConfig,
-  toPublicWebToolsConfig,
-} from './web-tools-store'
-import {
-  loadRuntimeSettingsConfig,
-  saveRuntimeSettingsConfig,
   syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from './runtime-settings-store'
 import {
@@ -480,10 +473,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
-    const config = supabaseStore
-      ? await supabaseStore.loadWebTools(user.id)
-      : loadWebToolsConfig({ dataDir: getCurrentUserDataRoot(c.req.raw) })
-    return c.json(toPublicWebToolsConfig(config))
+    return c.json(await dashboardRepository.loadWebTools(c.req.raw, user))
   })
 
   app.put('/api/web-tools', async c => {
@@ -514,11 +504,7 @@ export function createAgentWorkflowApp(
         ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
         : {}),
     }
-    const saved = supabaseStore
-      ? await supabaseStore.saveWebTools(user.id, input)
-      : saveWebToolsConfig(input, {
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        })
+    const saved = await dashboardRepository.saveWebTools(c.req.raw, user, input)
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'web_tools.updated',
@@ -539,11 +525,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'runtime_settings.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(supabaseStore
-      ? await supabaseStore.loadRuntimeSettings(user.id)
-      : loadRuntimeSettingsConfig({
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        }))
+    return c.json(await dashboardRepository.loadRuntimeSettings(c.req.raw, user))
   })
 
   app.put('/api/runtime-settings', async c => {
@@ -574,11 +556,11 @@ export function createAgentWorkflowApp(
         ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
         : {}),
     }
-    const saved = supabaseStore
-      ? await supabaseStore.saveRuntimeSettings(user.id, input)
-      : saveRuntimeSettingsConfig(input, {
-          dataDir: getCurrentUserDataRoot(c.req.raw),
-        })
+    const saved = await dashboardRepository.saveRuntimeSettings(
+      c.req.raw,
+      user,
+      input,
+    )
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
       dataDir: getCurrentUserDataRoot(c.req.raw),
     })
