@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { History, LogOut, Settings, User, UserCircle } from 'lucide-react';
+import { History, LogOut, Shield, Settings, User, UserCircle } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
 
 interface LandingActionsProps {
@@ -12,7 +12,9 @@ interface LandingActionsProps {
     currentUserDisplayName?: string;
     currentUserAvatarUrl?: string;
     creditBalance?: number;
+    canOpenAdmin?: boolean;
     onToggleSettings: () => void;
+    onToggleAdmin?: () => void;
     onToggleHistory: () => void;
     onOpenProfile: () => void;
     onOpenLogin: () => void;
@@ -28,7 +30,9 @@ export function LandingActions({
     currentUserDisplayName,
     currentUserAvatarUrl,
     creditBalance,
+    canOpenAdmin = false,
     onToggleSettings,
+    onToggleAdmin,
     onToggleHistory,
     onOpenProfile,
     onOpenLogin,
@@ -41,6 +45,7 @@ export function LandingActions({
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
+    const adminLabel = lang === 'en' ? 'Admin' : '管理员';
     const fallbackUserLabel = lang === 'en' ? 'Syncing profile' : '账号资料同步中';
     const userLabel = currentUserDisplayName || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
@@ -67,6 +72,11 @@ export function LandingActions({
     const handleToggleSettings = () => {
         setIsUserMenuOpen(false);
         onToggleSettings();
+    };
+
+    const handleToggleAdmin = () => {
+        setIsUserMenuOpen(false);
+        onToggleAdmin?.();
     };
 
     const handleToggleHistory = () => {
@@ -152,6 +162,17 @@ export function LandingActions({
                         <Settings className="h-4 w-4" />
                         <span>{t.settings}</span>
                     </button>
+                    {canOpenAdmin && onToggleAdmin ? (
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onClick={handleToggleAdmin}
+                            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                        >
+                            <Shield className="h-4 w-4" />
+                            <span>{adminLabel}</span>
+                        </button>
+                    ) : null}
                     <button
                         type="button"
                         role="menuitem"

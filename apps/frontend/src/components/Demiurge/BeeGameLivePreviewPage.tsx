@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square, User } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Shield, Square, User } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -356,6 +356,7 @@ export function BeeGameLivePreviewPage({
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isUserMenuOpen, setUserMenuOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [isAdminOpen, setAdminOpen] = useState(false);
     const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
@@ -400,6 +401,15 @@ export function BeeGameLivePreviewPage({
     const userEmail = currentUser?.email || '';
     const userInitial = getUserInitial(userLabel);
     const userAvatarUrl = currentUser?.avatarUrl || '';
+    const isWorkspaceAdmin = currentUser?.role === 'owner';
+    const canOpenAdmin = Boolean(isWorkspaceAdmin && (
+        hasPermission('workspace.manage') ||
+        hasPermission('workspace.manage_members') ||
+        hasPermission('secrets.manage') ||
+        hasPermission('runtime_settings.manage') ||
+        hasPermission('mcp.manage') ||
+        hasPermission('model_config.manage')
+    ));
 
     useEffect(() => {
         setStoppedPreviewUrl('');
@@ -536,10 +546,12 @@ export function BeeGameLivePreviewPage({
                                     event.preventDefault();
                                     setUserMenuOpen(false);
                                     setSettingsOpen(true);
+                                    setAdminOpen(false);
                                 }}
                                 onClick={() => {
                                     setUserMenuOpen(false);
                                     setSettingsOpen(true);
+                                    setAdminOpen(false);
                                 }}
                                 className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
                             >
@@ -550,6 +562,32 @@ export function BeeGameLivePreviewPage({
                                     <div className="text-sm font-black">{labels.settings}</div>
                                 </div>
                             </button>
+                            {canOpenAdmin ? (
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    aria-label={lang === 'en' ? 'Admin' : '管理员'}
+                                    onMouseDown={(event) => {
+                                        event.preventDefault();
+                                        setUserMenuOpen(false);
+                                        setSettingsOpen(false);
+                                        setAdminOpen(true);
+                                    }}
+                                    onClick={() => {
+                                        setUserMenuOpen(false);
+                                        setSettingsOpen(false);
+                                        setAdminOpen(true);
+                                    }}
+                                    className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
+                                >
+                                    <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/[0.08] text-zinc-300">
+                                        <Shield className="h-4 w-4" />
+                                    </span>
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-black">{lang === 'en' ? 'Admin' : '管理员'}</div>
+                                    </div>
+                                </button>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -649,13 +687,24 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
-                canManageWorkspace={hasPermission('workspace.manage')}
-                canManageSecrets={hasPermission('secrets.manage')}
-                canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
-                canManageMcp={hasPermission('mcp.manage')}
-                canManageModelConfig={hasPermission('model_config.manage')}
-                canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
+                mode="settings"
             />
+
+            {canOpenAdmin ? (
+                <SettingsMenu
+                    isOpen={isAdminOpen}
+                    lang={lang}
+                    onClose={() => setAdminOpen(false)}
+                    onSetLang={onSetLang}
+                    mode="admin"
+                    canManageWorkspace={hasPermission('workspace.manage')}
+                    canManageSecrets={hasPermission('secrets.manage')}
+                    canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
+                    canManageMcp={hasPermission('mcp.manage')}
+                    canManageModelConfig={hasPermission('model_config.manage')}
+                    canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
+                />
+            ) : null}
         </main>
     );
 }

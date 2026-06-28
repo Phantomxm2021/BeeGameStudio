@@ -103,6 +103,12 @@ const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}
         lang="zh"
         onClose={vi.fn()}
         onSetLang={vi.fn()}
+        mode="admin"
+        canManageWorkspace
+        canManageSecrets
+        canManageRuntimeSettings
+        canManageMcp
+        canManageModelConfig
         {...props}
     />,
 );
@@ -226,6 +232,39 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+        expect(listModelConfigs).not.toHaveBeenCalled();
+        expect(getBeeGameWorkspaceSettings).not.toHaveBeenCalled();
+        expect(getWebToolsConfig).not.toHaveBeenCalled();
+        expect(getRuntimeSettings).not.toHaveBeenCalled();
+        expect(listMcpServers).not.toHaveBeenCalled();
+        expect(listWorkspaceMembers).not.toHaveBeenCalled();
+    });
+
+    it('keeps normal settings limited to personal preferences', () => {
+        listModelConfigs.mockClear();
+        getBeeGameWorkspaceSettings.mockClear();
+        getWebToolsConfig.mockClear();
+        getRuntimeSettings.mockClear();
+        listMcpServers.mockClear();
+
+        renderSettings({
+            mode: 'settings',
+            canManageWorkspace: true,
+            canManageSecrets: true,
+            canManageRuntimeSettings: true,
+            canManageMcp: true,
+            canManageModelConfig: true,
+            canManageWorkspaceMembers: true,
+        });
+
+        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(listModelConfigs).not.toHaveBeenCalled();
         expect(getBeeGameWorkspaceSettings).not.toHaveBeenCalled();
         expect(getWebToolsConfig).not.toHaveBeenCalled();

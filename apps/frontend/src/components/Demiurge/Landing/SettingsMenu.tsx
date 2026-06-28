@@ -56,6 +56,7 @@ interface SettingsMenuProps {
     lang: Language;
     onClose: () => void;
     onSetLang: (lang: Language) => void;
+    mode?: 'settings' | 'admin';
     canManageWorkspace?: boolean;
     canManageSecrets?: boolean;
     canManageRuntimeSettings?: boolean;
@@ -96,15 +97,23 @@ export function SettingsMenu({
     lang,
     onClose,
     onSetLang,
-    canManageWorkspace = true,
-    canManageSecrets = true,
-    canManageRuntimeSettings = true,
-    canManageMcp = true,
-    canManageModelConfig = true,
+    mode = 'settings',
+    canManageWorkspace = false,
+    canManageSecrets = false,
+    canManageRuntimeSettings = false,
+    canManageMcp = false,
+    canManageModelConfig = false,
     canManageWorkspaceMembers = false,
 }: SettingsMenuProps) {
     const t = translations[lang];
     const text = getBeeGameText(lang);
+    const isAdminMode = mode === 'admin';
+    const effectiveCanManageWorkspace = isAdminMode && canManageWorkspace;
+    const effectiveCanManageSecrets = isAdminMode && canManageSecrets;
+    const effectiveCanManageRuntimeSettings = isAdminMode && canManageRuntimeSettings;
+    const effectiveCanManageMcp = isAdminMode && canManageMcp;
+    const effectiveCanManageModelConfig = isAdminMode && canManageModelConfig;
+    const effectiveCanManageWorkspaceMembers = isAdminMode && canManageWorkspaceMembers;
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -154,7 +163,7 @@ export function SettingsMenu({
     useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
-        if (canManageModelConfig) {
+        if (effectiveCanManageModelConfig) {
             void listModelConfigs()
                 .then((configs) => {
                     if (cancelled) return;
@@ -179,7 +188,7 @@ export function SettingsMenu({
                     }
                 });
         }
-        if (canManageWorkspace) {
+        if (effectiveCanManageWorkspace) {
             void getBeeGameWorkspaceSettings()
                 .then((settings) => {
                     if (cancelled) return;
@@ -193,7 +202,7 @@ export function SettingsMenu({
                 });
         }
         setSubagentsEnabled(getBeeGameSubagentsEnabled());
-        if (canManageSecrets) {
+        if (effectiveCanManageSecrets) {
             void getWebToolsConfig()
                 .then((config) => {
                     if (cancelled) return;
@@ -210,7 +219,7 @@ export function SettingsMenu({
                     }
                 });
         }
-        if (canManageRuntimeSettings) {
+        if (effectiveCanManageRuntimeSettings) {
             void getRuntimeSettings()
                 .then((config) => {
                     if (cancelled) return;
@@ -223,7 +232,7 @@ export function SettingsMenu({
                     }
                 });
         }
-        if (canManageMcp) {
+        if (effectiveCanManageMcp) {
             void listMcpServers()
                 .then((servers) => {
                     if (cancelled) return;
@@ -240,7 +249,7 @@ export function SettingsMenu({
                     }
                 });
         }
-        if (canManageWorkspaceMembers) {
+        if (effectiveCanManageWorkspaceMembers) {
             void listWorkspaceMembers()
                 .then((members) => {
                     if (cancelled) return;
@@ -262,12 +271,12 @@ export function SettingsMenu({
             }
         };
     }, [
-        canManageMcp,
-        canManageModelConfig,
-        canManageRuntimeSettings,
-        canManageSecrets,
-        canManageWorkspaceMembers,
-        canManageWorkspace,
+        effectiveCanManageMcp,
+        effectiveCanManageModelConfig,
+        effectiveCanManageRuntimeSettings,
+        effectiveCanManageSecrets,
+        effectiveCanManageWorkspaceMembers,
+        effectiveCanManageWorkspace,
         isOpen,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
@@ -585,17 +594,25 @@ export function SettingsMenu({
     const capabilityCopy = getRuntimeCapabilityCopy(lang);
     const mcpCopy = getMcpSettingsCopy(lang);
     const memberCopy = getWorkspaceMemberCopy(lang);
-    const tabs = useMemo(() => [
-        { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
-        ...(canManageWorkspaceMembers ? [{ id: 'members' as const, label: memberCopy.title, icon: Users }] : []),
-        ...(canManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
-        ...(canManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
-        ...(canManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
-    ], [
-        canManageMcp,
-        canManageModelConfig,
-        canManageRuntimeSettings,
-        canManageWorkspaceMembers,
+    const tabs = useMemo(() => {
+        if (mode === 'settings') {
+            return [{ id: 'general' as const, label: text.settingsGeneral, icon: Globe }];
+        }
+        return [
+            { id: 'general' as const, label: text.settingsGeneral, icon: Globe },
+            ...(effectiveCanManageWorkspaceMembers ? [{ id: 'members' as const, label: memberCopy.title, icon: Users }] : []),
+            ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
+            ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
+            ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
+        ];
+    }, [
+        mode,
+        effectiveCanManageWorkspace,
+        effectiveCanManageSecrets,
+        effectiveCanManageMcp,
+        effectiveCanManageModelConfig,
+        effectiveCanManageRuntimeSettings,
+        effectiveCanManageWorkspaceMembers,
         capabilityCopy.title,
         memberCopy.title,
         mcpCopy.title,
@@ -612,7 +629,7 @@ export function SettingsMenu({
                 ? mcpCopy.title
                 : text.settingsModel;
     const isSavingCurrentTab = activeTab === 'general'
-        ? (canManageWorkspace && isSavingWorkspace) || (canManageSecrets && isSavingWebTools)
+        ? (effectiveCanManageWorkspace && isSavingWorkspace) || (effectiveCanManageSecrets && isSavingWebTools)
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
         : activeTab === 'members'
@@ -620,12 +637,12 @@ export function SettingsMenu({
         : activeTab === 'mcp'
                 ? false
             : isSaving;
-    const hasGeneralSaveAction = canManageWorkspace || canManageSecrets;
+    const hasGeneralSaveAction = effectiveCanManageWorkspace || effectiveCanManageSecrets;
     const isSaveDisabled = activeTab === 'general'
         ? !hasGeneralSaveAction ||
             isSavingCurrentTab ||
-            (canManageWorkspace && !workspacePath.trim()) ||
-            (canManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
+            (effectiveCanManageWorkspace && !workspacePath.trim()) ||
+            (effectiveCanManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
         : activeTab === 'runtime'
             ? isSavingCurrentTab
         : activeTab === 'members'
@@ -647,8 +664,8 @@ export function SettingsMenu({
         }
         if (activeTab === 'members') return;
         if (activeTab === 'mcp') return;
-        const workspaceSaved = canManageWorkspace ? handleSaveWorkspace() : true;
-        const webToolsSaved = canManageSecrets ? await handleSaveWebTools() : true;
+        const workspaceSaved = effectiveCanManageWorkspace ? handleSaveWorkspace() : true;
+        const webToolsSaved = effectiveCanManageSecrets ? await handleSaveWebTools() : true;
         if (workspaceSaved && webToolsSaved) onClose();
     };
 
@@ -660,7 +677,7 @@ export function SettingsMenu({
     };
     useEffect(() => {
         if (!tabs.some((tab) => tab.id === activeTab)) {
-            setActiveTab('general');
+            setActiveTab(tabs[0]?.id ?? 'general');
         }
     }, [activeTab, tabs]);
 
@@ -732,7 +749,7 @@ export function SettingsMenu({
                                             </div>
                                             <h2 className="mt-3 text-xl font-medium text-zinc-100">{activeTabLabel}</h2>
                                         </div>
-                                        {activeTab === 'mcp' && canManageMcp ? (
+                                        {activeTab === 'mcp' && effectiveCanManageMcp ? (
                                             <div className="relative mt-2">
                                                 <button
                                                     type="button"
@@ -843,7 +860,7 @@ export function SettingsMenu({
                                             </select>
                                         </label>
 
-                                        {canManageWorkspace ? (
+                                        {effectiveCanManageWorkspace ? (
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <FolderOpen className="h-4 w-4 text-zinc-400" />
@@ -876,7 +893,7 @@ export function SettingsMenu({
                                         </div>
                                         ) : null}
 
-                                        {canManageSecrets ? (
+                                        {effectiveCanManageSecrets ? (
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100 sm:mt-2.5">
                                                 <Search className="h-4 w-4 text-zinc-400" />
@@ -922,7 +939,7 @@ export function SettingsMenu({
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'runtime' && canManageRuntimeSettings ? (
+                                {activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
                                     <div className="divide-y divide-white/10">
                                         <CapabilityToggleRow
                                             item={{
@@ -949,7 +966,7 @@ export function SettingsMenu({
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'model' && canManageModelConfig ? (
+                                {activeTab === 'model' && effectiveCanManageModelConfig ? (
                                     <>
                                         <div className="divide-y divide-white/10">
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
@@ -1032,7 +1049,7 @@ export function SettingsMenu({
                                         </div>
                                     </>
                                 ) : null}
-                                {activeTab === 'members' && canManageWorkspaceMembers ? (
+                                {activeTab === 'members' && effectiveCanManageWorkspaceMembers ? (
                                     <div className="space-y-4 py-3">
                                         <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
                                             <div className="grid gap-3 sm:grid-cols-[1fr_9rem_7rem]">
@@ -1097,7 +1114,7 @@ export function SettingsMenu({
                                         </div>
                                     </div>
                                 ) : null}
-                                {activeTab === 'mcp' && canManageMcp ? (
+                                {activeTab === 'mcp' && effectiveCanManageMcp ? (
                                     <McpSettingsPanel
                                         copy={mcpCopy}
                                         servers={mcpServers}

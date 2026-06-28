@@ -156,6 +156,7 @@ const optionsWithCurrentValue = (options: string[], value: string): string[] => 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [projectName, setProjectName] = useState('');
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isAdminOpen, setIsAdminOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
@@ -630,6 +631,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             console.error('Failed to select project:', error);
         }
     };
+    const isWorkspaceAdmin = currentUser?.role === 'owner';
+    const canOpenAdmin = Boolean(isWorkspaceAdmin && (
+        hasPermission('workspace.manage') ||
+        hasPermission('workspace.manage_members') ||
+        hasPermission('secrets.manage') ||
+        hasPermission('runtime_settings.manage') ||
+        hasPermission('mcp.manage') ||
+        hasPermission('model_config.manage')
+    ));
 
     return (
         <AnimatePresence mode="wait">
@@ -652,16 +662,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
                     creditBalance={creditBalance?.balanceCredits}
+                    canOpenAdmin={canOpenAdmin}
                     onOpenLogin={handleOpenLogin}
                     onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
+                        setIsAdminOpen(false);
+                        setIsHistoryOpen(false);
+                    }}
+                    onToggleAdmin={() => {
+                        setIsAdminOpen((value) => !value);
+                        setIsSettingsOpen(false);
                         setIsHistoryOpen(false);
                     }}
                     onToggleHistory={() => {
                         setIsHistoryOpen((value) => !value);
                         setIsSettingsOpen(false);
+                        setIsAdminOpen(false);
                     }}
                 />
 
@@ -670,13 +688,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                    canManageWorkspace={hasPermission('workspace.manage')}
-                    canManageSecrets={hasPermission('secrets.manage')}
-                    canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
-                    canManageMcp={hasPermission('mcp.manage')}
-                    canManageModelConfig={hasPermission('model_config.manage')}
-                    canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
+                    mode="settings"
                 />
+
+                {canOpenAdmin ? (
+                    <SettingsMenu
+                        isOpen={isAdminOpen}
+                        lang={lang}
+                        onClose={() => setIsAdminOpen(false)}
+                        onSetLang={onSetLang}
+                        mode="admin"
+                        canManageWorkspace={hasPermission('workspace.manage')}
+                        canManageSecrets={hasPermission('secrets.manage')}
+                        canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
+                        canManageMcp={hasPermission('mcp.manage')}
+                        canManageModelConfig={hasPermission('model_config.manage')}
+                        canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
+                    />
+                ) : null}
 
                 <ProjectHistoryModal
                     isOpen={isHistoryOpen}
