@@ -230,13 +230,13 @@ export function createAgentWorkflowApp(
 
   app.delete('/api/current-user', async c => {
     const user = getCurrentUser(c.req.raw)
-    if (!supabaseStore) {
+    if (!dashboardRepository.hasSupabaseStorage()) {
       return c.json({
         error: 'Supabase Auth admin is not configured',
         message: 'account deletion requires BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
       }, 501)
     }
-    await supabaseStore.deleteAuthUser(user.id)
+    await dashboardRepository.deleteAuthUser(user)
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
       action: 'account.deleted',
@@ -251,20 +251,20 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'workspace.manage_members')
     if (forbidden) return c.json(forbidden, 403)
-    if (!supabaseStore) {
+    if (!dashboardRepository.hasSupabaseStorage()) {
       return c.json({
         error: 'Supabase repository is not configured',
         message: 'workspace member management requires Supabase storage',
       }, 501)
     }
-    return c.json(await supabaseStore.listWorkspaceMembers(user.id))
+    return c.json(await dashboardRepository.listWorkspaceMembers(user))
   })
 
   app.put('/api/workspace/members/:userId', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'workspace.manage_members')
     if (forbidden) return c.json(forbidden, 403)
-    if (!supabaseStore) {
+    if (!dashboardRepository.hasSupabaseStorage()) {
       return c.json({
         error: 'Supabase repository is not configured',
         message: 'workspace member management requires Supabase storage',
@@ -274,7 +274,7 @@ export function createAgentWorkflowApp(
     const role = isBeeGameRole(body.role) ? body.role : undefined
     if (!role) return c.json({ error: 'Invalid member role' }, 400)
     try {
-      const member = await supabaseStore.upsertWorkspaceMember(user.id, {
+      const member = await dashboardRepository.upsertWorkspaceMember(user, {
         userId: c.req.param('userId'),
         role,
       })
@@ -298,15 +298,15 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'workspace.manage_members')
     if (forbidden) return c.json(forbidden, 403)
-    if (!supabaseStore) {
+    if (!dashboardRepository.hasSupabaseStorage()) {
       return c.json({
         error: 'Supabase repository is not configured',
         message: 'workspace member management requires Supabase storage',
       }, 501)
     }
     try {
-      const deleted = await supabaseStore.deleteWorkspaceMember(
-        user.id,
+      const deleted = await dashboardRepository.deleteWorkspaceMember(
+        user,
         c.req.param('userId'),
       )
       if (deleted) {

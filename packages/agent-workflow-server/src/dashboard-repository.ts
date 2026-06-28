@@ -42,7 +42,7 @@ import {
   saveRuntimeSettingsConfig,
   type RuntimeSettingsConfig,
 } from './runtime-settings-store'
-import type { BeeGameUserContext } from './auth/user-context'
+import type { BeeGameRole, BeeGameUserContext } from './auth/user-context'
 import {
   saveModelConfigsToStore,
   type ModelConfigStoreOptions,
@@ -103,6 +103,39 @@ export class DashboardRepository {
       : getCreditBalance(user.id, {
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  hasSupabaseStorage(): boolean {
+    return Boolean(this.supabaseStore)
+  }
+
+  async deleteAuthUser(user: BeeGameUserContext): Promise<void> {
+    if (!this.supabaseStore) throw new Error('Supabase Auth admin is not configured')
+    await this.supabaseStore.deleteAuthUser(user.id)
+  }
+
+  async listWorkspaceMembers(user: BeeGameUserContext) {
+    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
+    return this.supabaseStore.listWorkspaceMembers(user.id)
+  }
+
+  async upsertWorkspaceMember(
+    user: BeeGameUserContext,
+    input: {
+      userId: string
+      role: BeeGameRole
+    },
+  ) {
+    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
+    return this.supabaseStore.upsertWorkspaceMember(user.id, input)
+  }
+
+  async deleteWorkspaceMember(
+    user: BeeGameUserContext,
+    userId: string,
+  ): Promise<boolean> {
+    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
+    return this.supabaseStore.deleteWorkspaceMember(user.id, userId)
   }
 
   async listProjects(
