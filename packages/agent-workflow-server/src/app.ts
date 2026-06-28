@@ -176,6 +176,32 @@ export function createAgentWorkflowApp(
   }
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
+  const getUserCreditBalance = async (
+    request: Request,
+    user: BeeGameUserContext,
+  ) => supabaseStore
+    ? supabaseStore.getCreditBalance(user.id)
+    : getCreditBalance(user.id, {
+        dataDir: getCurrentUserDataRoot(request),
+      })
+  const listUserCreditLedger = async (
+    request: Request,
+    user: BeeGameUserContext,
+  ) => supabaseStore
+    ? supabaseStore.listCreditLedger(user.id)
+    : listCreditLedger(user.id, {
+        dataDir: getCurrentUserDataRoot(request),
+      })
+  const summarizeUserCreditLedger = async (
+    request: Request,
+    user: BeeGameUserContext,
+    projectId?: string,
+  ) => supabaseStore
+    ? supabaseStore.summarizeCreditLedger(user.id, projectId)
+    : summarizeCreditLedger(user.id, {
+        dataDir: getCurrentUserDataRoot(request),
+        ...(projectId ? { projectId } : {}),
+      })
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -280,35 +306,30 @@ export function createAgentWorkflowApp(
     }))
   })
 
-  app.get('/api/credits', c => {
+  app.get('/api/credits', async c => {
     const user = getCurrentUser(c.req.raw)
-    return c.json(getCreditBalance(user.id, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }))
+    return c.json(await getUserCreditBalance(c.req.raw, user))
   })
 
-  app.get('/api/credits/ledger', c => {
+  app.get('/api/credits/ledger', async c => {
     const user = getCurrentUser(c.req.raw)
-    return c.json(listCreditLedger(user.id, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    }))
+    return c.json(await listUserCreditLedger(c.req.raw, user))
   })
 
-  app.get('/api/credits/summary', c => {
+  app.get('/api/credits/summary', async c => {
     const user = getCurrentUser(c.req.raw)
     const projectId = c.req.query('projectId')?.trim()
-    return c.json(summarizeCreditLedger(user.id, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-      ...(projectId ? { projectId } : {}),
-    }))
+    return c.json(await summarizeUserCreditLedger(
+      c.req.raw,
+      user,
+      projectId || undefined,
+    ))
   })
 
   app.post('/api/credits/quote', async c => {
     const user = getCurrentUser(c.req.raw)
     const body = await readJson(c.req.raw)
-    const balance = getCreditBalance(user.id, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
-    })
+    const balance = await getUserCreditBalance(c.req.raw, user)
     return c.json(quoteCreditTask({
       taskType: isObject(body) ? body.taskType : undefined,
       balanceCredits: balance.balanceCredits,
@@ -769,9 +790,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const dataDir = getCurrentUserDataRoot(c.req.raw)
-    const creditBalance = getCreditBalance(user.id, {
-      dataDir,
-    })
+    const creditBalance = await getUserCreditBalance(c.req.raw, user)
     if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
       return c.json({
         error: 'Insufficient credits',
@@ -787,16 +806,26 @@ export function createAgentWorkflowApp(
       await loadSupabaseModelConfigs(supabaseStore)
       const policy = getCreditTaskPolicy('idea_intake')
       const reservedCredits = policy.reservedCredits
-      reservation = reserveCredits(user.id, {
-        dataDir,
-        credits: reservedCredits,
-        kind: policy.taskType,
-        metadata: {
-          taskType: policy.taskType,
-          displayName: policy.displayName,
-          language: typeof body.language === 'string' ? body.language : undefined,
-        },
-      })
+      reservation = supabaseStore
+        ? await supabaseStore.reserveCredits(user.id, {
+            credits: reservedCredits,
+            kind: policy.taskType,
+            metadata: {
+              taskType: policy.taskType,
+              displayName: policy.displayName,
+              language: typeof body.language === 'string' ? body.language : undefined,
+            },
+          })
+        : reserveCredits(user.id, {
+            dataDir,
+            credits: reservedCredits,
+            kind: policy.taskType,
+            metadata: {
+              taskType: policy.taskType,
+              displayName: policy.displayName,
+              language: typeof body.language === 'string' ? body.language : undefined,
+            },
+          })
       const intake = await generateBeeGameIntakeOptions({
         idea: String(body.idea),
         language:
@@ -805,25 +834,44 @@ export function createAgentWorkflowApp(
         modelConfigId:
           typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
       })
-      settleCreditReservation(user.id, {
-        dataDir,
-        reservationId: reservation.id,
-        weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
-        metadata: {
-          kind: policy.taskType,
-          taskType: policy.taskType,
-          displayName: policy.displayName,
-        },
-      })
+      if (supabaseStore) {
+        await supabaseStore.settleCreditReservation(user.id, {
+          reservationId: reservation.id,
+          weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+          metadata: {
+            kind: policy.taskType,
+            taskType: policy.taskType,
+            displayName: policy.displayName,
+          },
+        })
+      } else {
+        settleCreditReservation(user.id, {
+          dataDir,
+          reservationId: reservation.id,
+          weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+          metadata: {
+            kind: policy.taskType,
+            taskType: policy.taskType,
+            displayName: policy.displayName,
+          },
+        })
+      }
       return c.json({ ...intake })
     } catch (err) {
       if (reservation) {
         try {
-          refundCreditReservation(user.id, {
-            dataDir,
-            reservationId: reservation.id,
-            metadata: { reason: 'idea_intake_failed' },
-          })
+          if (supabaseStore) {
+            await supabaseStore.refundCreditReservation(user.id, {
+              reservationId: reservation.id,
+              metadata: { reason: 'idea_intake_failed' },
+            })
+          } else {
+            refundCreditReservation(user.id, {
+              dataDir,
+              reservationId: reservation.id,
+              metadata: { reason: 'idea_intake_failed' },
+            })
+          }
         } catch {
           // Keep the original intake failure visible to the caller.
         }

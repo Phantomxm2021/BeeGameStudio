@@ -118,13 +118,20 @@ create table if not exists public.beegame_credit_accounts (
 create table if not exists public.beegame_credit_ledger (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  project_id text references public.beegame_projects(id) on delete set null,
+  project_id text,
+  reservation_id text,
   kind text not null check (kind in ('estimate', 'reserve', 'settle', 'grant', 'refund')),
   credits integer not null,
   weighted_tokens integer,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table public.beegame_credit_ledger
+  drop constraint if exists beegame_credit_ledger_project_id_fkey;
+
+alter table public.beegame_credit_ledger
+  add column if not exists reservation_id text;
 
 create table if not exists public.beegame_audit_events (
   id uuid primary key default gen_random_uuid(),

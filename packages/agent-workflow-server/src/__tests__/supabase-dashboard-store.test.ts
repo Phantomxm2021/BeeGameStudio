@@ -10,6 +10,15 @@ describe('SupabaseDashboardStore', () => {
 
   test('loads and upserts owner scoped dashboard data through Supabase REST', async () => {
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const creditAccount = {
+      user_id: '00000000-0000-0000-0000-000000000001',
+      plan: 'free',
+      included_credits: 300,
+      consumed_credits: 0,
+      reserved_credits: 0,
+      updated_at: '2026-06-27T00:00:00.000Z',
+    }
+    const creditLedger: Array<Record<string, unknown>> = []
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
       calls.push({
@@ -60,6 +69,35 @@ describe('SupabaseDashboardStore', () => {
           return Response.json([JSON.parse(String(init.body))])
         }
         return Response.json([])
+      }
+
+      if (requestUrl.includes('/beegame_credit_accounts')) {
+        if (init?.method === 'POST') {
+          Object.assign(creditAccount, JSON.parse(String(init.body)))
+          return Response.json([creditAccount])
+        }
+        return Response.json([creditAccount])
+      }
+
+      if (requestUrl.includes('/beegame_credit_ledger')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>
+          const row = {
+            created_at: '2026-06-27T00:00:00.000Z',
+            ...body,
+          }
+          creditLedger.push(row)
+          return Response.json([row])
+        }
+        if (requestUrl.includes('reservation_id=eq.')) {
+          const reservationId = decodeURIComponent(
+            requestUrl.split('reservation_id=eq.')[1]?.split('&')[0] ?? '',
+          )
+          return Response.json(
+            creditLedger.filter(row => row.reservation_id === reservationId),
+          )
+        }
+        return Response.json(creditLedger)
       }
 
       if (requestUrl.includes('/beegame_workspaces')) {
@@ -134,11 +172,42 @@ describe('SupabaseDashboardStore', () => {
       id: 'project_1',
       name: 'Project One',
     }))
+    const reservation = await store.reserveCredits(ownerId, {
+      credits: 5,
+      kind: 'edit_turn',
+      projectId: 'session_1',
+      metadata: { taskType: 'edit_turn' },
+    })
+    expect(reservation.reservedCredits).toBe(5)
+    expect(await store.settleCreditReservation(ownerId, {
+      reservationId: reservation.id,
+      weightedTokens: 12_500,
+      projectId: 'session_1',
+    })).toEqual(expect.objectContaining({
+      reservedCredits: 5,
+      settledCredits: 2,
+      refundedCredits: 3,
+    }))
+    expect(await store.listCreditLedger(ownerId)).toEqual([
+      expect.objectContaining({ kind: 'reserve', credits: 5 }),
+      expect.objectContaining({ kind: 'settle', credits: 2, weightedTokens: 12_500 }),
+      expect.objectContaining({ kind: 'refund', credits: 3 }),
+    ])
+    expect(await store.summarizeCreditLedger(ownerId, 'session_1')).toEqual({
+      entriesCount: 3,
+      reservedCredits: 5,
+      settledCredits: 2,
+      refundedCredits: 3,
+      outstandingReservedCredits: 0,
+      weightedTokens: 12_500,
+    })
 
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_model_configs'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_runtime_settings'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_web_tools'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_mcp_servers'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_projects'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
+    expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
   })
 })

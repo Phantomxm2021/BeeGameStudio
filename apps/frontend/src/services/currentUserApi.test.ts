@@ -14,17 +14,23 @@ vi.mock('./apiClient', () => ({
 }));
 
 describe('currentUserApi', () => {
+  const mockGet = apiClient.get as unknown as {
+    mockResolvedValue: (value: unknown) => void;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('loads the current BeeGame user from the server', async () => {
     const user: BeeGameCurrentUser = {
-      id: 'dashboard-local',
+      id: 'user-123',
       role: 'owner',
+      email: 'owner@example.com',
+      displayName: 'Owner',
       permissions: ['project.read', 'agent.send_message'],
     };
-    vi.mocked(apiClient.get).mockResolvedValue(user);
+    mockGet.mockResolvedValue(user);
 
     await expect(getCurrentUser()).resolves.toEqual(user);
     expect(apiClient.get).toHaveBeenCalledWith('/api/current-user', {

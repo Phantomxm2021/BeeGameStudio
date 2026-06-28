@@ -11,8 +11,8 @@ import {
 import { dirname, join } from 'node:path'
 
 const STORE_FILE = 'credits.json'
-const DEFAULT_FREE_CREDITS = 300
-const CREDIT_UNIT_WEIGHTED_TOKENS = 10_000
+export const DEFAULT_FREE_CREDITS = 300
+export const CREDIT_UNIT_WEIGHTED_TOKENS = 10_000
 
 export type CreditEstimateRange = {
   minCredits: number
@@ -343,7 +343,7 @@ function sumCreditKind(
     .reduce((sum, entry) => sum + entry.credits, 0)
 }
 
-function getCreditEstimates(): CreditBalance['estimates'] {
+export function getCreditEstimates(): CreditBalance['estimates'] {
   return {
     ideaIntake: { minCredits: 3, maxCredits: 3 },
     planningDocs: { minCredits: 8, maxCredits: 30 },
@@ -469,7 +469,7 @@ function isCreditLedgerKind(value: unknown): value is CreditLedgerKind {
     value === 'refund'
 }
 
-function getDefaultFreeCredits(): number {
+export function getDefaultFreeCredits(): number {
   return normalizeNonNegativeNumber(
     Number.parseInt(process.env.BEEGAME_FREE_CREDITS ?? '', 10),
     DEFAULT_FREE_CREDITS,
