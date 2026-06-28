@@ -958,6 +958,31 @@ function requireBeeGameSessionOwner(
     : { error: 'Session not found' }
 }
 
+function optionalOwnedModelConfigId(
+  ownerId: string,
+  value: unknown,
+): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const modelConfigId = value.trim()
+  return modelConfigId
+    ? requireOwnedModelConfigId(ownerId, modelConfigId)
+    : undefined
+}
+
+function requireOwnedModelConfigId(
+  ownerId: string,
+  value: unknown,
+): string {
+  const modelConfigId = typeof value === 'string' ? value.trim() : ''
+  if (
+    !modelConfigId ||
+    !listModelConfigs(ownerId).some(config => config.id === modelConfigId)
+  ) {
+    throw new Error('Model config not found')
+  }
+  return modelConfigId
+}
+
 async function generateBeeGameIntakeOptions(input: {
   idea: string
   language?: string
@@ -1366,6 +1391,7 @@ function registerBeeGameSessionRoutes(
     const error = requireFields(body, ['workspacePath'])
     if (error) return c.json({ error }, 400)
     try {
+      const currentUser = options.getCurrentUser(c.req.raw)
       const workspacePath = await resolveSessionWorkspacePath(
         String(body.workspacePath),
         defaultWorkspacePath,
@@ -1374,23 +1400,27 @@ function registerBeeGameSessionRoutes(
         workspacePath,
         defaultWorkspacePath,
       )
+      const modelConfigId = optionalOwnedModelConfigId(
+        currentUser.id,
+        body.modelConfigId,
+      )
       const session = beeGameSessions.start({
           workspacePath,
           ...(typeof body.projectId === 'string' && body.projectId
             ? { projectId: body.projectId }
             : {}),
-          ...(typeof body.modelConfigId === 'string' && body.modelConfigId
-            ? { modelConfigId: body.modelConfigId }
+          ...(modelConfigId
+            ? { modelConfigId }
             : {}),
           ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
             ? { transcriptSessionId: body.transcriptSessionId }
             : {}),
-          userId: options.getCurrentUser(c.req.raw).id,
+          userId: currentUser.id,
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
       await persistSupabaseSessionMetadata(
         options.supabaseStore,
-        options.getCurrentUser(c.req.raw).id,
+        currentUser.id,
         beeGameSessions,
         session.id,
       )
@@ -1471,17 +1501,23 @@ function registerBeeGameSessionRoutes(
     const error = requireFields(body, ['modelConfigId'])
     if (error) return c.json({ error }, 400)
     try {
+      const modelConfigId = requireOwnedModelConfigId(
+        options.getCurrentUser(c.req.raw).id,
+        body.modelConfigId,
+      )
       return c.json(
         beeGameSessions.updateModel(
           c.req.param('id'),
-          String(body.modelConfigId),
+          modelConfigId,
         ),
       )
     } catch (err) {
       const message = toErrorMessage(err)
       return c.json(
         { error: message },
-        message === 'Session not found' ? 404 : 400,
+        message === 'Session not found' || message === 'Model config not found'
+          ? 404
+          : 400,
       )
     }
   })

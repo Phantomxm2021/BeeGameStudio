@@ -881,9 +881,10 @@ describe('beegame session routes', () => {
       process.env.BEEGAME_AUTH_TOKENS = JSON.stringify({
         'owner-a-token': { id: 'owner-a', role: 'owner' },
       })
-      const app = createAgentWorkflowApp({
+      const app = createAgentWorkflowAppBase({
         sessionRunner: fake.runner,
         defaultWorkspacePath: projectsRoot,
+        dashboardDataRoot: projectsRoot,
       })
       const model = createModelConfig('owner-a', {
         name: 'Primary LLM',
@@ -1919,6 +1920,99 @@ describe('beegame session routes', () => {
           }),
         }),
       ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects BeeGame session model configs owned by another user', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-model-owner-'))
+    const ownerAWorkspace = join(projectsRoot, 'owner-a-game')
+    const ownerBWorkspace = join(projectsRoot, 'owner-b-game')
+    const fake = createFakeRunner(undefined, 'build_write_complete')
+    const ownerAModel = createModelConfig('owner-a', {
+      name: 'Owner A LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://owner-a.example.invalid/v1',
+      apiKey: 'sk-owner-a',
+      models: { balanced: 'owner-a-model' },
+    })
+    const ownerBModel = createModelConfig('owner-b', {
+      name: 'Owner B LLM',
+      provider: 'openai-compatible',
+      baseUrl: 'https://owner-b.example.invalid/v1',
+      apiKey: 'sk-owner-b',
+      models: { balanced: 'owner-b-model' },
+    })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUserResolver: request => {
+        const token = request.headers.get('authorization')
+        if (token === 'Bearer owner-a-token') return { id: 'owner-a', role: 'owner' }
+        if (token === 'Bearer owner-b-token') return { id: 'owner-b', role: 'owner' }
+        return undefined
+      },
+    })
+    try {
+      const crossOwnerStartRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-a-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: ownerAWorkspace,
+          modelConfigId: ownerBModel.id,
+        }),
+      })
+      expect(crossOwnerStartRes.status).toBe(400)
+      expect(await crossOwnerStartRes.json()).toEqual({
+        error: 'Model config not found',
+      })
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-a-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: ownerAWorkspace,
+          modelConfigId: ownerAModel.id,
+        }),
+      })
+      expect(sessionRes.status).toBe(200)
+      const session = await sessionRes.json()
+
+      const crossOwnerUpdateRes = await app.request(
+        `/api/beegame-sessions/${session.id}/model`,
+        {
+          method: 'PATCH',
+          headers: {
+            authorization: 'Bearer owner-a-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ modelConfigId: ownerBModel.id }),
+        },
+      )
+      expect(crossOwnerUpdateRes.status).toBe(404)
+      expect(await crossOwnerUpdateRes.json()).toEqual({
+        error: 'Model config not found',
+      })
+
+      const ownerBStartRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-b-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: ownerBWorkspace,
+          modelConfigId: ownerBModel.id,
+        }),
+      })
+      expect(ownerBStartRes.status).toBe(200)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
