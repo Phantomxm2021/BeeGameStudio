@@ -7,7 +7,10 @@ import {
   createModelConfig,
   resetAgentWorkflow,
 } from '@claude-code-best/agent-workflow'
-import { createAgentWorkflowApp } from '../app'
+import {
+  createAgentWorkflowApp as createAgentWorkflowAppBase,
+  type AgentWorkflowAppOptions,
+} from '../app'
 import { DEFAULT_LOCAL_USER_ID } from '../auth/user-context'
 import { listCreditLedger } from '../credit-store'
 import type {
@@ -48,6 +51,18 @@ type FakeRuntimeMode =
   | 'runtime_failure_after_usage'
   | 'runtime_failure_no_usage'
   | 'wait_after_usage'
+
+function createAgentWorkflowApp(
+  options: AgentWorkflowAppOptions = {},
+) {
+  return createAgentWorkflowAppBase({
+    ...options,
+    currentUser: options.currentUser ??
+      (options.currentUserResolver
+        ? undefined
+        : { id: DEFAULT_LOCAL_USER_ID, role: 'owner' }),
+  })
+}
 
 class FakeBeeGameRuntime {
   readonly submits: BeeGameSessionSubmitInput[] = []
@@ -563,12 +578,16 @@ describe('beegame session routes', () => {
     delete process.env.SUPABASE_URL
     delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
     delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    delete process.env.AGENT_WORKFLOW_WORKSPACE_PATH
   })
 
   test('creates a dashboard session without starting a BeeGame turn', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'build_write_complete')
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
       provider: 'openai-compatible',
@@ -836,7 +855,10 @@ describe('beegame session routes', () => {
 
   test('rejects relative workspace paths before creating a runner', async () => {
     const fake = createFakeRunner()
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
 
     const res = await app.request('/api/console/sessions', {
       method: 'POST',
@@ -1486,6 +1508,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
@@ -1549,6 +1572,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
@@ -1763,14 +1787,23 @@ describe('beegame session routes', () => {
   test('supports beegame-sessions routes while keeping console routes compatible', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner()
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ workspacePath: workspace }),
       })
-      expect(sessionRes.status).toBe(200)
+      const sessionError = sessionRes.status === 200
+        ? undefined
+        : await sessionRes.clone().json()
+      expect({ status: sessionRes.status, error: sessionError }).toEqual({
+        status: 200,
+        error: undefined,
+      })
       const session = await sessionRes.json()
 
       const inputRes = await app.request(
@@ -2274,6 +2307,7 @@ describe('beegame session routes', () => {
       await waitFor(async () => {
         const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
         const events = await eventsRes.json()
+        if (!Array.isArray(events)) return false
         return events.some((event: { type: string }) => event.type === 'turn.completed')
       })
 
@@ -2821,6 +2855,7 @@ describe('beegame session routes', () => {
       await waitFor(async () => {
         const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
         const events = await eventsRes.json()
+        if (!Array.isArray(events)) return false
         return events.some((event: { type: string }) => event.type === 'turn.completed')
       })
 
@@ -3999,7 +4034,10 @@ describe('beegame session routes', () => {
       },
       { type: 'result', result: 'Done' },
     ])
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
     try {
       await mkdir(gameDir, { recursive: true })
       await mkdir(keepDir, { recursive: true })
@@ -4011,15 +4049,24 @@ describe('beegame session routes', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ workspacePath: workspace }),
       })
+      const sessionError = sessionRes.status === 200
+        ? undefined
+        : await sessionRes.clone().json()
+      expect({ status: sessionRes.status, error: sessionError }).toEqual({
+        status: 200,
+        error: undefined,
+      })
       const session = await sessionRes.json()
-      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+      const inputRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: 'Create snake game.' }),
       })
+      expect(inputRes.status).toBe(200)
       await waitFor(async () => {
         const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
         const events = await eventsRes.json()
+        if (!Array.isArray(events)) return false
         return events.some((event: { type: string }) => event.type === 'turn.completed')
       })
 
@@ -4048,6 +4095,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     try {
       await mkdir(workspace, { recursive: true })
@@ -4086,6 +4134,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
       defaultWorkspacePath: resolvedWorkspace,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     try {
       await mkdir(gameDir, { recursive: true })
@@ -4135,6 +4184,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     try {
       await mkdir(workspace, { recursive: true })
@@ -4164,6 +4214,7 @@ describe('beegame session routes', () => {
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
       defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
     })
     try {
       const deleteRes = await app.request(
@@ -4185,7 +4236,10 @@ describe('beegame session routes', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-transcript-read-'))
     const sessionId = 'beegame_transcript_read'
     const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
-    const app = createAgentWorkflowApp({ defaultWorkspacePath: workspace })
+    const app = createAgentWorkflowApp({
+      defaultWorkspacePath: workspace,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
 
     try {
       await mkdir(dirname(transcriptPath), { recursive: true })

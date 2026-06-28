@@ -118,6 +118,9 @@ describe('SupabaseDashboardStore', () => {
       }
 
       if (requestUrl.includes('/beegame_projects')) {
+        if (init?.method === 'DELETE') {
+          return Response.json([{ id: 'project_1' }])
+        }
         if (init?.method === 'POST') {
           return Response.json([JSON.parse(String(init.body))])
         }
@@ -125,6 +128,9 @@ describe('SupabaseDashboardStore', () => {
       }
 
       if (requestUrl.includes('/beegame_sessions')) {
+        if (init?.method === 'DELETE') {
+          return Response.json([{ id: 'session_1' }])
+        }
         if (init?.method === 'POST') {
           return Response.json([JSON.parse(String(init.body))])
         }
@@ -212,6 +218,7 @@ describe('SupabaseDashboardStore', () => {
         transcriptPath: '/tmp/project-one/transcripts/project-one__abcd1234.jsonl',
       }),
     ])
+    expect(await store.deleteProject(ownerId, 'project_1')).toBe(true)
     const reservation = await store.reserveCredits(ownerId, {
       credits: 5,
       kind: 'edit_turn',
@@ -248,6 +255,11 @@ describe('SupabaseDashboardStore', () => {
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_mcp_servers'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_projects'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_sessions'))).toBe(true)
+    expect(calls.some(call =>
+      call.method === 'DELETE' &&
+      call.url.includes('/rest/v1/beegame_sessions') &&
+      call.url.includes(`project_id=eq.${encodeURIComponent('project_1')}`),
+    )).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_accounts'))).toBe(true)
     expect(calls.some(call => call.url.includes('/rest/v1/beegame_credit_ledger'))).toBe(true)
   })

@@ -338,6 +338,7 @@ export class SupabaseDashboardStore {
   }
 
   async deleteProject(ownerId: string, id: string): Promise<boolean> {
+    await this.deleteProjectSessions(ownerId, id)
     return this.deleteWhere('beegame_projects', {
       owner_id: ownerId,
       id,
@@ -378,6 +379,13 @@ export class SupabaseDashboardStore {
     return this.deleteWhere('beegame_sessions', {
       owner_id: ownerId,
       id,
+    })
+  }
+
+  async deleteProjectSessions(ownerId: string, projectId: string): Promise<boolean> {
+    return this.deleteWhere('beegame_sessions', {
+      owner_id: ownerId,
+      project_id: projectId,
     })
   }
 
