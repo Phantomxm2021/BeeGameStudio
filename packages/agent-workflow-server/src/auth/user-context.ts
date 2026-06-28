@@ -225,7 +225,7 @@ export function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
   ) {
     return value
   }
-  return 'owner'
+  return 'viewer'
 }
 
 function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {

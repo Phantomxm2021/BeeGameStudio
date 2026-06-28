@@ -43,10 +43,18 @@ export function getSupabaseAccessToken(): string {
   const session = getStoredSupabaseSession();
   if (!session) return '';
   if (session.expiresAt <= Date.now()) {
-    clearSupabaseSession();
     return '';
   }
   return session.accessToken;
+}
+
+export async function getValidSupabaseAccessToken(): Promise<string> {
+  const token = getSupabaseAccessToken();
+  if (token) return token;
+  const session = getStoredSupabaseSession();
+  if (!session?.refreshToken) return '';
+  const refreshed = await refreshSupabaseSession();
+  return refreshed?.accessToken ?? '';
 }
 
 export function getSupabaseSessionUser(): BeeGameSupabaseUser | null {
@@ -282,6 +290,36 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
   };
   saveSupabaseSession(hydrated);
   return hydrated;
+}
+
+export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
+  const session = getStoredSupabaseSession();
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!session?.refreshToken || !supabaseUrl || !anonKey) return null;
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      refresh_token: session.refreshToken,
+    }),
+  });
+  if (!response.ok) {
+    clearSupabaseSession();
+    return null;
+  }
+  const refreshed = toSupabaseSession(await response.json());
+  saveSupabaseSession({
+    ...refreshed,
+    user: {
+      ...session.user,
+      ...refreshed.user,
+    },
+  });
+  return getStoredSupabaseSession();
 }
 
 export function clearSupabaseSession(): void {

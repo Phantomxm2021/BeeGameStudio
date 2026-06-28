@@ -191,6 +191,81 @@ create table if not exists public.beegame_audit_events (
   created_at timestamptz not null default now()
 );
 
+create or replace function public.beegame_workspace_role(target_workspace_id uuid)
+returns text
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select m.role
+  from public.beegame_workspace_members m
+  where m.workspace_id = target_workspace_id
+    and m.user_id = auth.uid()
+  limit 1
+$$;
+
+create or replace function public.beegame_is_workspace_owner(target_workspace_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(public.beegame_workspace_role(target_workspace_id) = 'owner', false)
+$$;
+
+create or replace function public.beegame_handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  workspace_id uuid;
+  profile_name text;
+begin
+  profile_name := coalesce(
+    nullif(new.raw_user_meta_data->>'display_name', ''),
+    nullif(new.raw_user_meta_data->>'full_name', ''),
+    nullif(new.raw_user_meta_data->>'name', ''),
+    nullif(new.raw_user_meta_data->>'user_name', ''),
+    nullif(split_part(new.email, '@', 1), '')
+  );
+
+  insert into public.beegame_profiles (user_id, display_name)
+  values (new.id, profile_name)
+  on conflict (user_id) do update
+  set display_name = coalesce(public.beegame_profiles.display_name, excluded.display_name),
+      updated_at = now();
+
+  insert into public.beegame_workspaces (name, owner_id)
+  values (
+    coalesce(profile_name, 'BeeGame Workspace'),
+    new.id
+  )
+  on conflict (owner_id) do update
+  set updated_at = now()
+  returning id into workspace_id;
+
+  insert into public.beegame_workspace_members (workspace_id, user_id, role)
+  values (workspace_id, new.id, 'owner')
+  on conflict (workspace_id, user_id) do update
+  set role = 'owner';
+
+  insert into public.beegame_credit_accounts (user_id)
+  values (new.id)
+  on conflict (user_id) do nothing;
+
+  return new;
+end
+$$;
+
+drop trigger if exists beegame_after_auth_user_created on auth.users;
+create trigger beegame_after_auth_user_created
+  after insert on auth.users
+  for each row execute function public.beegame_handle_new_user();
+
 do $$
 begin
   if not exists (
@@ -234,7 +309,14 @@ create policy "workspace member access" on public.beegame_workspaces
 
 drop policy if exists "workspace membership access" on public.beegame_workspace_members;
 create policy "workspace membership access" on public.beegame_workspace_members
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+  for select using (
+    user_id = auth.uid() or public.beegame_is_workspace_owner(workspace_id)
+  );
+
+drop policy if exists "workspace owner manages membership" on public.beegame_workspace_members;
+create policy "workspace owner manages membership" on public.beegame_workspace_members
+  for all using (public.beegame_is_workspace_owner(workspace_id))
+  with check (public.beegame_is_workspace_owner(workspace_id));
 
 drop policy if exists "project owner access" on public.beegame_projects;
 create policy "project owner access" on public.beegame_projects

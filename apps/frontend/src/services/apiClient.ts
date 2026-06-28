@@ -1,5 +1,9 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
-import { getSupabaseAccessToken } from './supabaseAuthApi';
+import {
+  getSupabaseAccessToken,
+  getValidSupabaseAccessToken,
+  refreshSupabaseSession,
+} from './supabaseAuthApi';
 
 export interface ApiErrorEnvelope {
   code: string;
@@ -19,6 +23,10 @@ const getEnvAuthToken = (): string => String(import.meta.env.VITE_API_AUTH_TOKEN
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
 export const resolveAuthToken = (): string => getEnvAuthToken() || getSupabaseAccessToken();
+
+export const resolveAuthTokenAsync = async (): Promise<string> => (
+  getEnvAuthToken() || await getValidSupabaseAccessToken()
+);
 
 export const buildApiUrl = (path: string): string => {
   if (!API_BASE_URL || /^[a-z][a-z\d+\-.]*:/i.test(path)) {
@@ -41,13 +49,20 @@ export const buildAuthHeaders = (headers?: HeadersInit): Headers => {
 export const authenticatedFetch = (
   input: RequestInfo | URL,
   init: RequestInit = {},
-): Promise<Response> => {
+): Promise<Response> => (async () => {
   const nextInput = typeof input === 'string' ? buildApiUrl(input) : input;
+  const response = await fetch(nextInput, {
+    ...init,
+    headers: await buildAuthHeadersAsync(init.headers),
+  });
+  if (response.status !== 401 || getEnvAuthToken()) return response;
+  const refreshed = await refreshSupabaseSession();
+  if (!refreshed) return response;
   return fetch(nextInput, {
     ...init,
-    headers: buildAuthHeaders(init.headers),
+    headers: await buildAuthHeadersAsync(init.headers),
   });
-};
+})();
 
 export const buildUnauthorizedMessage = (backendMessage?: string): string => {
   const normalizedBackendMessage = String(backendMessage ?? '').trim();
@@ -73,8 +88,8 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = resolveAuthToken();
+  async (config: InternalAxiosRequestConfig) => {
+    const token = await resolveAuthTokenAsync();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -85,7 +100,16 @@ apiClient.interceptors.request.use(
 
 apiClient.interceptors.response.use(
   (response) => response.data,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
+    if (error.response?.status === 401 && !getEnvAuthToken() && error.config && !isRetriedRequest(error.config)) {
+      const refreshed = await refreshSupabaseSession();
+      if (refreshed) {
+        markRetriedRequest(error.config);
+        error.config.headers = error.config.headers ?? {};
+        error.config.headers.Authorization = `Bearer ${refreshed.accessToken}`;
+        return apiClient.request(error.config);
+      }
+    }
     console.error('API Error:', error);
 
     let errorMessage = '请求失败，请稍后重试';
@@ -132,5 +156,25 @@ apiClient.interceptors.response.use(
     return Promise.reject(enhancedError);
   },
 );
+
+const BEEGAME_AUTH_RETRY_HEADER = 'X-BeeGame-Auth-Retry';
+
+const buildAuthHeadersAsync = async (headers?: HeadersInit): Promise<Headers> => {
+  const nextHeaders = new Headers(headers);
+  const token = await resolveAuthTokenAsync();
+  if (token && !nextHeaders.has('Authorization')) {
+    nextHeaders.set('Authorization', `Bearer ${token}`);
+  }
+  return nextHeaders;
+};
+
+const isRetriedRequest = (config: InternalAxiosRequestConfig): boolean => (
+  String(config.headers?.[BEEGAME_AUTH_RETRY_HEADER] ?? '') === '1'
+);
+
+const markRetriedRequest = (config: InternalAxiosRequestConfig): void => {
+  config.headers = config.headers ?? {};
+  config.headers[BEEGAME_AUTH_RETRY_HEADER] = '1';
+};
 
 export default apiClient;

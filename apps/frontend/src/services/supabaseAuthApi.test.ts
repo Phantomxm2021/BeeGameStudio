@@ -4,8 +4,10 @@ import {
   clearSupabaseSession,
   consumeSupabaseRedirectSession,
   getSupabaseAccessToken,
+  getValidSupabaseAccessToken,
   hydrateSupabaseSessionUser,
   isSupabaseAuthConfigured,
+  refreshSupabaseSession,
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
@@ -100,6 +102,60 @@ describe('supabaseAuthApi', () => {
         }),
       }),
     );
+  });
+
+  it('refreshes an expired session instead of clearing it immediately', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000,
+      user: { id: 'user-1', email: 'old@example.com' },
+    }));
+    const fetchMock = vi.fn(async () => Response.json({
+      access_token: 'fresh-token',
+      refresh_token: 'fresh-refresh-token',
+      expires_in: 3600,
+      user: { id: 'user-1', email: 'new@example.com' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(getSupabaseAccessToken()).toBe('');
+    const session = await refreshSupabaseSession();
+
+    expect(session?.accessToken).toBe('fresh-token');
+    expect(session?.refreshToken).toBe('fresh-refresh-token');
+    expect(session?.user.email).toBe('new@example.com');
+    expect(await getValidSupabaseAccessToken()).toBe('fresh-token');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project.supabase.co/auth/v1/token?grant_type=refresh_token',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify({
+          refresh_token: 'refresh-token',
+        }),
+      }),
+    );
+  });
+
+  it('clears the stored session only when refresh fails', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000,
+      user: { id: 'user-1' },
+    }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('invalid refresh token', { status: 401 })));
+
+    await expect(refreshSupabaseSession()).resolves.toBeNull();
+    expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
   });
 
   it('starts a Supabase OAuth redirect for third-party providers', async () => {
@@ -365,7 +421,7 @@ describe('supabaseAuthApi', () => {
     );
   });
 
-  it('clears expired sessions instead of returning stale access tokens', () => {
+  it('keeps expired sessions so refresh tokens can renew them', () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'expired-token',
       refreshToken: 'refresh-token',
@@ -374,7 +430,7 @@ describe('supabaseAuthApi', () => {
     }));
 
     expect(getSupabaseAccessToken()).toBe('');
-    expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
+    expect(localStorage.getItem('beegame_supabase_session')).toContain('refresh-token');
   });
 
   it('clears the stored session on sign out', () => {

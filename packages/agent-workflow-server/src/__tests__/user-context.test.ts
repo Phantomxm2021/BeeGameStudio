@@ -84,7 +84,7 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
-  test('extracts OAuth profile metadata from identity data', async () => {
+  test('extracts OAuth profile metadata from identity data without granting owner by default', async () => {
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co',
       apiKey: 'anon-key',
@@ -110,7 +110,7 @@ describe('BeeGame user context', () => {
       ),
     ).toEqual({
       id: 'oauth-user',
-      role: 'owner',
+      role: 'viewer',
       email: 'oauth@example.com',
       displayName: 'OAuth Player',
       avatarUrl: 'https://avatars.example.com/oauth.png',
@@ -169,7 +169,7 @@ describe('BeeGame user context', () => {
         ),
       ).toEqual({
         id: 'oauth-user',
-        role: 'owner',
+        role: 'viewer',
         email: 'oauth@example.com',
         displayName: 'OAuth Maker',
         avatarUrl: 'https://avatars.example.com/oauth.png',
@@ -178,5 +178,24 @@ describe('BeeGame user context', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+
+  test('uses owner only when Supabase metadata explicitly grants it', async () => {
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => Response.json({
+        id: 'owner-user',
+        app_metadata: { beegame_role: 'owner' },
+      }),
+    })
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer owner-token' },
+        }),
+      ),
+    ).toEqual({ id: 'owner-user', role: 'owner' })
   })
 })
