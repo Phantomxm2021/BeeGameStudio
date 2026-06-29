@@ -282,11 +282,20 @@ export const beeGameAdapter = {
     pipeline: { pipeline_id: string; status: string };
   }> {
     const title = getBriefDisplayTitle(data);
-    const workspacePath = await resolveProjectWorkspacePath(data.root_path, getBriefFolderName(data, title));
-    const project = createLocalProject(title, workspacePath);
+    const folderName = getBriefFolderName(data, title);
+    const requestedWorkspacePath = await resolveNewProjectClientWorkspacePath(data.root_path, folderName);
+    const project = createLocalProject(title, requestedWorkspacePath);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
-    const session = await startBeeGameSession(workspacePath, undefined, project.id);
+    const session = await startBeeGameSession({
+      workspacePath: requestedWorkspacePath,
+      projectName: folderName,
+      projectId: project.id,
+    });
+    const workspacePath = session.cwd;
+    const syncedProject = { ...project, root_path: workspacePath };
+    saveProjects(upsertProject(readProjects(), syncedProject));
+    await syncProjectMetadata(syncedProject);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildConfirmedBriefPrompt(data);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -296,7 +305,7 @@ export const beeGameAdapter = {
       taskType: 'full_build',
     });
     return {
-      project,
+      project: syncedProject,
       task_id: session.id,
       status: 'running',
       pipeline: { pipeline_id: session.id, status: 'running' },
@@ -314,11 +323,19 @@ export const beeGameAdapter = {
     pipeline: { pipeline_id: string; status: string };
   }> {
     const title = data.title || summarizeTitle(data.idea);
-    const workspacePath = await resolveProjectWorkspacePath(data.root_path, title);
-    const project = createLocalProject(title, workspacePath);
+    const requestedWorkspacePath = await resolveNewProjectClientWorkspacePath(data.root_path, title);
+    const project = createLocalProject(title, requestedWorkspacePath);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
-    const session = await startBeeGameSession(workspacePath, undefined, project.id);
+    const session = await startBeeGameSession({
+      workspacePath: requestedWorkspacePath,
+      projectName: title,
+      projectId: project.id,
+    });
+    const workspacePath = session.cwd;
+    const syncedProject = { ...project, root_path: workspacePath };
+    saveProjects(upsertProject(readProjects(), syncedProject));
+    await syncProjectMetadata(syncedProject);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath });
     const prompt = buildIdeaIntakePrompt(data.idea);
     rememberSentDisplayText(session.id, prompt, data.idea);
@@ -328,7 +345,7 @@ export const beeGameAdapter = {
       taskType: 'full_build',
     });
     return {
-      project,
+      project: syncedProject,
       task_id: session.id,
       status: 'running',
       pipeline: { pipeline_id: session.id, status: 'running' },
@@ -758,7 +775,11 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
       if (session.status !== 'running') {
         const recoveredEvents = await fetchBeeGameTranscriptIfAvailable(binding);
         const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
-        const restored = await startBeeGameSession(workspacePath, binding.sessionId, projectId);
+        const restored = await startBeeGameSession({
+          workspacePath,
+          transcriptSessionId: binding.sessionId,
+          projectId,
+        });
         saveBinding({ projectId, sessionId: restored.id, workspacePath });
         return {
           session: restored,
@@ -774,7 +795,11 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
       if (!isSessionNotFoundError(error)) throw error;
       const recoveredEvents = await fetchBeeGameTranscriptIfAvailable(binding);
       const workspacePath = await resolveExistingProjectWorkspacePath(project, binding.workspacePath);
-      const session = await startBeeGameSession(workspacePath, binding.sessionId, projectId);
+      const session = await startBeeGameSession({
+        workspacePath,
+        transcriptSessionId: binding.sessionId,
+        projectId,
+      });
       saveBinding({ projectId, sessionId: session.id, workspacePath });
       return {
         session,
@@ -785,7 +810,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
   }
 
   const workspacePath = await resolveExistingProjectWorkspacePath(project);
-  const session = await startBeeGameSession(workspacePath, undefined, projectId);
+  const session = await startBeeGameSession({ workspacePath, projectId });
   saveBinding({ projectId, sessionId: session.id, workspacePath });
   return { session, recoveredEvents: [] };
 }
@@ -839,6 +864,14 @@ async function resolveProjectWorkspacePath(input: string | undefined, folderName
   const projectPath = joinPath(projectsRoot, slugifyPathSegment(folderName || 'game-project', 'game-project'));
   rememberWorkspace(projectPath);
   return projectPath;
+}
+
+async function resolveNewProjectClientWorkspacePath(
+  input: string | undefined,
+  folderName: string,
+): Promise<string | undefined> {
+  if (!ALLOW_CLIENT_WORKSPACE_ROOT) return undefined;
+  return resolveProjectWorkspacePath(input, folderName);
 }
 
 async function resolveExistingProjectWorkspacePath(
@@ -927,19 +960,23 @@ function getWorkspaceDisplayName(workspacePath: string, fallback: string): strin
 }
 
 async function startBeeGameSession(
-  workspacePath: string,
-  transcriptSessionId?: string,
-  projectId?: string,
+  options: {
+    workspacePath?: string;
+    transcriptSessionId?: string;
+    projectId?: string;
+    projectName?: string;
+  },
 ): Promise<BeeGameSession> {
   const modelConfigId = await getDefaultModelConfigId();
   if (!modelConfigId) {
     throw new Error('请先在模型设置中配置 BeeGame LLM API Key、Base URL 和 Model，并设为默认模型。');
   }
   return postJson('/api/beegame-sessions', {
-    workspacePath,
     modelConfigId,
-    ...(projectId ? { projectId } : {}),
-    ...(transcriptSessionId ? { transcriptSessionId } : {}),
+    ...(options.workspacePath ? { workspacePath: options.workspacePath } : {}),
+    ...(options.projectId ? { projectId: options.projectId } : {}),
+    ...(options.projectName ? { projectName: options.projectName } : {}),
+    ...(options.transcriptSessionId ? { transcriptSessionId: options.transcriptSessionId } : {}),
   });
 }
 

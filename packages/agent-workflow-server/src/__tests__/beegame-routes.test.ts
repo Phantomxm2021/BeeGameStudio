@@ -1025,6 +1025,44 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('derives managed project workspace paths for authenticated users', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'beegame-outside-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: 'user@example.com', role: 'developer' },
+    })
+
+    try {
+      const res = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: outsideRoot,
+          projectName: 'Classic Snake Game',
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const session = await res.json()
+      const resolvedProjectsRoot = await realpath(projectsRoot)
+      const expectedWorkspace = join(
+        resolvedProjectsRoot,
+        'users',
+        'user-example.com',
+        'classic-snake-game',
+      )
+      expect(session.cwd).toBe(expectedWorkspace)
+      expect((await stat(expectedWorkspace)).isDirectory()).toBe(true)
+      expect(fake.starts).toHaveLength(0)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rejects starting a BeeGame session directly in the default Projects root', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const fake = createFakeRunner()

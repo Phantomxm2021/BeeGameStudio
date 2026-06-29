@@ -60,6 +60,7 @@ import {
   type BeeGamePermission,
   type BeeGameUserContext,
   type BeeGameUserResolver,
+  DEFAULT_LOCAL_USER_ID,
   createConfiguredUserResolver,
   getBearerToken,
   hasBeeGamePermission,
@@ -69,6 +70,7 @@ import { createBeeGameAuthContext } from './auth/auth-context'
 import { DashboardRepository } from './dashboard-repository'
 import {
   assertSessionWorkspaceIsProjectDirectory,
+  createManagedProjectWorkspacePath,
   deleteWorkspaceDirectoryIfSafe,
   getDashboardDataRoot,
   getUserDashboardDataRoot,
@@ -892,6 +894,41 @@ function requireBeeGameSessionOwner(
     : { error: 'Session not found' }
 }
 
+async function resolveNewBeeGameSessionWorkspacePath(
+  body: JsonObject,
+  user: BeeGameUserContext,
+  defaultWorkspacePath?: string,
+): Promise<string> {
+  if (canUseClientWorkspacePath(user) && typeof body.workspacePath === 'string') {
+    const workspacePath = await resolveSessionWorkspacePath(
+      body.workspacePath,
+      defaultWorkspacePath,
+    )
+    await assertSessionWorkspaceIsProjectDirectory(
+      workspacePath,
+      defaultWorkspacePath,
+    )
+    return workspacePath
+  }
+  const projectName = typeof body.projectName === 'string'
+    ? body.projectName
+    : undefined
+  const projectId = typeof body.projectId === 'string'
+    ? body.projectId
+    : undefined
+  return createManagedProjectWorkspacePath({
+    defaultWorkspacePath,
+    userId: user.id,
+    ...(projectName ? { projectName } : {}),
+    ...(projectId ? { projectId } : {}),
+  })
+}
+
+function canUseClientWorkspacePath(user: BeeGameUserContext): boolean {
+  if (user.id === DEFAULT_LOCAL_USER_ID) return true
+  return process.env.BEEGAME_ALLOW_CLIENT_WORKSPACE_PATH === '1'
+}
+
 async function optionalOwnedModelConfigId(
   request: Request,
   user: BeeGameUserContext,
@@ -1367,16 +1404,11 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['workspacePath'])
-    if (error) return c.json({ error }, 400)
     try {
       const currentUser = options.getCurrentUser(c.req.raw)
-      const workspacePath = await resolveSessionWorkspacePath(
-        String(body.workspacePath),
-        defaultWorkspacePath,
-      )
-      await assertSessionWorkspaceIsProjectDirectory(
-        workspacePath,
+      const workspacePath = await resolveNewBeeGameSessionWorkspacePath(
+        body,
+        currentUser,
         defaultWorkspacePath,
       )
       const modelConfigId = await optionalOwnedModelConfigId(

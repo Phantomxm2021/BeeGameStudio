@@ -1,4 +1,4 @@
-import { realpath, rm } from 'node:fs/promises'
+import { mkdir, realpath, rm } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { DEFAULT_LOCAL_USER_ID } from './auth/user-context'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -75,6 +75,28 @@ export async function resolveSessionWorkspacePath(
   return canonicalWorkspace
 }
 
+export async function createManagedProjectWorkspacePath(
+  options: {
+    defaultWorkspacePath?: string
+    userId: string
+    projectName?: string
+    projectId?: string
+  },
+): Promise<string> {
+  const defaultWorkspace = resolve(
+    await getDefaultWorkspacePath({
+      defaultWorkspacePath: options.defaultWorkspacePath,
+    }),
+  )
+  const userRoot = getUserDashboardDataRoot(defaultWorkspace, options.userId)
+  const projectSegment = normalizeProjectDirName(
+    options.projectName || options.projectId || 'beegame-project',
+  )
+  const workspacePath = join(userRoot, projectSegment)
+  await mkdir(workspacePath, { recursive: true })
+  return resolve(workspacePath)
+}
+
 export async function assertSessionWorkspaceIsProjectDirectory(
   workspacePath: string,
   defaultWorkspacePath?: string,
@@ -104,6 +126,18 @@ function normalizeUserDataDirName(userId: string): string {
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
+}
+
+function normalizeProjectDirName(value: string): string {
+  const normalized = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+  return normalized || 'beegame-project'
 }
 
 function canonicalizeWorkspaceCandidate(
