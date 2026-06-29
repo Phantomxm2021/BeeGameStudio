@@ -399,6 +399,50 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
     });
 
+    it('smokes the SaaS entry flow without bypassing login or credit confirmation', async () => {
+        mockCurrentUser = null;
+        mockLoadCurrentUser.mockImplementation(async () => {
+            if (signInWithSupabasePassword.mock.calls.length > 0) {
+                mockCurrentUser = {
+                    id: 'user-1',
+                    email: 'player@example.com',
+                    displayName: 'Player',
+                    role: 'owner',
+                    permissions: ['project.create', 'project.delete'],
+                };
+            }
+        });
+
+        renderLanding();
+
+        submitIdea('LLM generated idea');
+
+        expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+        expect(getCreditQuote).not.toHaveBeenCalled();
+
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
+        fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+        fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
+
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+        });
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+
+        submitIdea('LLM generated idea');
+        fireEvent.click(await screen.findByRole('button', { name: '确认生成' }));
+
+        expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+    });
+
     it('opens account actions from a circular signed-in user avatar', async () => {
         mockCurrentUser = {
             id: 'alice',
