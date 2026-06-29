@@ -187,6 +187,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [creditLedger, setCreditLedger] = useState<BeeGameCreditLedgerEntry[]>([]);
     const [isCreditLedgerLoading, setIsCreditLedgerLoading] = useState(false);
     const [isCreditLedgerExpanded, setIsCreditLedgerExpanded] = useState(false);
+    const [intakeCreditQuote, setIntakeCreditQuote] = useState<BeeGameCreditQuote | null>(null);
+    const [pendingIntakeIdea, setPendingIntakeIdea] = useState('');
     const [buildCreditQuote, setBuildCreditQuote] = useState<BeeGameCreditQuote | null>(null);
     const [pendingBuildBrief, setPendingBuildBrief] = useState<BeeGameBuildBrief | null>(null);
     const t = translations[lang];
@@ -244,13 +246,26 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsLoginPromptOpen(true);
             return false;
         }
-        const credits = await getCreditBalance();
-        const requiredCredits = credits.estimates.ideaIntake.minCredits;
-        if (credits.balanceCredits < requiredCredits) {
-            setIntakeError(`Credit 不足，生成方案预计至少需要 ${requiredCredits} credit。`);
-            return false;
-        }
         return true;
+    };
+
+    const requestIntakeCreditConfirmation = async (idea: string) => {
+        setIntakeError('');
+        setIsPreparing(true);
+        try {
+            const quote = await getCreditQuote('idea_intake');
+            if (!quote.canStart) {
+                setIntakeError(`Credit 不足。本次方案生成需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
+                return;
+            }
+            setPendingIntakeIdea(idea);
+            setIntakeCreditQuote(quote);
+        } catch (error) {
+            setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
+            console.error('Failed to quote intake credits:', error);
+        } finally {
+            setIsPreparing(false);
+        }
     };
 
     const runIntake = async (idea: string) => {
@@ -310,8 +325,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsPreparing(false);
             return;
         }
-        setIsPreparing(false);
-        await runIntake(idea);
+        await requestIntakeCreditConfirmation(idea);
     };
 
     const handleLoginSubmit = async (event: React.FormEvent) => {
@@ -364,7 +378,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 setProjectName(nextIdea);
                 const canGenerate = await ensureGenerationAccess();
                 if (canGenerate) {
-                    await runIntake(nextIdea);
+                    await requestIntakeCreditConfirmation(nextIdea);
                 }
             }
         } catch (error) {
@@ -550,6 +564,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakeError('');
         setClarification(null);
         setClarificationDraft('');
+    };
+
+    const handleConfirmIntakeCredit = () => {
+        const idea = pendingIntakeIdea;
+        setIntakeCreditQuote(null);
+        setPendingIntakeIdea('');
+        if (idea) {
+            void runIntake(idea);
+        }
+    };
+
+    const handleCancelIntakeCredit = () => {
+        setIntakeCreditQuote(null);
+        setPendingIntakeIdea('');
     };
 
     const startConfirmedBuild = async (brief: BeeGameBuildBrief) => {
@@ -1310,8 +1338,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     </div>
                 ) : null}
 
+                {intakeCreditQuote ? (
+                    <CreditConfirmDialog
+                        quote={intakeCreditQuote}
+                        lang={lang}
+                        onCancel={handleCancelIntakeCredit}
+                        onConfirm={handleConfirmIntakeCredit}
+                    />
+                ) : null}
+
                 {buildCreditQuote ? (
-                    <BuildCreditConfirmDialog
+                    <CreditConfirmDialog
                         quote={buildCreditQuote}
                         lang={lang}
                         onCancel={handleCancelBuildCredit}
@@ -1329,7 +1366,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     );
 }
 
-function BuildCreditConfirmDialog({
+function CreditConfirmDialog({
     quote,
     lang,
     onCancel,
@@ -1341,19 +1378,28 @@ function BuildCreditConfirmDialog({
     onConfirm: () => void;
 }) {
     const isZh = lang === 'zh' || lang === 'zh-TW';
+    const isIntake = quote.taskType === 'idea_intake';
+    const titleId = `beegame-${quote.taskType}-credit-title`;
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 px-6 backdrop-blur-md">
-            <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-zinc-950/80 p-7 text-left text-white shadow-2xl shadow-black/50 backdrop-blur-2xl">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                className="w-full max-w-xl rounded-[32px] border border-white/20 bg-zinc-950/80 p-7 text-left text-white shadow-2xl shadow-black/50 backdrop-blur-2xl"
+            >
                 <div className="text-[11px] font-black uppercase tracking-[0.45em] text-amber-300">
                     Credits
                 </div>
-                <h2 className="mt-4 text-3xl font-black">
-                    {isZh ? '确认开始构建' : 'Confirm build'}
+                <h2 id={titleId} className="mt-4 text-3xl font-black">
+                    {isZh
+                        ? isIntake ? '确认生成方案' : '确认开始构建'
+                        : isIntake ? 'Confirm idea generation' : 'Confirm build'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-zinc-300">
                     {isZh
-                        ? `本次构建将预扣 ${quote.reservedCredits} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。`
-                        : `This build will reserve ${quote.reservedCredits} credits. It settles against actual token and tool usage, and unused credits are refunded.`}
+                        ? `本次${isIntake ? '方案生成' : '构建'}将预扣 ${quote.reservedCredits} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。`
+                        : `This ${isIntake ? 'idea generation' : 'build'} will reserve ${quote.reservedCredits} credits. It settles against actual token and tool usage, and unused credits are refunded.`}
                 </p>
                 <div className="mt-6 grid gap-3 rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:grid-cols-2">
                     <div>
@@ -1386,7 +1432,7 @@ function BuildCreditConfirmDialog({
                         onClick={onConfirm}
                         className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
                     >
-                        {isZh ? '确认构建' : 'Start build'}
+                        {isZh ? isIntake ? '确认生成' : '确认构建' : isIntake ? 'Start generation' : 'Start build'}
                     </button>
                 </div>
             </div>

@@ -12,7 +12,10 @@ const options = resolveDashboardDevOptions(process.argv.slice(2), {
 })
 
 const apiPort = await findAvailablePort(options.preferredApiPort)
-const frontendPort = await findAvailablePort(options.preferredFrontendPort)
+const frontendPort = await findAvailablePort(
+  options.preferredFrontendPort,
+  new Set([apiPort]),
+)
 const bunExecutable = process.execPath
 const children: Array<ReturnType<typeof Bun.spawn>> = []
 
@@ -88,10 +91,14 @@ function shutdown(): void {
   }
 }
 
-async function findAvailablePort(preferredPort: number): Promise<number> {
+async function findAvailablePort(
+  preferredPort: number,
+  unavailablePorts = new Set<number>(),
+): Promise<number> {
   for (let port = preferredPort; port < preferredPort + 50; port += 1) {
+    if (unavailablePorts.has(port)) continue
     const result = await canListen(port)
-    if (result === 'unknown') return preferredPort
+    if (result === 'unknown') return port
     if (result) return port
   }
   throw new Error(

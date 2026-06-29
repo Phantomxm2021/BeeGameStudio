@@ -166,6 +166,24 @@ const renderLanding = (props?: Partial<React.ComponentProps<typeof LandingView>>
     />,
 );
 
+const submitIdea = (idea: string) => {
+    const textbox = screen.getByRole('textbox');
+    fireEvent.change(textbox, { target: { value: idea } });
+    fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+    return textbox;
+};
+
+const confirmIntakeCreditQuote = async () => {
+    expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+};
+
+const submitIdeaAndConfirmIntake = async (idea: string) => {
+    const textbox = submitIdea(idea);
+    await confirmIntakeCreditQuote();
+    return textbox;
+};
+
 const makeIntakeOptions = () => [
     {
         id: 'llm_mode_a',
@@ -271,15 +289,27 @@ beforeEach(() => {
     getCreditLedger.mockReset();
     getCreditLedger.mockResolvedValue([]);
     getCreditQuote.mockReset();
-    getCreditQuote.mockResolvedValue({
-        taskType: 'full_build',
-        reservedCredits: 200,
-        displayName: 'Full game build',
-        description: 'Create a complete game project from a confirmed brief.',
-        balanceCredits: 300,
-        canStart: true,
-        message: '200 credits reserved before the build starts. Unused credits are refunded after settlement.',
-    });
+    getCreditQuote.mockImplementation((taskType = 'full_build') => Promise.resolve(
+        taskType === 'idea_intake'
+            ? {
+                taskType: 'idea_intake',
+                reservedCredits: 3,
+                displayName: 'Idea intake',
+                description: 'Generate candidate directions from an idea.',
+                balanceCredits: 300,
+                canStart: true,
+                message: '3 credits reserved before idea generation.',
+            }
+            : {
+                taskType: 'full_build',
+                reservedCredits: 200,
+                displayName: 'Full game build',
+                description: 'Create a complete game project from a confirmed brief.',
+                balanceCredits: 300,
+                canStart: true,
+                message: '200 credits reserved before the build starts. Unused credits are refunded after settlement.',
+            },
+    ));
     deleteCurrentUser.mockReset();
     deleteCurrentUser.mockResolvedValue({ ok: true });
     isSupabaseAuthConfigured.mockReset();
@@ -325,9 +355,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding();
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
         expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
@@ -358,11 +386,16 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
         fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+
         await screen.findByText('LLM Mode A');
         expect(signInWithSupabasePassword).toHaveBeenCalledWith({
             email: 'player@example.com',
             password: 'secret-password',
         });
+        expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
     });
 
@@ -636,31 +669,22 @@ describe('LandingView bootstrap submission', () => {
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
 
-    it('stops intake generation when available credits are below the intake estimate', async () => {
-        getCreditBalance.mockResolvedValue({
-            userId: 'alice',
-            plan: 'free',
+    it('stops intake generation when the credit quote cannot start', async () => {
+        getCreditQuote.mockResolvedValueOnce({
+            taskType: 'idea_intake',
+            reservedCredits: 3,
+            displayName: 'Idea intake',
+            description: 'Generate candidate directions from an idea.',
             balanceCredits: 0,
-            includedCredits: 300,
-            consumedCredits: 300,
-            reservedCredits: 0,
-            creditUnitWeightedTokens: 10000,
-            estimates: {
-                ideaIntake: { minCredits: 3, maxCredits: 3 },
-                planningDocs: { minCredits: 8, maxCredits: 30 },
-                smallPlayableGame: { minCredits: 80, maxCredits: 200 },
-                standardGame: { minCredits: 200, maxCredits: 600 },
-                complexGame: { minCredits: 600, maxCredits: 1500 },
-            },
+            canStart: false,
+            message: 'Insufficient credits.',
         });
 
         renderLanding();
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        submitIdea('LLM generated idea');
 
-        expect(await screen.findByText('Credit 不足，生成方案预计至少需要 3 credit。')).toBeInTheDocument();
+        expect(await screen.findByText('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
     });
 
@@ -669,9 +693,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding({ onStart });
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
 
         expect(textbox).toBeDisabled();
         await screen.findByText('LLM Mode A');
@@ -684,9 +706,7 @@ describe('LandingView bootstrap submission', () => {
     it('shows generated intake options in a modal instead of embedding them into the landing page', async () => {
         renderLanding();
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        await submitIdeaAndConfirmIntake('LLM generated idea');
 
         const dialog = await screen.findByRole('dialog', { name: '选择方案' });
 
@@ -736,9 +756,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding();
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        await submitIdeaAndConfirmIntake('LLM generated idea');
 
         const clarification = await screen.findByTestId('intake-clarification');
         expect(clarification).toHaveTextContent('需求补充');
@@ -763,9 +781,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding({ onStart });
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
 
         expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
         expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
@@ -825,9 +841,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding();
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM concrete idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        await submitIdeaAndConfirmIntake('LLM concrete idea');
 
         expect(await screen.findByRole('dialog', { name: 'LLM Concrete Mode' })).toBeInTheDocument();
         expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
@@ -839,9 +853,7 @@ describe('LandingView bootstrap submission', () => {
 
         renderLanding({ onStart });
 
-        const textbox = screen.getByRole('textbox');
-        fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
-        fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+        await submitIdeaAndConfirmIntake('LLM generated idea');
 
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
         expect(screen.getByTestId('intake-settings')).toHaveAttribute('data-panel-depth', 'single');
