@@ -120,6 +120,10 @@ bun run supabase:smoke
 
 The smoke check must pass Auth, RLS, projects, asset manifest, avatar Storage, project asset Storage, credits RPC, and runtime env checks before production rollout.
 
+If password sign-in fails with `Database error granting user`, re-run
+`docs/beegame-supabase-schema.sql`. That error usually means the Supabase
+Auth trigger or existing-user backfill is out of date.
+
 ## Repository Hygiene
 
 - Do not commit `.env.local`.

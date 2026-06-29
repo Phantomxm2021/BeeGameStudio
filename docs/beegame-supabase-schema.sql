@@ -426,7 +426,7 @@ security definer
 set search_path = public
 as $$
 declare
-  workspace_id uuid;
+  created_workspace_id uuid;
   profile_name text;
   profile_avatar_url text;
   initial_role text;
@@ -464,10 +464,10 @@ begin
   )
   on conflict (owner_id) do update
   set updated_at = now()
-  returning id into workspace_id;
+  returning id into created_workspace_id;
 
   insert into public.beegame_workspace_members (workspace_id, user_id, role)
-  values (workspace_id, new.id, initial_role)
+  values (created_workspace_id, new.id, initial_role)
   on conflict (workspace_id, user_id) do update
   set role = case
     when new.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
@@ -484,8 +484,62 @@ $$;
 
 drop trigger if exists beegame_after_auth_user_created on auth.users;
 create trigger beegame_after_auth_user_created
-  after insert or update on auth.users
+  after insert or update of email, raw_user_meta_data, raw_app_meta_data on auth.users
   for each row execute function public.beegame_handle_new_user();
+
+insert into public.beegame_profiles (user_id, display_name, email, avatar_url)
+select
+  u.id,
+  coalesce(
+    nullif(u.raw_user_meta_data->>'display_name', ''),
+    nullif(u.raw_user_meta_data->>'full_name', ''),
+    nullif(u.raw_user_meta_data->>'name', ''),
+    nullif(u.raw_user_meta_data->>'user_name', ''),
+    nullif(split_part(u.email, '@', 1), '')
+  ),
+  u.email,
+  coalesce(
+    nullif(u.raw_user_meta_data->>'avatar_url', ''),
+    nullif(u.raw_user_meta_data->>'picture', ''),
+    nullif(u.raw_user_meta_data->>'image', ''),
+    nullif(u.raw_user_meta_data->>'photo_url', '')
+  )
+from auth.users u
+on conflict (user_id) do update
+set display_name = coalesce(public.beegame_profiles.display_name, excluded.display_name),
+    email = coalesce(excluded.email, public.beegame_profiles.email),
+    avatar_url = coalesce(public.beegame_profiles.avatar_url, excluded.avatar_url),
+    updated_at = now();
+
+insert into public.beegame_workspaces (name, owner_id)
+select
+  coalesce(p.display_name, split_part(u.email, '@', 1), 'BeeGame Workspace'),
+  u.id
+from auth.users u
+left join public.beegame_profiles p on p.user_id = u.id
+on conflict (owner_id) do update
+set updated_at = now();
+
+insert into public.beegame_workspace_members (workspace_id, user_id, role)
+select
+  w.id,
+  u.id,
+  case
+    when u.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
+    else 'developer'
+  end
+from auth.users u
+join public.beegame_workspaces w on w.owner_id = u.id
+on conflict (workspace_id, user_id) do update
+set role = case
+  when excluded.role = 'owner' then 'owner'
+  else public.beegame_workspace_members.role
+end;
+
+insert into public.beegame_credit_accounts (user_id)
+select u.id
+from auth.users u
+on conflict (user_id) do nothing;
 
 update public.beegame_workspace_members m
 set role = 'developer'

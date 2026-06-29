@@ -218,8 +218,11 @@ async function resolveSmokeAuthContext(): Promise<{
   )
   if (!response.ok) {
     const text = await response.text().catch(() => '')
+    const hint = text.includes('Database error granting user')
+      ? ' Hint: re-run docs/beegame-supabase-schema.sql so the BeeGame auth trigger/backfill is up to date.'
+      : ''
     throw new Error(
-      `Supabase password sign-in failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+      `Supabase password sign-in failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}.${hint}`,
     )
   }
   const payload = await response.json() as JsonObject
