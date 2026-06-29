@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
@@ -172,5 +172,59 @@ describe('RightSidebar tabs', () => {
 
         await user.click(screen.getByRole('button', { name: '让 BeeGame 集成' }));
         expect(onSendMessage).toHaveBeenCalledWith('Integrate uploaded asset', 'asset_integration');
+    });
+
+    it('clears the previous project asset manifest when switching projects', async () => {
+        const user = userEvent.setup();
+        vi.mocked(api.getProjectAssets).mockImplementation(async (projectId: string) => {
+            if (projectId === 'proj_1') {
+                return {
+                    version: 1,
+                    slots: [{
+                        id: 'bgm_game',
+                        name: 'Game BGM',
+                        type: 'audio',
+                        purpose: 'Game background music',
+                        status: 'uploaded',
+                    }],
+                };
+            }
+            return { version: 1, slots: [] };
+        });
+        const baseProps = {
+            lang: 'zh' as const,
+            messages: [],
+            progress: 0,
+            onSendMessage: vi.fn(),
+            isLoading: false,
+            waitingApproval: {
+                kind: 'none' as const,
+                isBlockingChat: false,
+                isWaitingStatus: false,
+                message: '',
+                placeholder: 'Type...',
+            },
+            variant: 'beegame' as const,
+        };
+
+        const { rerender } = render(
+            <RightSidebar
+                {...baseProps}
+                projectId="proj_1"
+            />
+        );
+
+        await user.click(screen.getByRole('button', { name: '资源' }));
+        expect(await screen.findByText('Game BGM')).toBeInTheDocument();
+
+        rerender(
+            <RightSidebar
+                {...baseProps}
+                projectId="proj_2"
+            />
+        );
+
+        await waitFor(() => expect(screen.queryByText('Game BGM')).not.toBeInTheDocument());
+        expect(api.getProjectAssets).toHaveBeenCalledWith('proj_2');
     });
 });

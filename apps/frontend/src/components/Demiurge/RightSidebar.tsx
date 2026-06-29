@@ -98,6 +98,13 @@ export function RightSidebar({
     const springTransition = { type: "spring" as const, stiffness: 260, damping: 26 };
     const isComposerLocked = isLoading || isRuntimeBusy;
 
+    useEffect(() => {
+        setAssetManifest(null);
+        setAssetIntegrationMessages({});
+        setUploadingAssetSlotId(null);
+        setIsAssetsLoading(false);
+    }, [projectId]);
+
     // Derived Data
     const structuredApprovalReview = useMemo(() =>
         pendingReviews.find((review: ReviewDisplayModel) => (
