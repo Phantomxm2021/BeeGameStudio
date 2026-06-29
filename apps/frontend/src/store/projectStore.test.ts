@@ -94,7 +94,7 @@ describe('projectStore pending review normalization', () => {
                         detail: {
                             error: {
                                 code: 'idea_intake_clarification_required',
-                                message: 'Logos requires clarification before creating a project.',
+                                message: 'BeeGame requires clarification before creating a project.',
                             },
                             phase: 'idea_intake',
                             agent: 'logos',

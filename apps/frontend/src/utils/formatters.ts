@@ -1,5 +1,5 @@
 /**
- * Task ID formatting utilities for the XRMOD Demiurge frontend.
+ * Task ID formatting utilities for the BeeGame frontend.
  */
 
 /**

@@ -618,11 +618,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             console.error('Failed to select project:', error);
         }
     };
-    const canOpenSystemManagement = hasPermission('workspace.manage') ||
+    const canOpenSystemManagement = Boolean(currentUser) && (hasPermission('workspace.manage') ||
         hasPermission('secrets.manage') ||
         hasPermission('runtime_settings.manage') ||
         hasPermission('mcp.manage') ||
-        hasPermission('model_config.manage');
+        hasPermission('model_config.manage'));
     return (
         <AnimatePresence mode="wait">
             <motion.div

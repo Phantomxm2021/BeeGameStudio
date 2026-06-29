@@ -161,7 +161,7 @@ const optionGroupsFor = (suggestion: ClarificationSuggestionPayload | null): Opt
 };
 
 const firstQuestion = (analysis: IdeaIntakeAnalysisPayload): string => (
-    analysis.clarification_questions[0] || 'Logos needs one more decision before starting Phase 0.'
+    analysis.clarification_questions[0] || 'BeeGame needs one more decision before starting.'
 );
 
 const clampStyle = (lines: number): CSSProperties => ({

@@ -271,4 +271,4 @@ See `useWebSocket.example.tsx` for a complete example component that demonstrate
 
 ## License
 
-Part of the XRMOD Demiurge multi-agent system frontend.
+Part of the BeeGame frontend.

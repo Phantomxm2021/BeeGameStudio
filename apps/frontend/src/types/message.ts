@@ -1,6 +1,6 @@
 /**
- * Message type definitions for the XRMOD Demiurge multi-agent system frontend.
- * 
+ * Message type definitions for the BeeGame frontend.
+ *
  * This file defines the core message types used for communication between
  * the frontend and backend, including WebSocket messages and token usage tracking.
  */

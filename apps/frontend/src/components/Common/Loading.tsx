@@ -1,6 +1,6 @@
 /**
- * Loading spinner component for the XRMOD Demiurge multi-agent system frontend.
- * 
+ * Loading spinner component for the BeeGame frontend.
+ *
  * This component provides visual feedback during loading states:
  * - Spinning animation
  * - Multiple size variants (small, medium, large)

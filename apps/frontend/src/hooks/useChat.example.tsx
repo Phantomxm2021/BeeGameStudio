@@ -2,7 +2,7 @@
  * useChat Hook Usage Examples
  * 
  * This file demonstrates various ways to use the useChat hook
- * for managing chat functionality in the XRMOD Demiurge frontend.
+ * for managing chat functionality in the BeeGame frontend.
  */
 
 import React, { useState } from 'react';

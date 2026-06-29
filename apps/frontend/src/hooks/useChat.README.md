@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `useChat` hook is a comprehensive React hook that manages all chat functionality for the XRMOD Demiurge multi-agent system frontend. It integrates WebSocket communication, message routing, and chat operations into a single, easy-to-use interface.
+The `useChat` hook manages chat functionality for the BeeGame frontend. It integrates WebSocket communication, message routing, and chat operations into a single interface.
 
 ## Features
 

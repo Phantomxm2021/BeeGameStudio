@@ -1,6 +1,6 @@
 /**
- * Toast notification component for the XRMOD Demiurge multi-agent system frontend.
- * 
+ * Toast notification component for the BeeGame frontend.
+ *
  * Features:
  * - Auto-hide after 3 seconds
  * - Smooth enter/exit animations using Framer Motion

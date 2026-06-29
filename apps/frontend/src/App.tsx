@@ -1,8 +1,7 @@
 /**
  * App Component
- * 
- * Root component of the XRMOD Demiurge Web Frontend.
- * Re-architected to feature the Landing/Dashboard state progression.
+ *
+ * Root component for the BeeGame frontend.
  */
 
 import { useState, useEffect, useRef } from 'react';

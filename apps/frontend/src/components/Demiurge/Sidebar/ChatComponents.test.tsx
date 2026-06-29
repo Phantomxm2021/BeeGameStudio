@@ -142,7 +142,7 @@ describe('MessageItem semantic rendering', () => {
 
         expect(screen.getByText('GDD.md')).not.toBeNull();
         expect(screen.getByText('Open Preview')).not.toBeNull();
-        expect(screen.getAllByText('Metis').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Game Design').length).toBeGreaterThan(0);
 
         screen.getByText('Open Preview').click();
         expect(onPreviewArtifact).toHaveBeenCalledWith('art_1', 'GDD.md', undefined);

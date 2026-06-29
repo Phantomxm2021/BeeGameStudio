@@ -807,7 +807,7 @@ export const api = {
       }),
 
   /**
-   * Run Logos idea intake without creating a project.
+   * Run BeeGame idea intake without creating a project.
    * Used by the landing page thinking/clarification flow.
    */
   analyzeIdeaIntake: (data: { idea: string; clarification?: Record<string, string>; language?: string }) =>

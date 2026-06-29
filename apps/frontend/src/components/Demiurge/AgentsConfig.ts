@@ -377,7 +377,7 @@ const center1 = (CANVAS_W - CARD_W) / 2;                     // single node cent
 const row4 = (i: number) => 30 + i * ((CANVAS_W - 60 - CARD_W) / 3);  // 4-node row
 const row2 = (i: number) => (CANVAS_W - 2 * CARD_W - 80) / 2 + i * (CARD_W + 80); // 2-node row centered
 
-// --- Dynamic Agent UI Mapping ---
+// --- Dynamic BeeGame capability UI mapping ---
 export const AGENT_UI_MAP: Record<string, { name: string; role: string; x: number; y: number; icon: any; color: string; text: string; border: string; bio: string; layer: AgentLayer; phase: string }> = {
     'beegame': {
         name: 'BeeGame', role: '游戏构建代理', x: center1, y: LAYER_CONFIG.governor.y, icon: BeeIcon,
@@ -385,75 +385,71 @@ export const AGENT_UI_MAP: Record<string, { name: string; role: string; x: numbe
         bio: '核心能力：把想法转成文档、代码、工具调用与可运行项目。',
         layer: 'governor', phase: 'Session'
     },
-    // ── Layer 1: Runtime Governor ──────────────────────────
     'logos': {
-        name: 'Logos', role: '制作人/编排器', x: center1, y: LAYER_CONFIG.governor.y, icon: Briefcase,
+        name: 'Intake', role: '需求整理', x: center1, y: LAYER_CONFIG.governor.y, icon: Briefcase,
         color: 'bg-blue-500', text: 'text-blue-500', border: 'border-blue-500/50',
-        bio: '核心能力：定义秩序。负责全局工作流的编排与意图解析。',
-        layer: 'governor', phase: 'P0-P5'
+        bio: '整理用户想法，明确项目目标、限制和下一步。',
+        layer: 'governor', phase: 'Intake'
     },
-    // ── Layer 2: Cognitive Agents ──────────────────────────
     'metis': {
-        name: 'Metis', role: '游戏策划', x: row4(0), y: LAYER_CONFIG.cognitive.y, icon: BookOpen,
+        name: 'Game Design', role: '游戏策划', x: row4(0), y: LAYER_CONFIG.cognitive.y, icon: BookOpen,
         color: 'bg-purple-500', text: 'text-purple-500', border: 'border-purple-500/50',
-        bio: '核心能力：构筑规则。专注于 GDD 创建与数值平衡。',
-        layer: 'cognitive', phase: 'P1'
+        bio: '定义玩法、节奏、目标、反馈和可玩性标准。',
+        layer: 'cognitive', phase: 'Design'
     },
     'tecton': {
-        name: 'Tecton', role: '架构师', x: row4(1), y: LAYER_CONFIG.cognitive.y, icon: Cpu,
+        name: 'Architecture', role: '技术架构', x: row4(1), y: LAYER_CONFIG.cognitive.y, icon: Cpu,
         color: 'bg-indigo-500', text: 'text-indigo-500', border: 'border-indigo-500/50',
-        bio: '核心能力：支撑结构。定义代码架构与接口规范。',
-        layer: 'cognitive', phase: 'P2'
+        bio: '规划项目结构、技术方案和运行方式。',
+        layer: 'cognitive', phase: 'Tech'
     },
     'apollo': {
-        name: 'Apollo', role: '美术指导', x: row4(2), y: LAYER_CONFIG.cognitive.y, icon: Palette,
+        name: 'Art Direction', role: '美术指导', x: row4(2), y: LAYER_CONFIG.cognitive.y, icon: Palette,
         color: 'bg-pink-500', text: 'text-pink-500', border: 'border-pink-500/50',
-        bio: '核心能力：审美统筹。统领视觉风格与资产规范。',
-        layer: 'cognitive', phase: 'P2'
+        bio: '定义视觉风格、资源占位和替换方向。',
+        layer: 'cognitive', phase: 'Art'
     },
     'morphe': {
-        name: 'Morphe', role: 'UI/UX 设计', x: row4(3), y: LAYER_CONFIG.cognitive.y, icon: Layout,
+        name: 'Experience', role: 'UI/UX 设计', x: row4(3), y: LAYER_CONFIG.cognitive.y, icon: Layout,
         color: 'bg-rose-500', text: 'text-rose-500', border: 'border-rose-500/50',
-        bio: '核心能力：形态交互。设计 UI 布局与交互体验。',
-        layer: 'cognitive', phase: 'P2'
+        bio: '设计界面、反馈和玩家操作路径。',
+        layer: 'cognitive', phase: 'UX'
     },
-    // ── Layer 3: Implementation Agents ─────────────────────
     'hephaestus': {
-        name: 'Hephaestus', role: '工程师', x: row4(0), y: LAYER_CONFIG.implementation.y, icon: Code,
+        name: 'Implementation', role: '工程实现', x: row4(0), y: LAYER_CONFIG.implementation.y, icon: Code,
         color: 'bg-emerald-500', text: 'text-emerald-500', border: 'border-emerald-500/50',
-        bio: '核心能力：逻辑实现。编写 C# 脚本与核心业务逻辑。',
-        layer: 'implementation', phase: 'P4'
+        bio: '实现游戏逻辑、系统和运行入口。',
+        layer: 'implementation', phase: 'Build'
     },
     'sankta': {
-        name: 'Sankta', role: 'UI 构建师', x: row4(1), y: LAYER_CONFIG.implementation.y, icon: Zap,
+        name: 'Interface', role: '界面实现', x: row4(1), y: LAYER_CONFIG.implementation.y, icon: Zap,
         color: 'bg-amber-500', text: 'text-amber-500', border: 'border-amber-500/50',
-        bio: '核心能力：UI 实现。负责 Unity UI 构建与动效实现。',
-        layer: 'implementation', phase: 'P4'
+        bio: '实现界面、交互反馈和可操作流程。',
+        layer: 'implementation', phase: 'Interface'
     },
     'hyle': {
-        name: 'Hyle', role: '资产管理', x: row4(2), y: LAYER_CONFIG.implementation.y, icon: Database,
+        name: 'Assets', role: '资产管理', x: row4(2), y: LAYER_CONFIG.implementation.y, icon: Database,
         color: 'bg-orange-500', text: 'text-orange-500', border: 'border-orange-500/50',
-        bio: '核心能力：物质生产。管理资产清单与资源同步。',
-        layer: 'implementation', phase: 'P3'
+        bio: '整理资源清单、placeholder 和替换入口。',
+        layer: 'implementation', phase: 'Assets'
     },
     'pneuma': {
-        name: 'Pneuma', role: '技术美术', x: row4(3), y: LAYER_CONFIG.implementation.y, icon: Rocket,
+        name: 'Tech Art', role: '技术美术', x: row4(3), y: LAYER_CONFIG.implementation.y, icon: Rocket,
         color: 'bg-violet-500', text: 'text-violet-500', border: 'border-violet-500/50',
-        bio: '核心能力：优化赋能。性能瓶颈分析与 Shader 优化。',
-        layer: 'implementation', phase: 'P4'
+        bio: '连接资源、效果和运行时表现。',
+        layer: 'implementation', phase: 'Tech Art'
     },
-    // ── Layer 4: Verification & Build ─────────────────────
     'argus': {
-        name: 'Argus', role: '测试工程师', x: row2(0), y: LAYER_CONFIG.verification.y, icon: Shield,
+        name: 'Review', role: '体验检查', x: row2(0), y: LAYER_CONFIG.verification.y, icon: Shield,
         color: 'bg-red-500', text: 'text-red-500', border: 'border-red-500/50',
-        bio: '核心能力：完美守护。执行自动化测试与质量保障。',
-        layer: 'verification', phase: 'P5'
+        bio: '检查可运行性、玩家路径和已知缺口。',
+        layer: 'verification', phase: 'Review'
     },
     'synthet': {
-        name: 'Synthet', role: '构建工程师', x: row2(1), y: LAYER_CONFIG.verification.y, icon: Eye,
+        name: 'Preview', role: '预览检查', x: row2(1), y: LAYER_CONFIG.verification.y, icon: Eye,
         color: 'bg-cyan-500', text: 'text-cyan-500', border: 'border-cyan-500/50',
-        bio: '核心能力：封装进化。CI/CD 流水线与多平台打包。',
-        layer: 'verification', phase: 'P5'
+        bio: '验证启动、预览和交付说明。',
+        layer: 'verification', phase: 'Preview'
     }
 };
 

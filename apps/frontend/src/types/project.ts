@@ -1,6 +1,6 @@
 /**
- * Project type definitions for the XRMOD Demiurge multi-agent system frontend.
- * 
+ * Project type definitions for the BeeGame frontend.
+ *
  * This file defines the project-related types used for managing multiple
  * game development projects, each with independent conversation history and context.
  */
