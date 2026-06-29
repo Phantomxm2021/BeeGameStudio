@@ -3896,7 +3896,10 @@ describe('beegame session routes', () => {
       })
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
         body: JSON.stringify({
           workspacePath: workspace,
           projectId: 'project_asset_metadata',
@@ -3921,6 +3924,7 @@ describe('beegame session routes', () => {
 
       const assetsRes = await app.request(
         `/api/beegame-sessions/${session.id}/assets?workspacePath=${encodeURIComponent(workspace)}`,
+        { headers: { authorization: 'Bearer user-token' } },
       )
 
       expect(assetsRes.status).toBe(200)

@@ -586,13 +586,9 @@ export class DashboardRepository {
 
   private supabaseForRequest(request?: Request): SupabaseDashboardStore | undefined {
     if (!this.supabaseStore) return undefined
-    return this.supabaseStore.withAuthToken(request ? getBearerToken(request) : undefined)
-  }
-
-  private requireSupabaseForRequest(request: Request): SupabaseDashboardStore {
-    const supabase = this.supabaseForRequest(request)
-    if (!supabase) throw new Error('Supabase repository is not configured')
-    return supabase
+    return this.supabaseStore.withAuthToken(
+      this.requireAuthToken(request ? getBearerToken(request) : undefined),
+    )
   }
 
   private supabaseForAuthToken(authToken: string | undefined): SupabaseDashboardStore {

@@ -390,10 +390,11 @@ describe('agent workflow server routes', () => {
           role: 'owner',
         },
       })
+      const authHeaders = { authorization: 'Bearer user-token' }
 
       const saveRes = await authApp.request('/api/web-tools', {
         method: 'PUT',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...authHeaders, 'content-type': 'application/json' },
         body: JSON.stringify({
           webSearchAdapter: 'brave',
           braveApiKey: 'bsa-secret',
@@ -401,7 +402,9 @@ describe('agent workflow server routes', () => {
       })
       expect(saveRes.status).toBe(200)
 
-      const auditRes = await authApp.request('/api/audit-events')
+      const auditRes = await authApp.request('/api/audit-events', {
+        headers: authHeaders,
+      })
       expect(auditRes.status).toBe(200)
       expect(await auditRes.json()).toEqual([
         expect.objectContaining({
