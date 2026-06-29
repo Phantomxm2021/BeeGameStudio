@@ -158,6 +158,32 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
   });
 
+  it('scopes cloud project cache to the authenticated user', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'cloud-access-token',
+      expiresAt: Date.now() + 60_000,
+      user: { id: 'user_cloud' },
+    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/projects') {
+        return jsonResponse([
+          { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
+      { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
+    ]);
+
+    expect(localStorage.getItem('beegame-adapter-projects')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-projects:user_cloud') || '[]')).toEqual([
+      { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
+    ]);
+  });
+
   it('does not synthesize local game mode options when LLM intake fails', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'intake unavailable' }, 500));
     vi.stubGlobal('fetch', fetchMock);
@@ -635,7 +661,8 @@ describe('beeGameAdapter prompt rules', () => {
         content: 'Cloud transcript restored.',
       }),
     ]));
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings:user_cloud') || '[]')).toEqual([
       {
         projectId: 'project_cloud',
         sessionId: 'beegame_cloud_restore',

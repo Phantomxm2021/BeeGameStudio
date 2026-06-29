@@ -13,7 +13,7 @@ import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
 import type { BeeGameCreditTaskType } from './creditsApi';
-import { getSupabaseAccessToken } from './supabaseAuthApi';
+import { getSupabaseAccessToken, getSupabaseSessionUser } from './supabaseAuthApi';
 
 type BeeGameSession = {
   id: string;
@@ -732,11 +732,11 @@ function newProjectId(): string {
 }
 
 function readProjects(): Project[] {
-  return readJson<Project[]>(PROJECTS_KEY, []);
+  return readJson<Project[]>(scopedAdapterCacheKey(PROJECTS_KEY), []);
 }
 
 function saveProjects(projects: Project[]): void {
-  writeJson(PROJECTS_KEY, projects);
+  writeJson(scopedAdapterCacheKey(PROJECTS_KEY), projects);
 }
 
 async function syncProjectMetadata(project: Project): Promise<void> {
@@ -761,22 +761,28 @@ function hasCloudSession(): boolean {
   return Boolean(getSupabaseAccessToken());
 }
 
+function scopedAdapterCacheKey(baseKey: string): string {
+  const userId = getSupabaseSessionUser()?.id?.trim();
+  if (!userId) return baseKey;
+  return `${baseKey}:${encodeURIComponent(userId)}`;
+}
+
 function upsertProject(projects: Project[], project: Project): Project[] {
   return [project, ...projects.filter(item => item.id !== project.id)];
 }
 
 function readBindings(): ProjectSessionBinding[] {
-  return readJson<ProjectSessionBinding[]>(BINDINGS_KEY, []);
+  return readJson<ProjectSessionBinding[]>(scopedAdapterCacheKey(BINDINGS_KEY), []);
 }
 
 function saveBinding(binding: ProjectSessionBinding): void {
   const bindings = [binding, ...readBindings().filter(item => item.projectId !== binding.projectId)];
-  writeJson(BINDINGS_KEY, bindings);
+  writeJson(scopedAdapterCacheKey(BINDINGS_KEY), bindings);
   rememberWorkspace(binding.workspacePath);
 }
 
 function deleteBinding(projectId: string): void {
-  writeJson(BINDINGS_KEY, readBindings().filter(item => item.projectId !== projectId));
+  writeJson(scopedAdapterCacheKey(BINDINGS_KEY), readBindings().filter(item => item.projectId !== projectId));
 }
 
 function getBinding(projectId: string): ProjectSessionBinding | undefined {
@@ -2155,13 +2161,14 @@ function containsCjk(text: string): boolean {
 }
 
 function rememberSentDisplayText(sessionId: string, transportText: string, displayText: string): void {
-  const values = readJson<Record<string, string>>(SENT_DISPLAY_KEY, {});
+  const storageKey = scopedAdapterCacheKey(SENT_DISPLAY_KEY);
+  const values = readJson<Record<string, string>>(storageKey, {});
   values[`${sessionId}:${stableTextHash(transportText)}`] = displayText;
-  writeJson(SENT_DISPLAY_KEY, values);
+  writeJson(storageKey, values);
 }
 
 function resolveSentDisplayText(sessionId: string, transportText: string): string {
-  const values = readJson<Record<string, string>>(SENT_DISPLAY_KEY, {});
+  const values = readJson<Record<string, string>>(scopedAdapterCacheKey(SENT_DISPLAY_KEY), {});
   return values[`${sessionId}:${stableTextHash(transportText)}`] || transportText;
 }
 
