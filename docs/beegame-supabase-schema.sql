@@ -96,9 +96,15 @@ create policy "beegame asset owner delete" on storage.objects
 create table if not exists public.beegame_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
+  email text,
+  avatar_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.beegame_profiles
+  add column if not exists email text,
+  add column if not exists avatar_url text;
 
 create table if not exists public.beegame_workspaces (
   id uuid primary key default gen_random_uuid(),
@@ -279,6 +285,12 @@ set search_path = public
 stable
 as $$
   select coalesce(public.beegame_workspace_role(target_workspace_id) = 'owner', false)
+    or exists (
+      select 1
+      from auth.users u
+      where u.id = auth.uid()
+        and u.raw_app_meta_data->>'beegame_role' = 'owner'
+    )
 $$;
 
 create or replace function public.beegame_role_permissions(role_name text)
@@ -313,7 +325,6 @@ as $$
       'workspace.read',
       'project.read',
       'project.create',
-      'project.delete',
       'project.export',
       'agent.send_message',
       'agent.cancel',
@@ -325,10 +336,7 @@ as $$
     when 'reviewer' then array[
       'workspace.read',
       'project.read',
-      'project.export',
-      'agent.send_message',
-      'agent.cancel',
-      'preview.manage'
+      'project.export'
     ]
     else array[
       'workspace.read',
@@ -349,6 +357,7 @@ declare
   profile_row public.beegame_profiles%rowtype;
   workspace_row public.beegame_workspaces%rowtype;
   member_role text;
+  account_role text;
 begin
   current_user_id := auth.uid();
   if current_user_id is null then
@@ -386,7 +395,16 @@ begin
     and m.user_id = current_user_id
   limit 1;
 
+  select nullif(u.raw_app_meta_data->>'beegame_role', '')
+  into account_role
+  from auth.users u
+  where u.id = current_user_id
+  limit 1;
+
   member_role := coalesce(member_role, 'viewer');
+  if account_role = 'owner' then
+    member_role := 'owner';
+  end if;
 
   return jsonb_build_object(
     'id', current_user_id,
@@ -410,6 +428,8 @@ as $$
 declare
   workspace_id uuid;
   profile_name text;
+  profile_avatar_url text;
+  initial_role text;
 begin
   profile_name := coalesce(
     nullif(new.raw_user_meta_data->>'display_name', ''),
@@ -418,11 +438,23 @@ begin
     nullif(new.raw_user_meta_data->>'user_name', ''),
     nullif(split_part(new.email, '@', 1), '')
   );
+  profile_avatar_url := coalesce(
+    nullif(new.raw_user_meta_data->>'avatar_url', ''),
+    nullif(new.raw_user_meta_data->>'picture', ''),
+    nullif(new.raw_user_meta_data->>'image', ''),
+    nullif(new.raw_user_meta_data->>'photo_url', '')
+  );
+  initial_role := case
+    when new.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
+    else 'developer'
+  end;
 
-  insert into public.beegame_profiles (user_id, display_name)
-  values (new.id, profile_name)
+  insert into public.beegame_profiles (user_id, display_name, email, avatar_url)
+  values (new.id, profile_name, new.email, profile_avatar_url)
   on conflict (user_id) do update
   set display_name = coalesce(public.beegame_profiles.display_name, excluded.display_name),
+      email = coalesce(excluded.email, public.beegame_profiles.email),
+      avatar_url = coalesce(public.beegame_profiles.avatar_url, excluded.avatar_url),
       updated_at = now();
 
   insert into public.beegame_workspaces (name, owner_id)
@@ -435,9 +467,12 @@ begin
   returning id into workspace_id;
 
   insert into public.beegame_workspace_members (workspace_id, user_id, role)
-  values (workspace_id, new.id, 'owner')
+  values (workspace_id, new.id, initial_role)
   on conflict (workspace_id, user_id) do update
-  set role = 'owner';
+  set role = case
+    when new.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
+    else excluded.role
+  end;
 
   insert into public.beegame_credit_accounts (user_id)
   values (new.id)
@@ -449,8 +484,18 @@ $$;
 
 drop trigger if exists beegame_after_auth_user_created on auth.users;
 create trigger beegame_after_auth_user_created
-  after insert on auth.users
+  after insert or update on auth.users
   for each row execute function public.beegame_handle_new_user();
+
+update public.beegame_workspace_members m
+set role = 'developer'
+from public.beegame_workspaces w,
+     auth.users u
+where m.workspace_id = w.id
+  and m.user_id = u.id
+  and m.user_id = w.owner_id
+  and m.role = 'owner'
+  and coalesce(u.raw_app_meta_data->>'beegame_role', '') <> 'owner';
 
 create or replace function public.beegame_runtime_env(
   p_user_id uuid,
