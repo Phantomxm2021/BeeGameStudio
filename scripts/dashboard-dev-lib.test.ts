@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
 import {
+  buildApiEnv,
   buildFrontendEnv,
   resolveDashboardDevOptions,
   resolveProductionApiBase,
@@ -30,6 +31,26 @@ describe('dashboard dev launcher helpers', () => {
     expect(env.PORT).toBe('5188')
     expect(env.VITE_API_BASE_URL).toBe('http://127.0.0.1:4123')
     expect(env.VITE_WS_BASE_URL).toBe('ws://127.0.0.1:4123')
+  })
+
+  test('does not pass Supabase service-role secrets to the runtime host', () => {
+    const env = buildApiEnv({
+      apiPort: 62174,
+      workspacePath: '/repo/Projects',
+      baseEnv: {
+        BEEGAME_SUPABASE_URL: 'https://project.supabase.co',
+        BEEGAME_SUPABASE_ANON_KEY: 'anon-key',
+        BEEGAME_SUPABASE_SERVICE_ROLE_KEY: 'service-role-secret',
+        SUPABASE_SERVICE_ROLE_KEY: 'generic-service-role-secret',
+      },
+    })
+
+    expect(env.BEEGAME_SUPABASE_URL).toBe('https://project.supabase.co')
+    expect(env.BEEGAME_SUPABASE_ANON_KEY).toBe('anon-key')
+    expect(env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
+    expect(env.AGENT_WORKFLOW_PORT).toBe('62174')
+    expect(env.AGENT_WORKFLOW_WORKSPACE_PATH).toBe('/repo/Projects')
   })
 
   test('keeps production frontend on same-origin api by default', () => {

@@ -69,7 +69,7 @@ export function buildApiEnv(input: {
   baseEnv: Record<string, string | undefined>
 }): Record<string, string> {
   return compactEnv({
-    ...input.baseEnv,
+    ...omitRuntimeHostForbiddenEnv(input.baseEnv),
     AGENT_WORKFLOW_PORT: String(input.apiPort),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
   })
@@ -119,4 +119,17 @@ function compactEnv(
     if (value !== undefined) compacted[key] = value
   }
   return compacted
+}
+
+const RUNTIME_HOST_FORBIDDEN_ENV = new Set([
+  'BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+])
+
+function omitRuntimeHostForbiddenEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !RUNTIME_HOST_FORBIDDEN_ENV.has(key)),
+  )
 }

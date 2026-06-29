@@ -37,6 +37,8 @@ Use this checklist before promoting a BeeGame deployment to production.
 
 ## Frontend Environment
 
+Start from the checked-in `.env.example` when preparing local development or deployment-specific environment files.
+
 Required production values:
 
 ```env
@@ -68,6 +70,7 @@ Rules:
 
 - The runtime host uses the current user's Supabase access token and RLS/RPC.
 - The runtime host must not use Supabase service-role credentials.
+- The local dev launcher filters known Supabase service-role variables before spawning the runtime host.
 - The workspace root is a platform deployment setting, not a normal user setting.
 - Preview ports must not conflict with the frontend, runtime host, or reverse proxy.
 - Generated projects should live outside the source repository.
