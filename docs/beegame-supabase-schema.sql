@@ -112,6 +112,27 @@ create table if not exists public.beegame_model_configs (
   updated_at timestamptz not null default now()
 );
 
+with ranked_model_defaults as (
+  select
+    id,
+    row_number() over (
+      partition by owner_id
+      order by updated_at desc, created_at desc, id desc
+    ) as default_rank
+  from public.beegame_model_configs
+  where is_default = true
+)
+update public.beegame_model_configs configs
+set is_default = false,
+    updated_at = now()
+from ranked_model_defaults ranked
+where configs.id = ranked.id
+  and ranked.default_rank > 1;
+
+create unique index if not exists beegame_model_configs_one_default_per_owner
+  on public.beegame_model_configs (owner_id)
+  where is_default = true;
+
 create table if not exists public.beegame_runtime_settings (
   owner_id uuid primary key references auth.users(id) on delete cascade,
   settings jsonb not null default '{}'::jsonb,
@@ -215,6 +236,126 @@ as $$
   select coalesce(public.beegame_workspace_role(target_workspace_id) = 'owner', false)
 $$;
 
+create or replace function public.beegame_role_permissions(role_name text)
+returns text[]
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select case role_name
+    when 'owner' then array[
+      'workspace.read',
+      'workspace.manage',
+      'workspace.manage_members',
+      'project.read',
+      'project.create',
+      'project.delete',
+      'project.export',
+      'agent.send_message',
+      'agent.cancel',
+      'agent.approve_tool',
+      'preview.manage',
+      'assets.upload',
+      'assets.integrate',
+      'model_config.manage',
+      'mcp.manage',
+      'runtime_settings.manage',
+      'secrets.manage',
+      'audit.read'
+    ]
+    when 'developer' then array[
+      'workspace.read',
+      'project.read',
+      'project.create',
+      'project.delete',
+      'project.export',
+      'agent.send_message',
+      'agent.cancel',
+      'agent.approve_tool',
+      'preview.manage',
+      'assets.upload',
+      'assets.integrate'
+    ]
+    when 'reviewer' then array[
+      'workspace.read',
+      'project.read',
+      'project.export',
+      'agent.send_message',
+      'agent.cancel',
+      'preview.manage'
+    ]
+    else array[
+      'workspace.read',
+      'project.read'
+    ]
+  end
+$$;
+
+create or replace function public.beegame_current_user_context()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+declare
+  current_user_id uuid;
+  profile_row public.beegame_profiles%rowtype;
+  workspace_row public.beegame_workspaces%rowtype;
+  member_role text;
+begin
+  current_user_id := auth.uid();
+  if current_user_id is null then
+    return null;
+  end if;
+
+  select *
+  into profile_row
+  from public.beegame_profiles
+  where user_id = current_user_id
+  limit 1;
+
+  select w.*
+  into workspace_row
+  from public.beegame_workspaces w
+  join public.beegame_workspace_members m on m.workspace_id = w.id
+  where m.user_id = current_user_id
+  order by
+    case when w.owner_id = current_user_id then 0 else 1 end,
+    w.created_at asc
+  limit 1;
+
+  if workspace_row.id is null then
+    return jsonb_build_object(
+      'id', current_user_id,
+      'role', 'viewer',
+      'permissions', public.beegame_role_permissions('viewer')
+    );
+  end if;
+
+  select coalesce(m.role, 'viewer')
+  into member_role
+  from public.beegame_workspace_members m
+  where m.workspace_id = workspace_row.id
+    and m.user_id = current_user_id
+  limit 1;
+
+  member_role := coalesce(member_role, 'viewer');
+
+  return jsonb_build_object(
+    'id', current_user_id,
+    'email', profile_row.email,
+    'displayName', profile_row.display_name,
+    'avatarUrl', profile_row.avatar_url,
+    'workspaceId', workspace_row.id,
+    'workspaceOwnerId', workspace_row.owner_id,
+    'role', member_role,
+    'permissions', public.beegame_role_permissions(member_role)
+  );
+end;
+$$;
+
 create or replace function public.beegame_handle_new_user()
 returns trigger
 language plpgsql
@@ -266,6 +407,208 @@ create trigger beegame_after_auth_user_created
   after insert on auth.users
   for each row execute function public.beegame_handle_new_user();
 
+create or replace function public.beegame_runtime_env(
+  p_user_id uuid,
+  p_data_dir text default null,
+  p_model_config_id text default null
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+stable
+as $$
+declare
+  model_row public.beegame_model_configs%rowtype;
+  web_row public.beegame_web_tools%rowtype;
+  settings_row public.beegame_runtime_settings%rowtype;
+  model_env jsonb := '{}'::jsonb;
+  web_env jsonb := '{}'::jsonb;
+  settings_env jsonb := '{}'::jsonb;
+  runtime_env jsonb := '{}'::jsonb;
+  base_config_dir text;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if auth.uid() is null or auth.uid() <> p_user_id then
+    raise exception 'Forbidden';
+  end if;
+
+  base_config_dir := trim(trailing '/' from coalesce(p_data_dir, ''));
+  if base_config_dir <> '' then
+    runtime_env := runtime_env || jsonb_build_object(
+      'BEEGAME_CONFIG_DIR', base_config_dir || '/beegame-config',
+      'BEEGAME_PROJECT_CONFIG_DIR_NAME', '.beegame'
+    );
+  else
+    runtime_env := runtime_env || jsonb_build_object(
+      'BEEGAME_PROJECT_CONFIG_DIR_NAME', '.beegame'
+    );
+  end if;
+
+  select *
+  into model_row
+  from public.beegame_model_configs
+  where owner_id = p_user_id
+    and (
+      (p_model_config_id is not null and id = p_model_config_id) or
+      (p_model_config_id is null and is_default = true)
+    )
+  order by is_default desc, updated_at desc
+  limit 1;
+
+  if found then
+    case model_row.provider
+      when 'anthropic-compatible' then
+        model_env := jsonb_build_object(
+          'ANTHROPIC_BASE_URL', model_row.base_url,
+          'ANTHROPIC_AUTH_TOKEN', model_row.api_key_ciphertext,
+          'ANTHROPIC_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
+          'ANTHROPIC_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
+          'ANTHROPIC_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+        );
+      when 'openai-compatible' then
+        model_env := jsonb_build_object(
+          'CLAUDE_CODE_USE_OPENAI', '1',
+          'OPENAI_BASE_URL', model_row.base_url,
+          'OPENAI_API_KEY', model_row.api_key_ciphertext,
+          'OPENAI_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
+          'OPENAI_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
+          'OPENAI_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+        );
+      when 'gemini' then
+        model_env := jsonb_build_object(
+          'CLAUDE_CODE_USE_GEMINI', '1',
+          'GEMINI_BASE_URL', model_row.base_url,
+          'GEMINI_API_KEY', model_row.api_key_ciphertext,
+          'GEMINI_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
+          'GEMINI_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
+          'GEMINI_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+        );
+      when 'grok' then
+        model_env := jsonb_build_object(
+          'CLAUDE_CODE_USE_GROK', '1',
+          'GROK_BASE_URL', model_row.base_url,
+          'GROK_API_KEY', model_row.api_key_ciphertext,
+          'GROK_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
+          'GROK_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
+          'GROK_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+        );
+      else
+        model_env := '{}'::jsonb;
+    end case;
+  end if;
+
+  select *
+  into web_row
+  from public.beegame_web_tools
+  where owner_id = p_user_id
+  limit 1;
+
+  if found then
+    web_env := jsonb_build_object(
+      'WEB_SEARCH_ADAPTER', web_row.config->>'webSearchAdapter',
+      'WEB_FETCH_ADAPTER', web_row.config->>'webFetchAdapter',
+      'BRAVE_SEARCH_API_KEY', web_row.config->>'braveApiKey',
+      'EXA_API_KEY', web_row.config->>'exaApiKey'
+    );
+  end if;
+
+  select *
+  into settings_row
+  from public.beegame_runtime_settings
+  where owner_id = p_user_id
+  limit 1;
+
+  if found then
+    if settings_row.settings ? 'skillSearchEnabled' then
+      settings_env := settings_env || jsonb_build_object(
+        'SKILL_SEARCH_ENABLED',
+        case when (settings_row.settings->>'skillSearchEnabled')::boolean then '1' else '0' end
+      );
+    end if;
+    if settings_row.settings ? 'autoMemoryEnabled' then
+      settings_env := settings_env || jsonb_build_object(
+        'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
+        case when (settings_row.settings->>'autoMemoryEnabled')::boolean then '0' else '1' end
+      );
+      if base_config_dir <> '' then
+        settings_env := settings_env || jsonb_build_object(
+          'CLAUDE_CONFIG_DIR',
+          base_config_dir || '/claude-config'
+        );
+      end if;
+    end if;
+    if (settings_row.settings->>'treeSitterBashEnabled')::boolean is true then
+      settings_env := settings_env || jsonb_build_object('FEATURE_TREE_SITTER_BASH', '1');
+    end if;
+    if (settings_row.settings->>'webBrowserToolEnabled')::boolean is true then
+      settings_env := settings_env || jsonb_build_object('FEATURE_WEB_BROWSER_TOOL', '1');
+    end if;
+    if (settings_row.settings->>'bashClassifierEnabled')::boolean is true then
+      settings_env := settings_env || jsonb_build_object('FEATURE_BASH_CLASSIFIER', '1');
+    end if;
+    if (settings_row.settings->>'mcpSkillsEnabled')::boolean is true then
+      settings_env := settings_env || jsonb_build_object('FEATURE_MCP_SKILLS', '1');
+    end if;
+  end if;
+
+  return jsonb_strip_nulls(runtime_env || model_env || web_env || settings_env);
+end
+$$;
+
+create or replace function public.beegame_set_default_model_config(
+  p_user_id uuid,
+  p_model_config_id text
+)
+returns public.beegame_model_configs
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  selected_config public.beegame_model_configs%rowtype;
+begin
+  if p_user_id is null then
+    raise exception 'User id is required';
+  end if;
+  if p_model_config_id is null or trim(p_model_config_id) = '' then
+    raise exception 'Model config id is required';
+  end if;
+  if auth.uid() is null or auth.uid() <> p_user_id then
+    raise exception 'Forbidden';
+  end if;
+
+  select *
+  into selected_config
+  from public.beegame_model_configs
+  where owner_id = p_user_id
+    and id = p_model_config_id
+  for update;
+
+  if not found then
+    raise exception 'Model config not found';
+  end if;
+
+  update public.beegame_model_configs
+  set is_default = false,
+      updated_at = now()
+  where owner_id = p_user_id
+    and is_default = true
+    and id <> p_model_config_id;
+
+  update public.beegame_model_configs
+  set is_default = true,
+      updated_at = now()
+  where owner_id = p_user_id
+    and id = p_model_config_id
+  returning * into selected_config;
+
+  return selected_config;
+end
+$$;
+
 create or replace function public.beegame_reserve_credits(
   p_user_id uuid,
   p_credits integer,
@@ -285,6 +628,9 @@ declare
 begin
   if p_user_id is null then
     raise exception 'User id is required';
+  end if;
+  if auth.uid() is null or auth.uid() <> p_user_id then
+    raise exception 'Forbidden';
   end if;
   if p_credits is null or p_credits <= 0 then
     raise exception 'Credits must be positive';
@@ -375,6 +721,9 @@ declare
 begin
   if p_user_id is null then
     raise exception 'User id is required';
+  end if;
+  if auth.uid() is null or auth.uid() <> p_user_id then
+    raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
     raise exception 'Reservation id is required';
@@ -501,6 +850,9 @@ declare
 begin
   if p_user_id is null then
     raise exception 'User id is required';
+  end if;
+  if auth.uid() is null or auth.uid() <> p_user_id then
+    raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
     raise exception 'Reservation id is required';
@@ -671,3 +1023,21 @@ create policy "credit ledger owner access" on public.beegame_credit_ledger
 drop policy if exists "audit owner access" on public.beegame_audit_events;
 create policy "audit owner access" on public.beegame_audit_events
   for select using (actor_id = auth.uid());
+
+revoke execute on function public.beegame_current_user_context() from public;
+grant execute on function public.beegame_current_user_context() to authenticated;
+
+revoke execute on function public.beegame_runtime_env(uuid, text, text) from public;
+grant execute on function public.beegame_runtime_env(uuid, text, text) to authenticated;
+
+revoke execute on function public.beegame_set_default_model_config(uuid, text) from public;
+grant execute on function public.beegame_set_default_model_config(uuid, text) to authenticated;
+
+revoke execute on function public.beegame_reserve_credits(uuid, integer, text, text, jsonb) from public;
+grant execute on function public.beegame_reserve_credits(uuid, integer, text, text, jsonb) to authenticated;
+
+revoke execute on function public.beegame_settle_credit_reservation(uuid, text, integer, integer, text, jsonb) from public;
+grant execute on function public.beegame_settle_credit_reservation(uuid, text, integer, integer, text, jsonb) to authenticated;
+
+revoke execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) from public;
+grant execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) to authenticated;

@@ -1,8 +1,6 @@
 import {
   createModelConfig,
   deleteModelConfig,
-  exportModelConfigSnapshot,
-  importModelConfigSnapshot,
   listModelConfigs,
   updateModelConfig,
   type ModelProviderKind,
@@ -50,12 +48,16 @@ import {
   saveRuntimeSettingsConfig,
   type RuntimeSettingsConfig,
 } from './runtime-settings-store'
-import type { BeeGameRole, BeeGameUserContext } from './auth/user-context'
+import {
+  getBearerToken,
+  type BeeGameUserContext,
+} from './auth/user-context'
 import {
   saveModelConfigsToStore,
   type ModelConfigStoreOptions,
 } from './model-config-store'
 import type { SupabaseDashboardStore } from './supabase-dashboard-store'
+import type { SupabaseRuntimeEnvClient } from './supabase-runtime-env-client'
 import {
   loadWebToolsConfig,
   mapWebToolsConfigToRuntimeEnv,
@@ -67,6 +69,7 @@ import {
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
+  supabaseRuntimeEnvClient?: SupabaseRuntimeEnvClient
   getUserDataRoot: (request?: Request) => string
   modelConfigStore?: ModelConfigStoreOptions | false
 }
@@ -106,8 +109,9 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<CreditBalance> {
-    return this.supabaseStore
-      ? this.supabaseStore.getCreditBalance(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.getCreditBalance(user.id)
       : getCreditBalance(user.id, {
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -117,41 +121,19 @@ export class DashboardRepository {
     return Boolean(this.supabaseStore)
   }
 
-  async deleteAuthUser(user: BeeGameUserContext): Promise<void> {
-    if (!this.supabaseStore) throw new Error('Supabase Auth admin is not configured')
-    await this.supabaseStore.deleteAuthUser(user.id)
-  }
-
-  async listWorkspaceMembers(user: BeeGameUserContext) {
-    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
-    return this.supabaseStore.listWorkspaceMembers(user.id)
-  }
-
-  async upsertWorkspaceMember(
-    user: BeeGameUserContext,
-    input: {
-      userId: string
-      role: BeeGameRole
-    },
-  ) {
-    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
-    return this.supabaseStore.upsertWorkspaceMember(user.id, input)
-  }
-
-  async deleteWorkspaceMember(
-    user: BeeGameUserContext,
-    userId: string,
-  ): Promise<boolean> {
-    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
-    return this.supabaseStore.deleteWorkspaceMember(user.id, userId)
+  async deleteAuthUser(_user: BeeGameUserContext): Promise<void> {
+    throw new Error(
+      'Account deletion is handled by Supabase RPC or a deployment-side service, not the local runtime host',
+    )
   }
 
   async listProjects(
     request: Request,
     user: BeeGameUserContext,
   ): Promise<BeeGameProjectMetadata[]> {
-    return this.supabaseStore
-      ? this.supabaseStore.listProjects(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listProjects(user.id)
       : this.getProjectStore(request).listProjects()
   }
 
@@ -160,8 +142,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     project: BeeGameProjectMetadata,
   ): Promise<BeeGameProjectMetadata> {
-    return this.supabaseStore
-      ? this.supabaseStore.upsertProject(user.id, project)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.upsertProject(user.id, project)
       : this.getProjectStore(request).upsertProject(project)
   }
 
@@ -170,17 +153,20 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     id: string,
   ): Promise<boolean> {
-    return this.supabaseStore
-      ? this.supabaseStore.deleteProject(user.id, id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.deleteProject(user.id, id)
       : this.getProjectStore(request).deleteProject(id)
   }
 
   async upsertSessionMetadata(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
   ): Promise<void> {
-    if (!this.supabaseStore || !metadata?.projectId) return
-    await this.supabaseStore.upsertSession(user.id, {
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return
+    await supabase.upsertSession(user.id, {
       id: metadata.id,
       projectId: metadata.projectId,
       workspacePath: metadata.workspacePath,
@@ -193,21 +179,25 @@ export class DashboardRepository {
   }
 
   async deleteSessionMetadata(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
     sessionId: string,
   ): Promise<void> {
-    if (!this.supabaseStore || !metadata?.projectId) return
-    await this.supabaseStore.deleteSession(user.id, sessionId)
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return
+    await supabase.deleteSession(user.id, sessionId)
   }
 
   async upsertPreviewSnapshot(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
     snapshot: BeeGamePreviewSnapshot,
   ): Promise<void> {
-    if (!this.supabaseStore || !metadata?.projectId) return
-    await this.supabaseStore.upsertPreviewSnapshot(
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return
+    await supabase.upsertPreviewSnapshot(
       user.id,
       metadata.projectId,
       snapshot,
@@ -215,12 +205,14 @@ export class DashboardRepository {
   }
 
   async upsertAssetManifest(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
     manifest: BeeGameAssetManifest,
   ): Promise<BeeGameAssetManifest | undefined> {
-    if (!this.supabaseStore || !metadata?.projectId) return undefined
-    return this.supabaseStore.upsertAssetManifest(
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return undefined
+    return supabase.upsertAssetManifest(
       user.id,
       metadata.projectId,
       manifest,
@@ -228,20 +220,24 @@ export class DashboardRepository {
   }
 
   async loadAssetManifest(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
   ): Promise<BeeGameAssetManifest | undefined> {
-    if (!this.supabaseStore || !metadata?.projectId) return undefined
-    return this.supabaseStore.loadAssetManifest(user.id, metadata.projectId)
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return undefined
+    return supabase.loadAssetManifest(user.id, metadata.projectId)
   }
 
   async uploadAssetFile(
+    request: Request,
     user: BeeGameUserContext,
     metadata: BeeGameSessionInternalMetadata | undefined,
     file: File,
   ): Promise<string | undefined> {
-    if (!this.supabaseStore || !metadata?.projectId) return undefined
-    return this.supabaseStore.uploadAssetFile({
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase || !metadata?.projectId) return undefined
+    return supabase.uploadAssetFile({
       ownerId: user.id,
       projectId: metadata.projectId,
       fileName: file.name,
@@ -254,8 +250,9 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<McpServerConfig[]> {
-    return this.supabaseStore
-      ? this.supabaseStore.listMcpServers(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listMcpServers(user.id)
       : listMcpServers({
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -266,8 +263,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: McpServerInput,
   ): Promise<McpServerConfig> {
-    return this.supabaseStore
-      ? this.supabaseStore.upsertMcpServer(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.upsertMcpServer(user.id, input)
       : upsertMcpServer(input, {
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -278,8 +276,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     id: string,
   ): Promise<boolean> {
-    return this.supabaseStore
-      ? this.supabaseStore.deleteMcpServer(user.id, id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.deleteMcpServer(user.id, id)
       : deleteMcpServer(id, {
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -289,8 +288,9 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<WebToolsConfig> {
-    const config = this.supabaseStore
-      ? await this.supabaseStore.loadWebTools(user.id)
+    const supabase = this.supabaseForRequest(request)
+    const config = supabase
+      ? await supabase.loadWebTools(user.id)
       : loadWebToolsConfig({
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -302,8 +302,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: WebToolsConfig,
   ): Promise<WebToolsConfig> {
-    return this.supabaseStore
-      ? this.supabaseStore.saveWebTools(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.saveWebTools(user.id, input)
       : saveWebToolsConfig(input, {
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -313,8 +314,9 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<RuntimeSettingsConfig> {
-    return this.supabaseStore
-      ? this.supabaseStore.loadRuntimeSettings(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.loadRuntimeSettings(user.id)
       : loadRuntimeSettingsConfig({
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -325,61 +327,78 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: RuntimeSettingsConfig,
   ): Promise<RuntimeSettingsConfig> {
-    return this.supabaseStore
-      ? this.supabaseStore.saveRuntimeSettings(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.saveRuntimeSettings(user.id, input)
       : saveRuntimeSettingsConfig(input, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }
 
-  async listModelConfigs(user: BeeGameUserContext) {
-    await this.syncModelConfigs()
+  async listModelConfigs(request: Request, user: BeeGameUserContext) {
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) return supabase.listPublicModelConfigs(user.id)
     return listModelConfigs(user.id)
   }
 
-  async syncModelConfigs(): Promise<void> {
-    if (!this.supabaseStore) return
-    importModelConfigSnapshot(await this.supabaseStore.loadModelConfigSnapshot())
-  }
-
   async createModelConfig(
+    request: Request,
     user: BeeGameUserContext,
     input: CreateModelConfigInput,
   ) {
-    await this.syncModelConfigs()
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) return supabase.createModelConfig(user.id, input)
     const created = createModelConfig(user.id, input)
-    await this.persistModelConfig(created.id)
+    this.persistLocalModelConfigs()
     return created
   }
 
-  async updateModelConfig(id: string, input: UpdateModelConfigInput) {
-    await this.syncModelConfigs()
+  async updateModelConfig(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+    input: UpdateModelConfigInput,
+  ) {
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) {
+      return supabase.updateModelConfig(user.id, id, input)
+    }
     const updated = updateModelConfig(id, input)
-    if (updated) await this.persistModelConfig(updated.id)
+    if (updated) this.persistLocalModelConfigs()
     return updated
   }
 
   async deleteModelConfig(
+    request: Request,
     user: BeeGameUserContext,
     id: string,
   ): Promise<boolean> {
-    await this.syncModelConfigs()
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) return supabase.deleteModelConfig(user.id, id)
     const deleted = deleteModelConfig(id)
     if (!deleted) return false
-    if (this.supabaseStore) {
-      await this.supabaseStore.deleteModelConfig(user.id, id)
-    } else {
-      this.persistLocalModelConfigs()
-    }
+    this.persistLocalModelConfigs()
     return true
+  }
+
+  async modelConfigExists(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<boolean> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.hasModelConfig(user.id, id)
+      : listModelConfigs(user.id).some(config => config.id === id)
   }
 
   async listCreditLedger(
     request: Request,
     user: BeeGameUserContext,
   ): Promise<CreditLedgerEntry[]> {
-    return this.supabaseStore
-      ? this.supabaseStore.listCreditLedger(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listCreditLedger(user.id)
       : listCreditLedger(user.id, {
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -390,8 +409,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     projectId?: string,
   ): Promise<CreditLedgerSummary> {
-    return this.supabaseStore
-      ? this.supabaseStore.summarizeCreditLedger(user.id, projectId)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.summarizeCreditLedger(user.id, projectId)
       : summarizeCreditLedger(user.id, {
           dataDir: this.options.getUserDataRoot(request),
           ...(projectId ? { projectId } : {}),
@@ -403,8 +423,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditReserveInput,
   ): Promise<CreditReservation> {
-    return this.supabaseStore
-      ? this.supabaseStore.reserveCredits(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.reserveCredits(user.id, input)
       : reserveCredits(user.id, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
@@ -416,8 +437,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditSettleInput,
   ): Promise<ReturnType<typeof settleCreditReservation>> {
-    return this.supabaseStore
-      ? this.supabaseStore.settleCreditReservation(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.settleCreditReservation(user.id, input)
       : settleCreditReservation(user.id, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
@@ -429,8 +451,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditRefundInput,
   ): Promise<ReturnType<typeof refundCreditReservation>> {
-    return this.supabaseStore
-      ? this.supabaseStore.refundCreditReservation(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.refundCreditReservation(user.id, input)
       : refundCreditReservation(user.id, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
@@ -441,11 +464,14 @@ export class DashboardRepository {
     if (this.supabaseStore) {
       return {
         reserveCredits: (userId, input) =>
-          this.supabaseStore!.reserveCredits(userId, input),
+          this.supabaseForAuthToken(input.authToken)
+            .reserveCredits(userId, input),
         settleCreditReservation: (userId, input) =>
-          this.supabaseStore!.settleCreditReservation(userId, input),
+          this.supabaseForAuthToken(input.authToken)
+            .settleCreditReservation(userId, input),
         refundCreditReservation: (userId, input) =>
-          this.supabaseStore!.refundCreditReservation(userId, input),
+          this.supabaseForAuthToken(input.authToken)
+            .refundCreditReservation(userId, input),
       }
     }
     return {
@@ -462,8 +488,9 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: AppendAuditEventInput,
   ): Promise<void> {
-    if (this.supabaseStore) {
-      await this.supabaseStore.appendAuditEvent(user.id, input)
+    const supabase = this.supabaseForRequest(request)
+    if (supabase) {
+      await supabase.appendAuditEvent(user.id, input)
       return
     }
     appendAuditEvent(input, {
@@ -475,8 +502,9 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
   ): Promise<ReturnType<typeof listAuditEvents>> {
-    return this.supabaseStore
-      ? this.supabaseStore.listAuditEvents(user.id)
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listAuditEvents(user.id)
       : listAuditEvents({
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -485,17 +513,23 @@ export class DashboardRepository {
   async getRuntimeEnv(
     userDataRoot?: string,
     userId?: string,
+    authToken?: string,
+    modelConfigId?: string,
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
     if (this.supabaseStore && userId) {
-      const [webTools, runtimeSettings] = await Promise.all([
-        this.supabaseStore.loadWebTools(userId),
-        this.supabaseStore.loadRuntimeSettings(userId),
-      ])
-      return {
-        ...mapWebToolsConfigToRuntimeEnv(webTools),
-        ...mapRuntimeSettingsToEnv(runtimeSettings, { dataDir }),
+      const client = this.options.supabaseRuntimeEnvClient
+      if (!client) {
+        throw new Error(
+          'Supabase runtime env must be provided by RLS/RPC; the local runtime host does not use service-role Supabase credentials',
+        )
       }
+      return client.loadRuntimeEnv({
+        userId,
+        dataDir,
+        authToken: this.requireAuthToken(authToken),
+        ...(modelConfigId ? { modelConfigId } : {}),
+      })
     }
     return {
       ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
@@ -503,15 +537,6 @@ export class DashboardRepository {
         dataDir,
       }),
     }
-  }
-
-  private async persistModelConfig(id: string): Promise<void> {
-    if (!this.supabaseStore) {
-      this.persistLocalModelConfigs()
-      return
-    }
-    const record = exportModelConfigSnapshot().find(config => config.id === id)
-    if (record) await this.supabaseStore.upsertModelConfig(record)
   }
 
   private persistLocalModelConfigs(): void {
@@ -530,5 +555,29 @@ export class DashboardRepository {
     )
     this.projectStores.set(dataRoot, created)
     return created
+  }
+
+  private supabaseForRequest(request?: Request): SupabaseDashboardStore | undefined {
+    if (!this.supabaseStore) return undefined
+    return this.supabaseStore.withAuthToken(request ? getBearerToken(request) : undefined)
+  }
+
+  private requireSupabaseForRequest(request: Request): SupabaseDashboardStore {
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase) throw new Error('Supabase repository is not configured')
+    return supabase
+  }
+
+  private supabaseForAuthToken(authToken: string | undefined): SupabaseDashboardStore {
+    if (!this.supabaseStore) throw new Error('Supabase repository is not configured')
+    return this.supabaseStore.withAuthToken(this.requireAuthToken(authToken))
+  }
+
+  private requireAuthToken(authToken: string | undefined): string {
+    const trimmed = authToken?.trim()
+    if (!trimmed) {
+      throw new Error('Supabase user token is required for local runtime storage')
+    }
+    return trimmed
   }
 }

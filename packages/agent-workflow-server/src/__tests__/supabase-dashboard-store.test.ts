@@ -304,15 +304,16 @@ describe('SupabaseDashboardStore', () => {
 
     const store = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
-      serviceRoleKey: 'service-role-key',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
     })
     const ownerId = '00000000-0000-0000-0000-000000000001'
 
-    expect(await store.loadModelConfigSnapshot()).toEqual([
+    expect(await store.listPublicModelConfigs(ownerId)).toEqual([
       expect.objectContaining({
         id: 'llm_1',
         ownerId,
-        apiKey: 'sk-secret',
+        apiKeyPreview: 'sk-s...cret',
       }),
     ])
     await store.upsertModelConfig({
@@ -518,108 +519,118 @@ describe('SupabaseDashboardStore', () => {
       .filter(call => call.method === 'POST')
       .map(call => JSON.stringify(call.body))
       .join('\n')
-    expect(postedBodies).not.toContain('sk-new-secret')
-    expect(postedBodies).not.toContain('brave-key')
-    expect(postedBodies).not.toContain('secret-token')
+    expect(postedBodies).toContain('sk-new-secret')
+    expect(postedBodies).toContain('brave-key')
+    expect(postedBodies).toContain('secret-token')
   })
 
-  test('manages default workspace members through Supabase REST', async () => {
+  test('sets default model configs through the Supabase RPC', async () => {
+    const ownerId = '00000000-0000-0000-0000-000000000001'
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
-    const workspace = {
-      id: '11111111-1111-1111-1111-111111111111',
-      owner_id: '00000000-0000-0000-0000-000000000001',
-      name: 'Default Workspace',
-    }
-    const members: Array<Record<string, unknown>> = [{
-      workspace_id: workspace.id,
-      user_id: '00000000-0000-0000-0000-000000000001',
-      role: 'owner',
+    const rows: Array<Record<string, unknown>> = [{
+      id: 'llm_existing',
+      owner_id: ownerId,
+      name: 'Existing LLM',
+      provider: 'openai-compatible',
+      base_url: 'https://llm.example/v1',
+      api_key_ciphertext: 'sk-existing',
+      models: { balanced: 'existing-model' },
+      is_default: true,
       created_at: '2026-06-27T00:00:00.000Z',
+      updated_at: '2026-06-27T00:00:00.000Z',
     }]
+
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
+      const method = init?.method ?? 'GET'
+      const body = init?.body
+        ? JSON.parse(String(init.body)) as Record<string, unknown>
+        : undefined
       calls.push({
         url: requestUrl,
-        method: init?.method ?? 'GET',
-        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        method,
+        ...(body ? { body } : {}),
       })
-      if (requestUrl.includes('/beegame_workspaces')) {
-        return Response.json([workspace])
+
+      if (requestUrl.includes('/rpc/beegame_set_default_model_config')) {
+        const configId = String(body?.p_model_config_id ?? '')
+        for (const row of rows) row.is_default = row.id === configId
+        const selected = rows.find(row => row.id === configId)
+        return selected
+          ? Response.json(selected)
+          : new Response('not found', { status: 404 })
       }
-      if (requestUrl.includes('/beegame_workspace_members')) {
-        if (init?.method === 'POST') {
-          const body = JSON.parse(String(init.body)) as Record<string, unknown>
-          const index = members.findIndex(row =>
-            row.workspace_id === body.workspace_id &&
-            row.user_id === body.user_id
-          )
+
+      if (requestUrl.includes('/beegame_model_configs')) {
+        if (method === 'POST') {
           const row = {
             created_at: '2026-06-27T00:00:00.000Z',
+            updated_at: '2026-06-27T00:00:00.000Z',
             ...body,
           }
-          if (index >= 0) {
-            members[index] = row
-          } else {
-            members.push(row)
-          }
+          rows.push(row)
           return Response.json([row])
         }
-        if (init?.method === 'DELETE') {
-          const userId = decodeURIComponent(
-            requestUrl.split('user_id=eq.')[1]?.split('&')[0] ?? '',
+        if (method === 'PATCH') {
+          const id = decodeURIComponent(
+            requestUrl.split('id=eq.')[1]?.split('&')[0] ?? '',
           )
-          const deleted = members.filter(row => row.user_id === userId)
-          for (const row of deleted) members.splice(members.indexOf(row), 1)
-          return Response.json(deleted)
+          const index = rows.findIndex(row => row.id === id)
+          if (index < 0) return Response.json([])
+          rows[index] = { ...rows[index], ...body }
+          return Response.json([rows[index]])
         }
-        return Response.json(members)
+        return Response.json(rows)
       }
+
       return new Response('Not found', { status: 404 })
     }) as typeof fetch
+
     const store = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
-      serviceRoleKey: 'service-role-key',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
     })
 
-    await expect(
-      store.listWorkspaceMembers('00000000-0000-0000-0000-000000000001'),
-    ).resolves.toEqual([
-      {
-        workspaceId: workspace.id,
-        userId: '00000000-0000-0000-0000-000000000001',
-        role: 'owner',
-        createdAt: '2026-06-27T00:00:00.000Z',
-      },
-    ])
-    await expect(store.upsertWorkspaceMember(
-      '00000000-0000-0000-0000-000000000001',
-      {
-        userId: '00000000-0000-0000-0000-000000000002',
-        role: 'developer',
-      },
-    )).resolves.toEqual({
-      workspaceId: workspace.id,
-      userId: '00000000-0000-0000-0000-000000000002',
-      role: 'developer',
-      createdAt: '2026-06-27T00:00:00.000Z',
+    const created = await store.createModelConfig(ownerId, {
+      name: 'New Default',
+      provider: 'openai-compatible',
+      baseUrl: 'https://new-llm.example/v1',
+      apiKey: 'sk-new',
+      models: { balanced: 'new-model' },
+      isDefault: true,
     })
-    await expect(store.deleteWorkspaceMember(
-      '00000000-0000-0000-0000-000000000001',
-      '00000000-0000-0000-0000-000000000002',
-    )).resolves.toBe(true)
-    await expect(store.deleteWorkspaceMember(
-      '00000000-0000-0000-0000-000000000001',
-      '00000000-0000-0000-0000-000000000001',
-    )).rejects.toThrow('Cannot remove the workspace owner')
+    expect(created.isDefault).toBe(true)
 
+    await expect(store.updateModelConfig(ownerId, 'llm_existing', {
+      isDefault: true,
+    })).resolves.toEqual(expect.objectContaining({
+      id: 'llm_existing',
+      isDefault: true,
+    }))
+
+    const modelPosts = calls.filter(call =>
+      call.url.includes('/rest/v1/beegame_model_configs') &&
+      call.method === 'POST'
+    )
+    expect(modelPosts[0]?.body).toEqual(expect.objectContaining({
+      is_default: false,
+    }))
+    const directDefaultWrites = calls.filter(call =>
+      call.url.includes('/rest/v1/beegame_model_configs') &&
+      JSON.stringify(call.body ?? {}).includes('"is_default":true')
+    )
+    expect(directDefaultWrites).toHaveLength(0)
+    expect(calls.filter(call =>
+      call.url.includes('/rest/v1/rpc/beegame_set_default_model_config')
+    )).toHaveLength(2)
     expect(calls.some(call =>
-      call.url.includes('/rest/v1/beegame_workspace_members') &&
-      call.method === 'POST' &&
-      (call.body as Record<string, unknown>).role === 'developer',
-    )).toBe(true)
+      call.url.includes('/rest/v1/beegame_model_configs') &&
+      call.url.includes('is_default=eq.true')
+    )).toBe(false)
   })
 
-  test('uses a dedicated secrets key while preserving service-role encrypted secrets', async () => {
+  test('stores RLS-protected secrets without depending on a local encryption key', async () => {
     let row = {
       id: 'llm_1',
       owner_id: '00000000-0000-0000-0000-000000000001',
@@ -634,6 +645,10 @@ describe('SupabaseDashboardStore', () => {
     }
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
+      if (requestUrl.includes('/rpc/beegame_set_default_model_config')) {
+        row = { ...row, is_default: true }
+        return Response.json(row)
+      }
       if (requestUrl.includes('/beegame_model_configs')) {
         if (init?.method === 'POST') {
           row = JSON.parse(String(init.body)) as typeof row
@@ -646,7 +661,8 @@ describe('SupabaseDashboardStore', () => {
 
     const legacyStore = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
-      serviceRoleKey: 'service-role-key-v1',
+      anonKey: 'anon-key-v1',
+      authToken: 'user-token',
     })
     await legacyStore.upsertModelConfig({
       id: 'llm_1',
@@ -661,15 +677,15 @@ describe('SupabaseDashboardStore', () => {
       updatedAt: row.updated_at,
     })
     const legacyCiphertext = row.api_key_ciphertext
-    expect(legacyCiphertext).not.toContain('sk-legacy-secret')
+    expect(legacyCiphertext).toBe('sk-legacy-secret')
 
     const storeWithDedicatedKey = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
-      serviceRoleKey: 'service-role-key-v1',
-      secretKey: 'stable-beegame-secret-key',
+      anonKey: 'anon-key-v1',
+      authToken: 'user-token',
     })
-    expect(await storeWithDedicatedKey.loadModelConfigSnapshot()).toEqual([
-      expect.objectContaining({ apiKey: 'sk-legacy-secret' }),
+    expect(await storeWithDedicatedKey.listPublicModelConfigs(row.owner_id)).toEqual([
+      expect.objectContaining({ apiKeyPreview: 'sk-l...cret' }),
     ])
 
     await storeWithDedicatedKey.upsertModelConfig({
@@ -686,15 +702,15 @@ describe('SupabaseDashboardStore', () => {
     })
     const dedicatedCiphertext = row.api_key_ciphertext
     expect(dedicatedCiphertext).not.toBe(legacyCiphertext)
-    expect(dedicatedCiphertext).not.toContain('sk-new-secret')
+    expect(dedicatedCiphertext).toBe('sk-new-secret')
 
-    const rotatedServiceRoleStore = new SupabaseDashboardStore({
+    const rotatedAnonKeyStore = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
-      serviceRoleKey: 'service-role-key-v2',
-      secretKey: 'stable-beegame-secret-key',
+      anonKey: 'anon-key-v2',
+      authToken: 'user-token',
     })
-    expect(await rotatedServiceRoleStore.loadModelConfigSnapshot()).toEqual([
-      expect.objectContaining({ apiKey: 'sk-new-secret' }),
+    expect(await rotatedAnonKeyStore.listPublicModelConfigs(row.owner_id)).toEqual([
+      expect.objectContaining({ apiKeyPreview: 'sk-n...cret' }),
     ])
   })
 })

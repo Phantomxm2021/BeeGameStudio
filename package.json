@@ -66,6 +66,7 @@
     "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs",
     "docs:dev": "npx mintlify dev",
     "dashboard:dev": "bun run scripts/dashboard-dev.ts",
+    "supabase:smoke": "bun run scripts/smoke-beegame-supabase.ts",
     "typecheck": "tsc --noEmit",
     "precheck": "bun run typecheck && bun run check:fix && bun test",
     "rcs": "bun run scripts/rcs.ts"

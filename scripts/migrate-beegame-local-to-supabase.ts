@@ -19,12 +19,23 @@ async function main(): Promise<void> {
   if (!options.ownerId) {
     throw new Error('Missing --owner-id <supabase-user-id>')
   }
-  const store = createSupabaseDashboardStoreFromEnv()
-  if (!store) {
+  const baseStore = createSupabaseDashboardStoreFromEnv()
+  if (!baseStore) {
     throw new Error(
-      'Supabase is not configured. Set BEEGAME_SUPABASE_URL and BEEGAME_SUPABASE_SERVICE_ROLE_KEY.',
+      'Supabase is not configured. Set BEEGAME_SUPABASE_URL and BEEGAME_SUPABASE_ANON_KEY or VITE_SUPABASE_ANON_KEY.',
     )
   }
+  const authToken = (
+    process.env.BEEGAME_SUPABASE_ACCESS_TOKEN ??
+    process.env.SUPABASE_ACCESS_TOKEN ??
+    ''
+  ).trim()
+  if (!authToken) {
+    throw new Error(
+      'Missing Supabase user token. Set BEEGAME_SUPABASE_ACCESS_TOKEN for the target owner.',
+    )
+  }
+  const store = baseStore.withAuthToken(authToken)
   const summary = await migrateBeeGameLocalDashboardData({
     ownerId: options.ownerId,
     dataDir: options.dataDir,
@@ -78,6 +89,7 @@ function printHelp(): void {
 
 Defaults:
   --data-dir uses BEEGAME_MIGRATION_DATA_DIR, AGENT_WORKFLOW_DATA_DIR, or ~/.beegame/dashboard.
+  Supabase access uses BEEGAME_SUPABASE_URL, BEEGAME_SUPABASE_ANON_KEY or VITE_SUPABASE_ANON_KEY, and BEEGAME_SUPABASE_ACCESS_TOKEN.
   Without --apply, the command only prints a dry-run summary.
 `)
 }

@@ -183,6 +183,8 @@ const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
 const USER_QUESTION_TOOL = 'AskUserQuestion';
 const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ?? '').trim();
+const ALLOW_CLIENT_WORKSPACE_ROOT = String(import.meta.env.VITE_BEEGAME_ALLOW_CLIENT_WORKSPACE_ROOT ?? '').trim() === '1' ||
+  import.meta.env.MODE === 'test';
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
 const CONTINUE_FROM_LAST_FAILED_CHECK_ACTION = 'continue_from_last_failed_check';
 const missingRuntimeSessionIds = new Set<string>();
@@ -205,6 +207,9 @@ export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSet
 }
 
 export function setBeeGameWorkspaceRoot(path: string): BeeGameWorkspaceSettings {
+  if (!ALLOW_CLIENT_WORKSPACE_ROOT) {
+    throw new Error('Workspace root is managed by the server deployment');
+  }
   const normalized = path.trim();
   if (!isAbsolutePath(normalized)) {
     throw new Error('工作路径必须是绝对路径');
@@ -214,6 +219,9 @@ export function setBeeGameWorkspaceRoot(path: string): BeeGameWorkspaceSettings 
 }
 
 export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSettings> {
+  if (!ALLOW_CLIENT_WORKSPACE_ROOT) {
+    return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
+  }
   localStorage.removeItem(WORKSPACE_ROOT_KEY);
   return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
 }
@@ -870,6 +878,7 @@ function rememberWorkspace(path?: string): void {
 }
 
 function readConfiguredWorkspaceRoot(): string {
+  if (!ALLOW_CLIENT_WORKSPACE_ROOT) return '';
   const value = String(localStorage.getItem(WORKSPACE_ROOT_KEY) || '').trim();
   return isAbsolutePath(value) ? value : '';
 }

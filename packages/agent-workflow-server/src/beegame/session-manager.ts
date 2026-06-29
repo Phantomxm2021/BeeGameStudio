@@ -146,6 +146,7 @@ type SessionRecord = {
   session: BeeGameSession
   runtime: RuntimeModelConfig | undefined
   userId: string
+  authToken?: string
   projectId?: string
   userDataRoot?: string
   transcriptPath: string
@@ -171,6 +172,7 @@ export type StartBeeGameSessionInput = {
   modelConfigId?: string
   transcriptSessionId?: string
   userId: string
+  authToken?: string
   userDataRoot?: string
 }
 
@@ -195,6 +197,7 @@ export type BeeGameSessionCreditBackend = {
       kind?: string
       projectId?: string
       metadata?: Record<string, unknown>
+      authToken?: string
     },
   ) => CreditReservation | Promise<CreditReservation>
   settleCreditReservation: (
@@ -205,6 +208,7 @@ export type BeeGameSessionCreditBackend = {
       weightedTokens: number
       projectId?: string
       metadata?: Record<string, unknown>
+      authToken?: string
     },
   ) => CreditSettlement | Promise<CreditSettlement>
   refundCreditReservation: (
@@ -214,6 +218,7 @@ export type BeeGameSessionCreditBackend = {
       reservationId: string
       projectId?: string
       metadata?: Record<string, unknown>
+      authToken?: string
     },
   ) => CreditSettlement | Promise<CreditSettlement>
 }
@@ -234,8 +239,11 @@ export class BeeGameSessionManager {
     private readonly getAdditionalRuntimeEnv: (
       userDataRoot?: string,
       userId?: string,
+      authToken?: string,
+      modelConfigId?: string,
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly creditBackend: BeeGameSessionCreditBackend = localCreditBackend,
+    private readonly allowExternalRuntimeEnv = false,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -253,7 +261,7 @@ export class BeeGameSessionManager {
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
       : undefined
-    if (input.modelConfigId && !runtime) {
+    if (input.modelConfigId && !runtime && !this.allowExternalRuntimeEnv) {
       throw new Error('Model config not found')
     }
 
@@ -281,6 +289,7 @@ export class BeeGameSessionManager {
       session,
       runtime,
       userId: input.userId,
+      ...(input.authToken ? { authToken: input.authToken } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
       transcriptPath: recoveredTranscript?.path ??
@@ -356,7 +365,9 @@ export class BeeGameSessionManager {
       throw new Error('Session is already processing a prompt')
     }
     const runtime = mapModelConfigToRuntime(modelConfigId)
-    if (!runtime) throw new Error('Model config not found')
+    if (!runtime && !this.allowExternalRuntimeEnv) {
+      throw new Error('Model config not found')
+    }
 
     record.runtime = runtime
     record.session.modelConfigId = modelConfigId
@@ -434,6 +445,7 @@ export class BeeGameSessionManager {
       displayText?: string
       displayKind?: string
       taskType?: BeeGameCreditTaskType
+      authToken?: string
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -444,6 +456,7 @@ export class BeeGameSessionManager {
     if (record.session.turnStatus !== 'idle') {
       throw new Error('Session is already processing a prompt')
     }
+    if (display?.authToken) record.authToken = display.authToken
 
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
@@ -577,7 +590,12 @@ export class BeeGameSessionManager {
         cwd: record.session.cwd,
         env: buildRuntimeEnv(
           record.runtime,
-          await this.getAdditionalRuntimeEnv(record.userDataRoot, record.userId),
+          await this.getAdditionalRuntimeEnv(
+            record.userDataRoot,
+            record.userId,
+            record.authToken,
+            record.session.modelConfigId,
+          ),
         ),
       })
       record.runner = runner
@@ -966,6 +984,7 @@ export class BeeGameSessionManager {
           workspacePath: record.session.cwd,
           ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
         },
+        ...(record.authToken ? { authToken: record.authToken } : {}),
       })
     } catch (err) {
       this.append(record, 'system.status', toErrorMessage(err), {
@@ -1000,6 +1019,7 @@ export class BeeGameSessionManager {
         totalTokens: usage.total_tokens,
         previousSettledTotalTokens: record.lastSettledTotalTokens,
       },
+      ...(record.authToken ? { authToken: record.authToken } : {}),
     })
     record.lastSettledTotalTokens = usage.total_tokens
     this.append(record, 'system.status', 'Credit settled', {
@@ -1026,6 +1046,7 @@ export class BeeGameSessionManager {
           sessionId: record.session.id,
           reason: 'turn_finished_without_billable_usage',
         },
+        ...(record.authToken ? { authToken: record.authToken } : {}),
       })
       this.append(record, 'system.status', 'Credit reservation refunded', {
         type: 'credit.refunded',

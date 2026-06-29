@@ -17,9 +17,6 @@ const { getCreditBalance, getCreditLedger, getCreditQuote } = vi.hoisted(() => (
     getCreditLedger: vi.fn(),
     getCreditQuote: vi.fn(),
 }));
-const { deleteCurrentUser } = vi.hoisted(() => ({
-    deleteCurrentUser: vi.fn(),
-}));
 const {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
@@ -129,10 +126,6 @@ vi.mock('../../services/creditsApi', () => ({
     getCreditBalance,
     getCreditLedger,
     getCreditQuote,
-}));
-
-vi.mock('../../services/currentUserApi', () => ({
-    deleteCurrentUser,
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
@@ -246,8 +239,6 @@ beforeEach(() => {
     mockSetActiveProject.mockReset();
     mockLoadCurrentUser.mockReset();
     mockLoadCurrentUser.mockResolvedValue(undefined);
-    deleteCurrentUser.mockReset();
-    deleteCurrentUser.mockResolvedValue({ deleted: true });
     mockCurrentUser = {
         id: 'alice',
         role: 'owner',
@@ -474,7 +465,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
     });
 
-    it('requires confirmation before deleting the signed-in account', async () => {
+    it('does not expose account deletion from the local runtime host profile', async () => {
         mockCurrentUser = {
             id: 'alice',
             email: 'alice@example.com',
@@ -486,15 +477,8 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
-        fireEvent.click(await screen.findByRole('button', { name: '注销账户' }));
 
-        expect(screen.getByText('注销账户会删除云端账号和关联数据。')).toBeInTheDocument();
-        fireEvent.change(screen.getByLabelText('注销账户确认'), { target: { value: 'DELETE' } });
-        fireEvent.click(screen.getByRole('button', { name: '确认注销' }));
-
-        await waitFor(() => expect(deleteCurrentUser).toHaveBeenCalledTimes(1));
-        expect(clearSupabaseSession).toHaveBeenCalledTimes(1);
-        expect(mockLoadCurrentUser).toHaveBeenCalled();
+        expect(screen.queryByRole('button', { name: '注销账户' })).not.toBeInTheDocument();
     });
 
     it('closes the account menu when clicking outside it', async () => {

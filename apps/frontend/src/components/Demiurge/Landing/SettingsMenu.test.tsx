@@ -17,17 +17,12 @@ const {
     getRuntimeSettings,
     listModelConfigs,
     listMcpServers,
-    resetBeeGameWorkspaceRoot,
     saveRuntimeSettings,
     saveWebToolsConfig,
     setBeeGameSubagentsEnabled,
-    setBeeGameWorkspaceRoot,
     testMcpServer,
     updateMcpServer,
     updateModelConfig,
-    listWorkspaceMembers,
-    upsertWorkspaceMember,
-    deleteWorkspaceMember,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
     createMcpServer: vi.fn(),
@@ -40,17 +35,12 @@ const {
     getRuntimeSettings: vi.fn(),
     listModelConfigs: vi.fn(),
     listMcpServers: vi.fn(),
-    resetBeeGameWorkspaceRoot: vi.fn(),
     saveRuntimeSettings: vi.fn(),
     saveWebToolsConfig: vi.fn(),
     setBeeGameSubagentsEnabled: vi.fn(),
-    setBeeGameWorkspaceRoot: vi.fn(),
     testMcpServer: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
-    listWorkspaceMembers: vi.fn(),
-    upsertWorkspaceMember: vi.fn(),
-    deleteWorkspaceMember: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -66,9 +56,7 @@ vi.mock('../../../services/modelConfigApi', () => ({
 vi.mock('../../../services/beeGameAdapter', () => ({
     getBeeGameWorkspaceSettings,
     getBeeGameSubagentsEnabled,
-    resetBeeGameWorkspaceRoot,
     setBeeGameSubagentsEnabled,
-    setBeeGameWorkspaceRoot,
 }));
 
 vi.mock('../../../services/webToolsApi', () => ({
@@ -91,19 +79,13 @@ vi.mock('../../../services/mcpServersApi', () => ({
     updateMcpServer,
 }));
 
-vi.mock('../../../services/workspaceMembersApi', () => ({
-    listWorkspaceMembers,
-    upsertWorkspaceMember,
-    deleteWorkspaceMember,
-}));
-
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
     <SettingsMenu
         isOpen
         lang="zh"
         onClose={vi.fn()}
         onSetLang={vi.fn()}
-        mode="admin"
+        scope="admin"
         canManageWorkspace
         canManageSecrets
         canManageRuntimeSettings
@@ -151,27 +133,14 @@ describe('SettingsMenu model settings', () => {
         createModelConfig.mockReset();
         getBeeGameSubagentsEnabled.mockReturnValue(true);
         setBeeGameSubagentsEnabled.mockReset();
-        setBeeGameWorkspaceRoot.mockReset();
-        resetBeeGameWorkspaceRoot.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
-        listWorkspaceMembers.mockReset();
-        listWorkspaceMembers.mockResolvedValue([]);
-        upsertWorkspaceMember.mockReset();
-        upsertWorkspaceMember.mockResolvedValue({
-            workspaceId: 'workspace-1',
-            userId: 'user-2',
-            role: 'developer',
-            createdAt: '2026-06-27T00:00:00.000Z',
-        });
-        deleteWorkspaceMember.mockReset();
-        deleteWorkspaceMember.mockResolvedValue({ deleted: true });
     });
 
-    it('renders the settings panel as a centered modal overlay', () => {
+    it('renders the settings panel as a centered modal overlay', async () => {
         renderSettings();
 
-        const dialog = screen.getByRole('dialog', { name: '系统设置' });
+        const dialog = screen.getByRole('dialog', { name: '系统管理' });
         expect(dialog.className).toContain('items-center');
         expect(dialog.className).toContain('justify-center');
         expect(dialog.className).toContain('bg-zinc-950/55');
@@ -186,7 +155,7 @@ describe('SettingsMenu model settings', () => {
         expect(settingsContent).toBeInTheDocument();
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
-        expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: '部署' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
@@ -198,7 +167,8 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('switch', { name: 'Auto Memory' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
-        expect(screen.getByLabelText('工作路径')).toBeInTheDocument();
+        await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
+        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
         expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存工作路径' })).not.toBeInTheDocument();
@@ -223,12 +193,12 @@ describe('SettingsMenu model settings', () => {
             canManageModelConfig: false,
         });
 
-        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '部署' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.queryByRole('combobox', { name: '语言选择' })).not.toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
@@ -237,10 +207,9 @@ describe('SettingsMenu model settings', () => {
         expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
-        expect(listWorkspaceMembers).not.toHaveBeenCalled();
     });
 
-    it('keeps normal settings limited to personal preferences', () => {
+    it('keeps settings limited to personal preferences without management permissions', () => {
         listModelConfigs.mockClear();
         getBeeGameWorkspaceSettings.mockClear();
         getWebToolsConfig.mockClear();
@@ -248,13 +217,12 @@ describe('SettingsMenu model settings', () => {
         listMcpServers.mockClear();
 
         renderSettings({
-            mode: 'settings',
-            canManageWorkspace: true,
-            canManageSecrets: true,
-            canManageRuntimeSettings: true,
-            canManageMcp: true,
-            canManageModelConfig: true,
-            canManageWorkspaceMembers: true,
+            scope: 'user',
+            canManageWorkspace: false,
+            canManageSecrets: false,
+            canManageRuntimeSettings: false,
+            canManageMcp: false,
+            canManageModelConfig: false,
         });
 
         expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
@@ -270,43 +238,6 @@ describe('SettingsMenu model settings', () => {
         expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
-        expect(listWorkspaceMembers).not.toHaveBeenCalled();
-    });
-
-    it('manages workspace members when the user has member permissions', async () => {
-        listWorkspaceMembers.mockResolvedValue([
-            {
-                workspaceId: 'workspace-1',
-                userId: 'user-1',
-                role: 'owner',
-                createdAt: '2026-06-27T00:00:00.000Z',
-            },
-            {
-                workspaceId: 'workspace-1',
-                userId: 'user-2',
-                role: 'developer',
-                createdAt: '2026-06-27T00:00:00.000Z',
-            },
-        ]);
-        renderSettings({ canManageWorkspaceMembers: true });
-
-        await userEvent.click(screen.getByRole('tab', { name: '成员' }));
-
-        expect(await screen.findByText('user-1')).toBeInTheDocument();
-        expect(screen.getByText('user-2')).toBeInTheDocument();
-        expect(screen.getAllByText('developer').length).toBeGreaterThan(0);
-
-        await userEvent.type(screen.getByLabelText('成员 User ID'), 'user-3');
-        await userEvent.selectOptions(screen.getByLabelText('成员角色'), 'reviewer');
-        await userEvent.click(screen.getByRole('button', { name: '保存成员' }));
-
-        expect(upsertWorkspaceMember).toHaveBeenCalledWith('user-3', 'reviewer');
-        await waitFor(() => {
-            expect(listWorkspaceMembers).toHaveBeenCalledTimes(2);
-        });
-
-        await userEvent.click(screen.getByRole('button', { name: '移除 user-2' }));
-        expect(deleteWorkspaceMember).toHaveBeenCalledWith('user-2');
     });
 
     it('keeps the settings chrome and controls visually consistent', async () => {
@@ -325,17 +256,13 @@ describe('SettingsMenu model settings', () => {
         const onClose = vi.fn();
         renderSettings({ onClose });
 
-        await userEvent.click(screen.getByRole('dialog', { name: '系统设置' }));
+        await userEvent.click(screen.getByRole('dialog', { name: '系统管理' }));
 
         expect(onClose).not.toHaveBeenCalled();
     });
 
     it('closes after saving settings successfully', async () => {
         const onClose = vi.fn();
-        setBeeGameWorkspaceRoot.mockReturnValue({
-            workspacePath: '/tmp/beegame-projects',
-            isDefault: true,
-        });
         saveWebToolsConfig.mockResolvedValue({
             webSearchAdapter: 'tavily',
         });
@@ -542,10 +469,6 @@ describe('SettingsMenu model settings', () => {
             bashClassifierEnabled: false,
             mcpSkillsEnabled: false,
         });
-        setBeeGameWorkspaceRoot.mockReturnValue({
-            workspacePath: '/tmp/beegame-projects',
-            isDefault: true,
-        });
         saveWebToolsConfig.mockResolvedValue({
             webSearchAdapter: 'tavily',
         });
@@ -579,42 +502,31 @@ describe('SettingsMenu model settings', () => {
         expect(setBeeGameSubagentsEnabled).toHaveBeenCalledWith(false);
     });
 
-    it('saves general settings from the footer and can reset to the default Projects path', async () => {
+    it('keeps deployment workspace root read-only and saves web search settings from the footer', async () => {
         getBeeGameWorkspaceSettings.mockResolvedValueOnce({
             workspacePath: '/tmp/beegame-projects',
             isDefault: true,
         });
-        resetBeeGameWorkspaceRoot.mockResolvedValue({
-            workspacePath: '/tmp/beegame-projects',
-            isDefault: true,
-        });
-        setBeeGameWorkspaceRoot.mockReturnValue({
-            workspacePath: '/tmp/custom-beegame-projects',
-            isDefault: false,
+        getWebToolsConfig.mockResolvedValueOnce({
+            webSearchAdapter: 'tavily',
         });
 
         renderSettings();
 
-        const input = await screen.findByLabelText('工作路径');
-        expect(input).toHaveValue('/tmp/beegame-projects');
-
-        await userEvent.clear(input);
-        await userEvent.type(input, '/tmp/custom-beegame-projects');
+        expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
+        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '恢复默认' })).not.toBeInTheDocument();
+        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
+        await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
-        await waitFor(() => expect(setBeeGameWorkspaceRoot).toHaveBeenCalledWith('/tmp/custom-beegame-projects'));
         await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
-            webSearchAdapter: 'tavily',
+            webSearchAdapter: 'brave',
+            braveApiKey: 'bsa-dashboard-secret',
         }));
         expect(saveRuntimeSettings).not.toHaveBeenCalled();
         expect(setBeeGameSubagentsEnabled).not.toHaveBeenCalled();
         expect(screen.queryByText('工作路径已保存')).not.toBeInTheDocument();
-
-        await userEvent.click(screen.getByRole('button', { name: '恢复默认' }));
-
-        await waitFor(() => expect(resetBeeGameWorkspaceRoot).toHaveBeenCalled());
-        expect(input).toHaveValue('/tmp/beegame-projects');
-        expect(screen.queryByText('已恢复默认工作路径')).not.toBeInTheDocument();
     });
 
     it('shows compact tiered model fields and saves a new default model config', async () => {

@@ -112,14 +112,16 @@ The code should not care whether Supabase is managed or self-hosted. It should u
 
 ```text
 BEEGAME_SUPABASE_URL
-BEEGAME_SUPABASE_ANON_KEY
-BEEGAME_SUPABASE_SERVICE_ROLE_KEY
-BEEGAME_SECRETS_KEY
+BEEGAME_SUPABASE_ANON_KEY or VITE_SUPABASE_ANON_KEY
 BEEGAME_SUPABASE_ASSET_BUCKET
 SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL
 BEEGAME_DATA_DIR
 BEEGAME_PROJECTS_ROOT
 ```
+
+Service-role credentials must not be configured in the local Runtime Host. The
+current production path should use Supabase RLS and RPC with the user's access
+token.
 
 Frontend uses the anon key and Supabase client for login/session handling:
 
@@ -129,9 +131,9 @@ VITE_SUPABASE_ANON_KEY
 VITE_SUPABASE_AVATAR_BUCKET
 ```
 
-Backend uses service role only for trusted server-side metadata operations. The service role key must never be exposed to frontend code.
-
-`BEEGAME_SECRETS_KEY` is the server-side encryption key for model API keys, web search keys, and MCP environment secrets before they are written to Supabase. It should be generated once per deployment and kept stable across service-role key rotation. If it is omitted, BeeGame falls back to service-role-derived encryption for local development and reads legacy rows written that way, but production deployments should set it explicitly.
+Runtime Host uses the user's Supabase access token only. Data access should go
+through RLS and RPC; service-role credentials and separate server-side secret
+encryption keys are not part of the local Runtime Host configuration.
 
 Local dashboard data can be migrated into the authenticated Supabase owner scope with:
 
@@ -139,7 +141,19 @@ Local dashboard data can be migrated into the authenticated Supabase owner scope
 bun scripts/migrate-beegame-local-to-supabase.ts --owner-id <supabase-user-id> --data-dir <local-dashboard-data-dir>
 ```
 
-The command is dry-run by default. Add `--apply` only after the printed summary is correct. It migrates the local project index, model configs, runtime settings, web tool settings, and MCP servers. Transcript files remain in project folders and are not inserted into Postgres.
+The command is dry-run by default. It uses `BEEGAME_SUPABASE_URL`, `BEEGAME_SUPABASE_ANON_KEY`, and the target user's `BEEGAME_SUPABASE_ACCESS_TOKEN`; it does not use a service role key. Add `--apply` only after the printed summary is correct. It migrates the local project index, model configs, runtime settings, web tool settings, and MCP servers. Transcript files remain in project folders and are not inserted into Postgres.
+
+After applying the schema, validate the real Supabase RLS/RPC path with:
+
+```bash
+BEEGAME_SUPABASE_URL=... \
+BEEGAME_SUPABASE_ANON_KEY=... \
+BEEGAME_SUPABASE_ACCESS_TOKEN=... \
+BEEGAME_SUPABASE_USER_ID=... \
+bun run supabase:smoke
+```
+
+The smoke script calls `beegame_current_user_context` and `beegame_runtime_env` with the user's token and prints only redacted runtime env values.
 
 ## Data Model
 
@@ -286,6 +300,8 @@ create unique index model_configs_one_default_per_owner
   on model_configs(owner_id)
   where is_default = true;
 ```
+
+Default switching should use a Supabase RPC that verifies `auth.uid()`, clears the previous default, and marks the selected config as default in one database transaction. The local Runtime Host must not implement this as a two-step "clear default, then update selected row" operation.
 
 ### runtime_settings
 
@@ -875,8 +891,7 @@ Static scans:
 
 - Local filesystem isolation is stricter than database isolation. A bug in path resolution could expose another user's generated project.
 - Preview processes are OS-level child processes; owner checks must happen before process control.
-- Model API keys are sensitive and need encryption from the first multi-user release.
-- MCP env values and web search keys have the same sensitivity as model API keys.
+- Model API keys, MCP env values, and web search keys are sensitive. The current local Runtime Host design protects them with Supabase Auth + RLS and only retrieves them when the user starts a local runtime task. If production requirements demand stronger at-rest isolation, move those values to Supabase Vault/RPC without adding a service-role path to the local Runtime Host.
 - Machine-level MCP discovery can accidentally expose local developer config unless discovery candidates are explicitly imported per user.
 - Runtime snapshots can leak project activity and model usage if not owner-scoped.
 - Deployment-level admin can become too powerful if it is treated as project owner. Keep admin and project content roles separate.

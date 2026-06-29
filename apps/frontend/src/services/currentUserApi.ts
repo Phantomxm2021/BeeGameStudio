@@ -5,7 +5,6 @@ export type BeeGameRole = 'owner' | 'developer' | 'reviewer' | 'viewer';
 export type BeeGamePermission =
   | 'workspace.read'
   | 'workspace.manage'
-  | 'workspace.manage_members'
   | 'project.read'
   | 'project.create'
   | 'project.delete'
@@ -35,10 +34,6 @@ export const getCurrentUser = (): Promise<BeeGameCurrentUser> => (
   apiClient.get('/api/current-user', {
     headers: { 'Hide-Error-Toast': 'true' },
   })
-);
-
-export const deleteCurrentUser = (): Promise<{ deleted: true }> => (
-  apiClient.delete('/api/current-user')
 );
 
 export const hasPermission = (

@@ -1,11 +1,10 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto'
-import type { ModelConfigSnapshotRecord } from '@claude-code-best/agent-workflow'
+import { randomUUID } from 'node:crypto'
+import type {
+  ModelConfigInput,
+  ModelConfigSnapshotRecord,
+  ModelConfigUpdate,
+  PublicModelConfig,
+} from '@claude-code-best/agent-workflow'
 import {
   CREDIT_UNIT_WEIGHTED_TOKENS,
   getCreditEstimates,
@@ -33,7 +32,6 @@ import type {
   AppendAuditEventInput,
   BeeGameAuditEvent,
 } from './audit-events-store'
-import type { BeeGameRole } from './auth/user-context'
 import type { BeeGameAssetManifest } from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import type {
@@ -46,8 +44,8 @@ type Env = Record<string, string | undefined>
 
 type SupabaseConfig = {
   url: string
-  serviceRoleKey: string
-  secretKey?: string
+  anonKey: string
+  authToken?: string
   assetBucket?: string
   fetchImpl?: typeof fetch
 }
@@ -93,20 +91,6 @@ type SupabaseWorkspaceRow = {
   id: string
   owner_id: string
   name: string
-}
-
-type SupabaseWorkspaceMemberRow = {
-  workspace_id: string
-  user_id: string
-  role: BeeGameRole
-  created_at: string
-}
-
-export type BeeGameWorkspaceMember = {
-  workspaceId: string
-  userId: string
-  role: BeeGameRole
-  createdAt: string
 }
 
 type SupabaseProjectRow = {
@@ -215,21 +199,16 @@ export function createSupabaseDashboardStoreFromEnv(
     env.SUPABASE_URL ??
     ''
   ).trim()
-  const serviceRoleKey = (
-    env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
-    env.SUPABASE_SERVICE_ROLE_KEY ??
+  const anonKey = (
+    env.BEEGAME_SUPABASE_ANON_KEY ??
+    env.SUPABASE_ANON_KEY ??
+    env.VITE_SUPABASE_ANON_KEY ??
     ''
   ).trim()
-  if (!url || !serviceRoleKey) return undefined
+  if (!url || !anonKey) return undefined
   return new SupabaseDashboardStore({
     url,
-    serviceRoleKey,
-    secretKey: (
-      env.BEEGAME_SECRETS_KEY ??
-      env.BEEGAME_SECRET_KEY ??
-      env.SUPABASE_SECRETS_KEY ??
-      ''
-    ).trim() || undefined,
+    anonKey,
     assetBucket: (
       env.BEEGAME_SUPABASE_ASSET_BUCKET ??
       env.SUPABASE_ASSET_BUCKET ??
@@ -240,52 +219,109 @@ export function createSupabaseDashboardStoreFromEnv(
 
 export class SupabaseDashboardStore {
   private readonly baseUrl: string
-  private readonly serviceRoleKey: string
+  private readonly anonKey: string
+  private readonly authToken?: string
   private readonly assetBucket: string
   private readonly fetchImpl: typeof fetch
-  private readonly encryptSecretKey: Buffer
-  private readonly decryptSecretKeys: readonly Buffer[]
   private readonly workspaceIds = new Map<string, string>()
 
   constructor(config: SupabaseConfig) {
     this.baseUrl = config.url.replace(/\/+$/, '')
-    this.serviceRoleKey = config.serviceRoleKey
+    this.anonKey = config.anonKey
+    this.authToken = trimString(config.authToken) || undefined
     this.assetBucket = config.assetBucket || 'beegame-assets'
     this.fetchImpl = config.fetchImpl ?? fetch
-    const primarySecret = trimString(config.secretKey) || config.serviceRoleKey
-    this.encryptSecretKey = deriveSecretKey(primarySecret)
-    const fallbackKeys = [this.encryptSecretKey]
-    if (primarySecret !== config.serviceRoleKey) {
-      fallbackKeys.push(deriveSecretKey(config.serviceRoleKey))
-    }
-    this.decryptSecretKeys = fallbackKeys
   }
 
-  async deleteAuthUser(userId: string): Promise<void> {
-    const id = userId.trim()
-    if (!id) throw new Error('User id is required')
-    await this.rest<void>(
-      `/auth/v1/admin/users/${encodeURIComponent(id)}`,
-      { method: 'DELETE' },
+  withAuthToken(authToken: string | undefined): SupabaseDashboardStore {
+    const trimmed = trimString(authToken)
+    return new SupabaseDashboardStore({
+      url: this.baseUrl,
+      anonKey: this.anonKey,
+      ...(trimmed ? { authToken: trimmed } : {}),
+      assetBucket: this.assetBucket,
+      fetchImpl: this.fetchImpl,
+    })
+  }
+
+  async deleteAuthUser(_userId: string): Promise<void> {
+    throw new Error(
+      'Supabase Auth admin operations must run in Supabase RPC or a deployment-side service',
     )
   }
 
-  async loadModelConfigSnapshot(): Promise<ModelConfigSnapshotRecord[]> {
+  async listPublicModelConfigs(ownerId: string): Promise<PublicModelConfig[]> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
-      `/rest/v1/beegame_model_configs?select=*`,
+      `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
-    return rows.map(row => ({
-      id: row.id,
-      ownerId: row.owner_id,
-      name: row.name,
-      provider: row.provider as ModelConfigSnapshotRecord['provider'],
-      ...(row.base_url ? { baseUrl: row.base_url } : {}),
-      apiKey: decryptSecret(row.api_key_ciphertext ?? '', this.decryptSecretKeys),
-      models: toModelMap(row.models),
-      isDefault: row.is_default,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }))
+    return rows.map(rowToPublicModelConfig)
+  }
+
+  async hasModelConfig(ownerId: string, id: string): Promise<boolean> {
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=id&limit=1`,
+    )
+    return rows.length > 0
+  }
+
+  async createModelConfig(
+    ownerId: string,
+    input: ModelConfigInput,
+  ): Promise<PublicModelConfig> {
+    const existing = await this.listPublicModelConfigs(ownerId)
+    const isDefault = input.isDefault ?? existing.length === 0
+    const now = new Date().toISOString()
+    const row = await this.upsertModelConfigRow({
+      id: `model_${randomUUID().replaceAll('-', '')}`,
+      owner_id: ownerId,
+      name: input.name,
+      provider: input.provider,
+      base_url: input.baseUrl ?? null,
+      api_key_ciphertext: input.apiKey,
+      models: input.models,
+      is_default: false,
+      created_at: now,
+      updated_at: now,
+    })
+    if (isDefault) {
+      return rowToPublicModelConfig(
+        await this.setDefaultModelConfig(ownerId, row.id),
+      )
+    }
+    return rowToPublicModelConfig(row)
+  }
+
+  async updateModelConfig(
+    ownerId: string,
+    id: string,
+    input: ModelConfigUpdate,
+  ): Promise<PublicModelConfig | undefined> {
+    const patch: JsonObject = {
+      updated_at: new Date().toISOString(),
+    }
+    if (input.name !== undefined) patch.name = input.name
+    if (input.provider !== undefined) patch.provider = input.provider
+    if (input.baseUrl !== undefined) patch.base_url = input.baseUrl || null
+    if (input.apiKey !== undefined) patch.api_key_ciphertext = input.apiKey
+    if (input.models !== undefined) patch.models = input.models
+    if (input.isDefault === false) patch.is_default = false
+
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*`,
+      {
+        method: 'PATCH',
+        headers: {
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify(patch),
+      },
+    )
+    if (input.isDefault) {
+      return rowToPublicModelConfig(
+        await this.setDefaultModelConfig(ownerId, id),
+      )
+    }
+    return rows[0] ? rowToPublicModelConfig(rows[0]) : undefined
   }
 
   async upsertModelConfig(record: ModelConfigSnapshotRecord): Promise<void> {
@@ -295,18 +331,41 @@ export class SupabaseDashboardStore {
       name: record.name,
       provider: record.provider,
       base_url: record.baseUrl ?? null,
-      api_key_ciphertext: encryptSecret(record.apiKey, this.encryptSecretKey),
+      api_key_ciphertext: record.apiKey,
       models: record.models,
-      is_default: record.isDefault,
+      is_default: record.isDefault ? false : record.isDefault,
       created_at: record.createdAt,
       updated_at: record.updatedAt,
     }, 'id')
+    if (record.isDefault) {
+      await this.setDefaultModelConfig(record.ownerId, record.id)
+    }
   }
 
   async deleteModelConfig(ownerId: string, id: string): Promise<boolean> {
     return this.deleteWhere('beegame_model_configs', {
       owner_id: ownerId,
       id,
+    })
+  }
+
+  private async upsertModelConfigRow(
+    row: SupabaseModelConfigRow,
+  ): Promise<SupabaseModelConfigRow> {
+    return this.upsert<SupabaseModelConfigRow>(
+      'beegame_model_configs',
+      row as unknown as JsonObject,
+      'id',
+    )
+  }
+
+  private async setDefaultModelConfig(
+    ownerId: string,
+    id: string,
+  ): Promise<SupabaseModelConfigRow> {
+    return this.rpc<SupabaseModelConfigRow>('beegame_set_default_model_config', {
+      p_user_id: ownerId,
+      p_model_config_id: id,
     })
   }
 
@@ -335,10 +394,7 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseWebToolsRow[]>(
       `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
     )
-    return normalizeWebTools(decryptWebToolsConfig(
-      rows[0]?.config ?? {},
-      this.decryptSecretKeys,
-    ))
+    return normalizeWebTools(rows[0]?.config ?? {})
   }
 
   async saveWebTools(
@@ -354,7 +410,7 @@ export class SupabaseDashboardStore {
     })
     await this.upsert('beegame_web_tools', {
       owner_id: ownerId,
-      config: encryptWebToolsConfig(normalized, this.encryptSecretKey),
+      config: normalized as JsonObject,
       updated_at: new Date().toISOString(),
     }, 'owner_id')
     return normalized
@@ -365,7 +421,7 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
     return rows.map(row => toPublicMcpServerConfig(
-      rowToMcpServer(row, this.decryptSecretKeys),
+      rowToMcpServer(row),
     ))
   }
 
@@ -392,7 +448,7 @@ export class SupabaseDashboardStore {
         autoStart: normalized.autoStart,
       },
       env_ciphertext: {
-        env: encryptMcpEnv(normalized.env ?? [], this.encryptSecretKey),
+        env: normalized.env ?? [],
       },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -404,52 +460,6 @@ export class SupabaseDashboardStore {
     return this.deleteWhere('beegame_mcp_servers', {
       owner_id: ownerId,
       id,
-    })
-  }
-
-  async listWorkspaceMembers(ownerId: string): Promise<BeeGameWorkspaceMember[]> {
-    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
-    const rows = await this.rest<SupabaseWorkspaceMemberRow[]>(
-      `/rest/v1/beegame_workspace_members?workspace_id=eq.${q(workspaceId)}&select=*&order=created_at.asc`,
-    )
-    return rows.map(rowToWorkspaceMember)
-  }
-
-  async upsertWorkspaceMember(
-    ownerId: string,
-    input: { userId: string; role: BeeGameRole },
-  ): Promise<BeeGameWorkspaceMember> {
-    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
-    const memberUserId = input.userId.trim()
-    if (!memberUserId) throw new Error('Member user id is required')
-    if (memberUserId === ownerId && input.role !== 'owner') {
-      throw new Error('Workspace owner must keep the owner role')
-    }
-    const row = await this.upsert<SupabaseWorkspaceMemberRow>(
-      'beegame_workspace_members',
-      {
-        workspace_id: workspaceId,
-        user_id: memberUserId,
-        role: input.role,
-      },
-      'workspace_id,user_id',
-    )
-    return rowToWorkspaceMember(row)
-  }
-
-  async deleteWorkspaceMember(
-    ownerId: string,
-    userId: string,
-  ): Promise<boolean> {
-    const memberUserId = userId.trim()
-    if (!memberUserId) throw new Error('Member user id is required')
-    if (memberUserId === ownerId) {
-      throw new Error('Cannot remove the workspace owner')
-    }
-    const workspaceId = await this.ensureDefaultWorkspace(ownerId)
-    return this.deleteWhere('beegame_workspace_members', {
-      workspace_id: workspaceId,
-      user_id: memberUserId,
     })
   }
 
@@ -739,8 +749,8 @@ export class SupabaseDashboardStore {
       {
         method: 'PUT',
         headers: {
-          apikey: this.serviceRoleKey,
-          authorization: `Bearer ${this.serviceRoleKey}`,
+          apikey: this.anonKey,
+          authorization: `Bearer ${this.authToken ?? this.anonKey}`,
           'content-type': input.contentType || 'application/octet-stream',
           'x-upsert': 'true',
         },
@@ -795,7 +805,7 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
     )
-    return rows[0] ? rowToMcpServer(rows[0], this.decryptSecretKeys) : undefined
+    return rows[0] ? rowToMcpServer(rows[0]) : undefined
   }
 
   private async ensureCreditAccount(
@@ -923,8 +933,8 @@ export class SupabaseDashboardStore {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
-        apikey: this.serviceRoleKey,
-        authorization: `Bearer ${this.serviceRoleKey}`,
+        apikey: this.anonKey,
+        authorization: `Bearer ${this.authToken ?? this.anonKey}`,
         'content-type': 'application/json',
         ...(init.headers ?? {}),
       },
@@ -960,6 +970,30 @@ function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {
     ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
     ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
   }
+}
+
+function rowToPublicModelConfig(
+  row: SupabaseModelConfigRow,
+): PublicModelConfig {
+  const apiKey = trimString(row.api_key_ciphertext)
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    provider: row.provider as PublicModelConfig['provider'],
+    ...(row.base_url ? { baseUrl: row.base_url } : {}),
+    apiKeyPreview: maskSecret(apiKey),
+    models: toModelMap(row.models),
+    isDefault: row.is_default,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function maskSecret(secret: string): string {
+  if (!secret) return ''
+  if (secret.length <= 8) return '*'.repeat(secret.length)
+  return `${secret.slice(0, 4)}...${secret.slice(-4)}`
 }
 
 const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
@@ -1019,7 +1053,6 @@ function resolveSecretInput(
 
 function rowToMcpServer(
   row: SupabaseMcpServerRow,
-  secretKeys: readonly Buffer[],
 ): McpServerConfig {
   const config = isObject(row.config) ? row.config : {}
   const envPayload = isObject(row.env_ciphertext) ? row.env_ciphertext : {}
@@ -1035,20 +1068,9 @@ function rowToMcpServer(
     ...(Array.isArray(config.args) ? { args: config.args.map(String) } : {}),
     ...(typeof config.url === 'string' ? { url: config.url } : {}),
     ...(typeof config.cwd === 'string' ? { cwd: config.cwd } : {}),
-    env: decryptMcpEnv(normalizeEnvFromUnknown(envPayload.env), secretKeys),
+    env: normalizeEnvFromUnknown(envPayload.env),
     autoStart: config.autoStart !== false,
   })
-}
-
-function rowToWorkspaceMember(
-  row: SupabaseWorkspaceMemberRow,
-): BeeGameWorkspaceMember {
-  return {
-    workspaceId: row.workspace_id,
-    userId: row.user_id,
-    role: isBeeGameRole(row.role) ? row.role : 'viewer',
-    createdAt: row.created_at,
-  }
 }
 
 function normalizeMcpServerInput(
@@ -1133,111 +1155,6 @@ function normalizeEnvFromUnknown(value: unknown): McpServerEnvVar[] {
       }
     })
     .filter((item): item is McpServerEnvVar => item !== undefined)
-}
-
-const ENCRYPTED_SECRET_PREFIX = 'bgenc:v1:'
-
-function deriveSecretKey(secret: string): Buffer {
-  return createHash('sha256').update(secret).digest()
-}
-
-function encryptSecret(value: string | undefined, key: Buffer): string {
-  const secret = trimString(value)
-  if (!secret || secret.startsWith(ENCRYPTED_SECRET_PREFIX)) return secret
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', key, iv)
-  const encrypted = Buffer.concat([
-    cipher.update(secret, 'utf8'),
-    cipher.final(),
-  ])
-  const tag = cipher.getAuthTag()
-  return [
-    ENCRYPTED_SECRET_PREFIX,
-    iv.toString('base64url'),
-    tag.toString('base64url'),
-    encrypted.toString('base64url'),
-  ].join('.')
-}
-
-function decryptSecret(value: string | undefined, keys: readonly Buffer[]): string {
-  const secret = trimString(value)
-  if (!secret || !secret.startsWith(ENCRYPTED_SECRET_PREFIX)) return secret
-  const encoded = secret
-    .slice(ENCRYPTED_SECRET_PREFIX.length)
-    .replace(/^\./, '')
-  const parts = encoded.split('.')
-  if (parts.length !== 3) throw new Error('Invalid encrypted secret')
-  const [ivText, tagText, encryptedText] = parts
-  let lastError: unknown
-  for (const key of keys) {
-    try {
-      const decipher = createDecipheriv(
-        'aes-256-gcm',
-        key,
-        Buffer.from(ivText, 'base64url'),
-      )
-      decipher.setAuthTag(Buffer.from(tagText, 'base64url'))
-      return Buffer.concat([
-        decipher.update(Buffer.from(encryptedText, 'base64url')),
-        decipher.final(),
-      ]).toString('utf8')
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('Unable to decrypt secret')
-}
-
-function encryptWebToolsConfig(
-  config: WebToolsConfig,
-  key: Buffer,
-): JsonObject {
-  return {
-    ...config,
-    ...(config.braveApiKey
-      ? { braveApiKey: encryptSecret(config.braveApiKey, key) }
-      : {}),
-    ...(config.exaApiKey
-      ? { exaApiKey: encryptSecret(config.exaApiKey, key) }
-      : {}),
-  } as JsonObject
-}
-
-function decryptWebToolsConfig(
-  config: JsonObject,
-  keys: readonly Buffer[],
-): JsonObject {
-  return {
-    ...config,
-    ...(typeof config.braveApiKey === 'string'
-      ? { braveApiKey: decryptSecret(config.braveApiKey, keys) }
-      : {}),
-    ...(typeof config.exaApiKey === 'string'
-      ? { exaApiKey: decryptSecret(config.exaApiKey, keys) }
-      : {}),
-  }
-}
-
-function encryptMcpEnv(
-  env: McpServerEnvVar[],
-  key: Buffer,
-): McpServerEnvVar[] {
-  return env.map(item => ({
-    key: item.key,
-    ...(item.value ? { value: encryptSecret(item.value, key) } : {}),
-  }))
-}
-
-function decryptMcpEnv(
-  env: McpServerEnvVar[],
-  keys: readonly Buffer[],
-): McpServerEnvVar[] {
-  return env.map(item => ({
-    key: item.key,
-    ...(item.value ? { value: decryptSecret(item.value, keys) } : {}),
-  }))
 }
 
 function normalizeProject(project: BeeGameProjectMetadata): BeeGameProjectMetadata {
@@ -1503,13 +1420,6 @@ function trimString(value: unknown): string {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isBeeGameRole(value: unknown): value is BeeGameRole {
-  return value === 'owner' ||
-    value === 'developer' ||
-    value === 'reviewer' ||
-    value === 'viewer'
 }
 
 function isMcpServerTransport(value: unknown): value is McpServerTransport {

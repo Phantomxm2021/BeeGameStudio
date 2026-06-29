@@ -592,8 +592,8 @@ describe('beegame session routes', () => {
     resetAgentWorkflow()
     delete process.env.BEEGAME_SUPABASE_URL
     delete process.env.SUPABASE_URL
-    delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    delete process.env.BEEGAME_SUPABASE_ANON_KEY
+    delete process.env.SUPABASE_ANON_KEY
     delete process.env.AGENT_WORKFLOW_WORKSPACE_PATH
   })
 
@@ -1737,36 +1737,30 @@ describe('beegame session routes', () => {
 
   test('injects Supabase-backed runtime settings into new BeeGame turns', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
-    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
     const originalFetch = globalThis.fetch
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-supabase-runtime-'))
     const workspace = join(projectsRoot, 'supabase-runtime-game')
     const fake = createFakeRunner(undefined, 'build_write_complete')
     try {
       process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
-      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-key'
       globalThis.fetch = (async (input, init) => {
         const requestUrl = String(input)
+        if (requestUrl.includes('/rest/v1/rpc/beegame_runtime_env')) {
+          return Response.json({
+            env: {
+              WEB_SEARCH_ADAPTER: 'brave',
+              BRAVE_SEARCH_API_KEY: 'bsa-supabase-secret',
+              SKILL_SEARCH_ENABLED: '1',
+              FEATURE_WEB_BROWSER_TOOL: '1',
+              FEATURE_BASH_CLASSIFIER: '1',
+            },
+          })
+        }
         if (requestUrl.includes('/rest/v1/beegame_sessions')) {
           if (init?.method === 'POST') return Response.json([JSON.parse(String(init.body))])
           return Response.json([])
-        }
-        if (requestUrl.includes('/rest/v1/beegame_web_tools')) {
-          return Response.json([{
-            config: {
-              webSearchAdapter: 'brave',
-              braveApiKey: 'bsa-supabase-secret',
-            },
-          }])
-        }
-        if (requestUrl.includes('/rest/v1/beegame_runtime_settings')) {
-          return Response.json([{
-            settings: {
-              skillSearchEnabled: true,
-              webBrowserToolEnabled: true,
-              bashClassifierEnabled: true,
-            },
-          }])
         }
         if (requestUrl.includes('/rest/v1/rpc/beegame_reserve_credits')) {
           return Response.json({
@@ -1830,14 +1824,20 @@ describe('beegame session routes', () => {
 
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
         body: JSON.stringify({ workspacePath: workspace }),
       })
       const session = await sessionRes.json()
 
       await app.request(`/api/beegame-sessions/${session.id}/input`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
         body: JSON.stringify({ text: 'Build with Supabase runtime settings.' }),
       })
 
@@ -1863,10 +1863,10 @@ describe('beegame session routes', () => {
       } else {
         process.env.BEEGAME_SUPABASE_URL = originalUrl
       }
-      if (originalServiceRoleKey === undefined) {
-        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
       } else {
-        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
       }
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3739,14 +3739,14 @@ describe('beegame session routes', () => {
 
   test('mirrors project asset manifest metadata to Supabase when configured', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
-    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
     const originalFetch = globalThis.fetch
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-assets-supabase-'))
     const workspace = join(projectsRoot, 'asset-metadata-project')
     const assetRows: Array<Record<string, unknown>> = []
     try {
       process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
-      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-key'
       globalThis.fetch = (async (input, init) => {
         const requestUrl = String(input)
         if (requestUrl.includes('/rest/v1/beegame_sessions')) {
@@ -3821,10 +3821,10 @@ describe('beegame session routes', () => {
       } else {
         process.env.BEEGAME_SUPABASE_URL = originalUrl
       }
-      if (originalServiceRoleKey === undefined) {
-        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
       } else {
-        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
       }
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3964,7 +3964,7 @@ describe('beegame session routes', () => {
 
   test('uploads asset file bodies to Supabase Storage when configured', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
-    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
     const originalAssetBucket = process.env.BEEGAME_SUPABASE_ASSET_BUCKET
     const originalFetch = globalThis.fetch
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-assets-storage-'))
@@ -3973,7 +3973,7 @@ describe('beegame session routes', () => {
     const storageUploads: Array<{ url: string; contentType: string | null; text: string }> = []
     try {
       process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
-      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-key'
       process.env.BEEGAME_SUPABASE_ASSET_BUCKET = 'beegame-assets'
       globalThis.fetch = (async (input, init) => {
         const requestUrl = String(input)
@@ -4026,7 +4026,10 @@ describe('beegame session routes', () => {
       )
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
         body: JSON.stringify({
           workspacePath: workspace,
           projectId: 'project_asset_storage',
@@ -4038,7 +4041,11 @@ describe('beegame session routes', () => {
 
       const res = await app.request(
         `/api/beegame-sessions/${session.id}/assets/main_logo/upload?workspacePath=${encodeURIComponent(workspace)}`,
-        { method: 'POST', body: form },
+        {
+          method: 'POST',
+          headers: { authorization: 'Bearer user-token' },
+          body: form,
+        },
       )
       const payload = await res.json()
       const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
@@ -4072,10 +4079,10 @@ describe('beegame session routes', () => {
       } else {
         process.env.BEEGAME_SUPABASE_URL = originalUrl
       }
-      if (originalServiceRoleKey === undefined) {
-        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
       } else {
-        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
       }
       if (originalAssetBucket === undefined) {
         delete process.env.BEEGAME_SUPABASE_ASSET_BUCKET
@@ -4252,14 +4259,14 @@ describe('beegame session routes', () => {
 
   test('mirrors managed preview snapshots to Supabase when configured', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
-    const originalServiceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
     const originalFetch = globalThis.fetch
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-preview-supabase-'))
     const workspace = join(projectsRoot, 'preview-metadata-project')
     const previewRows: Array<Record<string, unknown>> = []
     try {
       process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
-      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-key'
       globalThis.fetch = (async (input, init) => {
         const requestUrl = String(input)
         if (requestUrl.includes('/rest/v1/beegame_sessions')) {
@@ -4304,7 +4311,10 @@ describe('beegame session routes', () => {
       })
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
         body: JSON.stringify({
           workspacePath: workspace,
           projectId: 'project_preview_metadata',
@@ -4316,13 +4326,19 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/${session.id}/preview`,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            authorization: 'Bearer user-token',
+          },
           body: JSON.stringify({ workspacePath: workspace }),
         },
       )
       const stopRes = await app.request(
         `/api/beegame-sessions/${session.id}/preview?workspacePath=${encodeURIComponent(workspace)}`,
-        { method: 'DELETE' },
+        {
+          method: 'DELETE',
+          headers: { authorization: 'Bearer user-token' },
+        },
       )
 
       expect(startRes.status).toBe(200)
@@ -4359,10 +4375,10 @@ describe('beegame session routes', () => {
       } else {
         process.env.BEEGAME_SUPABASE_URL = originalUrl
       }
-      if (originalServiceRoleKey === undefined) {
-        delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
       } else {
-        process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
       }
       await rm(projectsRoot, { recursive: true, force: true })
     }

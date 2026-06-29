@@ -26,7 +26,6 @@ import {
     type BeeGameCreditLedgerEntry,
     type BeeGameCreditQuote,
 } from '../../services/creditsApi';
-import { deleteCurrentUser } from '../../services/currentUserApi';
 import {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
@@ -156,7 +155,7 @@ const optionsWithCurrentValue = (options: string[], value: string): string[] => 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [projectName, setProjectName] = useState('');
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [isAdminOpen, setIsAdminOpen] = useState(false);
+    const [isSystemManagementOpen, setIsSystemManagementOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
@@ -181,9 +180,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [profileError, setProfileError] = useState('');
     const [profileNotice, setProfileNotice] = useState('');
     const [isSavingProfile, setIsSavingProfile] = useState(false);
-    const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-    const [isDeleteAccountConfirmOpen, setIsDeleteAccountConfirmOpen] = useState(false);
-    const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
     const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
     const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
@@ -400,8 +396,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProfileError('');
         setProfileNotice('');
         setAvatarDraft(currentUser?.avatarUrl || '');
-        setIsDeleteAccountConfirmOpen(false);
-        setDeleteAccountConfirmation('');
         setIsCreditLedgerExpanded(false);
         setIsProfileOpen(true);
         setIsCreditLedgerLoading(true);
@@ -456,29 +450,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setProfileError(error instanceof Error ? error.message : '头像更新失败。');
         } finally {
             setIsSavingProfile(false);
-        }
-    };
-
-    const handleDeleteAccount = async () => {
-        if (isDeletingAccount) return;
-        if (deleteAccountConfirmation.trim() !== 'DELETE') {
-            setProfileError('请输入 DELETE 确认注销账户。');
-            return;
-        }
-        setProfileError('');
-        setProfileNotice('');
-        setIsDeletingAccount(true);
-        try {
-            await deleteCurrentUser();
-            clearSupabaseSession();
-            await loadCurrentUser();
-            setIsProfileOpen(false);
-            setIsDeleteAccountConfirmOpen(false);
-            setDeleteAccountConfirmation('');
-        } catch (error) {
-            setProfileError(error instanceof Error ? error.message : '账户注销失败。');
-        } finally {
-            setIsDeletingAccount(false);
         }
     };
 
@@ -631,16 +602,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             console.error('Failed to select project:', error);
         }
     };
-    const isWorkspaceAdmin = currentUser?.role === 'owner';
-    const canOpenAdmin = Boolean(isWorkspaceAdmin && (
-        hasPermission('workspace.manage') ||
-        hasPermission('workspace.manage_members') ||
+    const canOpenSystemManagement = hasPermission('workspace.manage') ||
         hasPermission('secrets.manage') ||
         hasPermission('runtime_settings.manage') ||
         hasPermission('mcp.manage') ||
-        hasPermission('model_config.manage')
-    ));
-
+        hasPermission('model_config.manage');
     return (
         <AnimatePresence mode="wait">
             <motion.div
@@ -662,24 +628,25 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
                     creditBalance={creditBalance?.balanceCredits}
-                    canOpenAdmin={canOpenAdmin}
+                    canOpenSystemManagement={canOpenSystemManagement}
                     onOpenLogin={handleOpenLogin}
                     onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
-                        setIsAdminOpen(false);
+                        setIsSystemManagementOpen(false);
                         setIsHistoryOpen(false);
                     }}
-                    onToggleAdmin={() => {
-                        setIsAdminOpen((value) => !value);
+                    onToggleSystemManagement={() => {
+                        if (!canOpenSystemManagement) return;
+                        setIsSystemManagementOpen((value) => !value);
                         setIsSettingsOpen(false);
                         setIsHistoryOpen(false);
                     }}
                     onToggleHistory={() => {
                         setIsHistoryOpen((value) => !value);
                         setIsSettingsOpen(false);
-                        setIsAdminOpen(false);
+                        setIsSystemManagementOpen(false);
                     }}
                 />
 
@@ -688,24 +655,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                    mode="settings"
                 />
 
-                {canOpenAdmin ? (
-                    <SettingsMenu
-                        isOpen={isAdminOpen}
-                        lang={lang}
-                        onClose={() => setIsAdminOpen(false)}
-                        onSetLang={onSetLang}
-                        mode="admin"
-                        canManageWorkspace={hasPermission('workspace.manage')}
-                        canManageSecrets={hasPermission('secrets.manage')}
-                        canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
-                        canManageMcp={hasPermission('mcp.manage')}
-                        canManageModelConfig={hasPermission('model_config.manage')}
-                        canManageWorkspaceMembers={hasPermission('workspace.manage_members')}
-                    />
-                ) : null}
+                <SettingsMenu
+                    isOpen={isSystemManagementOpen && canOpenSystemManagement}
+                    lang={lang}
+                    onClose={() => setIsSystemManagementOpen(false)}
+                    onSetLang={onSetLang}
+                    scope="admin"
+                    canManageWorkspace={hasPermission('workspace.manage')}
+                    canManageSecrets={hasPermission('secrets.manage')}
+                    canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
+                    canManageMcp={hasPermission('mcp.manage')}
+                    canManageModelConfig={hasPermission('model_config.manage')}
+                />
 
                 <ProjectHistoryModal
                     isOpen={isHistoryOpen}
@@ -812,44 +775,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 ) : null}
                             </div>
 
-                            {isDeleteAccountConfirmOpen ? (
-                                <div className="mt-5 rounded-3xl border border-red-300/20 bg-red-950/20 p-4">
-                                    <div className="text-sm font-semibold text-red-100">注销账户会删除云端账号和关联数据。</div>
-                                    <div className="mt-1 text-xs leading-5 text-red-100/70">
-                                        这一步无法撤销。请输入 DELETE 后确认注销。
-                                    </div>
-                                    <div className="mt-3 flex gap-2">
-                                        <input
-                                            aria-label="注销账户确认"
-                                            value={deleteAccountConfirmation}
-                                            onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
-                                            placeholder="DELETE"
-                                            className="h-11 min-w-0 flex-1 rounded-2xl border border-red-200/20 bg-black/20 px-3 text-white outline-none placeholder:text-red-100/35 focus:border-red-200/60"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={handleDeleteAccount}
-                                            disabled={isDeletingAccount}
-                                            className="rounded-2xl bg-red-100 px-4 text-sm font-bold text-red-950 transition hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {isDeletingAccount ? '注销中...' : '确认注销'}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : null}
-
-                            <div className="mt-6 flex justify-between gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setProfileError('');
-                                        setProfileNotice('');
-                                        setIsDeleteAccountConfirmOpen(true);
-                                    }}
-                                    className="rounded-full border border-red-300/25 px-5 py-2.5 text-sm font-bold text-red-100 transition hover:bg-red-500/10"
-                                >
-                                    注销账户
-                                </button>
+                            <div className="mt-6 flex justify-end gap-3">
                                 <button
                                     type="button"
                                     onClick={() => void handleFinishProfile()}

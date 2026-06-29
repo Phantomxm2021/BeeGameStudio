@@ -20,20 +20,29 @@ const renderActions = (props: Partial<Parameters<typeof LandingActions>[0]> = {}
     />,
 );
 
-describe('LandingActions admin entry', () => {
-    it('does not show admin controls for signed-in non-admin users', async () => {
-        renderActions({ canOpenAdmin: false, onToggleAdmin: vi.fn() });
+describe('LandingActions user menu', () => {
+    it('keeps administration out of the user account menu', async () => {
+        renderActions();
 
         await userEvent.click(screen.getByRole('button', { name: '用户菜单' }));
 
         expect(screen.queryByRole('menuitem', { name: '管理员' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: '系统管理' })).not.toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });
 
-    it('shows admin controls only when explicitly allowed', async () => {
-        renderActions({ canOpenAdmin: true, onToggleAdmin: vi.fn() });
+    it('shows system management only when the signed-in user has deployment permissions', async () => {
+        const onToggleSystemManagement = vi.fn();
+        renderActions({
+            canOpenSystemManagement: true,
+            onToggleSystemManagement,
+        });
 
         await userEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: '系统管理' }));
 
-        expect(screen.getByRole('menuitem', { name: '管理员' })).toBeInTheDocument();
+        expect(onToggleSystemManagement).toHaveBeenCalledTimes(1);
     });
 });

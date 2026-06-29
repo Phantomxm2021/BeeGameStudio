@@ -23,6 +23,9 @@ export type BeeGamePermission =
 export type BeeGameUserContext = {
   id: string
   role: BeeGameRole
+  workspaceId?: string
+  workspaceOwnerId?: string
+  permissions?: BeeGamePermission[]
   email?: string
   displayName?: string
   avatarUrl?: string
@@ -50,12 +53,18 @@ export function hasBeeGamePermission(
   user: BeeGameUserContext,
   permission: BeeGamePermission,
 ): boolean {
+  if (user.permissions?.length) {
+    return user.permissions.includes(permission)
+  }
   return getRolePermissions(user.role).has(permission)
 }
 
 export function listBeeGamePermissions(
   user: BeeGameUserContext,
 ): BeeGamePermission[] {
+  if (user.permissions?.length) {
+    return [...new Set(user.permissions.filter(isBeeGamePermission))]
+  }
   return [...getRolePermissions(user.role)]
 }
 
@@ -85,9 +94,7 @@ export function createSupabaseUserResolver(
   )
   const apiKey = trimString(
     options.apiKey ??
-      process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
       process.env.BEEGAME_SUPABASE_ANON_KEY ??
-      process.env.SUPABASE_SERVICE_ROLE_KEY ??
       process.env.SUPABASE_ANON_KEY,
   )
   if (!baseUrl || !apiKey) return undefined
@@ -95,6 +102,8 @@ export function createSupabaseUserResolver(
   return async request => {
     const token = getBearerToken(request)
     if (!token) return undefined
+    const context = await fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
+    if (context) return context
     const response = await fetchImpl(joinUrl(baseUrl, '/auth/v1/user'), {
       headers: {
         apikey: apiKey,
@@ -113,9 +122,7 @@ export function createConfiguredUserResolver(
   const supabaseResolver = createSupabaseUserResolver({
     url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL,
     apiKey:
-      env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
       env.BEEGAME_SUPABASE_ANON_KEY ??
-      env.SUPABASE_SERVICE_ROLE_KEY ??
       env.SUPABASE_ANON_KEY,
   })
   if (!envResolver) return supabaseResolver
@@ -130,6 +137,28 @@ export function getBearerToken(request: Request): string | undefined {
   if (!header) return undefined
   const match = /^Bearer\s+(.+)$/i.exec(header)
   return match?.[1]?.trim() || undefined
+}
+
+async function fetchSupabaseUserContext(
+  baseUrl: string,
+  apiKey: string,
+  token: string,
+  fetchImpl: BeeGameFetch,
+): Promise<BeeGameUserContext | undefined> {
+  const response = await fetchImpl(
+    joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
+    {
+      method: 'POST',
+      headers: {
+        apikey: apiKey,
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    },
+  )
+  if (!response.ok) return undefined
+  return toSupabaseUserContext(await response.json())
 }
 
 function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
@@ -160,16 +189,25 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
     'image',
     'photo_url',
   ])
+  const role = normalizeBeeGameRole(
+    stringField(value.role) ??
+      stringField(appMetadata.beegame_role) ??
+      stringField(appMetadata.role) ??
+      firstMetadataString(metadataRecords, ['beegame_role', 'role']),
+  )
+  const permissions = normalizeBeeGamePermissions(value.permissions)
+  const workspaceId = stringField(value.workspaceId) ?? stringField(value.workspace_id)
+  const workspaceOwnerId =
+    stringField(value.workspaceOwnerId) ?? stringField(value.workspace_owner_id)
   return {
     id,
+    role,
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(workspaceOwnerId ? { workspaceOwnerId } : {}),
+    ...(permissions.length ? { permissions } : {}),
     ...(email ? { email } : {}),
     ...(displayName ? { displayName } : {}),
     ...(avatarUrl ? { avatarUrl } : {}),
-    role: normalizeBeeGameRole(
-      stringField(appMetadata.beegame_role) ??
-        stringField(appMetadata.role) ??
-        firstMetadataString(metadataRecords, ['beegame_role', 'role']),
-    ),
   }
 }
 
@@ -226,6 +264,15 @@ export function normalizeBeeGameRole(value: string | undefined): BeeGameRole {
     return value
   }
   return 'viewer'
+}
+
+function normalizeBeeGamePermissions(value: unknown): BeeGamePermission[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter(isBeeGamePermission))]
+}
+
+function isBeeGamePermission(value: unknown): value is BeeGamePermission {
+  return typeof value === 'string' && ALL_PERMISSIONS.has(value as BeeGamePermission)
 }
 
 function getRolePermissions(role: BeeGameRole): ReadonlySet<BeeGamePermission> {
@@ -310,4 +357,8 @@ const OWNER_PERMISSIONS = new Set<BeeGamePermission>([
   'runtime_settings.manage',
   'secrets.manage',
   'audit.read',
+])
+
+const ALL_PERMISSIONS = new Set<BeeGamePermission>([
+  ...OWNER_PERMISSIONS,
 ])

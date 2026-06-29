@@ -58,10 +58,10 @@ import {
 } from './credit-policy'
 import {
   type BeeGamePermission,
-  type BeeGameRole,
   type BeeGameUserContext,
   type BeeGameUserResolver,
   createConfiguredUserResolver,
+  getBearerToken,
   hasBeeGamePermission,
   listBeeGamePermissions,
 } from './auth/user-context'
@@ -77,6 +77,9 @@ import {
 import {
   createSupabaseDashboardStoreFromEnv,
 } from './supabase-dashboard-store'
+import {
+  createSupabaseRuntimeEnvClientFromEnv,
+} from './supabase-runtime-env-client'
 
 type JsonObject = Record<string, unknown>
 
@@ -151,6 +154,9 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const supabaseStore = createSupabaseDashboardStoreFromEnv()
+  const supabaseRuntimeEnvClient = supabaseStore
+    ? createSupabaseRuntimeEnvClientFromEnv()
+    : undefined
   const requestUserResolver =
     options.currentUserResolver ?? createConfiguredUserResolver()
   const authContext = createBeeGameAuthContext({
@@ -167,15 +173,22 @@ export function createAgentWorkflowApp(
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
+    supabaseRuntimeEnvClient,
     getUserDataRoot: getCurrentUserDataRoot,
     modelConfigStore,
   })
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
-    (userDataRoot, userId) =>
-      dashboardRepository.getRuntimeEnv(userDataRoot, userId),
+    (userDataRoot, userId, authToken, modelConfigId) =>
+      dashboardRepository.getRuntimeEnv(
+        userDataRoot,
+        userId,
+        authToken,
+        modelConfigId,
+      ),
     dashboardRepository.createSessionCreditBackend(),
+    Boolean(supabaseRuntimeEnvClient),
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -212,6 +225,8 @@ export function createAgentWorkflowApp(
     return c.json({
       id: user.id,
       role: user.role,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+      ...(user.workspaceOwnerId ? { workspaceOwnerId: user.workspaceOwnerId } : {}),
       ...(user.email ? { email: user.email } : {}),
       ...(user.displayName ? { displayName: user.displayName } : {}),
       ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
@@ -220,98 +235,10 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/current-user', async c => {
-    const user = getCurrentUser(c.req.raw)
-    if (!dashboardRepository.hasSupabaseStorage()) {
-      return c.json({
-        error: 'Supabase Auth admin is not configured',
-        message: 'account deletion requires BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
-      }, 501)
-    }
-    await dashboardRepository.deleteAuthUser(user)
-    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-      actorId: user.id,
-      action: 'account.deleted',
-      targetType: 'user',
-      targetId: user.id,
-      metadata: {},
-    })
-    return c.json({ deleted: true })
-  })
-
-  app.get('/api/workspace/members', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'workspace.manage_members')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!dashboardRepository.hasSupabaseStorage()) {
-      return c.json({
-        error: 'Supabase repository is not configured',
-        message: 'workspace member management requires Supabase storage',
-      }, 501)
-    }
-    return c.json(await dashboardRepository.listWorkspaceMembers(user))
-  })
-
-  app.put('/api/workspace/members/:userId', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'workspace.manage_members')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!dashboardRepository.hasSupabaseStorage()) {
-      return c.json({
-        error: 'Supabase repository is not configured',
-        message: 'workspace member management requires Supabase storage',
-      }, 501)
-    }
-    const body = await readJson(c.req.raw)
-    const role = isBeeGameRole(body.role) ? body.role : undefined
-    if (!role) return c.json({ error: 'Invalid member role' }, 400)
-    try {
-      const member = await dashboardRepository.upsertWorkspaceMember(user, {
-        userId: c.req.param('userId'),
-        role,
-      })
-      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: 'workspace_member.upserted',
-        targetType: 'workspace_member',
-        targetId: member.userId,
-        metadata: {
-          workspaceId: member.workspaceId,
-          role: member.role,
-        },
-      })
-      return c.json(member)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
-  })
-
-  app.delete('/api/workspace/members/:userId', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'workspace.manage_members')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!dashboardRepository.hasSupabaseStorage()) {
-      return c.json({
-        error: 'Supabase repository is not configured',
-        message: 'workspace member management requires Supabase storage',
-      }, 501)
-    }
-    try {
-      const deleted = await dashboardRepository.deleteWorkspaceMember(
-        user,
-        c.req.param('userId'),
-      )
-      if (deleted) {
-        await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-          actorId: user.id,
-          action: 'workspace_member.deleted',
-          targetType: 'workspace_member',
-          targetId: c.req.param('userId'),
-        })
-      }
-      return c.json({ deleted })
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
+    return c.json({
+      error: 'Unsupported by local runtime host',
+      message: 'Account deletion must be handled by Supabase RPC or a deployment-side service.',
+    }, 501)
   })
 
   app.get('/api/audit-events', async c => {
@@ -353,6 +280,7 @@ export function createAgentWorkflowApp(
 
   app.get('/api/model-configs', async c => {
     return c.json(await dashboardRepository.listModelConfigs(
+      c.req.raw,
       getCurrentUser(c.req.raw),
     ))
   })
@@ -366,7 +294,7 @@ export function createAgentWorkflowApp(
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
 
-    const created = await dashboardRepository.createModelConfig(user, {
+    const created = await dashboardRepository.createModelConfig(c.req.raw, user, {
       name: String(body.name),
       provider: body.provider as ModelProviderKind,
       ...(typeof body.baseUrl === 'string' && body.baseUrl
@@ -395,7 +323,7 @@ export function createAgentWorkflowApp(
       return c.json({ error: 'Forbidden' }, 403)
     }
     const body = await readJson(c.req.raw)
-    const updated = await dashboardRepository.updateModelConfig(c.req.param('id'), {
+    const updated = await dashboardRepository.updateModelConfig(c.req.raw, user, c.req.param('id'), {
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(typeof body.provider === 'string'
         ? { provider: body.provider as ModelProviderKind }
@@ -429,6 +357,7 @@ export function createAgentWorkflowApp(
       return c.json({ error: 'Forbidden' }, 403)
     }
     const deleted = await dashboardRepository.deleteModelConfig(
+      c.req.raw,
       user,
       c.req.param('id'),
     )
@@ -775,7 +704,6 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     let reservation: { id: string } | undefined
     try {
-      await dashboardRepository.syncModelConfigs()
       const policy = getCreditTaskPolicy('idea_intake')
       const reservedCredits = policy.reservedCredits
       reservation = await dashboardRepository.reserveCredits(c.req.raw, user, {
@@ -794,6 +722,14 @@ export function createAgentWorkflowApp(
         ownerId: user.id,
         modelConfigId:
           typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+        runtimeEnv: await dashboardRepository.getRuntimeEnv(
+          getCurrentUserDataRoot(c.req.raw),
+          user.id,
+          getBearerToken(c.req.raw),
+          typeof body.modelConfigId === 'string'
+            ? body.modelConfigId
+            : undefined,
+        ),
       })
       await dashboardRepository.settleCreditReservation(c.req.raw, user, {
         reservationId: reservation.id,
@@ -832,33 +768,47 @@ export function createAgentWorkflowApp(
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
       persistSessionMetadata: (request, metadata) =>
-        dashboardRepository.upsertSessionMetadata(getCurrentUser(request), metadata),
+        dashboardRepository.upsertSessionMetadata(
+          request,
+          getCurrentUser(request),
+          metadata,
+        ),
       deleteSessionMetadata: (request, metadata, sessionId) =>
         dashboardRepository.deleteSessionMetadata(
+          request,
           getCurrentUser(request),
           metadata,
           sessionId,
         ),
       persistPreviewSnapshot: (request, metadata, snapshot) =>
         dashboardRepository.upsertPreviewSnapshot(
+          request,
           getCurrentUser(request),
           metadata,
           snapshot,
         ),
       persistAssetManifest: (request, metadata, manifest) =>
         dashboardRepository.upsertAssetManifest(
+          request,
           getCurrentUser(request),
           metadata,
           manifest,
         ),
       loadAssetManifest: (request, metadata) =>
-        dashboardRepository.loadAssetManifest(getCurrentUser(request), metadata),
+        dashboardRepository.loadAssetManifest(
+          request,
+          getCurrentUser(request),
+          metadata,
+        ),
       uploadAssetFile: (request, metadata, file) =>
         dashboardRepository.uploadAssetFile(
+          request,
           getCurrentUser(request),
           metadata,
           file,
         ),
+      modelConfigExists: (request, user, id) =>
+        dashboardRepository.modelConfigExists(request, user, id),
     },
   )
   registerBeeGameSessionRoutes(
@@ -873,33 +823,47 @@ export function createAgentWorkflowApp(
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
       persistSessionMetadata: (request, metadata) =>
-        dashboardRepository.upsertSessionMetadata(getCurrentUser(request), metadata),
+        dashboardRepository.upsertSessionMetadata(
+          request,
+          getCurrentUser(request),
+          metadata,
+        ),
       deleteSessionMetadata: (request, metadata, sessionId) =>
         dashboardRepository.deleteSessionMetadata(
+          request,
           getCurrentUser(request),
           metadata,
           sessionId,
         ),
       persistPreviewSnapshot: (request, metadata, snapshot) =>
         dashboardRepository.upsertPreviewSnapshot(
+          request,
           getCurrentUser(request),
           metadata,
           snapshot,
         ),
       persistAssetManifest: (request, metadata, manifest) =>
         dashboardRepository.upsertAssetManifest(
+          request,
           getCurrentUser(request),
           metadata,
           manifest,
         ),
       loadAssetManifest: (request, metadata) =>
-        dashboardRepository.loadAssetManifest(getCurrentUser(request), metadata),
+        dashboardRepository.loadAssetManifest(
+          request,
+          getCurrentUser(request),
+          metadata,
+        ),
       uploadAssetFile: (request, metadata, file) =>
         dashboardRepository.uploadAssetFile(
+          request,
           getCurrentUser(request),
           metadata,
           file,
         ),
+      modelConfigExists: (request, user, id) =>
+        dashboardRepository.modelConfigExists(request, user, id),
     },
   )
 
@@ -915,13 +879,6 @@ function requirePermission(
     : { error: 'Forbidden' }
 }
 
-function isBeeGameRole(value: unknown): value is BeeGameRole {
-  return value === 'owner' ||
-    value === 'developer' ||
-    value === 'reviewer' ||
-    value === 'viewer'
-}
-
 function requireBeeGameSessionOwner(
   request: Request,
   sessionId: string,
@@ -935,26 +892,35 @@ function requireBeeGameSessionOwner(
     : { error: 'Session not found' }
 }
 
-function optionalOwnedModelConfigId(
-  ownerId: string,
+async function optionalOwnedModelConfigId(
+  request: Request,
+  user: BeeGameUserContext,
   value: unknown,
-): string | undefined {
+  exists: (
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ) => Promise<boolean>,
+): Promise<string | undefined> {
   if (typeof value !== 'string') return undefined
   const modelConfigId = value.trim()
   return modelConfigId
-    ? requireOwnedModelConfigId(ownerId, modelConfigId)
+    ? requireOwnedModelConfigId(request, user, modelConfigId, exists)
     : undefined
 }
 
-function requireOwnedModelConfigId(
-  ownerId: string,
+async function requireOwnedModelConfigId(
+  request: Request,
+  user: BeeGameUserContext,
   value: unknown,
-): string {
+  exists: (
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ) => Promise<boolean>,
+): Promise<string> {
   const modelConfigId = typeof value === 'string' ? value.trim() : ''
-  if (
-    !modelConfigId ||
-    !listModelConfigs(ownerId).some(config => config.id === modelConfigId)
-  ) {
+  if (!modelConfigId || !await exists(request, user, modelConfigId)) {
     throw new Error('Model config not found')
   }
   return modelConfigId
@@ -965,16 +931,20 @@ async function generateBeeGameIntakeOptions(input: {
   language?: string
   ownerId: string
   modelConfigId?: string
+  runtimeEnv?: Record<string, string>
 }): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
     listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
-  if (!configId) {
+  if (!configId && !input.runtimeEnv) {
     throw new Error('No default model config found')
   }
 
-  const runtime = mapModelConfigToRuntime(configId)
-  const env = runtime?.env ?? {}
+  const runtime = configId ? mapModelConfigToRuntime(configId) : undefined
+  const env = {
+    ...(runtime?.env ?? {}),
+    ...(input.runtimeEnv ?? {}),
+  }
   const baseUrl = env.OPENAI_BASE_URL
   const apiKey = env.OPENAI_API_KEY
   const model =
@@ -1369,6 +1339,11 @@ function registerBeeGameSessionRoutes(
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
       file: File,
     ) => Promise<string | undefined>
+    modelConfigExists: (
+      request: Request,
+      user: BeeGameUserContext,
+      id: string,
+    ) => Promise<boolean>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -1404,9 +1379,11 @@ function registerBeeGameSessionRoutes(
         workspacePath,
         defaultWorkspacePath,
       )
-      const modelConfigId = optionalOwnedModelConfigId(
-        currentUser.id,
+      const modelConfigId = await optionalOwnedModelConfigId(
+        c.req.raw,
+        currentUser,
         body.modelConfigId,
+        options.modelConfigExists,
       )
       const session = beeGameSessions.start({
           workspacePath,
@@ -1420,6 +1397,9 @@ function registerBeeGameSessionRoutes(
             ? { transcriptSessionId: body.transcriptSessionId }
             : {}),
           userId: currentUser.id,
+          ...(getBearerToken(c.req.raw)
+            ? { authToken: getBearerToken(c.req.raw) }
+            : {}),
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
       await options.persistSessionMetadata(
@@ -1503,9 +1483,12 @@ function registerBeeGameSessionRoutes(
     const error = requireFields(body, ['modelConfigId'])
     if (error) return c.json({ error }, 400)
     try {
-      const modelConfigId = requireOwnedModelConfigId(
-        options.getCurrentUser(c.req.raw).id,
+      const currentUser = options.getCurrentUser(c.req.raw)
+      const modelConfigId = await requireOwnedModelConfigId(
+        c.req.raw,
+        currentUser,
         body.modelConfigId,
+        options.modelConfigExists,
       )
       return c.json(
         beeGameSessions.updateModel(
@@ -1739,6 +1722,9 @@ function registerBeeGameSessionRoutes(
           displayText,
           displayKind,
           taskType,
+          ...(getBearerToken(c.req.raw)
+            ? { authToken: getBearerToken(c.req.raw) }
+            : {}),
         }),
       )
     } catch (err) {
