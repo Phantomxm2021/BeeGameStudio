@@ -13,6 +13,7 @@ import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
 import type { BeeGameCreditTaskType } from './creditsApi';
+import { getSupabaseAccessToken } from './supabaseAuthApi';
 
 type BeeGameSession = {
   id: string;
@@ -240,13 +241,14 @@ export const beeGameAdapter = {
     try {
       const projects = await getJson<Project[]>('/api/projects');
       const localProjects = readProjects();
-      if (projects.length === 0 && localProjects.length > 0) {
+      if (!hasCloudSession() && projects.length === 0 && localProjects.length > 0) {
         await Promise.all(localProjects.map(project => syncProjectMetadata(project)));
         return localProjects;
       }
       saveProjects(projects);
       return projects;
-    } catch {
+    } catch (error) {
+      if (hasCloudSession()) throw error;
       return readProjects();
     }
   },
@@ -729,17 +731,23 @@ function saveProjects(projects: Project[]): void {
 async function syncProjectMetadata(project: Project): Promise<void> {
   try {
     await postJson<Project>('/api/projects', project);
-  } catch {
-    // Local storage remains the offline fallback when the dashboard API is down.
+  } catch (error) {
+    if (hasCloudSession()) throw error;
+    // Local storage remains the dev/offline fallback when the dashboard API is down.
   }
 }
 
 async function deleteProjectMetadata(projectId: string): Promise<void> {
   try {
     await deleteJson(`/api/projects/${encodeURIComponent(projectId)}`);
-  } catch {
-    // Local storage remains the offline fallback when the dashboard API is down.
+  } catch (error) {
+    if (hasCloudSession()) throw error;
+    // Local storage remains the dev/offline fallback when the dashboard API is down.
   }
+}
+
+function hasCloudSession(): boolean {
+  return Boolean(getSupabaseAccessToken());
 }
 
 function upsertProject(projects: Project[], project: Project): Project[] {

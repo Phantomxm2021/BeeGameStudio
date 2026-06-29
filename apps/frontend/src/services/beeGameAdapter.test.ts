@@ -143,6 +143,21 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
+  it('does not fall back to local project storage for authenticated cloud sessions', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'cloud-access-token',
+      expiresAt: Date.now() + 60_000,
+      user: { id: 'user_cloud' },
+    }));
+    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
+      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
+    ]));
+    const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
+  });
+
   it('does not synthesize local game mode options when LLM intake fails', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'intake unavailable' }, 500));
     vi.stubGlobal('fetch', fetchMock);
