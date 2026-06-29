@@ -138,6 +138,46 @@ describe('BeeGame user context', () => {
     ).toEqual({ id: 'static-user', role: 'reviewer' })
   })
 
+  test('accepts frontend Supabase env names for the runtime auth resolver', async () => {
+    const originalFetch = globalThis.fetch
+    const calls: string[] = []
+    globalThis.fetch = (async (url, init) => {
+      calls.push(String(url))
+      expect(new Headers(init?.headers).get('apikey')).toBe('vite-anon-key')
+      expect(new Headers(init?.headers).get('authorization')).toBe(
+        'Bearer supabase-token',
+      )
+      return Response.json({
+        id: 'vite-user',
+        role: 'developer',
+        permissions: ['project.read', 'agent.send_message'],
+      })
+    }) as typeof fetch
+    try {
+      const resolver = createConfiguredUserResolver({
+        VITE_SUPABASE_URL: 'https://vite-project.supabase.co',
+        VITE_SUPABASE_ANON_KEY: 'vite-anon-key',
+      } as NodeJS.ProcessEnv)
+
+      expect(
+        await resolver?.(
+          new Request('https://beegame.test/api/current-user', {
+            headers: { authorization: 'Bearer supabase-token' },
+          }),
+        ),
+      ).toEqual({
+        id: 'vite-user',
+        role: 'developer',
+        permissions: ['project.read', 'agent.send_message'],
+      })
+      expect(calls).toEqual([
+        'https://vite-project.supabase.co/rest/v1/rpc/beegame_current_user_context',
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('does not enable static bearer tokens in production by default', async () => {
     const resolver = createEnvTokenUserResolver({
       NODE_ENV: 'production',

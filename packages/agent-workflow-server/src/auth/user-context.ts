@@ -91,12 +91,14 @@ export function createSupabaseUserResolver(
   const baseUrl = trimString(
     options.url ??
       process.env.BEEGAME_SUPABASE_URL ??
-      process.env.SUPABASE_URL,
+      process.env.SUPABASE_URL ??
+      process.env.VITE_SUPABASE_URL,
   )
   const apiKey = trimString(
     options.apiKey ??
       process.env.BEEGAME_SUPABASE_ANON_KEY ??
-      process.env.SUPABASE_ANON_KEY,
+      process.env.SUPABASE_ANON_KEY ??
+      process.env.VITE_SUPABASE_ANON_KEY,
   )
   if (!baseUrl || !apiKey) return undefined
   const fetchImpl = options.fetchImpl ?? fetch
@@ -121,10 +123,14 @@ export function createConfiguredUserResolver(
 ): BeeGameUserResolver | undefined {
   const envResolver = createEnvTokenUserResolver(env)
   const supabaseResolver = createSupabaseUserResolver({
-    url: env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL,
+    url:
+      env.BEEGAME_SUPABASE_URL ??
+      env.SUPABASE_URL ??
+      env.VITE_SUPABASE_URL,
     apiKey:
       env.BEEGAME_SUPABASE_ANON_KEY ??
-      env.SUPABASE_ANON_KEY,
+      env.SUPABASE_ANON_KEY ??
+      env.VITE_SUPABASE_ANON_KEY,
   })
   if (!envResolver) return supabaseResolver
   if (!supabaseResolver) return envResolver
