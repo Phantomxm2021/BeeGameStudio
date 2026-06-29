@@ -41,6 +41,7 @@ Runtime host:
 ```env
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
 BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 ```
 
@@ -83,6 +84,7 @@ Normal users should only see personal settings such as language and account prof
 
 - Supabase Auth providers configured.
 - RLS policies applied and verified.
+- Storage buckets and policies applied for `avatars` and `beegame-assets`.
 - Credit RPCs applied and tested.
 - Runtime host uses anon key plus user JWT only.
 - Static frontend uses Supabase anon key only.

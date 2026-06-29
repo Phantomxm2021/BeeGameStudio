@@ -21,6 +21,10 @@ const dataDir =
   process.env.BEEGAME_SMOKE_DATA_DIR?.trim() ||
   process.env.BEEGAME_DATA_DIR?.trim() ||
   '/tmp/beegame-supabase-smoke'
+const assetBucket =
+  process.env.BEEGAME_SUPABASE_ASSET_BUCKET?.trim() ||
+  process.env.SUPABASE_ASSET_BUCKET?.trim() ||
+  'beegame-assets'
 const modelConfigId =
   process.env.BEEGAME_SMOKE_MODEL_CONFIG_ID?.trim() || undefined
 const smokeId = `smoke_${Date.now().toString(36)}`
@@ -38,39 +42,52 @@ if (!workspaceId) {
 
 const projectId = `beegame-supabase-${smokeId}`
 const projectRoot = `${dataDir.replace(/\/+$/, '')}/${projectId}`
-await createSmokeProject(projectId, workspaceId, projectRoot)
-await upsertSmokeAssetManifest(projectId)
-const creditReservation = await rpc<JsonObject>('beegame_reserve_credits', {
-  p_user_id: userId,
-  p_credits: 1,
-  p_kind: 'supabase_smoke',
-  p_project_id: projectId,
-  p_metadata: {
-    smoke: true,
-    script: 'scripts/smoke-beegame-supabase.ts',
-  },
-})
-await rpc<JsonObject>('beegame_refund_credit_reservation', {
-  p_user_id: userId,
-  p_reservation_id: requireStringField(
-    creditReservation,
-    'reservation_id',
-    'beegame_reserve_credits response',
-  ),
-  p_project_id: projectId,
-  p_metadata: {
-    smoke: true,
-    reason: 'supabase_smoke_cleanup',
-  },
-})
+let createdProject = false
+let storageObjectPath: string | undefined
+let runtimeEnv: JsonObject | undefined
+try {
+  await createSmokeProject(projectId, workspaceId, projectRoot)
+  createdProject = true
+  await upsertSmokeAssetManifest(projectId)
+  storageObjectPath = await uploadSmokeAssetObject(projectId)
+  const creditReservation = await rpc<JsonObject>('beegame_reserve_credits', {
+    p_user_id: userId,
+    p_credits: 1,
+    p_kind: 'supabase_smoke',
+    p_project_id: projectId,
+    p_metadata: {
+      smoke: true,
+      script: 'scripts/smoke-beegame-supabase.ts',
+    },
+  })
+  await rpc<JsonObject>('beegame_refund_credit_reservation', {
+    p_user_id: userId,
+    p_reservation_id: requireStringField(
+      creditReservation,
+      'reservation_id',
+      'beegame_reserve_credits response',
+    ),
+    p_project_id: projectId,
+    p_metadata: {
+      smoke: true,
+      reason: 'supabase_smoke_cleanup',
+    },
+  })
 
-const runtimeEnv = await rpc<JsonObject>('beegame_runtime_env', {
-  p_user_id: userId,
-  p_data_dir: dataDir,
-  ...(modelConfigId ? { p_model_config_id: modelConfigId } : {}),
-})
-
-await deleteSmokeProject(projectId)
+  runtimeEnv = await rpc<JsonObject>('beegame_runtime_env', {
+    p_user_id: userId,
+    p_data_dir: dataDir,
+    ...(modelConfigId ? { p_model_config_id: modelConfigId } : {}),
+  })
+} finally {
+  await cleanupSmokeResources({
+    projectId: createdProject ? projectId : undefined,
+    storageObjectPath,
+  })
+}
+if (!runtimeEnv) {
+  throw new Error('beegame_runtime_env smoke check did not return a payload')
+}
 
 console.log(JSON.stringify({
   ok: true,
@@ -88,6 +105,11 @@ console.log(JSON.stringify({
   },
   assetManifest: {
     upserted: true,
+  },
+  assetStorage: {
+    bucket: assetBucket,
+    uploaded: true,
+    deleted: true,
   },
   credits: {
     reserved: 1,
@@ -255,6 +277,78 @@ async function upsertSmokeAssetManifest(projectId: string): Promise<void> {
   }
 }
 
+async function uploadSmokeAssetObject(projectId: string): Promise<string> {
+  const objectPath = [
+    'projects',
+    safeStoragePathSegment(userId),
+    safeStoragePathSegment(projectId),
+    `${smokeId}.txt`,
+  ].join('/')
+  const response = await fetch(
+    `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/${encodeURIComponent(assetBucket)}/${objectPath}`,
+    {
+      method: 'PUT',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${authToken}`,
+        'content-type': 'text/plain; charset=utf-8',
+        'x-upsert': 'true',
+      },
+      body: `BeeGame Supabase smoke asset ${smokeId}\n`,
+    },
+  )
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(
+      `Storage upload failed for bucket "${assetBucket}": ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+    )
+  }
+  return objectPath
+}
+
+async function deleteSmokeStorageObject(objectPath: string): Promise<void> {
+  const response = await fetch(
+    `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/${encodeURIComponent(assetBucket)}/${objectPath}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${authToken}`,
+      },
+    },
+  )
+  if (!response.ok && response.status !== 404) {
+    const text = await response.text().catch(() => '')
+    throw new Error(
+      `Storage cleanup failed for bucket "${assetBucket}": ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+    )
+  }
+}
+
+async function cleanupSmokeResources(input: {
+  projectId?: string
+  storageObjectPath?: string
+}): Promise<void> {
+  const errors: string[] = []
+  if (input.storageObjectPath) {
+    try {
+      await deleteSmokeStorageObject(input.storageObjectPath)
+    } catch (error) {
+      errors.push(toErrorMessage(error))
+    }
+  }
+  if (input.projectId) {
+    try {
+      await deleteSmokeProject(input.projectId)
+    } catch (error) {
+      errors.push(toErrorMessage(error))
+    }
+  }
+  if (errors.length) {
+    throw new Error(`Smoke cleanup failed: ${errors.join('; ')}`)
+  }
+}
+
 async function deleteSmokeProject(projectId: string): Promise<void> {
   await rest<void>(
     `/rest/v1/beegame_projects?id=eq.${encodeURIComponent(projectId)}`,
@@ -327,6 +421,10 @@ function stringField(value: unknown): string | undefined {
   return normalized || undefined
 }
 
+function safeStoragePathSegment(value: string): string {
+  return encodeURIComponent(value.trim().replace(/[^\w.-]+/g, '-'))
+}
+
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -342,6 +440,10 @@ function summarizeRuntimeEnv(env: JsonObject): JsonObject {
           : '<empty>',
       ]),
   )
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function shouldRedact(key: string): boolean {

@@ -98,5 +98,6 @@ It verifies:
 - `beegame_current_user_context` returns the expected user, workspace, role, and permissions.
 - Project metadata can be inserted and deleted under RLS.
 - `beegame_assets` can store an asset manifest for that project.
+- Supabase Storage can upload and delete a private project asset under `beegame-assets`.
 - Credit reserve and refund RPCs work without consuming final credits.
 - `beegame_runtime_env` returns runtime env values with secrets redacted in output.
