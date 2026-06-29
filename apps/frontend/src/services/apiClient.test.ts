@@ -4,12 +4,14 @@ import {
   API_BASE_URL,
   authenticatedFetch,
   buildAuthHeaders,
+  buildUnauthorizedMessage,
 } from './apiClient';
 
 describe('apiClient defaults', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    localStorage.clear();
   });
 
   it('uses same-origin requests by default', () => {
@@ -18,6 +20,31 @@ describe('apiClient defaults', () => {
 
   it('adds the runtime bearer token to fetch requests', async () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/current-user');
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer runtime-token');
+  });
+
+  it('ignores the deployment bearer token in production mode by default', async () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/current-user');
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBeNull();
+  });
+
+  it('allows the deployment bearer token in production only with explicit dev override', async () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    vi.stubEnv('VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN', '1');
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -80,5 +107,11 @@ describe('apiClient defaults', () => {
     });
 
     expect(headers.get('Authorization')).toBe('Bearer explicit-token');
+  });
+
+  it('uses sign-in copy when no auth token is available', () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', '');
+
+    expect(buildUnauthorizedMessage()).toBe('请先登录 BeeGame');
   });
 });

@@ -40,10 +40,10 @@ describe('buildUnauthorizedMessage', () => {
         expect(buildUnauthorizedMessage('authentication required')).toBe('authentication required');
     });
 
-    it('explains missing token configuration when no auth token is available', () => {
+    it('asks the user to sign in when no auth token is available', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', '');
 
-        expect(buildUnauthorizedMessage()).toBe('后端已开启鉴权，但前端未配置 token');
+        expect(buildUnauthorizedMessage()).toBe('请先登录 BeeGame');
     });
 
     it('reports invalid token when a deployment token is present', () => {

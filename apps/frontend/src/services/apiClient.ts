@@ -18,7 +18,17 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 let showToastError: ((message: string) => void) | null = null;
 
-const getEnvAuthToken = (): string => String(import.meta.env.VITE_API_AUTH_TOKEN ?? '').trim();
+const getEnvFlag = (value: unknown): boolean => value === true || value === '1' || value === 'true';
+
+const isDevAuthTokenAllowed = (): boolean => (
+  import.meta.env.MODE !== 'production' ||
+  getEnvFlag(import.meta.env.VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN)
+);
+
+const getEnvAuthToken = (): string => {
+  if (!isDevAuthTokenAllowed()) return '';
+  return String(import.meta.env.VITE_API_AUTH_TOKEN ?? '').trim();
+};
 
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
@@ -70,7 +80,7 @@ export const buildUnauthorizedMessage = (backendMessage?: string): string => {
     return normalizedBackendMessage;
   }
   if (!resolveAuthToken()) {
-    return '后端已开启鉴权，但前端未配置 token';
+    return '请先登录 BeeGame';
   }
   return '未授权，token 无效或已失效';
 };
