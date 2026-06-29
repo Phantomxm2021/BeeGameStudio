@@ -7,7 +7,7 @@ create extension if not exists pgcrypto;
 insert into storage.buckets (id, name, public)
 values
   ('avatars', 'avatars', true),
-  ('beegame-assets', 'beegame-assets', true)
+  ('beegame-assets', 'beegame-assets', false)
 on conflict (id) do update
 set public = excluded.public;
 
@@ -48,9 +48,15 @@ create policy "beegame avatar owner delete" on storage.objects
   );
 
 drop policy if exists "beegame asset public read" on storage.objects;
-create policy "beegame asset public read" on storage.objects
+drop policy if exists "beegame asset owner read" on storage.objects;
+create policy "beegame asset owner read" on storage.objects
   for select
-  using (bucket_id = 'beegame-assets');
+  to authenticated
+  using (
+    bucket_id = 'beegame-assets' and
+    (storage.foldername(name))[1] = 'projects' and
+    (storage.foldername(name))[2] = auth.uid()::text
+  );
 
 drop policy if exists "beegame asset owner insert" on storage.objects;
 create policy "beegame asset owner insert" on storage.objects

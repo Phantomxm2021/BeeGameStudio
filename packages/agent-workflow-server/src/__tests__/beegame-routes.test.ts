@@ -4100,7 +4100,7 @@ describe('beegame session routes', () => {
       )
       expect(payload.slot.uploaded_urls).toEqual([
         expect.stringContaining(
-          '/storage/v1/object/public/beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
+          'supabase://beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
         ),
       ])
       expect(manifest.slots[0].uploaded_urls).toEqual(payload.slot.uploaded_urls)

@@ -767,7 +767,7 @@ export class SupabaseDashboardStore {
         `Supabase storage upload failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
       )
     }
-    return `${this.baseUrl}/storage/v1/object/public/${encodeURIComponent(this.assetBucket)}/${objectPath}`
+    return `supabase://${this.assetBucket}/${objectPath}`
   }
 
   async upsertPreviewSnapshot(
