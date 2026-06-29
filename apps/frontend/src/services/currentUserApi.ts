@@ -5,6 +5,7 @@ export type BeeGameRole = 'owner' | 'developer' | 'reviewer' | 'viewer';
 export type BeeGamePermission =
   | 'workspace.read'
   | 'workspace.manage'
+  | 'workspace.manage_members'
   | 'project.read'
   | 'project.create'
   | 'project.delete'

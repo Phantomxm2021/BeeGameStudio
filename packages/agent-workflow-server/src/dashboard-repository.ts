@@ -108,6 +108,10 @@ export class DashboardRepository {
     this.supabaseStore = options.supabaseStore
   }
 
+  private hasSupabaseProductionStore(): boolean {
+    return Boolean(this.supabaseStore)
+  }
+
   async getCreditBalance(
     request: Request,
     user: BeeGameUserContext,
@@ -121,7 +125,7 @@ export class DashboardRepository {
   }
 
   hasSupabaseStorage(): boolean {
-    return Boolean(this.supabaseStore)
+    return this.hasSupabaseProductionStore()
   }
 
   async deleteAuthUser(_user: BeeGameUserContext): Promise<void> {
@@ -475,7 +479,7 @@ export class DashboardRepository {
   }
 
   createSessionCreditBackend(): BeeGameSessionCreditBackend {
-    if (this.supabaseStore) {
+    if (this.hasSupabaseProductionStore()) {
       return {
         reserveCredits: (userId, input) =>
           this.supabaseForAuthToken(input.authToken)
@@ -488,6 +492,8 @@ export class DashboardRepository {
             .refundCreditReservation(userId, input),
       }
     }
+    // Dev/offline mode only. SaaS deployments should provide a Supabase store,
+    // so credit mutations run through authenticated RPC under RLS.
     return {
       reserveCredits: (userId, input) => reserveCredits(userId, input),
       settleCreditReservation: (userId, input) =>
