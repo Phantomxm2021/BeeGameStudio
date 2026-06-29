@@ -37,6 +37,7 @@ import {
     updateSupabaseAvatarUrl,
     uploadSupabaseAvatarImage,
 } from '../../services/supabaseAuthApi';
+import { deleteCurrentUser } from '../../services/currentUserApi';
 
 type IntakePhase =
     | 'idle'
@@ -453,6 +454,21 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
     };
 
+    const handleDeleteAccount = async () => {
+        setProfileError('');
+        setProfileNotice('');
+        const confirmed = window.confirm('注销账户会删除你的 BeeGame 登录账号和云端数据。此操作无法撤销，是否继续？');
+        if (!confirmed) return;
+        try {
+            await deleteCurrentUser();
+            clearSupabaseSession();
+            setIsProfileOpen(false);
+            await loadCurrentUser();
+        } catch (error) {
+            setProfileError(error instanceof Error ? error.message : '注销账户失败，请稍后重试。');
+        }
+    };
+
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
@@ -776,7 +792,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 ) : null}
                             </div>
 
-                            <div className="mt-6 flex justify-end gap-3">
+                            <div className="mt-6 flex justify-between gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => void handleDeleteAccount()}
+                                    className="rounded-full border border-red-300/25 px-5 py-2.5 text-sm font-bold text-red-200 transition hover:border-red-200/50 hover:bg-red-500/10"
+                                >
+                                    注销账户
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => void handleFinishProfile()}

@@ -34,6 +34,10 @@ Admin status must come from Supabase-controlled state only:
 - `auth.users.raw_app_meta_data.beegame_role = "owner"`, or
 - a workspace membership row where the current user is `owner`.
 
+Account deletion also belongs to Supabase. The runtime host may call
+`beegame_delete_current_user()` with the current user's JWT, but it must not use
+Supabase Auth admin APIs or service role keys to delete users.
+
 ## Dev And Offline Mode
 
 Local JSON/SQLite stores and static bearer tokens exist only for development, tests, and offline packaging experiments.

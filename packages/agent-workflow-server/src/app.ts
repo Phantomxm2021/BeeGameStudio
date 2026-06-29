@@ -237,10 +237,16 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/current-user', async c => {
-    return c.json({
-      error: 'Unsupported by local runtime host',
-      message: 'Account deletion must be handled by Supabase RPC or a deployment-side service.',
-    }, 501)
+    const user = getCurrentUser(c.req.raw)
+    try {
+      await dashboardRepository.deleteAuthUser(c.req.raw, user)
+      return c.json({ ok: true })
+    } catch (error) {
+      return c.json({
+        error: 'Account deletion unavailable',
+        message: toErrorMessage(error),
+      }, 501)
+    }
   })
 
   app.get('/api/audit-events', async c => {

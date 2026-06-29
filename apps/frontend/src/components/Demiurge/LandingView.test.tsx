@@ -17,6 +17,9 @@ const { getCreditBalance, getCreditLedger, getCreditQuote } = vi.hoisted(() => (
     getCreditLedger: vi.fn(),
     getCreditQuote: vi.fn(),
 }));
+const { deleteCurrentUser } = vi.hoisted(() => ({
+    deleteCurrentUser: vi.fn(),
+}));
 const {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
@@ -126,6 +129,10 @@ vi.mock('../../services/creditsApi', () => ({
     getCreditBalance,
     getCreditLedger,
     getCreditQuote,
+}));
+
+vi.mock('../../services/currentUserApi', () => ({
+    deleteCurrentUser,
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
@@ -273,6 +280,8 @@ beforeEach(() => {
         canStart: true,
         message: '200 credits reserved before the build starts. Unused credits are refunded after settlement.',
     });
+    deleteCurrentUser.mockReset();
+    deleteCurrentUser.mockResolvedValue({ ok: true });
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
     clearSupabaseSession.mockReset();
@@ -465,7 +474,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
     });
 
-    it('does not expose account deletion from the local runtime host profile', async () => {
+    it('confirms account deletion before clearing the signed-in session', async () => {
         mockCurrentUser = {
             id: 'alice',
             email: 'alice@example.com',
@@ -473,12 +482,18 @@ describe('LandingView bootstrap submission', () => {
             role: 'owner',
             permissions: ['project.create', 'project.delete'],
         };
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
         renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
-        expect(screen.queryByRole('button', { name: '注销账户' })).not.toBeInTheDocument();
+        fireEvent.click(await screen.findByRole('button', { name: '注销账户' }));
+
+        await waitFor(() => expect(deleteCurrentUser).toHaveBeenCalledTimes(1));
+        expect(clearSupabaseSession).toHaveBeenCalled();
+        expect(mockLoadCurrentUser).toHaveBeenCalled();
+        confirmSpy.mockRestore();
     });
 
     it('closes the account menu when clicking outside it', async () => {

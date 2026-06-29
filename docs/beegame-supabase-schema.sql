@@ -1018,6 +1018,25 @@ begin
 end
 $$;
 
+create or replace function public.beegame_delete_current_user()
+returns void
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  current_user_id uuid;
+begin
+  current_user_id := auth.uid();
+  if current_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  delete from auth.users
+  where id = current_user_id;
+end
+$$;
+
 do $$
 begin
   if not exists (
@@ -1131,3 +1150,6 @@ grant execute on function public.beegame_settle_credit_reservation(uuid, text, i
 
 revoke execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) from public;
 grant execute on function public.beegame_refund_credit_reservation(uuid, text, text, jsonb) to authenticated;
+
+revoke execute on function public.beegame_delete_current_user() from public;
+grant execute on function public.beegame_delete_current_user() to authenticated;

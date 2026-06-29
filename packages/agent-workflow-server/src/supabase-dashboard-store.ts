@@ -249,9 +249,7 @@ export class SupabaseDashboardStore {
   }
 
   async deleteAuthUser(_userId: string): Promise<void> {
-    throw new Error(
-      'Supabase Auth admin operations must run in Supabase RPC or a deployment-side service',
-    )
+    await this.rpc('beegame_delete_current_user', {})
   }
 
   async listPublicModelConfigs(ownerId: string): Promise<PublicModelConfig[]> {

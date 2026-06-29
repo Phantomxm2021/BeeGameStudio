@@ -128,10 +128,17 @@ export class DashboardRepository {
     return this.hasSupabaseProductionStore()
   }
 
-  async deleteAuthUser(_user: BeeGameUserContext): Promise<void> {
-    throw new Error(
-      'Account deletion is handled by Supabase RPC or a deployment-side service, not the local runtime host',
-    )
+  async deleteAuthUser(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<void> {
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase) {
+      throw new Error(
+        'Account deletion requires Supabase RPC and is not available in dev/offline mode',
+      )
+    }
+    await supabase.deleteAuthUser(user.id)
   }
 
   async listProjects(

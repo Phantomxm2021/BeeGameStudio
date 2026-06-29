@@ -72,7 +72,7 @@ describe('agent workflow server routes', () => {
     })
   })
 
-  test('does not run Supabase Auth admin deletion from the local runtime host', async () => {
+  test('does not run account deletion from the local dev or offline runtime host', async () => {
     const authApp = createAgentWorkflowApp({
       currentUser: {
         id: '00000000-0000-0000-0000-000000000001',
@@ -86,8 +86,70 @@ describe('agent workflow server routes', () => {
 
     expect(res.status).toBe(501)
     expect(await res.json()).toEqual(expect.objectContaining({
-      error: 'Unsupported by local runtime host',
+      error: 'Account deletion unavailable',
     }))
+  })
+
+  test('deletes the current user through authenticated Supabase RPC when configured', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
+    const originalFetch = globalThis.fetch
+    const calls: Array<{ url: string; authorization?: string }> = []
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://supabase.example.test'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-test-key'
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        calls.push({
+          url,
+          authorization: new Headers(init?.headers).get('authorization') ?? undefined,
+        })
+        if (url.endsWith('/rest/v1/rpc/beegame_delete_current_user')) {
+          return new Response('{}', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch
+
+      const authApp = createAgentWorkflowApp({
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header !== 'Bearer user-token') return undefined
+          return {
+            id: '00000000-0000-0000-0000-000000000001',
+            role: 'owner',
+          }
+        },
+      })
+
+      const res = await authApp.request('/api/current-user', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer user-token' },
+      })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ ok: true })
+      expect(calls).toEqual([
+        {
+          url: 'https://supabase.example.test/rest/v1/rpc/beegame_delete_current_user',
+          authorization: 'Bearer user-token',
+        },
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
+      }
+    }
   })
 
   test('returns an owner-scoped credit balance with generation estimates', async () => {
