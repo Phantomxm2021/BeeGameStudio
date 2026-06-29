@@ -12,6 +12,7 @@ const renderActions = (props: Partial<Parameters<typeof LandingActions>[0]> = {}
         isHistoryOpen={false}
         currentUserId="user-1"
         currentUserDisplayName="Bee User"
+        currentUserEmail="bee@example.com"
         onToggleSettings={vi.fn()}
         onToggleHistory={vi.fn()}
         onOpenProfile={vi.fn()}
@@ -28,6 +29,8 @@ describe('LandingActions user menu', () => {
 
         expect(screen.queryByRole('menuitem', { name: '管理员' })).not.toBeInTheDocument();
         expect(screen.queryByRole('menuitem', { name: '系统管理' })).not.toBeInTheDocument();
+        expect(screen.getByText('Bee User')).toBeInTheDocument();
+        expect(screen.getByText('bee@example.com')).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();

@@ -10,6 +10,7 @@ interface LandingActionsProps {
     isHistoryOpen: boolean;
     currentUserId?: string;
     currentUserDisplayName?: string;
+    currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     creditBalance?: number;
     canOpenSystemManagement?: boolean;
@@ -28,6 +29,7 @@ export function LandingActions({
     isHistoryOpen,
     currentUserId,
     currentUserDisplayName,
+    currentUserEmail,
     currentUserAvatarUrl,
     creditBalance,
     canOpenSystemManagement = false,
@@ -46,8 +48,8 @@ export function LandingActions({
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
     const systemManagementLabel = lang === 'en' ? 'System Management' : '系统管理';
-    const fallbackUserLabel = lang === 'en' ? 'Syncing profile' : '账号资料同步中';
-    const userLabel = currentUserDisplayName || (currentUserId ? fallbackUserLabel : undefined);
+    const fallbackUserLabel = lang === 'en' ? 'Account' : '账号';
+    const userLabel = currentUserDisplayName || currentUserEmail || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
 
     useEffect(() => {
@@ -139,6 +141,9 @@ export function LandingActions({
                 >
                     <div className="px-3 py-3">
                         <div className="truncate text-sm font-semibold text-white">{userLabel}</div>
+                        {currentUserEmail ? (
+                            <div className="mt-1 truncate text-xs font-semibold text-zinc-400">{currentUserEmail}</div>
+                        ) : null}
                         {typeof creditBalance === 'number' ? (
                             <div className="mt-1 text-xs font-semibold text-emerald-200">{creditBalance} credits</div>
                         ) : null}

@@ -390,7 +390,7 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
 
-        expect(screen.getByText('账号资料同步中')).toBeInTheDocument();
+        expect(screen.getByText('账号')).toBeInTheDocument();
         expect(screen.queryByText('00000000-0000-0000-0000-000000000001')).not.toBeInTheDocument();
     });
 

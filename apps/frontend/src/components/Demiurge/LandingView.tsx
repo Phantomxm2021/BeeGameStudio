@@ -626,6 +626,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     isHistoryOpen={isHistoryOpen}
                     currentUserId={currentUser?.id}
                     currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+                    currentUserEmail={currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
                     creditBalance={creditBalance?.balanceCredits}
                     canOpenSystemManagement={canOpenSystemManagement}
