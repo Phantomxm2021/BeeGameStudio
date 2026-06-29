@@ -18,7 +18,7 @@ describe('apiClient defaults', () => {
     expect(API_BASE_URL).toBe('');
   });
 
-  it('adds the runtime bearer token to fetch requests', async () => {
+  it('adds the dev/offline bearer token to fetch requests outside production', async () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
@@ -29,7 +29,7 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBe('Bearer runtime-token');
   });
 
-  it('ignores the deployment bearer token in production mode by default', async () => {
+  it('ignores the dev/offline bearer token in production mode by default', async () => {
     vi.stubEnv('MODE', 'production');
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
@@ -41,7 +41,7 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBeNull();
   });
 
-  it('allows the deployment bearer token in production only with explicit dev override', async () => {
+  it('allows the dev/offline bearer token in production only with explicit override', async () => {
     vi.stubEnv('MODE', 'production');
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
     vi.stubEnv('VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN', '1');

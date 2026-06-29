@@ -38,8 +38,9 @@ Edit `.env.production` with your production values:
 ```env
 # Production API endpoints
 VITE_API_BASE_URL=https://api.your-domain.com
-VITE_API_AUTH_TOKEN=your-shared-token
 VITE_WS_BASE_URL=wss://api.your-domain.com
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 
 # Feature flags
 VITE_ENABLE_DEBUG=false
@@ -48,6 +49,11 @@ VITE_ENABLE_ANALYTICS=true
 # Build mode
 VITE_BUILD_MODE=production
 ```
+
+Production authentication uses Supabase Auth sessions. Do not deploy the SaaS
+frontend with a shared `VITE_API_AUTH_TOKEN`; that variable is reserved for
+dev/offline diagnostics and is ignored in production unless
+`VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN=1` is explicitly set.
 
 ### 3. Build with Production Environment
 

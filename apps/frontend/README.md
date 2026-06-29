@@ -338,8 +338,9 @@ Create a `.env` file in the frontend root directory:
 ```env
 # API Configuration
 VITE_API_BASE_URL=http://localhost:8000
-VITE_API_AUTH_TOKEN=
 VITE_WS_BASE_URL=ws://localhost:8000
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 
 # Feature Flags (optional)
 VITE_ENABLE_DEBUG=false
@@ -356,8 +357,9 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
 **Note**: Vite requires environment variables to be prefixed with `VITE_` to be exposed to the client.
 
-本地开发如果后端使用 `DEMIURGE_API_AUTH_ENABLED=false`，保持 `VITE_API_AUTH_TOKEN` 为空即可。
-如果后端开启鉴权，则前端必须配置与 `DEMIURGE_API_AUTH_TOKEN` 一致的 `VITE_API_AUTH_TOKEN`，否则 `/api/*` 请求会返回 `401 Unauthorized`。
+生产环境使用 Supabase Auth session 作为 API Bearer token，不使用共享部署 token。
+`VITE_API_AUTH_TOKEN` 仅保留给 dev/offline 调试；生产构建默认忽略它，除非显式设置
+`VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN=1`。
 
 ## Docker Configuration
 

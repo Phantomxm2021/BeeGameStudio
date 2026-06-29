@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, ShieldCheck, Square, User } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square, User } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
 import { getBeeGameText } from './BeeGameI18n';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -356,13 +356,11 @@ export function BeeGameLivePreviewPage({
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isUserMenuOpen, setUserMenuOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
-    const [isSystemManagementOpen, setSystemManagementOpen] = useState(false);
     const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
     const labels = LABELS[lang] || LABELS.en;
     const uiText = getBeeGameText(lang);
-    const hasPermission = useSystemStore(state => state.hasPermission);
     const currentUser = useSystemStore(state => state.currentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
@@ -401,11 +399,6 @@ export function BeeGameLivePreviewPage({
     const userEmail = currentUser?.email || '';
     const userInitial = getUserInitial(userLabel);
     const userAvatarUrl = currentUser?.avatarUrl || '';
-    const canOpenSystemManagement = hasPermission('workspace.manage') ||
-        hasPermission('secrets.manage') ||
-        hasPermission('runtime_settings.manage') ||
-        hasPermission('mcp.manage') ||
-        hasPermission('model_config.manage');
     useEffect(() => {
         setStoppedPreviewUrl('');
     }, [previewUrl]);
@@ -541,12 +534,10 @@ export function BeeGameLivePreviewPage({
                                     event.preventDefault();
                                     setUserMenuOpen(false);
                                     setSettingsOpen(true);
-                                    setSystemManagementOpen(false);
                                 }}
                                 onClick={() => {
                                     setUserMenuOpen(false);
                                     setSettingsOpen(true);
-                                    setSystemManagementOpen(false);
                                 }}
                                 className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
                             >
@@ -557,32 +548,6 @@ export function BeeGameLivePreviewPage({
                                     <div className="text-sm font-black">{labels.settings}</div>
                                 </div>
                             </button>
-                            {canOpenSystemManagement ? (
-                                <button
-                                    type="button"
-                                    role="menuitem"
-                                    aria-label={lang === 'en' ? 'Admin Console' : '管理控制台'}
-                                    onMouseDown={(event) => {
-                                        event.preventDefault();
-                                        setUserMenuOpen(false);
-                                        setSettingsOpen(false);
-                                        setSystemManagementOpen(true);
-                                    }}
-                                    onClick={() => {
-                                        setUserMenuOpen(false);
-                                        setSettingsOpen(false);
-                                        setSystemManagementOpen(true);
-                                    }}
-                                    className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
-                                >
-                                    <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/[0.08] text-zinc-300">
-                                        <ShieldCheck className="h-4 w-4" />
-                                    </span>
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-black">{lang === 'en' ? 'Admin Console' : '管理控制台'}</div>
-                                    </div>
-                                </button>
-                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -684,18 +649,6 @@ export function BeeGameLivePreviewPage({
                 onSetLang={onSetLang}
             />
 
-            <SettingsMenu
-                isOpen={isSystemManagementOpen && canOpenSystemManagement}
-                lang={lang}
-                onClose={() => setSystemManagementOpen(false)}
-                onSetLang={onSetLang}
-                scope="admin"
-                canManageWorkspace={hasPermission('workspace.manage')}
-                canManageSecrets={hasPermission('secrets.manage')}
-                canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
-                canManageMcp={hasPermission('mcp.manage')}
-                canManageModelConfig={hasPermission('model_config.manage')}
-            />
         </main>
     );
 }

@@ -16,13 +16,13 @@ describe('resolveAuthToken', () => {
         vi.unstubAllEnvs();
     });
 
-    it('uses the deployment auth token', () => {
+    it('uses the dev/offline auth token outside production', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', 'env-token');
 
         expect(resolveAuthToken()).toBe('env-token');
     });
 
-    it('returns an empty token when no deployment token is configured', () => {
+    it('returns an empty token when no dev/offline token is configured', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', '');
 
         expect(resolveAuthToken()).toBe('');
@@ -46,7 +46,7 @@ describe('buildUnauthorizedMessage', () => {
         expect(buildUnauthorizedMessage()).toBe('请先登录 BeeGame');
     });
 
-    it('reports invalid token when a deployment token is present', () => {
+    it('reports invalid token when a dev/offline token is present', () => {
         vi.stubEnv('VITE_API_AUTH_TOKEN', 'bad-token');
 
         expect(buildUnauthorizedMessage()).toBe('未授权，token 无效或已失效');
