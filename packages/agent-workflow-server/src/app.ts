@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
@@ -1414,6 +1414,27 @@ function registerBeeGameSessionRoutes(
       beeGameSessions,
       options.getCurrentUser,
     )
+  const getSessionWorkspacePath = async (
+    request: Request,
+    sessionId: string,
+    legacyWorkspacePath?: string,
+  ): Promise<string> => {
+    const metadata = beeGameSessions.metadata(sessionId)
+    if (metadata?.workspacePath) return metadata.workspacePath
+    if (!legacyWorkspacePath) throw new Error('Session not found')
+    const resolvedWorkspace = await resolveSessionWorkspacePath(
+      legacyWorkspacePath,
+      defaultWorkspacePath,
+    )
+    const user = options.getCurrentUser(request)
+    if (user.id === DEFAULT_LOCAL_USER_ID) return resolvedWorkspace
+    const userDataRoot = resolve(options.getUserDataRoot(request))
+    const relativeToUserRoot = relative(userDataRoot, resolvedWorkspace)
+    if (relativeToUserRoot.startsWith('..') || isAbsolute(relativeToUserRoot)) {
+      throw new Error('Workspace path must stay inside the current user workspace')
+    }
+    return resolvedWorkspace
+  }
 
   app.get(basePath, c => {
     const forbidden = check(c.req.raw, 'project.read')
@@ -1498,7 +1519,6 @@ function registerBeeGameSessionRoutes(
       return c.json(
         beeGameSessions.runtimeSnapshot(
           c.req.param('id'),
-          c.req.query('workspacePath'),
         ),
       )
     } catch (err) {
@@ -1585,9 +1605,12 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const workspacePath = c.req.query('workspacePath')
-    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
       const manifest = await readBeeGameAssetManifest(workspacePath)
       await options.persistAssetManifest(
         c.req.raw,
@@ -1610,13 +1633,16 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const workspacePath = c.req.query('workspacePath')
-    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
     const form = await c.req.raw.formData()
     const file = form.get('file')
     if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
     try {
       const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
       const uploadedUrl = await options.uploadAssetFile(
         c.req.raw,
         sessionMetadata,
@@ -1647,7 +1673,11 @@ function registerBeeGameSessionRoutes(
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
         c.req.param('id'),
-        c.req.query('workspacePath'),
+        await getSessionWorkspacePath(
+          c.req.raw,
+          c.req.param('id'),
+          c.req.query('workspacePath'),
+        ),
       )
       const body = projectPackage.data.buffer.slice(
         projectPackage.data.byteOffset,
@@ -1667,14 +1697,18 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.get(`${basePath}/:id/preview`, c => {
+  app.get(`${basePath}/:id/preview`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const workspacePath = c.req.query('workspacePath')
-    if (!workspacePath) return c.json({ error: 'Missing query: workspacePath' }, 400)
+    const body = await readOptionalJson(c.req.raw)
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        getWorkspacePathHint(c.req.query('workspacePath'), body),
+      )
       return c.json(beeGamePreviews.status(c.req.param('id'), workspacePath))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -1686,12 +1720,13 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const body = await readJson(c.req.raw)
-    const workspacePath = typeof body.workspacePath === 'string'
-      ? body.workspacePath
-      : c.req.query('workspacePath')
-    if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
+    const body = await readOptionalJson(c.req.raw)
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        getWorkspacePathHint(c.req.query('workspacePath'), body),
+      )
       const snapshot = await beeGamePreviews.start({
         sessionId: c.req.param('id'),
         workspacePath,
@@ -1712,12 +1747,13 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const body = await readJson(c.req.raw)
-    const workspacePath = typeof body.workspacePath === 'string'
-      ? body.workspacePath
-      : c.req.query('workspacePath')
-    if (!workspacePath) return c.json({ error: 'Missing workspacePath' }, 400)
+    const body = await readOptionalJson(c.req.raw)
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        getWorkspacePathHint(c.req.query('workspacePath'), body),
+      )
       const snapshot = await beeGamePreviews.restart({
         sessionId: c.req.param('id'),
         workspacePath,
@@ -1738,8 +1774,12 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const workspacePath = c.req.query('workspacePath')
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
       const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
       await options.persistPreviewSnapshot(
         c.req.raw,
@@ -1979,6 +2019,25 @@ function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectM
 async function readJson(request: Request): Promise<JsonObject> {
   const value = await request.json()
   return isObject(value) ? value : {}
+}
+
+async function readOptionalJson(request: Request): Promise<JsonObject> {
+  try {
+    const value = await request.json()
+    return isObject(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function getWorkspacePathHint(
+  queryValue: string | undefined,
+  body: JsonObject,
+): string | undefined {
+  if (queryValue) return queryValue
+  return typeof body.workspacePath === 'string'
+    ? body.workspacePath
+    : undefined
 }
 
 function requireFields(body: JsonObject, fields: string[]): string | null {

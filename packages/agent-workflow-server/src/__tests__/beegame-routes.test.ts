@@ -872,6 +872,87 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('ignores client workspace path hints for active SaaS sessions', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-saas-workspace-'))
+    const requestedWorkspace = join(projectsRoot, 'requested-project')
+    const wrongWorkspace = join(projectsRoot, 'wrong-project')
+    const starts: Array<{ cwd: string }> = []
+    const previewRunner: BeeGamePreviewRunner = (_command, options) => {
+      starts.push({ cwd: options.cwd })
+      return { kill: () => {} }
+    }
+    const app = createAgentWorkflowApp({
+      defaultWorkspacePath: projectsRoot,
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => 63100,
+      previewReadinessProbe: async () => true,
+      currentUser: {
+        id: '00000000-0000-0000-0000-000000000011',
+        role: 'owner',
+      },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: requestedWorkspace,
+          projectId: 'project_workspace_hint',
+        }),
+      })
+      const session = await sessionRes.json()
+      await writeFile(
+        join(session.cwd, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^5.0.0' },
+        }),
+      )
+
+      const previewRes = await app.request(
+        `/api/beegame-sessions/${session.id}/preview?workspacePath=${encodeURIComponent(wrongWorkspace)}`,
+        { method: 'POST' },
+      )
+
+      expect(previewRes.status).toBe(200)
+      expect(starts[0]?.cwd).toBe(session.cwd)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects legacy workspace path hints outside the current SaaS user root', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-saas-workspace-'))
+    const otherUserWorkspace = join(
+      projectsRoot,
+      'users',
+      '00000000-0000-0000-0000-000000000022',
+      'other-project',
+    )
+    const app = createAgentWorkflowApp({
+      defaultWorkspacePath: projectsRoot,
+      sessionRunner: createFakeRunner().runner,
+      currentUser: {
+        id: '00000000-0000-0000-0000-000000000011',
+        role: 'owner',
+      },
+    })
+    try {
+      const previewRes = await app.request('/api/beegame-sessions/missing/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: otherUserWorkspace }),
+      })
+      const preview = await previewRes.json()
+
+      expect(previewRes.status).toBe(400)
+      expect(preview.error).toContain('current user workspace')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('injects bearer authenticated user runtime settings into BeeGame turns', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
@@ -3813,9 +3894,19 @@ describe('beegame session routes', () => {
           role: 'owner',
         },
       })
-      await mkdir(join(workspace, 'assets'), { recursive: true })
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          projectId: 'project_asset_metadata',
+        }),
+      })
+      const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(join(sessionWorkspace, 'assets'), { recursive: true })
       await writeFile(
-        join(workspace, 'assets', 'asset-manifest.json'),
+        join(sessionWorkspace, 'assets', 'asset-manifest.json'),
         JSON.stringify({
           version: 1,
           project_target: { integration_mode: 'filesystem' },
@@ -3827,15 +3918,6 @@ describe('beegame session routes', () => {
           }],
         }),
       )
-      const sessionRes = await app.request('/api/beegame-sessions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          workspacePath: workspace,
-          projectId: 'project_asset_metadata',
-        }),
-      })
-      const session = await sessionRes.json()
 
       const assetsRes = await app.request(
         `/api/beegame-sessions/${session.id}/assets?workspacePath=${encodeURIComponent(workspace)}`,
@@ -4049,19 +4131,6 @@ describe('beegame session routes', () => {
           role: 'owner',
         },
       })
-      await mkdir(join(workspace, 'assets'), { recursive: true })
-      await writeFile(
-        join(workspace, 'assets', 'asset-manifest.json'),
-        JSON.stringify({
-          version: 1,
-          project_target: { integration_mode: 'filesystem' },
-          slots: [{
-            id: 'main_logo',
-            name: 'Main logo',
-            target: { path: 'public/assets/logo.png' },
-          }],
-        }),
-      )
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
         headers: {
@@ -4074,6 +4143,20 @@ describe('beegame session routes', () => {
         }),
       })
       const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(join(sessionWorkspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(sessionWorkspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({
+          version: 1,
+          project_target: { integration_mode: 'filesystem' },
+          slots: [{
+            id: 'main_logo',
+            name: 'Main logo',
+            target: { path: 'public/assets/logo.png' },
+          }],
+        }),
+      )
       const form = new FormData()
       form.set('file', new File(['logo-bytes'], 'logo.png', { type: 'image/png' }))
 
@@ -4086,7 +4169,7 @@ describe('beegame session routes', () => {
         },
       )
       const payload = await res.json()
-      const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
+      const manifest = JSON.parse(await readFile(join(sessionWorkspace, 'assets', 'asset-manifest.json'), 'utf8'))
 
       expect(res.status).toBe(200)
       expect(storageUploads).toEqual([
@@ -4325,14 +4408,6 @@ describe('beegame session routes', () => {
         }
         return new Response('Not found', { status: 404 })
       }) as typeof fetch
-      await mkdir(workspace, { recursive: true })
-      await writeFile(
-        join(workspace, 'package.json'),
-        JSON.stringify({
-          scripts: { dev: 'vite --host 127.0.0.1' },
-          devDependencies: { vite: '^5.0.0' },
-        }),
-      )
       const previewRunner: BeeGamePreviewRunner = () => ({
         kill: () => {},
       })
@@ -4359,6 +4434,15 @@ describe('beegame session routes', () => {
         }),
       })
       const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(sessionWorkspace, { recursive: true })
+      await writeFile(
+        join(sessionWorkspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^5.0.0' },
+        }),
+      )
 
       const startRes = await app.request(
         `/api/beegame-sessions/${session.id}/preview`,
@@ -4389,7 +4473,7 @@ describe('beegame session routes', () => {
           status: 'running',
           url: 'http://127.0.0.1:63100/',
           metadata: expect.objectContaining({
-            workspacePath: workspace,
+            workspacePath: sessionWorkspace,
             port: 63100,
             script: 'dev',
             entrypoint: 'package.json',
@@ -4401,7 +4485,7 @@ describe('beegame session routes', () => {
           project_id: 'project_preview_metadata',
           status: 'stopped',
           metadata: expect.objectContaining({
-            workspacePath: workspace,
+            workspacePath: sessionWorkspace,
             message: 'Preview stopped',
           }),
         }),
