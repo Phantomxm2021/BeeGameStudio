@@ -41,6 +41,7 @@ Runtime host:
 ```env
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
 BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 ```

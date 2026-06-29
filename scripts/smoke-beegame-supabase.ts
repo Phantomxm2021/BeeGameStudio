@@ -25,6 +25,11 @@ const assetBucket =
   process.env.BEEGAME_SUPABASE_ASSET_BUCKET?.trim() ||
   process.env.SUPABASE_ASSET_BUCKET?.trim() ||
   'beegame-assets'
+const avatarBucket =
+  process.env.BEEGAME_SUPABASE_AVATAR_BUCKET?.trim() ||
+  process.env.SUPABASE_AVATAR_BUCKET?.trim() ||
+  process.env.VITE_SUPABASE_AVATAR_BUCKET?.trim() ||
+  'avatars'
 const modelConfigId =
   process.env.BEEGAME_SMOKE_MODEL_CONFIG_ID?.trim() || undefined
 const smokeId = `smoke_${Date.now().toString(36)}`
@@ -43,12 +48,14 @@ if (!workspaceId) {
 const projectId = `beegame-supabase-${smokeId}`
 const projectRoot = `${dataDir.replace(/\/+$/, '')}/${projectId}`
 let createdProject = false
+let avatarObjectPath: string | undefined
 let storageObjectPath: string | undefined
 let runtimeEnv: JsonObject | undefined
 try {
   await createSmokeProject(projectId, workspaceId, projectRoot)
   createdProject = true
   await upsertSmokeAssetManifest(projectId)
+  avatarObjectPath = await uploadSmokeAvatarObject()
   storageObjectPath = await uploadSmokeAssetObject(projectId)
   const creditReservation = await rpc<JsonObject>('beegame_reserve_credits', {
     p_user_id: userId,
@@ -81,6 +88,7 @@ try {
   })
 } finally {
   await cleanupSmokeResources({
+    avatarObjectPath,
     projectId: createdProject ? projectId : undefined,
     storageObjectPath,
   })
@@ -108,6 +116,11 @@ console.log(JSON.stringify({
   },
   assetStorage: {
     bucket: assetBucket,
+    uploaded: true,
+    deleted: true,
+  },
+  avatarStorage: {
+    bucket: avatarBucket,
     uploaded: true,
     deleted: true,
   },
@@ -306,6 +319,34 @@ async function uploadSmokeAssetObject(projectId: string): Promise<string> {
   return objectPath
 }
 
+async function uploadSmokeAvatarObject(): Promise<string> {
+  const objectPath = [
+    'avatars',
+    safeStoragePathSegment(userId),
+    `${smokeId}.svg`,
+  ].join('/')
+  const response = await fetch(
+    `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/${encodeURIComponent(avatarBucket)}/${objectPath}`,
+    {
+      method: 'PUT',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${authToken}`,
+        'content-type': 'image/svg+xml',
+        'x-upsert': 'true',
+      },
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#f5c542"/></svg>`,
+    },
+  )
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(
+      `Avatar storage upload failed for bucket "${avatarBucket}": ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+    )
+  }
+  return objectPath
+}
+
 async function deleteSmokeStorageObject(objectPath: string): Promise<void> {
   const response = await fetch(
     `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/${encodeURIComponent(assetBucket)}/${objectPath}`,
@@ -325,11 +366,38 @@ async function deleteSmokeStorageObject(objectPath: string): Promise<void> {
   }
 }
 
+async function deleteSmokeAvatarObject(objectPath: string): Promise<void> {
+  const response = await fetch(
+    `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/${encodeURIComponent(avatarBucket)}/${objectPath}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${authToken}`,
+      },
+    },
+  )
+  if (!response.ok && response.status !== 404) {
+    const text = await response.text().catch(() => '')
+    throw new Error(
+      `Avatar storage cleanup failed for bucket "${avatarBucket}": ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+    )
+  }
+}
+
 async function cleanupSmokeResources(input: {
+  avatarObjectPath?: string
   projectId?: string
   storageObjectPath?: string
 }): Promise<void> {
   const errors: string[] = []
+  if (input.avatarObjectPath) {
+    try {
+      await deleteSmokeAvatarObject(input.avatarObjectPath)
+    } catch (error) {
+      errors.push(toErrorMessage(error))
+    }
+  }
   if (input.storageObjectPath) {
     try {
       await deleteSmokeStorageObject(input.storageObjectPath)
