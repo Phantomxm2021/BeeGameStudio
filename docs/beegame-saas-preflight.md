@@ -92,6 +92,12 @@ The Admin Console must be visible only when `/api/current-user` returns the requ
 
 ## Smoke Check
 
+First run the local configuration preflight. It does not contact Supabase and does not print secret values:
+
+```bash
+bun run saas:preflight
+```
+
 Add one of the following to `.env.local` before running the smoke check:
 
 ```env
