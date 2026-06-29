@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createConfiguredUserResolver,
+  createEnvTokenUserResolver,
   createSupabaseUserResolver,
   getBearerToken,
 } from '../auth/user-context'
@@ -126,6 +127,35 @@ describe('BeeGame user context', () => {
       }),
       BEEGAME_SUPABASE_URL: 'https://project.supabase.co',
       BEEGAME_SUPABASE_ANON_KEY: 'anon-key',
+    } as NodeJS.ProcessEnv)
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer static-token' },
+        }),
+      ),
+    ).toEqual({ id: 'static-user', role: 'reviewer' })
+  })
+
+  test('does not enable static bearer tokens in production by default', async () => {
+    const resolver = createEnvTokenUserResolver({
+      NODE_ENV: 'production',
+      BEEGAME_AUTH_TOKENS: JSON.stringify({
+        'static-token': { id: 'static-user', role: 'owner' },
+      }),
+    } as NodeJS.ProcessEnv)
+
+    expect(resolver).toBeUndefined()
+  })
+
+  test('allows static bearer tokens in production only with explicit dev override', async () => {
+    const resolver = createEnvTokenUserResolver({
+      NODE_ENV: 'production',
+      BEEGAME_ALLOW_DEV_AUTH_TOKENS: '1',
+      BEEGAME_AUTH_TOKENS: JSON.stringify({
+        'static-token': { id: 'static-user', role: 'reviewer' },
+      }),
     } as NodeJS.ProcessEnv)
 
     expect(

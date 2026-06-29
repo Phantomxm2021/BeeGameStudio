@@ -29,6 +29,7 @@ describe('LandingActions user menu', () => {
 
         expect(screen.queryByRole('menuitem', { name: '管理员' })).not.toBeInTheDocument();
         expect(screen.queryByRole('menuitem', { name: '系统管理' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: '管理控制台' })).not.toBeInTheDocument();
         expect(screen.getByText('Bee User')).toBeInTheDocument();
         expect(screen.getByText('bee@example.com')).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
@@ -44,7 +45,7 @@ describe('LandingActions user menu', () => {
         });
 
         await userEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-        await userEvent.click(screen.getByRole('menuitem', { name: '系统管理' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: '管理控制台' }));
 
         expect(onToggleSystemManagement).toHaveBeenCalledTimes(1);
     });

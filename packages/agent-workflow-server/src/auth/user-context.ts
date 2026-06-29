@@ -71,6 +71,7 @@ export function listBeeGamePermissions(
 export function createEnvTokenUserResolver(
   env: NodeJS.ProcessEnv = process.env,
 ): BeeGameUserResolver | undefined {
+  if (!isEnvTokenResolverAllowed(env)) return undefined
   const raw = env.BEEGAME_AUTH_TOKENS?.trim()
   if (!raw) return undefined
   const usersByToken = parseAuthTokenUsers(raw)
@@ -130,6 +131,11 @@ export function createConfiguredUserResolver(
   return async request => (
     (await envResolver(request)) ?? (await supabaseResolver(request))
   )
+}
+
+function isEnvTokenResolverAllowed(env: NodeJS.ProcessEnv): boolean {
+  if (env.BEEGAME_ALLOW_DEV_AUTH_TOKENS === '1') return true
+  return env.NODE_ENV !== 'production'
 }
 
 export function getBearerToken(request: Request): string | undefined {

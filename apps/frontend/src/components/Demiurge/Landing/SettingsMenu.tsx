@@ -993,14 +993,14 @@ function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null
 function getAdminSettingsCopy(lang: Language) {
     if (lang.startsWith('zh')) {
         return {
-            title: '系统管理',
+            title: '管理控制台',
             deployment: '部署',
             workspaceManaged: '由服务器部署配置管理',
             workspaceNote: '服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。',
         };
     }
     return {
-        title: 'System Management',
+        title: 'Admin Console',
         deployment: 'Deployment',
         workspaceManaged: 'Managed by server deployment',
         workspaceNote: 'In server mode, the workspace root is a global sandbox boundary. Users cannot override it; project paths are assigned by the platform per account.',

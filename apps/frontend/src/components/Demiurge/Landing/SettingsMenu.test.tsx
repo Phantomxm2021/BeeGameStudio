@@ -140,7 +140,7 @@ describe('SettingsMenu model settings', () => {
     it('renders the settings panel as a centered modal overlay', async () => {
         renderSettings();
 
-        const dialog = screen.getByRole('dialog', { name: '系统管理' });
+        const dialog = screen.getByRole('dialog', { name: '管理控制台' });
         expect(dialog.className).toContain('items-center');
         expect(dialog.className).toContain('justify-center');
         expect(dialog.className).toContain('bg-zinc-950/55');
@@ -256,7 +256,7 @@ describe('SettingsMenu model settings', () => {
         const onClose = vi.fn();
         renderSettings({ onClose });
 
-        await userEvent.click(screen.getByRole('dialog', { name: '系统管理' }));
+        await userEvent.click(screen.getByRole('dialog', { name: '管理控制台' }));
 
         expect(onClose).not.toHaveBeenCalled();
     });

@@ -140,6 +140,8 @@ create table if not exists public.beegame_model_configs (
   name text not null,
   provider text not null,
   base_url text,
+  -- Historical column name. BeeGame stores an RLS-protected secret here; the
+  -- local runtime host must not require or use a Supabase service-role key.
   api_key_ciphertext text,
   models jsonb not null default '{}'::jsonb,
   is_default boolean not null default false,
@@ -185,6 +187,8 @@ create table if not exists public.beegame_mcp_servers (
   owner_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   config jsonb not null default '{}'::jsonb,
+  -- Historical column name. Environment values are protected by RLS and are
+  -- released only to the authenticated user's runtime session.
   env_ciphertext jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

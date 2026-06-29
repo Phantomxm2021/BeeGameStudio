@@ -561,7 +561,7 @@ export function BeeGameLivePreviewPage({
                                 <button
                                     type="button"
                                     role="menuitem"
-                                    aria-label={lang === 'en' ? 'System Management' : '系统管理'}
+                                    aria-label={lang === 'en' ? 'Admin Console' : '管理控制台'}
                                     onMouseDown={(event) => {
                                         event.preventDefault();
                                         setUserMenuOpen(false);
@@ -579,7 +579,7 @@ export function BeeGameLivePreviewPage({
                                         <ShieldCheck className="h-4 w-4" />
                                     </span>
                                     <div className="min-w-0">
-                                        <div className="text-sm font-black">{lang === 'en' ? 'System Management' : '系统管理'}</div>
+                                        <div className="text-sm font-black">{lang === 'en' ? 'Admin Console' : '管理控制台'}</div>
                                     </div>
                                 </button>
                             ) : null}

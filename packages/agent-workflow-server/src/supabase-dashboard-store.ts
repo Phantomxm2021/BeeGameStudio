@@ -58,6 +58,8 @@ type SupabaseModelConfigRow = {
   name: string
   provider: string
   base_url: string | null
+  // Legacy column name. The runtime host treats this as an RLS-protected
+  // secret value; it does not perform Supabase server-side encryption.
   api_key_ciphertext: string | null
   models: JsonObject
   is_default: boolean
@@ -82,6 +84,8 @@ type SupabaseMcpServerRow = {
   owner_id: string
   name: string
   config: JsonObject
+  // Legacy column name. Values are protected by Supabase RLS and only sent to
+  // the local runtime for the authenticated user's session.
   env_ciphertext: JsonObject
   created_at: string
   updated_at: string

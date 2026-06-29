@@ -21,6 +21,8 @@ const macroValues = Object.fromEntries(
 
 Object.assign(globalThis, { MACRO: macroValues })
 process.env.NODE_ENV = process.env.NODE_ENV || 'production'
+process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS =
+  process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS || '1'
 
 const { createAgentWorkflowApp } = await import(
   '../packages/agent-workflow-server/src/app.ts'
