@@ -72,3 +72,27 @@ Credit mutations must follow this order:
 5. Record each mutation in the ledger.
 
 The runtime host may request these mutations, but Supabase RPC performs the actual balance update under the authenticated user's RLS context.
+
+## Supabase Smoke Verification
+
+After applying the schema, run the smoke check before treating a deployment as ready:
+
+```bash
+bun run supabase:smoke
+```
+
+The script reads `.env.local` automatically. It requires:
+
+- `BEEGAME_SUPABASE_URL`, `SUPABASE_URL`, or `VITE_SUPABASE_URL`.
+- `BEEGAME_SUPABASE_ANON_KEY`, `SUPABASE_ANON_KEY`, or `VITE_SUPABASE_ANON_KEY`.
+- Either `BEEGAME_SUPABASE_ACCESS_TOKEN` + `BEEGAME_SUPABASE_USER_ID`, or `BEEGAME_SMOKE_EMAIL` + `BEEGAME_SMOKE_PASSWORD`.
+
+The smoke check uses the user's access token only. It does not use service role keys.
+
+It verifies:
+
+- `beegame_current_user_context` returns the expected user, workspace, role, and permissions.
+- Project metadata can be inserted and deleted under RLS.
+- `beegame_assets` can store an asset manifest for that project.
+- Credit reserve and refund RPCs work without consuming final credits.
+- `beegame_runtime_env` returns runtime env values with secrets redacted in output.
