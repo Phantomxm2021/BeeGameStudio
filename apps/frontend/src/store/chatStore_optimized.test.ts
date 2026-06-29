@@ -16,6 +16,7 @@ const { useChatStore } = await import('./chatStore');
 
 describe('chatStore Performance & Cap', () => {
   beforeEach(() => {
+    localStorage.clear();
     useChatStore.getState().clearMessages();
   });
 
@@ -127,6 +128,27 @@ describe('chatStore Performance & Cap', () => {
       'beegame-event-10',
       'beegame-event-11',
     ]);
+  });
+
+  it('does not persist chat messages while a Supabase cloud session is active', () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'cloud-access-token',
+      expiresAt: Date.now() + 60_000,
+      user: { id: 'user_cloud' },
+    }));
+
+    useChatStore.getState().addMessage({
+      id: 'cloud-msg-1',
+      sender: 'user',
+      content: 'cloud message should come from transcript',
+      timestamp: 1000,
+    });
+
+    const raw = localStorage.getItem('chat-storage');
+    if (raw) {
+      const persisted = JSON.parse(raw);
+      expect(persisted.state?.messages ?? []).toEqual([]);
+    }
   });
 
   it('should clear map on clearMessages', () => {

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Message, MessageType } from '../types/message';
+import { getSupabaseAccessToken } from '../services/supabaseAuthApi';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
 
 function detectCorruption(content: string): boolean {
@@ -21,6 +22,10 @@ function detectCorruption(content: string): boolean {
 }
 
 const MAX_MESSAGES = 500;
+
+function hasCloudSession(): boolean {
+  return Boolean(getSupabaseAccessToken());
+}
 
 interface ChatMessageSemantic {
   renderHint?: Message['renderHint'];
@@ -403,7 +408,7 @@ export const useChatStore = create<ChatState>()(
       name: 'chat-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        messages: state.messages,
+        messages: hasCloudSession() ? [] : state.messages,
         expandedDocuments: Array.from(state.expandedDocuments),
       }),
       onRehydrateStorage: () => (state: ChatState | undefined, error: Error | unknown) => {
@@ -412,7 +417,9 @@ export const useChatStore = create<ChatState>()(
           return;
         }
         if (state) {
-          state.messages = Array.isArray(state.messages) ? state.messages.map(withDerivedIdentity) : [];
+          state.messages = hasCloudSession()
+            ? []
+            : Array.isArray(state.messages) ? state.messages.map(withDerivedIdentity) : [];
           state.messageIndexMap = rebuildIndexMap(state.messages);
           state.lastStreamingIdByTask = {};
           state.expandedDocuments = new Set(Array.isArray(state.expandedDocuments) ? state.expandedDocuments : []);
