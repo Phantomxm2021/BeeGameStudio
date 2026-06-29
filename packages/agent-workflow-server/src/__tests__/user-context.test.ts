@@ -14,11 +14,11 @@ describe('BeeGame user context', () => {
     expect(getBearerToken(request)).toBe('access-token')
   })
 
-  test('creates a Supabase resolver from configured URL and API key', async () => {
+  test('creates a Supabase resolver from configured URL and anon key', async () => {
     const calls: Array<{ url: string; headers: Headers }> = []
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co/',
-      apiKey: 'service-role-key',
+      apiKey: 'anon-key',
       fetchImpl: async (url, init) => {
         calls.push({
           url: String(url),
@@ -48,8 +48,10 @@ describe('BeeGame user context', () => {
       avatarUrl: 'https://avatars.example.com/octo.png',
     })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('https://project.supabase.co/auth/v1/user')
-    expect(calls[0].headers.get('apikey')).toBe('service-role-key')
+    expect(calls[0].url).toBe(
+      'https://project.supabase.co/rest/v1/rpc/beegame_current_user_context',
+    )
+    expect(calls[0].headers.get('apikey')).toBe('anon-key')
     expect(calls[0].headers.get('authorization')).toBe('Bearer jwt-token')
   })
 
@@ -174,7 +176,9 @@ describe('BeeGame user context', () => {
         displayName: 'OAuth Maker',
         avatarUrl: 'https://avatars.example.com/oauth.png',
       })
-      expect(calls).toEqual(['https://project.supabase.co/auth/v1/user'])
+      expect(calls).toEqual([
+        'https://project.supabase.co/rest/v1/rpc/beegame_current_user_context',
+      ])
     } finally {
       globalThis.fetch = originalFetch
     }

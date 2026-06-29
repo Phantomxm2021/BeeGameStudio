@@ -21,6 +21,7 @@ import {
   type ProjectBaselineStatusPayload,
 } from '../services/api';
 import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from '../services/beeGameAdapter';
+import { getSupabaseAccessToken } from '../services/supabaseAuthApi';
 import { useChatStore } from './chatStore';
 import type { ProductReadinessView } from '../types/message';
 import { extractBootstrapClarification } from '../utils/bootstrapClarificationError';
@@ -558,8 +559,17 @@ export const useProjectStore = create<ProjectState>()(
       name: 'project-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        activeProjectId: state.activeProjectId,
+        activeProjectId: hasCloudSession() ? null : state.activeProjectId,
       }),
+      onRehydrateStorage: () => (state: ProjectState | undefined) => {
+        if (state && hasCloudSession()) {
+          state.activeProjectId = null;
+        }
+      },
     }
   )
 );
+
+function hasCloudSession(): boolean {
+  return Boolean(getSupabaseAccessToken());
+}

@@ -18,11 +18,11 @@
 - Test: `apps/frontend/src/services/supabaseAuthApi.test.ts`
 - Test: `apps/frontend/src/services/apiClient.test.ts`
 
-- [ ] Add a refresh-token request that calls `/auth/v1/token?grant_type=refresh_token`.
-- [ ] Keep expired sessions in localStorage while a refresh token exists.
-- [ ] Make API requests obtain an async valid token before sending.
-- [ ] Retry one failed 401 request after a successful refresh.
-- [ ] Clear the session only when refresh fails.
+- [x] Add a refresh-token request that calls `/auth/v1/token?grant_type=refresh_token`.
+- [x] Keep expired sessions in localStorage while a refresh token exists.
+- [x] Make API requests obtain an async valid token before sending.
+- [x] Retry one failed 401 request after a successful refresh.
+- [x] Clear the session only when refresh fails.
 
 ### Task 2: Safe Role Defaults
 
@@ -30,19 +30,19 @@
 - Modify: `packages/agent-workflow-server/src/auth/user-context.ts`
 - Test: `packages/agent-workflow-server/src/__tests__/user-context.test.ts`
 
-- [ ] Change unknown or missing roles to `viewer`, not `owner`.
-- [ ] Keep explicit `owner`, `developer`, `reviewer`, and `viewer` unchanged.
-- [ ] Update tests so OAuth users without explicit BeeGame role are viewers.
+- [x] Change unknown or missing roles to `viewer`, not `owner`.
+- [x] Keep explicit `owner`, `developer`, `reviewer`, and `viewer` unchanged.
+- [x] Update tests so OAuth users without explicit BeeGame role are viewers.
 
 ### Task 3: Supabase Permission Foundation
 
 **Files:**
 - Modify: `docs/beegame-supabase-schema.sql`
 
-- [ ] Add idempotent helper functions for workspace role lookup.
-- [ ] Add idempotent profile/workspace bootstrap trigger for new auth users.
-- [ ] Keep SQL re-runnable with `create or replace function` and `drop trigger if exists`.
-- [ ] Do not move local runtime, preview, or filesystem work into Supabase.
+- [x] Add idempotent helper functions for workspace role lookup.
+- [x] Add idempotent profile/workspace bootstrap trigger for new auth users.
+- [x] Keep SQL re-runnable with `create or replace function` and `drop trigger if exists`.
+- [x] Do not move local runtime, preview, or filesystem work into Supabase.
 
 ### Task 4: Verification
 

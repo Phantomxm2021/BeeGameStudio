@@ -34,14 +34,17 @@ vi.mock('./chatStore', () => ({
 import { useProjectStore } from './projectStore';
 
 describe('projectStore pending review normalization', () => {
+    let storageData: Map<string, string>;
+
     beforeEach(() => {
+        localStorage.clear();
         bootstrapProjectFromIdea.mockReset();
         getPendingUserReviews.mockReset();
         getProjectStatus.mockReset();
         getProjects.mockReset();
         chatActions.clearMessages.mockReset();
         chatActions.addMessage.mockReset();
-        const storageData = new Map<string, string>();
+        storageData = new Map<string, string>();
         useProjectStore.persist.setOptions({
             storage: createJSONStorage(() => ({
                 getItem: (name: string) => storageData.get(name) ?? null,
@@ -63,6 +66,21 @@ describe('projectStore pending review normalization', () => {
             showToastSuccess: null,
         });
         useProjectStore.persist.clearStorage();
+    });
+
+    it('does not persist an active project id while a cloud session is active', () => {
+        localStorage.setItem('beegame_supabase_session', JSON.stringify({
+            accessToken: 'cloud-token',
+            expiresAt: Date.now() + 60_000,
+            user: { id: 'cloud-user' },
+        }));
+
+        useProjectStore.setState({ activeProjectId: 'project_from_other_account' });
+
+        expect(JSON.parse(storageData.get('project-storage') || '{}')).toEqual({
+            state: { activeProjectId: null },
+            version: 0,
+        });
     });
 
     it('returns bootstrap clarification from a 409 response without creating an active project', async () => {
