@@ -79,6 +79,17 @@ type ProjectSessionBinding = {
   workspacePath: string;
 };
 
+type BeeGameSessionMetadata = {
+  id: string;
+  projectId: string;
+  workspacePath: string;
+  status: string;
+  transcriptPath?: string;
+  modelConfigId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type BeeGameSessionHandle = {
   session: BeeGameSession;
   recoveredEvents: BeeGameEvent[];
@@ -381,7 +392,7 @@ export const beeGameAdapter = {
   },
 
   async deleteProject(projectId: string): Promise<{ ok: boolean }> {
-    const binding = getBinding(projectId);
+    const binding = getBinding(projectId) ?? await restoreProjectBindingFromCloud(projectId);
     if (binding) {
       await deleteBeeGameSession(binding.sessionId, true, binding.workspacePath);
     }
@@ -441,7 +452,7 @@ export const beeGameAdapter = {
   },
 
   async getChatHistory(projectId: string): Promise<unknown[]> {
-    const binding = getBinding(projectId);
+    const binding = await ensureProjectBinding(projectId);
     if (!binding) return [];
     const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
     if (transcript.length > 0) {
@@ -773,7 +784,7 @@ function getBinding(projectId: string): ProjectSessionBinding | undefined {
 }
 
 async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHandle> {
-  const binding = getBinding(projectId);
+  const binding = getBinding(projectId) ?? await restoreProjectBindingFromCloud(projectId);
   const project = readProjects().find(item => item.id === projectId);
   if (binding) {
     try {
@@ -825,8 +836,29 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
 
 async function ensureProjectBinding(projectId: string): Promise<ProjectSessionBinding | undefined> {
   const binding = getBinding(projectId);
-  if (!binding) return undefined;
-  return binding;
+  if (binding) return binding;
+  return restoreProjectBindingFromCloud(projectId);
+}
+
+async function restoreProjectBindingFromCloud(
+  projectId: string,
+): Promise<ProjectSessionBinding | undefined> {
+  if (!hasCloudSession()) return undefined;
+  try {
+    const session = await getJson<BeeGameSessionMetadata>(
+      `/api/projects/${encodeURIComponent(projectId)}/sessions/latest`,
+    );
+    const binding = {
+      projectId,
+      sessionId: session.id,
+      workspacePath: session.workspacePath,
+    };
+    saveBinding(binding);
+    return binding;
+  } catch (error) {
+    if (isSessionNotFoundError(error)) return undefined;
+    throw error;
+  }
 }
 
 function resolveStopSessionId(data: { task_id: string; project_id?: string }): string {

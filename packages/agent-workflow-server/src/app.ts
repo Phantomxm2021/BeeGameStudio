@@ -669,6 +669,21 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/sessions/latest', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessions = await dashboardRepository.listProjectSessions(
+      c.req.raw,
+      user,
+      c.req.param('id'),
+    )
+    const latest = sessions[0]
+    return latest
+      ? c.json(latest)
+      : c.json({ error: 'Session not found' }, 404)
+  })
+
   app.delete('/api/projects/:id', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.delete')

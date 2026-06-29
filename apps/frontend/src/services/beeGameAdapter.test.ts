@@ -592,6 +592,58 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
+  it('restores a cloud project binding from session metadata when local binding is missing', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'cloud-access-token',
+      expiresAt: Date.now() + 60_000,
+      user: { id: 'user_cloud' },
+    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/projects/project_cloud/sessions/latest') {
+        return jsonResponse({
+          id: 'beegame_cloud_restore',
+          projectId: 'project_cloud',
+          workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
+          status: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:02.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_cloud_restore/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fusers%2Fuser-cloud%2Fcloud-game') {
+        return jsonResponse([
+          {
+            id: 1,
+            sessionId: 'beegame_cloud_restore',
+            turnId: 'turn-1',
+            type: 'assistant.message',
+            text: 'Cloud transcript restored.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const history = await beeGameAdapter.getChatHistory('project_cloud');
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sender: 'beegame',
+        content: 'Cloud transcript restored.',
+      }),
+    ]));
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
+      {
+        projectId: 'project_cloud',
+        sessionId: 'beegame_cloud_restore',
+        workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
+      },
+    ]);
+  });
+
   it('prefers persisted transcript history over incomplete runtime events after refresh', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);

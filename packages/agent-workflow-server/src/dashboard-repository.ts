@@ -56,7 +56,10 @@ import {
   saveModelConfigsToStore,
   type ModelConfigStoreOptions,
 } from './model-config-store'
-import type { SupabaseDashboardStore } from './supabase-dashboard-store'
+import type {
+  BeeGameSessionMetadata,
+  SupabaseDashboardStore,
+} from './supabase-dashboard-store'
 import type { SupabaseRuntimeEnvClient } from './supabase-runtime-env-client'
 import {
   loadWebToolsConfig,
@@ -157,6 +160,17 @@ export class DashboardRepository {
     return supabase
       ? supabase.deleteProject(user.id, id)
       : this.getProjectStore(request).deleteProject(id)
+  }
+
+  async listProjectSessions(
+    request: Request,
+    user: BeeGameUserContext,
+    projectId: string,
+  ): Promise<BeeGameSessionMetadata[]> {
+    const supabase = this.supabaseForRequest(request)
+    if (!supabase) return []
+    return (await supabase.listSessions(user.id))
+      .filter(session => session.projectId === projectId)
   }
 
   async upsertSessionMetadata(
