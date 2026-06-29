@@ -727,6 +727,15 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     let reservation: { id: string } | undefined
     try {
+      const modelConfigId = await resolveDefaultModelConfigId(
+        c.req.raw,
+        user,
+        typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+        async (request, requestUser, id) =>
+          dashboardRepository.modelConfigExists(request, requestUser, id),
+        async (request, requestUser) =>
+          dashboardRepository.listModelConfigs(request, requestUser),
+      )
       const policy = getCreditTaskPolicy('idea_intake')
       const reservedCredits = policy.reservedCredits
       reservation = await dashboardRepository.reserveCredits(c.req.raw, user, {
@@ -743,15 +752,12 @@ export function createAgentWorkflowApp(
         language:
           typeof body.language === 'string' ? body.language : undefined,
         ownerId: user.id,
-        modelConfigId:
-          typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+        modelConfigId,
         runtimeEnv: await dashboardRepository.getRuntimeEnv(
           getCurrentUserDataRoot(c.req.raw),
           user.id,
           getBearerToken(c.req.raw),
-          typeof body.modelConfigId === 'string'
-            ? body.modelConfigId
-            : undefined,
+          modelConfigId,
         ),
       })
       await dashboardRepository.settleCreditReservation(c.req.raw, user, {
@@ -965,6 +971,36 @@ async function optionalOwnedModelConfigId(
   return modelConfigId
     ? requireOwnedModelConfigId(request, user, modelConfigId, exists)
     : undefined
+}
+
+async function resolveDefaultModelConfigId(
+  request: Request,
+  user: BeeGameUserContext,
+  value: unknown,
+  exists: (
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ) => Promise<boolean>,
+  list: (
+    request: Request,
+    user: BeeGameUserContext,
+  ) => Promise<Array<{ id: string; isDefault?: boolean }>>,
+): Promise<string | undefined> {
+  const requested = await optionalOwnedModelConfigId(
+    request,
+    user,
+    value,
+    exists,
+  )
+  if (requested) return requested
+
+  const configs = await list(request, user)
+  const modelConfigId = configs.find(config => config.isDefault)?.id ?? configs[0]?.id
+  if (!modelConfigId) {
+    throw new Error('No model config found. Configure a default model before generating.')
+  }
+  return modelConfigId
 }
 
 async function requireOwnedModelConfigId(

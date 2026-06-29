@@ -38,6 +38,7 @@ import {
     uploadSupabaseAvatarImage,
 } from '../../services/supabaseAuthApi';
 import { deleteCurrentUser } from '../../services/currentUserApi';
+import { listModelConfigs } from '../../services/modelConfigApi';
 
 type IntakePhase =
     | 'idle'
@@ -253,6 +254,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakeError('');
         setIsPreparing(true);
         try {
+            const modelConfigs = await listModelConfigs();
+            if (modelConfigs.length === 0) {
+                setIntakeError('请先在管理员设置中配置默认模型，然后再生成方案。');
+                return;
+            }
             const quote = await getCreditQuote('idea_intake');
             if (!quote.canStart) {
                 setIntakeError(`Credit 不足。本次方案生成需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);

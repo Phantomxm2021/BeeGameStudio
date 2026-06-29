@@ -17,6 +17,9 @@ const { getCreditBalance, getCreditLedger, getCreditQuote } = vi.hoisted(() => (
     getCreditLedger: vi.fn(),
     getCreditQuote: vi.fn(),
 }));
+const { listModelConfigs } = vi.hoisted(() => ({
+    listModelConfigs: vi.fn(),
+}));
 const { deleteCurrentUser } = vi.hoisted(() => ({
     deleteCurrentUser: vi.fn(),
 }));
@@ -122,7 +125,7 @@ vi.mock('../../services/beeGameAdapter', () => ({
 
 vi.mock('../../services/modelConfigApi', () => ({
     createModelConfig: vi.fn(),
-    listModelConfigs: vi.fn().mockResolvedValue([]),
+    listModelConfigs,
 }));
 
 vi.mock('../../services/creditsApi', () => ({
@@ -288,6 +291,18 @@ beforeEach(() => {
     });
     getCreditLedger.mockReset();
     getCreditLedger.mockResolvedValue([]);
+    listModelConfigs.mockReset();
+    listModelConfigs.mockResolvedValue([
+        {
+            id: 'model_1',
+            name: 'Default LLM',
+            provider: 'openai-compatible',
+            baseUrl: 'https://llm.example.test/v1',
+            apiKeyPreview: 'sk-...test',
+            models: { balanced: 'balanced-model' },
+            isDefault: true,
+        },
+    ]);
     getCreditQuote.mockReset();
     getCreditQuote.mockImplementation((taskType = 'full_build') => Promise.resolve(
         taskType === 'idea_intake'
@@ -361,6 +376,19 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
+    });
+
+    it('requires a configured model before showing the intake credit quote', async () => {
+        listModelConfigs.mockResolvedValueOnce([]);
+
+        renderLanding();
+
+        submitIdea('LLM generated idea');
+
+        expect(await screen.findByText('请先在管理员设置中配置默认模型，然后再生成方案。')).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+        expect(getCreditQuote).not.toHaveBeenCalled();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
     });
 
     it('signs in from the login dialog and continues the pending idea generation', async () => {

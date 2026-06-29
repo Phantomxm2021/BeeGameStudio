@@ -1122,6 +1122,23 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('rejects BeeGame intake before reserving credits when no model config exists', async () => {
+    const ledgerBeforeRes = await app.request('/api/credits/ledger')
+    const ledgerBefore = await ledgerBeforeRes.json()
+    const res = await app.request('/api/beegame-intake/options', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'No model config found. Configure a default model before generating.',
+    })
+    const ledgerAfterRes = await app.request('/api/credits/ledger')
+    expect(await ledgerAfterRes.json()).toEqual(ledgerBefore)
+  })
+
   test('analyzes BeeGame intake and returns game-mode options from the default model config', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
