@@ -1032,6 +1032,13 @@ begin
     raise exception 'Authentication required';
   end if;
 
+  insert into public.beegame_audit_events (actor_id, action, metadata)
+  values (
+    current_user_id,
+    'account.delete',
+    jsonb_build_object('source', 'beegame_delete_current_user')
+  );
+
   delete from auth.users
   where id = current_user_id;
 end
