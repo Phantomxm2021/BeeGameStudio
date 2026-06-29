@@ -83,6 +83,8 @@ Normal users should only see personal settings such as language and account prof
 
 ## Production Checklist
 
+Use the full preflight checklist in [BeeGame SaaS Preflight Checklist](../../docs/beegame-saas-preflight.md).
+
 - Supabase Auth providers configured.
 - RLS policies applied and verified.
 - Storage buckets and policies applied for `avatars` and `beegame-assets`.

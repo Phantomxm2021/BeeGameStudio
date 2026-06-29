@@ -79,6 +79,8 @@ The runtime host may request these mutations, but Supabase RPC performs the actu
 
 ## Supabase Smoke Verification
 
+For the full production checklist, see [BeeGame SaaS Preflight Checklist](./beegame-saas-preflight.md).
+
 After applying the schema, run the smoke check before treating a deployment as ready:
 
 ```bash

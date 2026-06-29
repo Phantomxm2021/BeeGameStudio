@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { History, LogOut, Settings, ShieldCheck, User, UserCircle } from 'lucide-react';
+import { History, LogOut, Settings, ShieldCheck, UserRound, UserCircle } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
 
 interface LandingActionsProps {
@@ -111,7 +111,7 @@ export function LandingActions({
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={handleUserButtonClick}
-                className={`relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-colors hover:border-amber-300/50 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''
+                className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-colors hover:border-amber-300/50 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isSettingsOpen || isHistoryOpen || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''
                     }`}
             >
                 {currentUserId ? (
@@ -127,7 +127,7 @@ export function LandingActions({
                         </span>
                     )
                 ) : (
-                    <User className="h-6 w-6" />
+                    <UserRound className="h-6 w-6" />
                 )}
             </motion.button>
 

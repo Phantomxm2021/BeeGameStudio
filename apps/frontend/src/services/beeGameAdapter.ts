@@ -187,7 +187,6 @@ export type BeeGameBuildBrief = {
 
 const PROJECTS_KEY = 'beegame-adapter-projects';
 const BINDINGS_KEY = 'beegame-adapter-bindings';
-const WORKSPACE_KEY = 'beegame-adapter-workspace-path';
 const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
 const SUBAGENTS_ENABLED_KEY = 'beegame-adapter-subagents-enabled';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
@@ -268,7 +267,6 @@ export const beeGameAdapter = {
     const project = createLocalProject(data.name, data.root_path);
     saveProjects(upsertProject(readProjects(), project));
     await syncProjectMetadata(project);
-    rememberWorkspace(data.root_path);
     return project;
   },
 
@@ -366,8 +364,6 @@ export const beeGameAdapter = {
   },
 
   async openProject(projectId: string): Promise<{ opened: boolean }> {
-    const binding = getBinding(projectId);
-    if (binding) rememberWorkspace(binding.workspacePath);
     return { opened: true };
   },
 
@@ -386,7 +382,6 @@ export const beeGameAdapter = {
     if (data.root_path) {
       const binding = getBinding(projectId);
       if (binding) saveBinding({ ...binding, workspacePath: data.root_path });
-      rememberWorkspace(data.root_path);
     }
     return updated;
   },
@@ -778,7 +773,6 @@ function readBindings(): ProjectSessionBinding[] {
 function saveBinding(binding: ProjectSessionBinding): void {
   const bindings = [binding, ...readBindings().filter(item => item.projectId !== binding.projectId)];
   writeJson(scopedAdapterCacheKey(BINDINGS_KEY), bindings);
-  rememberWorkspace(binding.workspacePath);
 }
 
 function deleteBinding(projectId: string): void {
@@ -908,7 +902,6 @@ async function resolveProjectWorkspacePath(input: string | undefined, folderName
   }
   const projectsRoot = await resolveWorkspacePath();
   const projectPath = joinPath(projectsRoot, slugifyPathSegment(folderName || 'game-project', 'game-project'));
-  rememberWorkspace(projectPath);
   return projectPath;
 }
 
@@ -930,7 +923,6 @@ async function resolveExistingProjectWorkspacePath(
   }
   const projectsRoot = await resolveWorkspacePath();
   if (normalizePath(candidate) !== normalizePath(projectsRoot)) {
-    rememberWorkspace(candidate);
     return candidate;
   }
   const migratedPath = joinPath(projectsRoot, slugifyPathSegment(project?.name || 'BeeGame Project'));
@@ -941,19 +933,11 @@ async function resolveExistingProjectWorkspacePath(
       root_path: migratedPath,
     }));
   }
-  rememberWorkspace(migratedPath);
   return migratedPath;
 }
 
 function normalizePath(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '');
-}
-
-function rememberWorkspace(path?: string): void {
-  const trimmedPath = path?.trim() || '';
-  if (isAbsolutePath(trimmedPath)) {
-    localStorage.setItem(WORKSPACE_KEY, trimmedPath);
-  }
 }
 
 function readConfiguredWorkspaceRoot(): string {
