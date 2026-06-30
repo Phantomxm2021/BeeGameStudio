@@ -515,9 +515,15 @@ begin
     w.created_at asc
   limit 1;
 
+  model_config_owner_id := public.beegame_model_config_owner_id(current_user_id);
+
   if workspace_row.id is null then
     return jsonb_build_object(
       'id', current_user_id,
+      'email', profile_row.email,
+      'displayName', profile_row.display_name,
+      'avatarUrl', profile_row.avatar_url,
+      'modelConfigOwnerId', model_config_owner_id,
       'role', 'viewer',
       'permissions', public.beegame_role_permissions('viewer')
     );
@@ -540,8 +546,6 @@ begin
   if account_role = 'owner' or public.beegame_is_platform_owner() then
     member_role := 'owner';
   end if;
-
-  model_config_owner_id := public.beegame_model_config_owner_id(current_user_id);
 
   return jsonb_build_object(
     'id', current_user_id,

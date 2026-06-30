@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { LandingView } from './LandingView';
 
@@ -241,6 +241,7 @@ const makeIntakeOptions = () => [
 ];
 
 beforeEach(() => {
+    sessionStorage.clear();
     analyzeIdeaIntake.mockReset();
     analyzeIdeaIntake.mockResolvedValue({
         clarification_required: false,
@@ -385,7 +386,7 @@ describe('LandingView bootstrap submission', () => {
 
         submitIdea('LLM generated idea');
 
-        expect(await screen.findByText('平台尚未配置默认模型。请管理员在管理控制台配置后再生成。')).toBeInTheDocument();
+        expect(await screen.findByText('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。')).toBeInTheDocument();
         expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
         expect(getCreditQuote).not.toHaveBeenCalled();
         expect(runIdeaIntake).not.toHaveBeenCalled();
@@ -425,6 +426,38 @@ describe('LandingView bootstrap submission', () => {
         });
         expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+    });
+
+    it('restores the pending idea after an OAuth redirect and continues generation', async () => {
+        mockCurrentUser = null;
+
+        const { unmount } = renderLanding();
+
+        submitIdea('OAuth generated idea');
+
+        await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+        fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
+
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
+        expect(getCreditQuote).not.toHaveBeenCalled();
+        unmount();
+
+        mockCurrentUser = {
+            id: 'oauth-user',
+            email: 'oauth@example.com',
+            displayName: 'OAuth Player',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
+
+        fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+
+        expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh' });
     });
 
     it('smokes the SaaS entry flow without bypassing login or credit confirmation', async () => {
@@ -469,6 +502,45 @@ describe('LandingView bootstrap submission', () => {
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+    });
+
+    it('restores a pending intake credit quote after a page refresh', async () => {
+        const { unmount } = renderLanding();
+
+        submitIdea('Persistent LLM generated idea');
+
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        unmount();
+        renderLanding();
+
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
+
+        expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
+    });
+
+    it('does not show platform settings for a non-owner account even if management permissions are present', async () => {
+        mockCurrentUser = {
+            id: 'developer-user',
+            role: 'developer',
+            permissions: [
+                'project.create',
+                'workspace.manage',
+                'model_config.manage',
+                'runtime_settings.manage',
+                'mcp.manage',
+                'secrets.manage',
+            ],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
+
+        expect(await screen.findByRole('dialog', { name: '系统设置' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
     });
 
     it('opens account actions from a circular signed-in user avatar', async () => {
@@ -546,7 +618,7 @@ describe('LandingView bootstrap submission', () => {
         expect(mockLoadCurrentUser).toHaveBeenCalled();
     });
 
-    it('shows recent credit ledger entries and expands to all entries', async () => {
+    it('shows only a compact credit summary and opens full ledger history in a detail dialog', async () => {
         mockCurrentUser = {
             id: 'alice',
             email: 'alice@example.com',
@@ -559,7 +631,10 @@ describe('LandingView bootstrap submission', () => {
             userId: 'alice',
             kind: index === 0 ? 'refund' : index === 1 ? 'settle' : 'reserve',
             credits: index + 1,
-            metadata: { displayName: `Task ${index + 1}` },
+            metadata: {
+                taskType: index === 0 ? 'idea_intake' : index === 1 ? 'full_build' : 'edit_turn',
+                displayName: `Task ${index + 1}`,
+            },
             createdAt: new Date(1710000000000 + index).toISOString(),
         })));
 
@@ -568,15 +643,23 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
-        expect(await screen.findByText('Task 1')).toBeInTheDocument();
-        expect(screen.getByText('+1')).toBeInTheDocument();
-        expect(screen.getByText('-2')).toBeInTheDocument();
-        expect(screen.queryByText('Task 6')).not.toBeInTheDocument();
+        expect(await screen.findByText('余额')).toBeInTheDocument();
+        expect(screen.getByText('已用')).toBeInTheDocument();
+        expect(screen.getByText('冻结')).toBeInTheDocument();
+        expect(screen.getByText('300')).toBeInTheDocument();
+        expect(screen.getAllByText('0')).toHaveLength(2);
+        expect(await screen.findByRole('button', { name: /查看 Credit 明细/ })).toBeInTheDocument();
+        expect(screen.getByText('6 条')).toBeInTheDocument();
+        expect(screen.queryByText('方案生成 · 退回')).not.toBeInTheDocument();
+        expect(screen.queryByText('+1')).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: '查看全部' }));
+        fireEvent.click(screen.getByRole('button', { name: /查看 Credit 明细/ }));
 
-        expect(await screen.findByText('Task 6')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
+        const details = await screen.findByRole('dialog', { name: 'Credit 明细' });
+        expect(within(details).getByText('-6')).toBeInTheDocument();
+        expect(within(details).getAllByText('修改任务 · 预扣')).toHaveLength(4);
+        expect(within(details).getByText('按任务环节记录预扣、结算和退回。')).toBeInTheDocument();
+        expect(details.querySelector('[data-credit-ledger-scroll="true"]')).toHaveClass('max-h-[52vh]', 'overflow-y-auto');
     });
 
     it('confirms account deletion before clearing the signed-in session', async () => {
@@ -650,6 +733,60 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: 'X' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Discord' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '忘记密码？' })).toBeInTheDocument();
+    });
+
+    it('does not start generation after account-menu email login without an explicit generate click', async () => {
+        mockCurrentUser = null;
+        mockLoadCurrentUser.mockImplementation(async () => {
+            if (signInWithSupabasePassword.mock.calls.length > 0) {
+                mockCurrentUser = {
+                    id: 'user-1',
+                    role: 'owner',
+                    permissions: ['project.create', 'project.delete'],
+                };
+            }
+        });
+
+        renderLanding();
+
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
+        fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+        fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
+
+        await waitFor(() => expect(signInWithSupabasePassword).toHaveBeenCalled());
+        expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+        expect(getCreditQuote).not.toHaveBeenCalled();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+    });
+
+    it('does not store an OAuth generation intent from the account menu without an explicit generate click', async () => {
+        mockCurrentUser = null;
+
+        const { unmount } = renderLanding();
+
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+        fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
+
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
+        unmount();
+
+        mockCurrentUser = {
+            id: 'oauth-user',
+            email: 'oauth@example.com',
+            displayName: 'OAuth Player',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete'],
+        };
+        renderLanding();
+
+        expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
+        expect(getCreditQuote).not.toHaveBeenCalled();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
     });
 
     it('opens a dedicated password reset view before sending reset email', async () => {
@@ -792,6 +929,11 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).not.toHaveTextContent('第一分钟');
         expect(dialog).not.toHaveTextContent('为什么适合');
         expect(dialog).not.toHaveTextContent('首版原型');
+        const cards = within(dialog).getAllByTestId('intake-option-card');
+        expect(cards[0]).toHaveClass('grid', 'h-[24rem]', 'grid-rows-[4.75rem_1.25rem_minmax(0,1fr)_2.75rem]');
+        expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('max-h-12', 'overflow-hidden');
+        expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('min-h-0', 'overflow-y-auto');
+        expect(within(cards[0]).getByTestId('intake-option-tags')).toHaveClass('items-end');
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
         expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
         expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
@@ -931,12 +1073,17 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByTestId('intake-settings')).toHaveAttribute('data-panel-depth', 'single');
         expect(screen.getByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
         expect(screen.queryByText('补齐制作设置')).not.toBeInTheDocument();
+        expect(screen.queryByText('LLM generated hypothesis A.')).not.toBeInTheDocument();
+        expect(screen.queryByRole('combobox', { name: '范围' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Auto')).not.toBeInTheDocument();
 
-        fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Godot' } });
+        fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
+        fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
         fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
         fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Minimal' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Voice' }));
+        fireEvent.click(screen.getByRole('button', { name: /Keyboard\/mouse/ }));
+        fireEvent.click(screen.getByRole('option', { name: 'Voice' }));
         fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: '优先验证关卡节奏。' } });
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
@@ -955,7 +1102,8 @@ describe('LandingView bootstrap submission', () => {
             title: 'LLM Mode A',
             option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {
-                platform: 'Godot',
+                platform: 'Web',
+                engine: 'Godot',
                 dimension: '3D',
                 genre: 'Puzzle',
                 visualStyle: 'Minimal',

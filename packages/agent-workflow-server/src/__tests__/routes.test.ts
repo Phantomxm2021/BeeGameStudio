@@ -57,6 +57,7 @@ describe('agent workflow server routes', () => {
       currentUser: {
         id: 'viewer-user',
         role: 'viewer',
+        modelConfigOwnerId: 'platform-owner',
       },
     })
     const viewerRes = await viewerApp.request('/api/current-user')
@@ -64,6 +65,7 @@ describe('agent workflow server routes', () => {
     expect(await viewerRes.json()).toEqual({
       id: 'viewer-user',
       role: 'viewer',
+      modelConfigOwnerId: 'platform-owner',
       permissions: [
         'workspace.read',
         'project.read',
@@ -1298,6 +1300,204 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).not.toContain('2D Arcade')
     } finally {
       globalThis.fetch = originalFetch
+    }
+  })
+
+  test('refunds BeeGame intake credits and explains provider authentication failures', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Rejected LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-rejected-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      Response.json({ error: { message: 'invalid api key' } }, { status: 401 })
+    ) as unknown as typeof fetch
+
+    try {
+      const ledgerBeforeRes = await app.request('/api/credits/ledger')
+      const ledgerBefore = await ledgerBeforeRes.json()
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
+      })
+
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toContain('平台默认模型认证失败（401）')
+      expect(body.error).toContain('重新保存有效 API Key')
+      const ledgerAfterRes = await app.request('/api/credits/ledger')
+      const ledgerAfter = await ledgerAfterRes.json()
+      expect(ledgerAfter.slice(ledgerBefore.length).map((entry: {
+        kind: string
+        credits: number
+      }) => ({
+        kind: entry.kind,
+        credits: entry.credits,
+      }))).toEqual([
+        { kind: 'reserve', credits: 3 },
+        { kind: 'refund', credits: 3 },
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('loads Supabase runtime env from frontend env names during BeeGame intake', async () => {
+    const originalEnv = {
+      BEEGAME_SUPABASE_URL: process.env.BEEGAME_SUPABASE_URL,
+      SUPABASE_URL: process.env.SUPABASE_URL,
+      VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+      BEEGAME_SUPABASE_ANON_KEY: process.env.BEEGAME_SUPABASE_ANON_KEY,
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+      VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+    }
+    const originalFetch = globalThis.fetch
+    const calls: Array<{ url: string; body: unknown }> = []
+    const userId = '00000000-0000-0000-0000-000000000001'
+    try {
+      delete process.env.BEEGAME_SUPABASE_URL
+      delete process.env.SUPABASE_URL
+      delete process.env.BEEGAME_SUPABASE_ANON_KEY
+      delete process.env.SUPABASE_ANON_KEY
+      process.env.VITE_SUPABASE_URL = 'https://vite-project.supabase.co'
+      process.env.VITE_SUPABASE_ANON_KEY = 'vite-anon-key'
+
+      globalThis.fetch = (async (url, init) => {
+        const requestUrl = String(url)
+        const requestBody = JSON.parse(String(init?.body ?? '{}')) as unknown
+        calls.push({ url: requestUrl, body: requestBody })
+
+        if (requestUrl.includes('/beegame_credit_accounts')) {
+          return Response.json([{
+            user_id: userId,
+            plan: 'free',
+            included_credits: 300,
+            consumed_credits: 0,
+            reserved_credits: 0,
+            updated_at: '2026-06-30T00:00:00.000Z',
+          }])
+        }
+        if (requestUrl.includes('/beegame_model_configs')) {
+          return Response.json([{
+            id: 'llm_platform_default',
+            owner_id: 'platform-owner',
+            name: 'Platform Default',
+            provider: 'openai-compatible',
+            base_url: 'https://llm.example.invalid/v1',
+            api_key_ciphertext: 'sk-secret',
+            models: { balanced: 'balanced-model' },
+            is_default: true,
+            created_at: '2026-06-30T00:00:00.000Z',
+            updated_at: '2026-06-30T00:00:00.000Z',
+          }])
+        }
+        if (requestUrl.includes('/rpc/beegame_reserve_credits')) {
+          return Response.json({
+            reservation_id: 'reserve_1',
+            reserved_credits: 3,
+            account: {
+              user_id: userId,
+              plan: 'free',
+              included_credits: 300,
+              consumed_credits: 0,
+              reserved_credits: 3,
+              updated_at: '2026-06-30T00:00:00.000Z',
+            },
+          })
+        }
+        if (requestUrl.includes('/rpc/beegame_runtime_env')) {
+          return Response.json({
+            CLAUDE_CODE_USE_OPENAI: '1',
+            OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
+            OPENAI_API_KEY: 'sk-secret',
+            OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+          })
+        }
+        if (requestUrl.includes('/rpc/beegame_settle_credit_reservation')) {
+          return Response.json({
+            reservation_id: 'reserve_1',
+            reserved_credits: 3,
+            settled_credits: 3,
+            refunded_credits: 0,
+            account: {
+              user_id: userId,
+              plan: 'free',
+              included_credits: 300,
+              consumed_credits: 3,
+              reserved_credits: 0,
+              updated_at: '2026-06-30T00:00:00.000Z',
+            },
+          })
+        }
+        return Response.json({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                maturity: 'vague',
+                needs_options: true,
+                needs_clarification: false,
+                detected_constraints: [],
+                recommended_next_step: 'choose_direction',
+                options: [
+                  { id: 'mode_one', title: 'Mode One', gameplay: 'First playable mode.' },
+                  { id: 'mode_two', title: 'Mode Two', gameplay: 'Second playable mode.' },
+                  { id: 'mode_three', title: 'Mode Three', gameplay: 'Third playable mode.' },
+                ],
+              }),
+            },
+          }],
+        })
+      }) as typeof fetch
+
+      const supabaseApp = createAgentWorkflowApp({
+        defaultWorkspacePath: testRoot,
+        currentUserResolver: request => {
+          if (request.headers.get('authorization') !== 'Bearer user-token') {
+            return undefined
+          }
+          return {
+            id: userId,
+            role: 'developer',
+            permissions: ['project.create'],
+          }
+        },
+      })
+      const res = await supabaseApp.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer user-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(calls.some(call =>
+        call.url === 'https://vite-project.supabase.co/rest/v1/rpc/beegame_runtime_env'
+      )).toBe(true)
+      expect(calls.some(call =>
+        call.url === 'https://llm.example.invalid/v1/chat/completions'
+      )).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
     }
   })
 

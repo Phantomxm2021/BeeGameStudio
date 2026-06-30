@@ -30,6 +30,10 @@ export type SupabaseOAuthProvider =
 
 const SESSION_STORAGE_KEY = 'beegame_supabase_session';
 const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
+let pendingRedirectConsumption: {
+  key: string;
+  promise: Promise<boolean>;
+} | null = null;
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
@@ -231,6 +235,22 @@ export async function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): 
 }
 
 export async function consumeSupabaseRedirectSession(): Promise<boolean> {
+  const callbackKey = getOAuthCallbackKey();
+  if (!callbackKey) return false;
+  if (pendingRedirectConsumption?.key === callbackKey) {
+    return pendingRedirectConsumption.promise;
+  }
+  const promise = consumeSupabaseRedirectSessionOnce()
+    .finally(() => {
+      if (pendingRedirectConsumption?.promise === promise) {
+        pendingRedirectConsumption = null;
+      }
+    });
+  pendingRedirectConsumption = { key: callbackKey, promise };
+  return promise;
+}
+
+async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
   const hash = window.location.hash.startsWith('#')
     ? window.location.hash.slice(1)
     : window.location.hash;
@@ -560,6 +580,24 @@ function isSupabaseOAuthProvider(value: unknown): value is SupabaseOAuthProvider
     value === 'facebook' ||
     value === 'x' ||
     value === 'discord';
+}
+
+function getOAuthCallbackKey(): string {
+  const hash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
+  const searchParams = new URLSearchParams(window.location.search);
+  const hasCallback = Boolean(
+    hashParams.get('access_token') ||
+    hashParams.get('error') ||
+    hashParams.get('error_description') ||
+    searchParams.get('code') ||
+    searchParams.get('error') ||
+    searchParams.get('error_description'),
+  );
+  if (!hasCallback) return '';
+  return `${window.location.pathname}?${window.location.search}#${window.location.hash}`;
 }
 
 function clearOAuthCallbackUrl(): void {

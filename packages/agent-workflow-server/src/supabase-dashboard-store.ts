@@ -201,6 +201,7 @@ export function createSupabaseDashboardStoreFromEnv(
   const url = (
     env.BEEGAME_SUPABASE_URL ??
     env.SUPABASE_URL ??
+    env.VITE_SUPABASE_URL ??
     ''
   ).trim()
   const anonKey = (
@@ -259,9 +260,23 @@ export class SupabaseDashboardStore {
     return rows.map(rowToPublicModelConfig)
   }
 
+  async listReadablePublicModelConfigs(): Promise<PublicModelConfig[]> {
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      '/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
+    )
+    return rows.map(rowToPublicModelConfig)
+  }
+
   async hasModelConfig(ownerId: string, id: string): Promise<boolean> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
       `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=id&limit=1`,
+    )
+    return rows.length > 0
+  }
+
+  async hasReadableModelConfig(id: string): Promise<boolean> {
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?id=eq.${q(id)}&select=id&limit=1`,
     )
     return rows.length > 0
   }

@@ -75,11 +75,11 @@ Rules:
 - Preview ports must not conflict with the frontend, runtime host, or reverse proxy.
 - Generated projects should live outside the source repository.
 
-## Admin Console Boundary
+## Settings Boundary
 
 Normal user Settings should contain only low-risk personal preferences such as language.
 
-Admin Console may contain:
+The Platform section inside Settings may contain:
 
 - Model provider configuration.
 - Web search provider credentials.
@@ -88,7 +88,7 @@ Admin Console may contain:
 - Workspace deployment policy.
 - Credit policy and audit views.
 
-The Admin Console must be visible only when `/api/current-user` returns the required named permissions.
+The Platform section must be visible only when `/api/current-user` returns the required named permissions.
 
 ## Platform Default Model
 
@@ -108,7 +108,7 @@ LLM key. Before opening generation to regular users:
 - Let the invited owner register or sign in through the normal frontend.
 - If the owner account already exists, sign in or refresh after bootstrap; the
   current-user RPC will claim the invite.
-- Sign in as that owner and create a default model config from Admin Console.
+- Sign in as that owner and create a default model config from Settings > Platform.
 - Confirm ordinary users can list the masked default model metadata but cannot
   create, update, or delete model configs.
 - Confirm `beegame_runtime_env` returns the model provider environment for an

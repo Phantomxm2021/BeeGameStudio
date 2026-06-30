@@ -85,7 +85,6 @@ const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}
         lang="zh"
         onClose={vi.fn()}
         onSetLang={vi.fn()}
-        scope="admin"
         canManageWorkspace
         canManageSecrets
         canManageRuntimeSettings
@@ -97,6 +96,15 @@ const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}
 
 const openMcpActionsMenu = async () => {
     await userEvent.click(screen.getByRole('button', { name: /操作/ }));
+};
+
+const openPlatformSettings = async () => {
+    await userEvent.click(screen.getByRole('tab', { name: '平台' }));
+};
+
+const openPlatformSettingsTab = async (name: string | RegExp) => {
+    await openPlatformSettings();
+    await userEvent.click(screen.getByRole('tab', { name }));
 };
 
 describe('SettingsMenu model settings', () => {
@@ -140,7 +148,7 @@ describe('SettingsMenu model settings', () => {
     it('renders the settings panel as a centered modal overlay', async () => {
         renderSettings();
 
-        const dialog = screen.getByRole('dialog', { name: '管理控制台' });
+        const dialog = screen.getByRole('dialog', { name: '系统设置' });
         expect(dialog.className).toContain('items-center');
         expect(dialog.className).toContain('justify-center');
         expect(dialog.className).toContain('bg-zinc-950/55');
@@ -155,11 +163,12 @@ describe('SettingsMenu model settings', () => {
         expect(settingsContent).toBeInTheDocument();
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
-        expect(screen.getByRole('tab', { name: '部署' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: '平台' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
         expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
@@ -167,14 +176,29 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('switch', { name: 'Auto Memory' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
-        await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
-        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
-        expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.queryByText('/tmp/beegame-projects')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存网页配置' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+    });
+
+    it('shows platform administration inside the same settings modal for privileged users', async () => {
+        renderSettings();
+
+        await userEvent.click(screen.getByRole('tab', { name: '平台' }));
+
+        expect(screen.getByRole('tab', { name: '部署' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '模型' })).toBeInTheDocument();
+        await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
+        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
+        expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
@@ -193,12 +217,14 @@ describe('SettingsMenu model settings', () => {
             canManageModelConfig: false,
         });
 
-        expect(screen.getByRole('tab', { name: '部署' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '部署' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('combobox', { name: '语言选择' })).not.toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
@@ -217,7 +243,6 @@ describe('SettingsMenu model settings', () => {
         listMcpServers.mockClear();
 
         renderSettings({
-            scope: 'user',
             canManageWorkspace: false,
             canManageSecrets: false,
             canManageRuntimeSettings: false,
@@ -244,19 +269,20 @@ describe('SettingsMenu model settings', () => {
         const onClose = vi.fn();
         const { container } = renderSettings({ onClose });
 
-        await userEvent.click(screen.getByRole('button', { name: '关闭设置' }));
-        expect(onClose).toHaveBeenCalledTimes(1);
-
+        await openPlatformSettings();
         const saveButton = screen.getByRole('button', { name: '保存设置' });
         expect(saveButton.querySelector('svg')).toBeNull();
         expect(container.querySelector('.bg-black')).toBeNull();
+
+        await userEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it('does not close when clicking outside the settings panel', async () => {
         const onClose = vi.fn();
         renderSettings({ onClose });
 
-        await userEvent.click(screen.getByRole('dialog', { name: '管理控制台' }));
+        await userEvent.click(screen.getByRole('dialog', { name: '系统设置' }));
 
         expect(onClose).not.toHaveBeenCalled();
     });
@@ -277,7 +303,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings({ onClose });
-        await userEvent.click(screen.getByRole('tab', { name: '能力' }));
+        await openPlatformSettingsTab('能力');
 
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -287,7 +313,7 @@ describe('SettingsMenu model settings', () => {
     it('renders capabilities as a dedicated settings tab', async () => {
         renderSettings();
 
-        await userEvent.click(screen.getByRole('tab', { name: '能力' }));
+        await openPlatformSettingsTab('能力');
 
         expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('switch', { name: 'Subagents' })).toBeChecked();
@@ -315,7 +341,7 @@ describe('SettingsMenu model settings', () => {
 
         renderSettings();
 
-        await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
+        await openPlatformSettingsTab('MCP');
 
         expect(screen.getByRole('tab', { name: 'MCP' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByText('通过 MCP，BeeGame 可以连接本机正在运行的编辑器、游戏引擎和工具服务。你可以在这里发现本机服务、添加 Server，并确认连接是否可用。')).toBeInTheDocument();
@@ -388,7 +414,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
+        await openPlatformSettingsTab('MCP');
         await openMcpActionsMenu();
         await userEvent.click(screen.getByRole('menuitem', { name: '发现本机服务' }));
 
@@ -434,7 +460,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
+        await openPlatformSettingsTab('MCP');
 
         expect(await screen.findByText('Existing MCP')).toBeInTheDocument();
         const rowActions = screen.getAllByRole('button', { name: /操作/ });
@@ -483,7 +509,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await userEvent.click(screen.getByRole('tab', { name: '能力' }));
+        await openPlatformSettingsTab('能力');
 
         await userEvent.click(screen.getByRole('switch', { name: 'Subagents' }));
         await userEvent.click(await screen.findByRole('switch', { name: 'Skill Search' }));
@@ -512,6 +538,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
+        await openPlatformSettings();
 
         expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
@@ -545,7 +572,7 @@ describe('SettingsMenu model settings', () => {
 
         renderSettings();
 
-        await userEvent.click(screen.getByRole('tab', { name: '模型' }));
+        await openPlatformSettingsTab('模型');
 
         expect(screen.queryByText('BeeGame LLM')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
@@ -607,7 +634,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await userEvent.click(screen.getByRole('tab', { name: '模型' }));
+        await openPlatformSettingsTab('模型');
 
         const apiKeyInput = await screen.findByLabelText('API Key');
         expect(apiKeyInput).toHaveAttribute('placeholder', '已保存：sk-...saved');
@@ -644,6 +671,7 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
 
         expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
+        await openPlatformSettings();
         await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
         await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { History, LogOut, Settings, ShieldCheck, UserRound, UserCircle } from 'lucide-react';
+import { History, LogOut, Settings, UserRound, UserCircle } from 'lucide-react';
 import { translations, type Language } from '../AgentsConfig';
 
 interface LandingActionsProps {
@@ -13,9 +13,7 @@ interface LandingActionsProps {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     creditBalance?: number;
-    canOpenSystemManagement?: boolean;
     onToggleSettings: () => void;
-    onToggleSystemManagement?: () => void;
     onToggleHistory: () => void;
     onOpenProfile: () => void;
     onOpenLogin: () => void;
@@ -32,9 +30,7 @@ export function LandingActions({
     currentUserEmail,
     currentUserAvatarUrl,
     creditBalance,
-    canOpenSystemManagement = false,
     onToggleSettings,
-    onToggleSystemManagement,
     onToggleHistory,
     onOpenProfile,
     onOpenLogin,
@@ -47,7 +43,6 @@ export function LandingActions({
     const signOutLabel = lang === 'en' ? 'Sign out' : '退出登录';
     const loginLabel = lang === 'en' ? 'Sign in / Register' : '登录 / 注册';
     const profileLabel = lang === 'en' ? 'Profile' : '个人主页';
-    const systemManagementLabel = lang === 'en' ? 'Admin Console' : '管理控制台';
     const fallbackUserLabel = lang === 'en' ? 'Account' : '账号';
     const userLabel = currentUserDisplayName || currentUserEmail || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
@@ -74,11 +69,6 @@ export function LandingActions({
     const handleToggleSettings = () => {
         setIsUserMenuOpen(false);
         onToggleSettings();
-    };
-
-    const handleToggleSystemManagement = () => {
-        setIsUserMenuOpen(false);
-        onToggleSystemManagement?.();
     };
 
     const handleToggleHistory = () => {
@@ -167,17 +157,6 @@ export function LandingActions({
                         <Settings className="h-4 w-4" />
                         <span>{t.settings}</span>
                     </button>
-                    {canOpenSystemManagement && onToggleSystemManagement ? (
-                        <button
-                            type="button"
-                            role="menuitem"
-                            onClick={handleToggleSystemManagement}
-                            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white"
-                        >
-                            <ShieldCheck className="h-4 w-4" />
-                            <span>{systemManagementLabel}</span>
-                        </button>
-                    ) : null}
                     <button
                         type="button"
                         role="menuitem"

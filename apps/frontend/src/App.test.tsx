@@ -39,9 +39,13 @@ vi.mock('./store/systemStore', () => ({
 }));
 
 vi.mock('./store/chatStore', () => ({
-  useChatStore: () => ({
+  useChatStore: Object.assign(() => ({
     loadHistory,
     messages: [],
+  }), {
+    getState: () => ({
+      messages: [],
+    }),
   }),
 }));
 
@@ -81,6 +85,7 @@ vi.mock('./components/Demiurge/DashboardView', () => ({
 
 describe('App view routing', () => {
   afterEach(() => {
+    localStorage.clear();
     vi.clearAllMocks();
     loadCurrentUser.mockResolvedValue({
       id: 'owner-user',
@@ -103,6 +108,11 @@ describe('App view routing', () => {
   });
 
   it('does not load protected dashboard data when no user is signed in', async () => {
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'access-token',
+      expiresAt: Date.now() + 3600_000,
+      user: { id: 'signed-out-user' },
+    }));
     loadCurrentUser.mockResolvedValueOnce(null);
 
     render(<App />);

@@ -157,7 +157,7 @@ BeeGame Web Dashboard 的 SaaS 部署使用 Supabase Auth/RLS。首次部署时�
 
 3. 打开 BeeGame 前端，用 `BEEGAME_BOOTSTRAP_OWNER_EMAILS` 里的邮箱注册或登录。
 4. 系统会在用户创建或读取当前用户权限时领取 owner invite，并授予平台 owner 权限。
-5. owner 进入 Admin Console 配置平台默认模型、搜索、运行时等全局配置。
+5. owner 进入系统设置的平台页配置平台默认模型、搜索、运行时等全局配置。
 
 `BEEGAME_SUPABASE_SERVICE_ROLE_KEY` 只允许用于这一次部署 bootstrap 命令。不要把 service-role key 放进前端构建、runtime host、dashboard dev server 或长期运行的环境变量里。
 

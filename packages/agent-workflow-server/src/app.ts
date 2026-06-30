@@ -229,6 +229,7 @@ export function createAgentWorkflowApp(
       role: user.role,
       ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
       ...(user.workspaceOwnerId ? { workspaceOwnerId: user.workspaceOwnerId } : {}),
+      ...(user.modelConfigOwnerId ? { modelConfigOwnerId: user.modelConfigOwnerId } : {}),
       ...(user.email ? { email: user.email } : {}),
       ...(user.displayName ? { displayName: user.displayName } : {}),
       ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
@@ -330,33 +331,37 @@ export function createAgentWorkflowApp(
     if (!hasBeeGamePermission(user, 'model_config.manage')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
-    const body = await readJson(c.req.raw)
-    const updated = await dashboardRepository.updateModelConfig(c.req.raw, user, c.req.param('id'), {
-      ...(typeof body.name === 'string' ? { name: body.name } : {}),
-      ...(typeof body.provider === 'string'
-        ? { provider: body.provider as ModelProviderKind }
-        : {}),
-      ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
-      ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
-      ...(isObject(body.models) ? { models: toModelMap(body.models) } : {}),
-      ...(typeof body.isDefault === 'boolean'
-        ? { isDefault: body.isDefault }
-        : {}),
-    })
-    if (!updated) return c.json({ error: 'Config not found' }, 404)
+    try {
+      const body = await readJson(c.req.raw)
+      const updated = await dashboardRepository.updateModelConfig(c.req.raw, user, c.req.param('id'), {
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(typeof body.provider === 'string'
+          ? { provider: body.provider as ModelProviderKind }
+          : {}),
+        ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
+        ...(isObject(body.models) ? { models: toModelMap(body.models) } : {}),
+        ...(typeof body.isDefault === 'boolean'
+          ? { isDefault: body.isDefault }
+          : {}),
+      })
+      if (!updated) return c.json({ error: 'Model config not found' }, 404)
 
-    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-      actorId: user.id,
-      action: 'model_config.updated',
-      targetType: 'model_config',
-      targetId: updated.id,
-      metadata: {
-        provider: updated.provider,
-        isDefault: updated.isDefault,
-        apiKeyChanged: typeof body.apiKey === 'string',
-      },
-    })
-    return c.json(updated)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'model_config.updated',
+        targetType: 'model_config',
+        targetId: updated.id,
+        metadata: {
+          provider: updated.provider,
+          isDefault: updated.isDefault,
+          apiKeyChanged: typeof body.apiKey === 'string',
+        },
+      })
+      return c.json(updated)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
   })
 
   app.delete('/api/model-configs/:id', async c => {
@@ -1118,10 +1123,60 @@ async function generateBeeGameIntakeOptions(input: {
     }),
   })
   if (!response.ok) {
-    throw new Error(`Model intake request failed: ${response.status}`)
+    throw new Error(
+      await describeModelIntakeFailure(response, {
+        baseUrl,
+        model,
+        language: input.language,
+      }),
+    )
   }
   const payload = (await response.json()) as JsonObject
   return parseBeeGameIntakeAnalysis(payload)
+}
+
+async function describeModelIntakeFailure(
+  response: Response,
+  input: {
+    baseUrl: string
+    model: string
+    language?: string
+  },
+): Promise<string> {
+  const upstreamMessage = await readShortResponseText(response)
+  const host = safeUrlHost(input.baseUrl)
+  const context = [
+    host ? `provider=${host}` : '',
+    input.model ? `model=${input.model}` : '',
+  ].filter(Boolean).join(', ')
+  const suffix = context ? ` (${context})` : ''
+  const detail = upstreamMessage ? ` Upstream response: ${upstreamMessage}` : ''
+  if (response.status === 401 || response.status === 403) {
+    return isZhLanguage(input.language)
+      ? `平台默认模型认证失败（${response.status}）。请让管理员在系统设置的平台模型中重新保存有效 API Key。${suffix}${detail}`
+      : `Platform default model authentication failed (${response.status}). Ask an administrator to re-save a valid API key in platform model settings.${suffix}${detail}`
+  }
+  return isZhLanguage(input.language)
+    ? `模型 intake 请求失败：${response.status}。请检查平台模型 Base URL、Model 和供应商服务状态。${suffix}${detail}`
+    : `Model intake request failed: ${response.status}. Check the platform model base URL, model, and provider status.${suffix}${detail}`
+}
+
+async function readShortResponseText(response: Response): Promise<string> {
+  const text = (await response.text().catch(() => '')).trim()
+  if (!text) return ''
+  return text.replace(/\s+/g, ' ').slice(0, 240)
+}
+
+function safeUrlHost(value: string): string {
+  try {
+    return new URL(value).host
+  } catch {
+    return ''
+  }
+}
+
+function isZhLanguage(value: string | undefined): boolean {
+  return Boolean(value && value.toLowerCase().startsWith('zh'))
 }
 
 function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis {

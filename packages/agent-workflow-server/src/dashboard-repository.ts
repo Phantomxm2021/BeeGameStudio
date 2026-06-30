@@ -364,8 +364,7 @@ export class DashboardRepository {
   async listModelConfigs(request: Request, user: BeeGameUserContext) {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      const ownerId = this.getReadableModelConfigOwnerId(user)
-      return ownerId ? supabase.listPublicModelConfigs(ownerId) : []
+      return supabase.listReadablePublicModelConfigs()
     }
     return listModelConfigs(user.id)
   }
@@ -417,8 +416,7 @@ export class DashboardRepository {
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      const ownerId = this.getReadableModelConfigOwnerId(user)
-      return ownerId ? supabase.hasModelConfig(ownerId, id) : false
+      return supabase.hasReadableModelConfig(id)
     }
     return listModelConfigs(user.id).some(config => config.id === id)
   }
@@ -610,12 +608,7 @@ export class DashboardRepository {
     return trimmed
   }
 
-  private getReadableModelConfigOwnerId(user: BeeGameUserContext): string | undefined {
-    return user.modelConfigOwnerId?.trim() ||
-      (hasBeeGamePermission(user, 'model_config.manage') ? user.id : undefined)
-  }
-
   private getManageModelConfigOwnerId(user: BeeGameUserContext): string {
-    return user.id
+    return user.modelConfigOwnerId ?? user.id
   }
 }

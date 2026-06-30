@@ -58,4 +58,17 @@ describe('BeeGame owner bootstrap', () => {
       'grant execute on function public.beegame_claim_platform_owner_invite() to authenticated;',
     )
   })
+
+  test('returns the platform model config owner for users without a workspace', async () => {
+    const schema = await Bun.file(
+      new URL('../../docs/beegame-supabase-schema.sql', import.meta.url),
+    ).text()
+
+    const noWorkspaceContext = schema.match(
+      /if workspace_row\.id is null then[\s\S]*?end if;/,
+    )?.[0]
+
+    expect(noWorkspaceContext).toContain('modelConfigOwnerId')
+    expect(noWorkspaceContext).toContain('model_config_owner_id')
+  })
 })

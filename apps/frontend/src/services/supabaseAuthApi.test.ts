@@ -247,6 +247,46 @@ describe('supabaseAuthApi', () => {
     expect(replaceState).toHaveBeenCalledWith({}, document.title, '/');
   });
 
+  it('deduplicates concurrent OAuth authorization code consumption during app initialization', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const replaceState = vi.fn();
+    const resolveExchange: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveExchange.push(resolve);
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('history', { replaceState });
+    vi.stubGlobal('location', {
+      href: 'http://localhost:5173/?code=auth-code',
+      origin: 'http://localhost:5173',
+      pathname: '/',
+      search: '?code=auth-code',
+      hash: '',
+    });
+    sessionStorage.setItem('beegame_supabase_oauth_pkce', JSON.stringify({
+      provider: 'discord',
+      codeVerifier: 'stored-code-verifier',
+      createdAt: Date.now(),
+    }));
+
+    const first = consumeSupabaseRedirectSession();
+    const second = consumeSupabaseRedirectSession();
+    const responseBody = {
+      access_token: 'pkce-access-token',
+      refresh_token: 'pkce-refresh-token',
+      expires_in: 3600,
+      user: { id: 'pkce-user', email: 'pkce@example.com' },
+    };
+    for (const resolve of resolveExchange) {
+      resolve(Response.json(responseBody));
+    }
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getSupabaseAccessToken()).toBe('pkce-access-token');
+  });
+
   it('surfaces Supabase OAuth callback errors instead of silently ignoring them', async () => {
     const replaceState = vi.fn();
     vi.stubGlobal('history', { replaceState });

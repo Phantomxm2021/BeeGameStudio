@@ -37,16 +37,17 @@ describe('LandingActions user menu', () => {
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });
 
-    it('shows system management only when the signed-in user has deployment permissions', async () => {
-        const onToggleSystemManagement = vi.fn();
+    it('keeps platform administration inside settings instead of exposing a separate menu item', async () => {
+        const onToggleSettings = vi.fn();
         renderActions({
-            canOpenSystemManagement: true,
-            onToggleSystemManagement,
+            onToggleSettings,
         });
 
         await userEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-        await userEvent.click(screen.getByRole('menuitem', { name: '管理控制台' }));
+        expect(screen.queryByRole('menuitem', { name: '管理控制台' })).not.toBeInTheDocument();
 
-        expect(onToggleSystemManagement).toHaveBeenCalledTimes(1);
+        await userEvent.click(screen.getByRole('menuitem', { name: '系统设置' }));
+
+        expect(onToggleSettings).toHaveBeenCalledTimes(1);
     });
 });

@@ -808,26 +808,24 @@ function CreditQuoteDialog({
         ? '修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。'
         : 'Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.';
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-6 backdrop-blur-md">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
             <div
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="beegame-credit-quote-title"
-                className="w-full max-w-xl rounded-[36px] border border-white/20 bg-zinc-950/80 p-8 text-white shadow-2xl shadow-black/50 backdrop-blur-2xl"
+                data-surface="frosted-glass"
+                className="input-surface w-full max-w-2xl rounded-[30px] border border-white/20 p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
             >
-                <div className="text-xs font-black uppercase tracking-[0.45em] text-amber-300">
-                    Credits
-                </div>
-                <h2 id="beegame-credit-quote-title" className="mt-4 text-3xl font-black">
+                <h2 id="beegame-credit-quote-title" className="text-3xl font-black leading-tight text-white sm:text-4xl">
                     {isZh ? '确认本次请求' : 'Confirm request'}
                 </h2>
-                <p className="mt-4 text-lg leading-relaxed text-zinc-300">
+                <p className="mt-5 text-base font-medium leading-8 text-zinc-300 sm:text-lg">
                     {isZh
                         ? `本次请求将预扣 ${quote.reservedCredits} credits。完成后按实际消耗结算，未使用部分会自动退回。`
                         : `This request will reserve ${quote.reservedCredits} credits. It will settle against actual usage, and unused credits will be refunded.`}
                 </p>
-                <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-                    <div className="text-sm font-bold uppercase tracking-[0.28em] text-zinc-500">
+                <div className="mt-7 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-6">
+                    <div className="text-xs font-black uppercase tracking-[0.28em] text-zinc-500">
                         {quote.displayName}
                     </div>
                     {quote.description ? (
@@ -835,40 +833,40 @@ function CreditQuoteDialog({
                             {quote.description}
                         </div>
                     ) : null}
-                    <div className="mt-3 flex items-end justify-between gap-4">
-                        <div>
-                            <div className="text-sm text-zinc-500">
+                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                        <div className="min-w-0">
+                            <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
                                 {isZh ? '当前余额' : 'Balance'}
                             </div>
-                            <div className="mt-1 text-2xl font-black text-emerald-200">
+                            <div className="mt-3 text-3xl font-black leading-none text-emerald-200">
                                 {quote.balanceCredits} credits
                             </div>
                         </div>
-                        <div className="text-right">
-                            <div className="text-sm text-zinc-500">
+                        <div className="min-w-0 sm:text-right">
+                            <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
                                 {isZh ? '预扣' : 'Reserved'}
                             </div>
-                            <div className="mt-1 text-2xl font-black text-white">
+                            <div className="mt-3 text-3xl font-black leading-none text-white">
                                 {quote.reservedCredits} credits
                             </div>
                         </div>
                     </div>
                 </div>
-                <p className="mt-5 rounded-3xl border border-amber-300/15 bg-amber-300/[0.06] px-5 py-4 text-sm font-semibold leading-relaxed text-amber-100">
+                <p className="mt-4 rounded-[22px] border border-amber-300/15 bg-amber-300/[0.05] px-5 py-4 text-sm font-semibold leading-relaxed text-amber-100">
                     {settlementNote}
                 </p>
-                <div className="mt-8 flex justify-end gap-3">
+                <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="rounded-full border border-white/15 px-6 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10"
+                        className="rounded-full border border-white/15 bg-black/10 px-6 py-3 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
                     >
                         {isZh ? '取消' : 'Cancel'}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
+                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100"
                     >
                         {isZh ? '确认并发送' : 'Confirm and send'}
                     </button>

@@ -419,7 +419,7 @@ export const useProjectStore = create<ProjectState>()(
             id: `bootstrap-brief-${newProjectId}-${bootstrapTimestamp}`,
             clientMessageId: `bootstrap-brief-${newProjectId}`,
             sender: 'system',
-            content: `方案已确认：${data.option.title} / ${data.settings.platform} / ${data.settings.dimension} / ${data.settings.genre}`,
+            content: `方案已确认：${data.option.title} / ${data.settings.platform} / ${data.settings.engine || 'React'} / ${data.settings.dimension} / ${data.settings.genre}`,
             taskId: result.task_id,
             timestamp: bootstrapTimestamp + 1,
             type: 'system_status',

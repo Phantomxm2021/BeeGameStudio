@@ -25,6 +25,7 @@ export class SupabaseRuntimeEnvClient {
       options.url ??
       process.env.BEEGAME_SUPABASE_URL ??
       process.env.SUPABASE_URL ??
+      process.env.VITE_SUPABASE_URL ??
       ''
     ).replace(/\/+$/, '')
     this.anonKey = (

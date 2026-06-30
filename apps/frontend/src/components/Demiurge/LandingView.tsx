@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Camera, X } from 'lucide-react';
+import { Camera, Check, ChevronDown, X } from 'lucide-react';
 import { translations, type Language } from './AgentsConfig';
 import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
@@ -48,12 +48,12 @@ type IntakePhase =
     | 'confirming_brief'
     | 'starting_build';
 
-const platformOptions = ['Auto', 'Web', 'Unity', 'Godot', 'XR', 'Native'];
-const dimensionOptions = ['Auto', '2D', '3D', 'Mixed'];
-const genreOptions = ['Auto', 'Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy'];
-const styleOptions = ['Auto', 'Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
-const inputOptions = ['Auto', 'Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
-const scopeOptions = ['Prototype', 'Playable demo', 'Vertical slice', 'MVP'];
+const platformOptions = ['Web', 'Mobile', 'Desktop', 'XR', 'Console'];
+const engineOptions = ['React', 'Phaser', 'Three.js', 'PlayCanvas', 'Unity', 'Godot', 'Unreal Engine', 'Native'];
+const dimensionOptions = ['2D', '3D', 'Mixed'];
+const genreOptions = ['Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy', 'RPG'];
+const styleOptions = ['Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
+const inputOptions = ['Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
 
 type LegalDocumentKind = 'terms' | 'privacy';
 
@@ -134,11 +134,12 @@ interface LandingViewProps {
 }
 
 const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings => ({
-    platform: option.recommendedPlatform || 'Auto',
-    visualStyle: option.recommendedStyle || 'Auto',
-    dimension: option.recommendedDimension || 'Auto',
-    genre: option.recommendedGenre || 'Auto',
-    inputs: option.recommendedInputs.length > 0 ? option.recommendedInputs : ['Keyboard/mouse'],
+    platform: normalizeOptionValue(platformOptions, inferPlatform(option.recommendedPlatform), 'Web'),
+    engine: normalizeOptionValue(engineOptions, inferEngine(option.recommendedPlatform), 'React'),
+    visualStyle: normalizeOptionValue(styleOptions, option.recommendedStyle, 'Cartoon'),
+    dimension: normalizeOptionValue(dimensionOptions, option.recommendedDimension, '2D'),
+    genre: normalizeOptionValue(genreOptions, option.recommendedGenre, 'Arcade'),
+    inputs: normalizeInputs(option.recommendedInputs),
     scope: option.scope || 'Prototype',
     notes: '',
 });
@@ -150,14 +151,148 @@ const optionTags = (option: BeeGameIntakeOption): string[] => [
 ].filter(tag => tag && tag !== 'Auto');
 
 const optionsWithCurrentValue = (options: string[], value: string): string[] => {
-    if (!value || options.includes(value)) return options;
+    if (!value || value === 'Auto' || options.includes(value)) return options;
     return [value, ...options];
 };
 
+function normalizeInputs(inputs: string[]): string[] {
+    const normalized = inputs.filter(input => input && input !== 'Auto');
+    return normalized.length > 0 ? normalized : ['Keyboard/mouse'];
+}
+
+function normalizeOptionValue(options: string[], value: string | undefined, fallback: string): string {
+    const normalized = value?.trim();
+    if (!normalized || normalized === 'Auto') return fallback;
+    return normalized;
+}
+
+function inferPlatform(value: string | undefined): string {
+    const normalized = value?.trim();
+    if (!normalized || normalized === 'Auto') return 'Web';
+    if (engineOptions.includes(normalized)) return normalized === 'React' ? 'Web' : 'Desktop';
+    return normalized;
+}
+
+function inferEngine(value: string | undefined): string {
+    const normalized = value?.trim();
+    if (!normalized || normalized === 'Auto') return 'React';
+    if (engineOptions.includes(normalized)) return normalized;
+    if (normalized === 'Web') return 'React';
+    if (normalized === 'XR') return 'Unity';
+    return 'React';
+}
+
+const pendingCreditStorageKey = 'beegame.pendingCreditQuote.v1';
+const pendingAuthIdeaStorageKey = 'beegame.pendingAuthIdea.v1';
+const pendingAuthIdeaMaxAgeMs = 30 * 60 * 1000;
+
+type PendingCreditState =
+    | { kind: 'intake'; idea: string; quote: BeeGameCreditQuote }
+    | { kind: 'build'; brief: BeeGameBuildBrief; quote: BeeGameCreditQuote };
+
+type PendingAuthIdeaState = {
+    idea: string;
+    createdAt: number;
+};
+
+function readPendingCreditState(): PendingCreditState | null {
+    try {
+        const raw = sessionStorage.getItem(pendingCreditStorageKey);
+        if (!raw) return null;
+        const value = JSON.parse(raw) as unknown;
+        if (!isPendingCreditState(value)) return null;
+        return value;
+    } catch {
+        return null;
+    }
+}
+
+function writePendingCreditState(value: PendingCreditState): void {
+    try {
+        sessionStorage.setItem(pendingCreditStorageKey, JSON.stringify(value));
+    } catch {
+        // Best-effort UI recovery only. Billing truth still lives on the server.
+    }
+}
+
+function readPendingAuthIdeaState(): PendingAuthIdeaState | null {
+    try {
+        const raw = sessionStorage.getItem(pendingAuthIdeaStorageKey);
+        if (!raw) return null;
+        const value = JSON.parse(raw) as unknown;
+        if (!isPendingAuthIdeaState(value)) return null;
+        if (Date.now() - value.createdAt > pendingAuthIdeaMaxAgeMs) {
+            clearPendingAuthIdeaState();
+            return null;
+        }
+        return value;
+    } catch {
+        return null;
+    }
+}
+
+function writePendingAuthIdeaState(idea: string): void {
+    const normalizedIdea = idea.trim();
+    if (!normalizedIdea) return;
+    try {
+        sessionStorage.setItem(pendingAuthIdeaStorageKey, JSON.stringify({
+            idea: normalizedIdea,
+            createdAt: Date.now(),
+        }));
+    } catch {
+        // OAuth redirects unload the page; this is best-effort recovery only.
+    }
+}
+
+function clearPendingAuthIdeaState(): void {
+    try {
+        sessionStorage.removeItem(pendingAuthIdeaStorageKey);
+    } catch {
+        // Ignore storage failures; the in-memory login flow can still continue.
+    }
+}
+
+function clearPendingCreditState(): void {
+    try {
+        sessionStorage.removeItem(pendingCreditStorageKey);
+    } catch {
+        // Ignore storage failures; the dialog state will still clear in memory.
+    }
+}
+
+function isPendingCreditState(value: unknown): value is PendingCreditState {
+    if (!isRecord(value) || !isRecord(value.quote)) return false;
+    if (value.kind === 'intake') {
+        return typeof value.idea === 'string' && value.idea.trim().length > 0;
+    }
+    if (value.kind === 'build') {
+        return isRecord(value.brief) && typeof value.brief.idea === 'string';
+    }
+    return false;
+}
+
+function isPendingAuthIdeaState(value: unknown): value is PendingAuthIdeaState {
+    return isRecord(value)
+        && typeof value.idea === 'string'
+        && value.idea.trim().length > 0
+        && typeof value.createdAt === 'number'
+        && Number.isFinite(value.createdAt);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
-    const [projectName, setProjectName] = useState('');
+    const [restoredPendingCredit] = useState<PendingCreditState | null>(() => readPendingCreditState());
+    const [projectName, setProjectName] = useState(() => (
+        restoredPendingCredit?.kind === 'intake'
+            ? restoredPendingCredit.idea
+            : restoredPendingCredit?.kind === 'build'
+                ? restoredPendingCredit.brief.idea
+                : ''
+    ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [isSystemManagementOpen, setIsSystemManagementOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
@@ -188,10 +323,19 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [creditLedger, setCreditLedger] = useState<BeeGameCreditLedgerEntry[]>([]);
     const [isCreditLedgerLoading, setIsCreditLedgerLoading] = useState(false);
     const [isCreditLedgerExpanded, setIsCreditLedgerExpanded] = useState(false);
-    const [intakeCreditQuote, setIntakeCreditQuote] = useState<BeeGameCreditQuote | null>(null);
-    const [pendingIntakeIdea, setPendingIntakeIdea] = useState('');
-    const [buildCreditQuote, setBuildCreditQuote] = useState<BeeGameCreditQuote | null>(null);
-    const [pendingBuildBrief, setPendingBuildBrief] = useState<BeeGameBuildBrief | null>(null);
+    const [intakeCreditQuote, setIntakeCreditQuote] = useState<BeeGameCreditQuote | null>(
+        restoredPendingCredit?.kind === 'intake' ? restoredPendingCredit.quote : null,
+    );
+    const [pendingIntakeIdea, setPendingIntakeIdea] = useState(
+        restoredPendingCredit?.kind === 'intake' ? restoredPendingCredit.idea : '',
+    );
+    const [buildCreditQuote, setBuildCreditQuote] = useState<BeeGameCreditQuote | null>(
+        restoredPendingCredit?.kind === 'build' ? restoredPendingCredit.quote : null,
+    );
+    const [pendingBuildBrief, setPendingBuildBrief] = useState<BeeGameBuildBrief | null>(
+        restoredPendingCredit?.kind === 'build' ? restoredPendingCredit.brief : null,
+    );
+    const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
     const t = translations[lang];
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
@@ -201,11 +345,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             : intakePhase === 'confirming_brief'
                 ? '确认构建方案'
                 : '启动构建';
+    const intakeModalWidthClass = intakePhase === 'options_ready'
+        ? 'max-w-5xl'
+        : 'max-w-xl';
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
     const currentUser = useSystemStore(state => state.currentUser);
     const hasPermission = useSystemStore(state => state.hasPermission);
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
+    const canOpenPlatformSettings = currentUser?.role === 'owner';
 
     useEffect(() => {
         if (!currentUser) {
@@ -226,24 +374,41 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     }, [currentUser?.id]);
 
     const handleSignOut = async () => {
+        clearPendingCreditState();
+        clearPendingAuthIdeaState();
+        setIntakeCreditQuote(null);
+        setPendingIntakeIdea('');
+        setBuildCreditQuote(null);
+        setPendingBuildBrief(null);
         clearSupabaseSession();
         setCreditBalance(null);
         await loadCurrentUser();
     };
 
     const handleOpenLogin = () => {
-        setPendingIdeaAfterLogin(projectName.trim());
+        setPendingIdeaAfterLogin('');
+        clearPendingAuthIdeaState();
         setLoginError('');
         setLoginNotice('');
         setAuthMode('login');
         setIsLoginPromptOpen(true);
     };
 
+    const handleCloseLoginPrompt = () => {
+        clearPendingAuthIdeaState();
+        setPendingIdeaAfterLogin('');
+        setIsLoginPromptOpen(false);
+        setLoginError('');
+        setLoginNotice('');
+    };
+
     const ensureGenerationAccess = async (): Promise<boolean> => {
         await loadCurrentUser();
         const latestUser = useSystemStore.getState().currentUser;
         if (!latestUser) {
-            setPendingIdeaAfterLogin(projectName.trim());
+            const pendingIdea = projectName.trim();
+            setPendingIdeaAfterLogin(pendingIdea);
+            writePendingAuthIdeaState(pendingIdea);
             setIsLoginPromptOpen(true);
             return false;
         }
@@ -256,7 +421,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         try {
             const modelConfigs = await listModelConfigs();
             if (modelConfigs.length === 0) {
-                setIntakeError('平台尚未配置默认模型。请管理员在管理控制台配置后再生成。');
+                setIntakeError('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。');
                 return;
             }
             const quote = await getCreditQuote('idea_intake');
@@ -266,6 +431,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             }
             setPendingIntakeIdea(idea);
             setIntakeCreditQuote(quote);
+            writePendingCreditState({ kind: 'intake', idea, quote });
         } catch (error) {
             setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
             console.error('Failed to quote intake credits:', error);
@@ -273,6 +439,19 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsPreparing(false);
         }
     };
+
+    useEffect(() => {
+        if (!currentUser || isPreparing || intakePhase !== 'idle' || intakeCreditQuote || buildCreditQuote) {
+            return;
+        }
+        const pendingAuthIdea = readPendingAuthIdeaState();
+        if (!pendingAuthIdea) return;
+        clearPendingAuthIdeaState();
+        setProjectName(pendingAuthIdea.idea);
+        setPendingIdeaAfterLogin('');
+        setIsLoginPromptOpen(false);
+        void requestIntakeCreditConfirmation(pendingAuthIdea.idea);
+    }, [currentUser?.id]);
 
     const runIntake = async (idea: string) => {
         setIntakeError('');
@@ -378,8 +557,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setLoginPassword('');
             setRegisterDisplayName('');
             setHasAcceptedTerms(false);
-            const nextIdea = pendingIdeaAfterLogin || projectName.trim();
+            const nextIdea = pendingIdeaAfterLogin.trim();
             setPendingIdeaAfterLogin('');
+            clearPendingAuthIdeaState();
             if (nextIdea) {
                 setProjectName(nextIdea);
                 const canGenerate = await ensureGenerationAccess();
@@ -492,8 +672,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
+            writePendingAuthIdeaState(pendingIdeaAfterLogin);
             await signInWithSupabaseOAuth(provider);
         } catch (error) {
+            clearPendingAuthIdeaState();
             setLoginError(error instanceof Error ? error.message : '第三方登录启动失败。');
         }
     };
@@ -529,6 +711,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSelectedOption(option);
         setSettings(settingsFromOption(option));
         setIntakePhase('configuring_details');
+        setIsInputMenuOpen(false);
         setIntakeError('');
     };
 
@@ -552,6 +735,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const handleConfirmSettings = () => {
         if (!selectedOption || !settings) return;
+        setIsInputMenuOpen(false);
         setIntakePhase('confirming_brief');
     };
 
@@ -559,6 +743,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakePhase('options_ready');
         setSelectedOption(null);
         setSettings(null);
+        setIsInputMenuOpen(false);
     };
 
     const handleCloseIntake = () => {
@@ -567,6 +752,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakeOptions([]);
         setSelectedOption(null);
         setSettings(null);
+        setIsInputMenuOpen(false);
         setIntakeError('');
         setClarification(null);
         setClarificationDraft('');
@@ -576,6 +762,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         const idea = pendingIntakeIdea;
         setIntakeCreditQuote(null);
         setPendingIntakeIdea('');
+        clearPendingCreditState();
         if (idea) {
             void runIntake(idea);
         }
@@ -584,6 +771,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleCancelIntakeCredit = () => {
         setIntakeCreditQuote(null);
         setPendingIntakeIdea('');
+        clearPendingCreditState();
     };
 
     const startConfirmedBuild = async (brief: BeeGameBuildBrief) => {
@@ -620,6 +808,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             }
             setPendingBuildBrief(brief);
             setBuildCreditQuote(quote);
+            writePendingCreditState({ kind: 'build', brief, quote });
         } catch (error) {
             setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
             console.error('Failed to quote build credits:', error);
@@ -632,6 +821,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         const brief = pendingBuildBrief;
         setBuildCreditQuote(null);
         setPendingBuildBrief(null);
+        clearPendingCreditState();
         if (brief) {
             void startConfirmedBuild(brief);
         }
@@ -640,6 +830,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleCancelBuildCredit = () => {
         setBuildCreditQuote(null);
         setPendingBuildBrief(null);
+        clearPendingCreditState();
     };
 
     const handleSelectProject = async (id: string) => {
@@ -652,11 +843,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             console.error('Failed to select project:', error);
         }
     };
-    const canOpenSystemManagement = Boolean(currentUser) && (hasPermission('workspace.manage') ||
-        hasPermission('secrets.manage') ||
-        hasPermission('runtime_settings.manage') ||
-        hasPermission('mcp.manage') ||
-        hasPermission('model_config.manage'));
     return (
         <AnimatePresence mode="wait">
             <motion.div
@@ -679,25 +865,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     currentUserEmail={currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
                     creditBalance={creditBalance?.balanceCredits}
-                    canOpenSystemManagement={canOpenSystemManagement}
                     onOpenLogin={handleOpenLogin}
                     onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
-                        setIsSystemManagementOpen(false);
-                        setIsHistoryOpen(false);
-                    }}
-                    onToggleSystemManagement={() => {
-                        if (!canOpenSystemManagement) return;
-                        setIsSystemManagementOpen((value) => !value);
-                        setIsSettingsOpen(false);
                         setIsHistoryOpen(false);
                     }}
                     onToggleHistory={() => {
                         setIsHistoryOpen((value) => !value);
                         setIsSettingsOpen(false);
-                        setIsSystemManagementOpen(false);
                     }}
                 />
 
@@ -706,19 +883,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                />
-
-                <SettingsMenu
-                    isOpen={isSystemManagementOpen && canOpenSystemManagement}
-                    lang={lang}
-                    onClose={() => setIsSystemManagementOpen(false)}
-                    onSetLang={onSetLang}
-                    scope="admin"
-                    canManageWorkspace={hasPermission('workspace.manage')}
-                    canManageSecrets={hasPermission('secrets.manage')}
-                    canManageRuntimeSettings={hasPermission('runtime_settings.manage')}
-                    canManageMcp={hasPermission('mcp.manage')}
-                    canManageModelConfig={hasPermission('model_config.manage')}
+                    canManageWorkspace={canOpenPlatformSettings && hasPermission('workspace.manage')}
+                    canManageSecrets={canOpenPlatformSettings && hasPermission('secrets.manage')}
+                    canManageRuntimeSettings={canOpenPlatformSettings && hasPermission('runtime_settings.manage')}
+                    canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
+                    canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
                 />
 
                 <ProjectHistoryModal
@@ -785,45 +954,31 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                             <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-left">
                                 <div className="flex items-center justify-between gap-3">
-                                    <div className="text-sm font-semibold text-white">Credit 记录</div>
+                                    <div className="text-sm font-semibold text-white">Credit 用量</div>
                                     {creditBalance ? (
                                         <div className="text-xs font-bold text-emerald-200">
                                             {creditBalance.balanceCredits} credits
                                         </div>
                                     ) : null}
                                 </div>
-                                <div className="mt-3 space-y-2">
-                                    {isCreditLedgerLoading ? (
-                                        <div className="text-sm text-zinc-500">正在加载...</div>
-                                    ) : creditLedger.length > 0 ? (
-                                        (isCreditLedgerExpanded ? creditLedger : creditLedger.slice(0, 5)).map(entry => (
-                                            <div key={entry.id} className="flex items-center justify-between gap-3 rounded-2xl bg-black/20 px-3 py-2">
-                                                <div className="min-w-0">
-                                                    <div className="truncate text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
-                                                        {formatCreditLedgerKind(entry.kind)}
-                                                    </div>
-                                                    <div className="mt-0.5 truncate text-xs text-zinc-500">
-                                                        {formatCreditLedgerMeta(entry)}
-                                                    </div>
-                                                </div>
-                                                <div className={`shrink-0 text-sm font-black ${getCreditLedgerAmountClass(entry.kind)}`}>
-                                                    {formatCreditLedgerAmount(entry)}
-                                                </div>
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <div className="text-sm text-zinc-500">暂无记录</div>
-                                    )}
-                                </div>
-                                {!isCreditLedgerLoading && creditLedger.length > 5 ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsCreditLedgerExpanded(value => !value)}
-                                        className="mt-3 rounded-full border border-white/15 px-4 py-2 text-xs font-bold text-zinc-200 transition hover:bg-white/10"
-                                    >
-                                        {isCreditLedgerExpanded ? '收起' : '查看全部'}
-                                    </button>
+                                {creditBalance ? (
+                                    <div className="mt-4 grid grid-cols-3 gap-2">
+                                        <CreditMetric label="余额" value={creditBalance.balanceCredits} tone="positive" />
+                                        <CreditMetric label="已用" value={creditBalance.consumedCredits} />
+                                        <CreditMetric label="冻结" value={creditBalance.reservedCredits} />
+                                    </div>
                                 ) : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCreditLedgerExpanded(true)}
+                                    disabled={isCreditLedgerLoading}
+                                    className="mt-4 flex h-12 w-full items-center justify-between rounded-2xl border border-white/15 bg-black/15 px-4 text-left text-sm font-bold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <span>{isCreditLedgerLoading ? '正在加载记录...' : '查看 Credit 明细'}</span>
+                                    <span className="text-xs font-black text-zinc-500">
+                                        {creditLedger.length > 0 ? `${creditLedger.length} 条` : '暂无记录'}
+                                    </span>
+                                </button>
                             </div>
 
                             <div className="mt-6 flex justify-between gap-3">
@@ -842,6 +997,44 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 >
                                     {isSavingProfile ? '保存中...' : '完成'}
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+
+                {isProfileOpen && isCreditLedgerExpanded ? (
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Credit 明细"
+                        data-surface="frosted-glass"
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+                    >
+                        <div className="input-surface flex max-h-[78vh] w-full max-w-lg flex-col rounded-[28px] border border-white/20 p-5 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-semibold text-white">Credit 明细</h2>
+                                    <p className="mt-2 text-sm text-zinc-400">
+                                        按任务环节记录预扣、结算和退回。
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label="关闭 Credit 明细"
+                                    onClick={() => setIsCreditLedgerExpanded(false)}
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <div className="mt-5 max-h-[52vh] space-y-2 overflow-y-auto pr-1" data-credit-ledger-scroll="true">
+                                {creditLedger.length > 0 ? (
+                                    creditLedger.map(entry => (
+                                        <CreditLedgerRow key={entry.id} entry={entry} />
+                                    ))
+                                ) : (
+                                    <div className="text-sm text-zinc-500">暂无记录</div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -879,11 +1072,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <button
                                     type="button"
                                     aria-label="关闭登录弹窗"
-                                    onClick={() => {
-                                        setIsLoginPromptOpen(false);
-                                        setLoginError('');
-                                        setLoginNotice('');
-                                    }}
+                                    onClick={handleCloseLoginPrompt}
                                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
                                 >
                                     <X className="h-5 w-5" />
@@ -1134,7 +1323,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     data-intake-modal="true"
                     className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm"
                 >
-                    <div className="relative flex max-h-[calc(100vh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[32px] border border-white/15 bg-zinc-950/85 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+                    <div className={`input-surface relative flex max-h-[calc(100vh-3rem)] w-full ${intakeModalWidthClass} flex-col overflow-hidden rounded-[32px] border border-white/20 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]`}>
                         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,212,54,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.08),transparent_38%)]" />
                         <div className="relative z-10 flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
                             <div className="min-w-0">
@@ -1156,22 +1345,38 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                     {intakePhase === 'options_ready' ? (
                         <div className="space-y-4" data-testid="intake-options">
-                            <div className="grid gap-3 md:grid-cols-3">
+                            <div className="grid items-stretch gap-4 md:grid-cols-3">
                                 {intakeOptions.map((option) => (
                                     <button
                                         key={option.id}
                                         type="button"
                                         onClick={() => handleSelectOption(option)}
-                                        className="group rounded-2xl border border-white/15 bg-zinc-950/65 p-4 text-left shadow-2xl backdrop-blur-xl transition hover:border-amber-300/70 hover:bg-zinc-900/80"
+                                        data-testid="intake-option-card"
+                                        className="group grid h-[24rem] grid-rows-[4.75rem_1.25rem_minmax(0,1fr)_2.75rem] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
                                     >
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">游戏模式</div>
-                                        <div className="mt-2 text-base font-semibold text-white">{option.title}</div>
-                                        <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">玩法</div>
-                                        <div className="mt-2 text-sm leading-6 text-zinc-300">{option.gameplay}</div>
+                                        <div className="min-h-0">
+                                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">游戏模式</div>
+                                            <div
+                                                data-testid="intake-option-title"
+                                                className="mt-2 max-h-12 overflow-hidden text-2xl font-semibold leading-tight tracking-normal text-white"
+                                            >
+                                                {option.title}
+                                            </div>
+                                        </div>
+                                        <div className="self-start text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">玩法</div>
+                                        <div
+                                            data-testid="intake-option-gameplay"
+                                            className="min-h-0 overflow-y-auto pr-1 text-[15px] font-medium leading-7 text-zinc-300 [scrollbar-width:thin]"
+                                        >
+                                            {option.gameplay}
+                                        </div>
                                         {optionTags(option).length > 0 ? (
-                                            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
+                                            <div
+                                                data-testid="intake-option-tags"
+                                                className="flex min-h-0 items-end gap-2 overflow-hidden text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300"
+                                            >
                                                 {optionTags(option).map(tag => (
-                                                    <span key={tag} className="rounded-full bg-white/10 px-2.5 py-1">{tag}</span>
+                                                    <span key={tag} className="shrink-0 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5">{tag}</span>
                                                 ))}
                                             </div>
                                         ) : null}
@@ -1182,81 +1387,89 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     ) : null}
 
                     {intakePhase === 'configuring_details' && selectedOption && settings ? (
-                        <div className="space-y-5" data-testid="intake-settings" data-panel-depth="single">
-                            <div>
-                                <p className="max-w-3xl text-sm leading-6 text-zinc-300">{selectedOption.coreGameplayHypothesis}</p>
-                                <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">{selectedOption.playablePrototype}</p>
-                            </div>
-
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                <label className="text-sm font-medium text-zinc-200">
+                        <div className="space-y-4" data-testid="intake-settings" data-panel-depth="single">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="text-sm font-semibold text-zinc-300">
                                     平台
-                                    <select aria-label="平台" value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
+                                    <select aria-label="平台" value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
                                         {optionsWithCurrentValue(platformOptions, settings.platform).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-medium text-zinc-200">
+                                <label className="text-sm font-semibold text-zinc-300">
+                                    引擎
+                                    <select aria-label="引擎" value={settings.engine || 'React'} onChange={(event) => updateSettings({ engine: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
+                                        {optionsWithCurrentValue(engineOptions, settings.engine || 'React').map((option) => <option key={option}>{option}</option>)}
+                                    </select>
+                                </label>
+                                <label className="text-sm font-semibold text-zinc-300">
                                     表现形式
-                                    <select aria-label="表现形式" value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
+                                    <select aria-label="表现形式" value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
                                         {optionsWithCurrentValue(dimensionOptions, settings.dimension).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-medium text-zinc-200">
+                                <label className="text-sm font-semibold text-zinc-300">
                                     游戏类型
-                                    <select aria-label="游戏类型" value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
+                                    <select aria-label="游戏类型" value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
                                         {optionsWithCurrentValue(genreOptions, settings.genre).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-medium text-zinc-200">
+                                <label className="text-sm font-semibold text-zinc-300">
                                     风格
-                                    <select aria-label="风格" value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
+                                    <select aria-label="风格" value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
                                         {optionsWithCurrentValue(styleOptions, settings.visualStyle).map((option) => <option key={option}>{option}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-medium text-zinc-200">
-                                    范围
-                                    <select aria-label="范围" value={settings.scope} onChange={(event) => updateSettings({ scope: event.target.value })} className="mt-2 w-full rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white">
-                                        {optionsWithCurrentValue(scopeOptions, settings.scope).map((option) => <option key={option}>{option}</option>)}
-                                    </select>
-                                </label>
-                            </div>
-
-                            <div>
-                                <div className="text-sm font-medium text-zinc-200">输入方式</div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                    {inputOptions.map((input) => {
-                                        const active = settings.inputs.includes(input);
-                                        return (
-                                            <button
-                                                key={input}
-                                                type="button"
-                                                onClick={() => toggleInput(input)}
-                                                aria-pressed={active}
-                                                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${active ? 'border-emerald-300 bg-emerald-400 text-zinc-950' : 'border-white/15 bg-white/5 text-zinc-200 hover:bg-white/10'}`}
-                                            >
-                                                {input}
-                                            </button>
-                                        );
-                                    })}
+                                <div className="relative text-sm font-semibold text-zinc-300">
+                                    输入方式
+                                    <button
+                                        type="button"
+                                        aria-haspopup="listbox"
+                                        aria-expanded={isInputMenuOpen}
+                                        onClick={() => setIsInputMenuOpen(value => !value)}
+                                        className="mt-2 flex h-11 w-full items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-left text-sm font-semibold text-white outline-none transition hover:bg-white/[0.07] focus-visible:border-white/35"
+                                    >
+                                        <span className="min-w-0 truncate">{settings.inputs.join(' / ')}</span>
+                                        <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-400 transition ${isInputMenuOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+                                    {isInputMenuOpen ? (
+                                        <div role="listbox" aria-label="输入方式" className="input-surface absolute left-0 right-0 top-[4.75rem] z-[85] overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40">
+                                            {inputOptions.map((input) => {
+                                                const active = settings.inputs.includes(input);
+                                                return (
+                                                    <button
+                                                        key={input}
+                                                        type="button"
+                                                        role="option"
+                                                        aria-selected={active}
+                                                        onClick={() => toggleInput(input)}
+                                                        className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+                                                    >
+                                                        <span>{input}</span>
+                                                        {active ? <Check className="h-4 w-4 text-emerald-200" /> : null}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
                                 </div>
                             </div>
 
-                            <label className="block text-sm font-medium text-zinc-200">
+                            <label className="block text-sm font-semibold text-zinc-300">
                                 补充说明
                                 <textarea
                                     aria-label="补充说明"
                                     value={settings.notes || ''}
                                     onChange={(event) => updateSettings({ notes: event.target.value })}
                                     placeholder="可补充目标用户、参考游戏、特殊限制或你想优先验证的体验。"
-                                    className="mt-2 min-h-20 w-full resize-none rounded-xl border border-white/15 bg-zinc-900 px-3 py-2 text-white placeholder:text-zinc-500"
+                                    className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-sm font-medium leading-6 text-white outline-none placeholder:text-zinc-500 focus:border-white/35"
                                 />
                             </label>
 
-                            <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
-                                <button type="button" onClick={handleBackToOptions} className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-semibold text-zinc-200 hover:bg-white/10">
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                                <button type="button" onClick={handleBackToOptions} className="rounded-full border border-white/15 bg-black/10 px-5 py-2.5 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10">
                                     重新选择
                                 </button>
-                                <button type="button" onClick={handleConfirmSettings} className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 hover:bg-amber-200">
+                                <button type="button" onClick={handleConfirmSettings} className="rounded-full bg-white px-6 py-2.5 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100">
                                     确认方案
                                 </button>
                             </div>
@@ -1269,11 +1482,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             <p className="mt-3 text-sm leading-6 text-zinc-300">{selectedOption.pitch}</p>
                             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                                 <div><dt className="text-zinc-500">平台</dt><dd className="font-semibold text-white">{settings.platform}</dd></div>
+                                <div><dt className="text-zinc-500">引擎</dt><dd className="font-semibold text-white">{settings.engine || 'React'}</dd></div>
                                 <div><dt className="text-zinc-500">表现</dt><dd className="font-semibold text-white">{settings.dimension}</dd></div>
                                 <div><dt className="text-zinc-500">类型</dt><dd className="font-semibold text-white">{settings.genre}</dd></div>
                                 <div><dt className="text-zinc-500">风格</dt><dd className="font-semibold text-white">{settings.visualStyle}</dd></div>
                                 <div><dt className="text-zinc-500">输入</dt><dd className="font-semibold text-white">{settings.inputs.join(' / ')}</dd></div>
-                                <div><dt className="text-zinc-500">范围</dt><dd className="font-semibold text-white">{settings.scope}</dd></div>
                             </dl>
                             {settings.notes ? <p className="mt-4 rounded-2xl bg-white/5 p-3 text-sm text-zinc-300">{settings.notes}</p> : null}
                             <div className="mt-5 flex flex-wrap justify-end gap-3">
@@ -1387,60 +1600,101 @@ function CreditConfirmDialog({
     const isIntake = quote.taskType === 'idea_intake';
     const titleId = `beegame-${quote.taskType}-credit-title`;
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 px-6 backdrop-blur-md">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
             <div
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
-                className="w-full max-w-xl rounded-[32px] border border-white/20 bg-zinc-950/80 p-7 text-left text-white shadow-2xl shadow-black/50 backdrop-blur-2xl"
+                data-surface="frosted-glass"
+                className="input-surface w-full max-w-2xl rounded-[30px] border border-white/20 p-6 text-left text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
             >
-                <div className="text-[11px] font-black uppercase tracking-[0.45em] text-amber-300">
-                    Credits
-                </div>
-                <h2 id={titleId} className="mt-4 text-3xl font-black">
+                <h2 id={titleId} className="text-3xl font-black leading-tight text-white sm:text-4xl">
                     {isZh
                         ? isIntake ? '确认生成方案' : '确认开始构建'
                         : isIntake ? 'Confirm idea generation' : 'Confirm build'}
                 </h2>
-                <p className="mt-4 text-base leading-7 text-zinc-300">
+                <p className="mt-5 max-w-[58rem] text-base font-medium leading-8 text-zinc-300 sm:text-lg">
                     {isZh
                         ? `本次${isIntake ? '方案生成' : '构建'}将预扣 ${quote.reservedCredits} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。`
                         : `This ${isIntake ? 'idea generation' : 'build'} will reserve ${quote.reservedCredits} credits. It settles against actual token and tool usage, and unused credits are refunded.`}
                 </p>
-                <div className="mt-6 grid gap-3 rounded-3xl border border-white/10 bg-white/[0.04] p-5 sm:grid-cols-2">
-                    <div>
-                        <div className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">
+                <div className="mt-7 grid gap-4 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:grid-cols-2 sm:p-6">
+                    <div className="min-w-0">
+                        <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
                             {isZh ? '当前余额' : 'Balance'}
                         </div>
-                        <div className="mt-2 text-2xl font-black text-emerald-200">
+                        <div className="mt-3 text-3xl font-black leading-none text-emerald-200">
                             {quote.balanceCredits} credits
                         </div>
                     </div>
-                    <div>
-                        <div className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">
+                    <div className="min-w-0">
+                        <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
                             {isZh ? '本次预扣' : 'Reserved'}
                         </div>
-                        <div className="mt-2 text-2xl font-black text-white">
+                        <div className="mt-3 text-3xl font-black leading-none text-white">
                             {quote.reservedCredits} credits
                         </div>
                     </div>
                 </div>
-                <div className="mt-7 flex justify-end gap-3">
+                <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="rounded-full border border-white/15 px-6 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10"
+                        className="rounded-full border border-white/15 bg-black/10 px-6 py-3 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
                     >
                         {isZh ? '取消' : 'Cancel'}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
+                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100"
                     >
                         {isZh ? isIntake ? '确认生成' : '确认构建' : isIntake ? 'Start generation' : 'Start build'}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function CreditMetric({
+    label,
+    value,
+    tone = 'neutral',
+}: {
+    label: string;
+    value: number;
+    tone?: 'neutral' | 'positive';
+}) {
+    return (
+        <div className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
+            <div className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</div>
+            <div className={`mt-1 truncate text-sm font-black ${tone === 'positive' ? 'text-emerald-200' : 'text-zinc-100'}`}>
+                {value}
+            </div>
+        </div>
+    );
+}
+
+function CreditLedgerRow({
+    entry,
+    compact = false,
+}: {
+    entry: BeeGameCreditLedgerEntry;
+    compact?: boolean;
+}) {
+    return (
+        <div className={`flex items-center justify-between gap-3 rounded-2xl bg-black/20 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
+            <div className="min-w-0">
+                <div className={`${compact ? 'text-sm' : 'text-base'} truncate font-bold text-zinc-200`}>
+                    {formatCreditLedgerTitle(entry)}
+                </div>
+                <div className="mt-0.5 truncate text-xs text-zinc-500">
+                    {formatCreditLedgerMeta(entry)}
+                </div>
+            </div>
+            <div className={`shrink-0 text-sm font-black ${getCreditLedgerAmountClass(entry.kind)}`}>
+                {formatCreditLedgerAmount(entry)}
             </div>
         </div>
     );
@@ -1463,16 +1717,49 @@ function formatCreditLedgerKind(kind: BeeGameCreditLedgerEntry['kind']): string 
     }
 }
 
-function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
-    const displayName = typeof entry.metadata?.displayName === 'string'
-        ? entry.metadata.displayName
-        : undefined;
+function formatCreditLedgerTitle(entry: BeeGameCreditLedgerEntry): string {
+    return `${formatCreditLedgerStage(entry)} · ${formatCreditLedgerKind(entry.kind)}`;
+}
+
+function formatCreditLedgerStage(entry: BeeGameCreditLedgerEntry): string {
     const taskType = typeof entry.metadata?.taskType === 'string'
         ? entry.metadata.taskType
         : undefined;
+    if (taskType) return formatCreditTaskType(taskType);
+    const displayName = typeof entry.metadata?.displayName === 'string'
+        ? entry.metadata.displayName.trim()
+        : '';
     if (displayName) return displayName;
-    if (taskType) return taskType.replaceAll('_', ' ');
-    return new Date(entry.createdAt).toLocaleString();
+    return 'Credit';
+}
+
+function formatCreditTaskType(taskType: string): string {
+    switch (taskType) {
+        case 'idea_intake':
+            return '方案生成';
+        case 'full_build':
+            return '完整构建';
+        case 'edit_turn':
+            return '修改任务';
+        case 'continue_turn':
+            return '继续任务';
+        case 'asset_integration':
+            return '资源集成';
+        case 'large_build':
+            return '大型构建';
+        case 'agent_turn':
+            return 'Agent 任务';
+        default:
+            return taskType.replaceAll('_', ' ');
+    }
+}
+
+function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
+    const parts = [new Date(entry.createdAt).toLocaleString()];
+    if (typeof entry.weightedTokens === 'number' && entry.weightedTokens > 0) {
+        parts.push(`${entry.weightedTokens.toLocaleString()} weighted tokens`);
+    }
+    return parts.join(' · ');
 }
 
 function formatCreditLedgerAmount(entry: BeeGameCreditLedgerEntry): string {

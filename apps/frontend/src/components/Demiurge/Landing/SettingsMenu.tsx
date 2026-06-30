@@ -46,7 +46,6 @@ interface SettingsMenuProps {
     lang: Language;
     onClose: () => void;
     onSetLang: (lang: Language) => void;
-    scope?: 'user' | 'admin';
     canManageWorkspace?: boolean;
     canManageSecrets?: boolean;
     canManageRuntimeSettings?: boolean;
@@ -54,6 +53,7 @@ interface SettingsMenuProps {
     canManageModelConfig?: boolean;
 }
 
+type SettingsSection = 'personal' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model';
 type PopoverAnchorRect = {
     top: number;
@@ -86,7 +86,6 @@ export function SettingsMenu({
     lang,
     onClose,
     onSetLang,
-    scope = 'user',
     canManageWorkspace = false,
     canManageSecrets = false,
     canManageRuntimeSettings = false,
@@ -95,12 +94,16 @@ export function SettingsMenu({
 }: SettingsMenuProps) {
     const t = translations[lang];
     const text = getBeeGameText(lang);
-    const isAdminScope = scope === 'admin';
-    const effectiveCanManageWorkspace = isAdminScope && canManageWorkspace;
-    const effectiveCanManageSecrets = isAdminScope && canManageSecrets;
-    const effectiveCanManageRuntimeSettings = isAdminScope && canManageRuntimeSettings;
-    const effectiveCanManageMcp = isAdminScope && canManageMcp;
-    const effectiveCanManageModelConfig = isAdminScope && canManageModelConfig;
+    const effectiveCanManageWorkspace = canManageWorkspace;
+    const effectiveCanManageSecrets = canManageSecrets;
+    const effectiveCanManageRuntimeSettings = canManageRuntimeSettings;
+    const effectiveCanManageMcp = canManageMcp;
+    const effectiveCanManageModelConfig = canManageModelConfig;
+    const hasPlatformSettings = effectiveCanManageWorkspace ||
+        effectiveCanManageSecrets ||
+        effectiveCanManageRuntimeSettings ||
+        effectiveCanManageMcp ||
+        effectiveCanManageModelConfig;
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -138,6 +141,7 @@ export function SettingsMenu({
     const [testingMcpServerId, setTestingMcpServerId] = useState('');
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+    const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
     const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
@@ -491,10 +495,15 @@ export function SettingsMenu({
     const capabilityCopy = getRuntimeCapabilityCopy(lang);
     const mcpCopy = getMcpSettingsCopy(lang);
     const adminCopy = getAdminSettingsCopy(lang);
-    const tabs = useMemo(() => {
-        if (!isAdminScope) {
-            return [{ id: 'general' as const, label: text.settingsGeneral, icon: Globe }];
-        }
+    const sectionTabs = useMemo(() => [
+        { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
+        ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
+    ], [
+        adminCopy.platform,
+        hasPlatformSettings,
+        text.settingsGeneral,
+    ]);
+    const platformTabs = useMemo(() => {
         return [
             { id: 'general' as const, label: adminCopy.deployment, icon: ShieldCheck },
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
@@ -507,29 +516,29 @@ export function SettingsMenu({
         effectiveCanManageMcp,
         effectiveCanManageModelConfig,
         effectiveCanManageRuntimeSettings,
-        isAdminScope,
         adminCopy.deployment,
         capabilityCopy.title,
         mcpCopy.title,
-        text.settingsGeneral,
         text.settingsModel,
     ]);
-    const activeTabLabel = activeTab === 'general'
-        ? (isAdminScope ? adminCopy.deployment : text.settingsGeneral)
+    const activeTabLabel = activeSection === 'personal'
+        ? text.settingsGeneral
+        : activeTab === 'general'
+        ? adminCopy.deployment
         : activeTab === 'runtime'
             ? capabilityCopy.title
             : activeTab === 'mcp'
                 ? mcpCopy.title
                 : text.settingsModel;
-    const isSavingCurrentTab = activeTab === 'general'
+    const isSavingCurrentTab = activeSection === 'platform' && activeTab === 'general'
         ? (effectiveCanManageSecrets && isSavingWebTools)
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
         : activeTab === 'mcp'
                 ? false
             : isSaving;
-    const hasGeneralSaveAction = effectiveCanManageSecrets;
-    const isSaveDisabled = activeTab === 'general'
+    const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
+    const isSaveDisabled = activeSection === 'platform' && activeTab === 'general'
         ? !hasGeneralSaveAction ||
             isSavingCurrentTab ||
             (effectiveCanManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
@@ -540,6 +549,7 @@ export function SettingsMenu({
             : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
 
     const handleSaveSettings = async () => {
+        if (activeSection === 'personal') return;
         if (activeTab === 'model') {
             const saved = await handleSaveModelConfig();
             if (saved) onClose();
@@ -562,17 +572,22 @@ export function SettingsMenu({
         }));
     };
     useEffect(() => {
-        if (!tabs.some((tab) => tab.id === activeTab)) {
-            setActiveTab(tabs[0]?.id ?? 'general');
+        if (!hasPlatformSettings && activeSection === 'platform') {
+            setActiveSection('personal');
+            setActiveTab('general');
+            return;
         }
-    }, [activeTab, tabs]);
+        if (activeSection === 'platform' && !platformTabs.some((tab) => tab.id === activeTab)) {
+            setActiveTab(platformTabs[0]?.id ?? 'general');
+        }
+    }, [activeSection, activeTab, hasPlatformSettings, platformTabs]);
 
     return (
         <AnimatePresence>
             {isOpen && (
                 <motion.div
                     role="dialog"
-                    aria-label={isAdminScope ? adminCopy.title : t.settings}
+                    aria-label={t.settings}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -606,16 +621,19 @@ export function SettingsMenu({
                                     </button>
                                 </div>
                                 <div className="space-y-1.5" role="tablist" aria-label={t.systemSettings}>
-                                    {tabs.map((tab) => {
+                                    {sectionTabs.map((tab) => {
                                         const Icon = tab.icon;
-                                        const selected = activeTab === tab.id;
+                                        const selected = activeSection === tab.id;
                                         return (
                                             <button
                                                 key={tab.id}
                                                 type="button"
                                                 role="tab"
                                                 aria-selected={selected}
-                                                onClick={() => setActiveTab(tab.id)}
+                                                onClick={() => {
+                                                    setActiveSection(tab.id);
+                                                    setActiveTab('general');
+                                                }}
                                                 className={`flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
                                             >
                                                 <Icon className="h-4 w-4" />
@@ -624,6 +642,32 @@ export function SettingsMenu({
                                         );
                                     })}
                                 </div>
+                                {activeSection === 'platform' ? (
+                                    <div className="mt-4 border-t border-white/10 pt-3">
+                                        <div className="mb-2 px-3 text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                                            {adminCopy.platform}
+                                        </div>
+                                        <div className="space-y-1.5" role="tablist" aria-label={adminCopy.platform}>
+                                            {platformTabs.map((tab) => {
+                                                const Icon = tab.icon;
+                                                const selected = activeTab === tab.id;
+                                                return (
+                                                    <button
+                                                        key={tab.id}
+                                                        type="button"
+                                                        role="tab"
+                                                        aria-selected={selected}
+                                                        onClick={() => setActiveTab(tab.id)}
+                                                        className={`flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+                                                    >
+                                                        <Icon className="h-4 w-4" />
+                                                        {tab.label}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </aside>
 
                             <main data-testid="settings-modal-content" className="relative flex min-w-0 flex-1 flex-col">
@@ -631,11 +675,11 @@ export function SettingsMenu({
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
                                             <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-                                                {isAdminScope ? adminCopy.title : t.systemSettings}
+                                                {activeSection === 'platform' ? adminCopy.platform : t.systemSettings}
                                             </div>
                                             <h2 className="mt-3 text-xl font-medium text-zinc-100">{activeTabLabel}</h2>
                                         </div>
-                                        {activeTab === 'mcp' && effectiveCanManageMcp ? (
+                                        {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
                                             <div className="relative mt-2">
                                                 <button
                                                     type="button"
@@ -726,9 +770,8 @@ export function SettingsMenu({
                                     data-testid="settings-modal-scroll-area"
                                     className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 [scrollbar-gutter:stable]"
                                 >
-                                {activeTab === 'general' ? (
+                                {activeSection === 'personal' && activeTab === 'general' ? (
                                     <div className="divide-y divide-white/10">
-                                        {!isAdminScope ? (
                                         <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
                                                 <Globe className="h-4 w-4 text-zinc-400" />
@@ -746,8 +789,11 @@ export function SettingsMenu({
                                                 ))}
                                             </select>
                                         </label>
-                                        ) : null}
+                                    </div>
+                                ) : null}
 
+                                {activeSection === 'platform' && activeTab === 'general' ? (
+                                    <div className="divide-y divide-white/10">
                                         {effectiveCanManageWorkspace ? (
                                         <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                             <span className="flex items-center gap-2.5 text-sm font-medium text-zinc-100">
@@ -814,7 +860,7 @@ export function SettingsMenu({
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
+                                {activeSection === 'platform' && activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
                                     <div className="divide-y divide-white/10">
                                         <CapabilityToggleRow
                                             item={{
@@ -841,9 +887,16 @@ export function SettingsMenu({
                                     </div>
                                 ) : null}
 
-                                {activeTab === 'model' && effectiveCanManageModelConfig ? (
+                                {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                                     <>
-                                        <div className="divide-y divide-white/10">
+                                        <form
+                                            className="divide-y divide-white/10"
+                                            autoComplete="off"
+                                            onSubmit={(event) => {
+                                                event.preventDefault();
+                                                if (!isSaveDisabled) void handleSaveSettings();
+                                            }}
+                                        >
                                             <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                                                 <span className="text-sm font-medium text-zinc-100">{text.provider}</span>
                                                 <select
@@ -875,6 +928,7 @@ export function SettingsMenu({
                                                 <input
                                                     aria-label={text.apiKey}
                                                     type="password"
+                                                    autoComplete="new-password"
                                                     value={apiKey}
                                                     onChange={(event) => setApiKey(event.target.value)}
                                                     placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'}
@@ -917,14 +971,14 @@ export function SettingsMenu({
                                                     </label>
                                                 </div>
                                             </div>
-                                        </div>
+                                        </form>
 
                                         <div className="flex items-center justify-between gap-3">
                                             <span className="text-xs text-emerald-400">{status}</span>
                                         </div>
                                     </>
                                 ) : null}
-                                {activeTab === 'mcp' && effectiveCanManageMcp ? (
+                                {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
                                     <McpSettingsPanel
                                         copy={mcpCopy}
                                         servers={mcpServers}
@@ -962,7 +1016,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
                                 </div>
-                                {activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
+                                {activeSection === 'platform' && activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"
@@ -993,14 +1047,16 @@ function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null
 function getAdminSettingsCopy(lang: Language) {
     if (lang.startsWith('zh')) {
         return {
-            title: '管理控制台',
+            title: '系统设置',
+            platform: '平台',
             deployment: '部署',
             workspaceManaged: '由服务器部署配置管理',
             workspaceNote: '服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。',
         };
     }
     return {
-        title: 'Admin Console',
+        title: 'Settings',
+        platform: 'Platform',
         deployment: 'Deployment',
         workspaceManaged: 'Managed by server deployment',
         workspaceNote: 'In server mode, the workspace root is a global sandbox boundary. Users cannot override it; project paths are assigned by the platform per account.',

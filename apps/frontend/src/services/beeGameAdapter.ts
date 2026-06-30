@@ -168,6 +168,7 @@ export type BeeGameIdeaIntakeResult = {
 
 export type BeeGameIntakeSettings = {
   platform: string;
+  engine?: string;
   visualStyle: string;
   dimension: string;
   genre: string;
@@ -999,7 +1000,7 @@ async function startBeeGameSession(
 ): Promise<BeeGameSession> {
   const modelConfigId = await getDefaultModelConfigId();
   if (!modelConfigId) {
-    throw new Error('请先在模型设置中配置 BeeGame LLM API Key、Base URL 和 Model，并设为默认模型。');
+    throw new Error('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。');
   }
   return postJson('/api/beegame-sessions', {
     modelConfigId,
@@ -2071,7 +2072,8 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       `第一分钟体验：${brief.option.playerFirstMinute}`,
       `第一版目标：${brief.option.firstBuild}`,
       `主要风险：${brief.option.risk}`,
-      `平台：${settings.platform}`,
+      `目标平台：${settings.platform}`,
+      `开发引擎/技术栈：${settings.engine || 'React'}`,
       `视觉风格：${settings.visualStyle}`,
       `表现形式：${settings.dimension}`,
       `游戏类型：${settings.genre}`,
@@ -2104,7 +2106,8 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     `Player first minute: ${brief.option.playerFirstMinute}`,
     `First build target: ${brief.option.firstBuild}`,
     `Main risk: ${brief.option.risk}`,
-    `Platform: ${settings.platform}`,
+    `Target platform: ${settings.platform}`,
+    `Engine / technology stack: ${settings.engine || 'React'}`,
     `Visual style: ${settings.visualStyle}`,
     `Dimension: ${settings.dimension}`,
     `Genre: ${settings.genre}`,

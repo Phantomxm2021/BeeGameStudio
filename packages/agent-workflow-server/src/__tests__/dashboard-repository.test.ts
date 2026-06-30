@@ -33,7 +33,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('uses the effective model config owner as the Supabase model config scope', async () => {
+  test('lists Supabase RLS-readable model configs without requiring an app-level owner scope', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ url: string; body?: unknown }> = []
     const repository = new DashboardRepository({
@@ -90,8 +90,6 @@ describe('DashboardRepository Supabase boundaries', () => {
     const user = {
       id: 'developer-user',
       role: 'developer' as const,
-      workspaceOwnerId: 'platform-owner',
-      modelConfigOwnerId: 'platform-owner',
     }
     const request = new Request('http://beegame.test/api/model-configs', {
       headers: { authorization: 'Bearer user-token' },
@@ -105,14 +103,85 @@ describe('DashboardRepository Supabase boundaries', () => {
         'llm_platform_default',
       )
 
-      expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
-      expect(calls[1]?.url).toContain('owner_id=eq.platform-owner')
+      expect(calls[0]?.url).toContain('/rest/v1/beegame_model_configs?select=*')
+      expect(calls[0]?.url).not.toContain('owner_id=')
+      expect(calls[1]?.url).toContain('/rest/v1/beegame_model_configs?id=eq.llm_platform_default')
+      expect(calls[1]?.url).not.toContain('owner_id=')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
 
-  test('does not fall back to a regular user model config scope in Supabase mode', async () => {
+  test('updates platform-owned model configs through the resolved model config owner', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (
+          input: Parameters<typeof fetch>[0],
+          init?: Parameters<typeof fetch>[1],
+        ) => {
+          const url = String(input)
+          calls.push({
+            url,
+            method: init?.method ?? 'GET',
+            ...(init?.body
+              ? { body: JSON.parse(String(init.body)) as unknown }
+              : {}),
+          })
+          if (url.includes('/beegame_model_configs')) {
+            return Response.json([
+              {
+                id: 'llm_platform_default',
+                owner_id: 'platform-owner',
+                name: 'Platform Default',
+                provider: 'openai-compatible',
+                base_url: 'https://llm.example/v1',
+                api_key_ciphertext: 'sk-new-secret',
+                models: { balanced: 'balanced-model' },
+                is_default: true,
+                created_at: '2026-06-30T00:00:00.000Z',
+                updated_at: '2026-06-30T00:00:00.000Z',
+              },
+            ])
+          }
+          return new Response('not found', { status: 404 })
+        }) as unknown as typeof fetch,
+      }),
+    })
+    const request = new Request('http://beegame.test/api/model-configs/llm_platform_default', {
+      headers: { authorization: 'Bearer user-token' },
+    })
+
+    try {
+      const updated = await repository.updateModelConfig(
+        request,
+        {
+          id: 'owner-auth-user',
+          role: 'owner',
+          modelConfigOwnerId: 'platform-owner',
+        },
+        'llm_platform_default',
+        { apiKey: 'sk-new-secret' },
+      )
+
+      expect(updated?.apiKeyPreview).toBe('sk-n...cret')
+      expect(calls[0]?.method).toBe('PATCH')
+      expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
+      expect(calls[0]?.url).not.toContain('owner_id=eq.owner-auth-user')
+      expect(calls[0]?.body).toEqual(expect.objectContaining({
+        api_key_ciphertext: 'sk-new-secret',
+      }))
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('returns an empty list when Supabase RLS exposes no model configs', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: string[] = []
     const repository = new DashboardRepository({
@@ -143,7 +212,10 @@ describe('DashboardRepository Supabase boundaries', () => {
         user,
         'llm_default',
       )).toBe(false)
-      expect(calls).toEqual([])
+      expect(calls).toEqual([
+        'https://project.supabase.co/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
+        'https://project.supabase.co/rest/v1/beegame_model_configs?id=eq.llm_default&select=id&limit=1',
+      ])
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }

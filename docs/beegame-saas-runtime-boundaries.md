@@ -54,7 +54,7 @@ Normal user settings should stay personal and low risk:
 - UI preferences.
 - Profile actions.
 
-Deployment and platform settings belong in the admin console and must remain owner-only:
+Deployment and platform settings belong in the Platform section of Settings and must remain owner-only:
 
 - Model provider configuration.
 - Web search provider keys.

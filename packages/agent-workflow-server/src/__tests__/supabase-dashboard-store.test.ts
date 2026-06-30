@@ -1,11 +1,38 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { SupabaseDashboardStore } from '../supabase-dashboard-store'
+import {
+  createSupabaseDashboardStoreFromEnv,
+  SupabaseDashboardStore,
+} from '../supabase-dashboard-store'
 
 describe('SupabaseDashboardStore', () => {
   const originalFetch = globalThis.fetch
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+  })
+
+  test('accepts frontend Supabase env names for dashboard data access', async () => {
+    const calls: string[] = []
+    globalThis.fetch = (async (url, init) => {
+      calls.push(String(url))
+      expect(new Headers(init?.headers).get('apikey')).toBe('vite-anon-key')
+      expect(new Headers(init?.headers).get('authorization')).toBe(
+        'Bearer user-token',
+      )
+      return Response.json([])
+    }) as typeof fetch
+
+    const store = createSupabaseDashboardStoreFromEnv({
+      VITE_SUPABASE_URL: 'https://vite-project.supabase.co',
+      VITE_SUPABASE_ANON_KEY: 'vite-anon-key',
+    })
+    expect(store).toBeDefined()
+
+    await store?.withAuthToken('user-token').listReadablePublicModelConfigs()
+
+    expect(calls).toEqual([
+      'https://vite-project.supabase.co/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
+    ])
   })
 
   test('loads and upserts owner scoped dashboard data through Supabase REST', async () => {

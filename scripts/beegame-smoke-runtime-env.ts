@@ -51,7 +51,7 @@ export function assertSmokeRuntimeEnv(
     ? ` effective model config owner: ${context.modelConfigOwnerId.trim()}.`
     : ''
   throw new Error(
-    `beegame_runtime_env did not return a usable model provider configuration.${diagnostics} Configure a platform default model in Admin Console, then re-run the Supabase smoke check.`,
+    `beegame_runtime_env did not return a usable model provider configuration.${diagnostics} Configure a platform default model in Settings > Platform, then re-run the Supabase smoke check.`,
   )
 }
 
