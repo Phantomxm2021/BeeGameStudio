@@ -184,7 +184,12 @@ function inferEngine(value: string | undefined): string {
 
 const pendingCreditStorageKey = 'beegame.pendingCreditQuote.v1';
 const pendingAuthIdeaStorageKey = 'beegame.pendingAuthIdea.v1';
+const pendingIdeaDraftStorageKey = 'beegame.pendingIdeaDraft.v1';
+const pendingIntakeFlowStorageKey = 'beegame.pendingIntakeFlow.v1';
 const pendingAuthIdeaMaxAgeMs = 30 * 60 * 1000;
+const pendingIntakeFlowMaxAgeMs = 30 * 60 * 1000;
+
+type RestorableIntakePhase = Extract<IntakePhase, 'options_ready' | 'configuring_details' | 'confirming_brief'>;
 
 type PendingCreditState =
     | { kind: 'intake'; idea: string; quote: BeeGameCreditQuote }
@@ -192,6 +197,21 @@ type PendingCreditState =
 
 type PendingAuthIdeaState = {
     idea: string;
+    createdAt: number;
+};
+
+type PendingIdeaDraftState = {
+    idea: string;
+    createdAt: number;
+};
+
+type PendingIntakeFlowState = {
+    phase: RestorableIntakePhase;
+    idea: string;
+    language: Language;
+    options: BeeGameIntakeOption[];
+    selectedOption?: BeeGameIntakeOption;
+    settings?: BeeGameIntakeSettings;
     createdAt: number;
 };
 
@@ -231,6 +251,81 @@ function readPendingAuthIdeaState(): PendingAuthIdeaState | null {
     }
 }
 
+function readPendingIdeaDraftState(): PendingIdeaDraftState | null {
+    try {
+        const raw = sessionStorage.getItem(pendingIdeaDraftStorageKey);
+        if (!raw) return null;
+        const value = JSON.parse(raw) as unknown;
+        if (!isPendingIdeaDraftState(value)) return null;
+        if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
+            clearPendingIdeaDraftState();
+            return null;
+        }
+        return value;
+    } catch {
+        return null;
+    }
+}
+
+function writePendingIdeaDraftState(idea: string): void {
+    const normalizedIdea = idea.trim();
+    try {
+        if (!normalizedIdea) {
+            clearPendingIdeaDraftState();
+            return;
+        }
+        sessionStorage.setItem(pendingIdeaDraftStorageKey, JSON.stringify({
+            idea: normalizedIdea,
+            createdAt: Date.now(),
+        }));
+    } catch {
+        // Best-effort draft recovery only.
+    }
+}
+
+function clearPendingIdeaDraftState(): void {
+    try {
+        sessionStorage.removeItem(pendingIdeaDraftStorageKey);
+    } catch {
+        // Ignore storage failures; this cache never drives server state.
+    }
+}
+
+function readPendingIntakeFlowState(): PendingIntakeFlowState | null {
+    try {
+        const raw = sessionStorage.getItem(pendingIntakeFlowStorageKey);
+        if (!raw) return null;
+        const value = JSON.parse(raw) as unknown;
+        if (!isPendingIntakeFlowState(value)) return null;
+        if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
+            clearPendingIntakeFlowState();
+            return null;
+        }
+        return value;
+    } catch {
+        return null;
+    }
+}
+
+function writePendingIntakeFlowState(value: Omit<PendingIntakeFlowState, 'createdAt'>): void {
+    try {
+        sessionStorage.setItem(pendingIntakeFlowStorageKey, JSON.stringify({
+            ...value,
+            createdAt: Date.now(),
+        }));
+    } catch {
+        // Best-effort UI recovery only. Confirmed builds still go through server state.
+    }
+}
+
+function clearPendingIntakeFlowState(): void {
+    try {
+        sessionStorage.removeItem(pendingIntakeFlowStorageKey);
+    } catch {
+        // Ignore storage failures; this cache never drives server state.
+    }
+}
+
 function writePendingAuthIdeaState(idea: string): void {
     const normalizedIdea = idea.trim();
     if (!normalizedIdea) return;
@@ -260,6 +355,12 @@ function clearPendingCreditState(): void {
     }
 }
 
+function clearIntakeRecoveryState(): void {
+    clearPendingCreditState();
+    clearPendingIdeaDraftState();
+    clearPendingIntakeFlowState();
+}
+
 function isPendingCreditState(value: unknown): value is PendingCreditState {
     if (!isRecord(value) || !isRecord(value.quote)) return false;
     if (value.kind === 'intake') {
@@ -279,27 +380,53 @@ function isPendingAuthIdeaState(value: unknown): value is PendingAuthIdeaState {
         && Number.isFinite(value.createdAt);
 }
 
+function isPendingIdeaDraftState(value: unknown): value is PendingIdeaDraftState {
+    return isRecord(value)
+        && typeof value.idea === 'string'
+        && value.idea.trim().length > 0
+        && typeof value.createdAt === 'number'
+        && Number.isFinite(value.createdAt);
+}
+
+function isPendingIntakeFlowState(value: unknown): value is PendingIntakeFlowState {
+    if (!isRecord(value)) return false;
+    const phase = value.phase;
+    if (phase !== 'options_ready' && phase !== 'configuring_details' && phase !== 'confirming_brief') return false;
+    if (typeof value.idea !== 'string' || value.idea.trim().length === 0) return false;
+    if (!Array.isArray(value.options)) return false;
+    if (typeof value.language !== 'string') return false;
+    if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return false;
+    if ((phase === 'configuring_details' || phase === 'confirming_brief') && (!isRecord(value.selectedOption) || !isRecord(value.settings))) {
+        return false;
+    }
+    return true;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [restoredPendingCredit] = useState<PendingCreditState | null>(() => readPendingCreditState());
+    const [restoredIntakeFlow] = useState<PendingIntakeFlowState | null>(() => readPendingIntakeFlowState());
+    const [restoredIdeaDraft] = useState<PendingIdeaDraftState | null>(() => readPendingIdeaDraftState());
     const [projectName, setProjectName] = useState(() => (
         restoredPendingCredit?.kind === 'intake'
             ? restoredPendingCredit.idea
             : restoredPendingCredit?.kind === 'build'
                 ? restoredPendingCredit.brief.idea
-                : ''
+                : restoredIntakeFlow?.idea
+                    ? restoredIntakeFlow.idea
+                    : restoredIdeaDraft?.idea || ''
     ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
-    const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle');
-    const [intakeOptions, setIntakeOptions] = useState<BeeGameIntakeOption[]>([]);
-    const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(null);
-    const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(null);
+    const [intakePhase, setIntakePhase] = useState<IntakePhase>(restoredIntakeFlow?.phase || 'idle');
+    const [intakeOptions, setIntakeOptions] = useState<BeeGameIntakeOption[]>(restoredIntakeFlow?.options || []);
+    const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(restoredIntakeFlow?.selectedOption || null);
+    const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings || null);
     const [intakeError, setIntakeError] = useState('');
     const [clarification, setClarification] = useState<BeeGameClarification | null>(null);
     const [clarificationDraft, setClarificationDraft] = useState('');
@@ -355,6 +482,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
     const canOpenPlatformSettings = currentUser?.role === 'owner';
 
+    const persistIntakeFlow = (
+        phase: RestorableIntakePhase,
+        options: BeeGameIntakeOption[],
+        option?: BeeGameIntakeOption | null,
+        nextSettings?: BeeGameIntakeSettings | null,
+    ) => {
+        const idea = projectName.trim();
+        if (!idea) return;
+        writePendingIntakeFlowState({
+            phase,
+            idea,
+            language: lang,
+            options,
+            selectedOption: option || undefined,
+            settings: nextSettings || undefined,
+        });
+    };
+
     useEffect(() => {
         if (!currentUser) {
             setCreditBalance(null);
@@ -374,7 +519,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     }, [currentUser?.id]);
 
     const handleSignOut = async () => {
-        clearPendingCreditState();
+        clearIntakeRecoveryState();
         clearPendingAuthIdeaState();
         setIntakeCreditQuote(null);
         setPendingIntakeIdea('');
@@ -418,6 +563,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const requestIntakeCreditConfirmation = async (idea: string) => {
         setIntakeError('');
         setIsPreparing(true);
+        clearPendingIntakeFlowState();
+        writePendingIdeaDraftState(idea);
         try {
             const modelConfigs = await listModelConfigs();
             if (modelConfigs.length === 0) {
@@ -458,6 +605,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSelectedOption(null);
         setSettings(null);
         setIntakeOptions([]);
+        clearPendingIntakeFlowState();
         setClarification(null);
         setClarificationDraft('');
         setIsPreparing(true);
@@ -480,14 +628,31 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 });
                 return;
             }
-            setIntakeOptions(intake.options);
+            const nextOptions = intake.options;
+            setIntakeOptions(nextOptions);
+            clearPendingIdeaDraftState();
             if (!intake.needsOptions && intake.options[0]) {
                 const option = intake.options[0];
+                const nextSettings = settingsFromOption(option);
                 setSelectedOption(option);
-                setSettings(settingsFromOption(option));
+                setSettings(nextSettings);
                 setIntakePhase('configuring_details');
+                writePendingIntakeFlowState({
+                    phase: 'configuring_details',
+                    idea: projectName.trim() || idea,
+                    language: lang,
+                    options: nextOptions,
+                    selectedOption: option,
+                    settings: nextSettings,
+                });
             } else {
                 setIntakePhase('options_ready');
+                writePendingIntakeFlowState({
+                    phase: 'options_ready',
+                    idea: projectName.trim() || idea,
+                    language: lang,
+                    options: nextOptions,
+                });
             }
             setIsPreparing(false);
         } catch (error) {
@@ -503,6 +668,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         event.preventDefault();
         const idea = projectName.trim();
         if (!idea || isTransitioning || isPreparing) return;
+        writePendingIdeaDraftState(idea);
+        clearPendingIntakeFlowState();
         setIntakeError('');
         setIsPreparing(true);
         const canGenerate = await ensureGenerationAccess();
@@ -682,11 +849,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const handleProjectNameChange = (value: string) => {
         setProjectName(value);
+        writePendingIdeaDraftState(value);
         if (intakePhase !== 'idle' && !isPreparing && !isTransitioning) {
             setIntakePhase('idle');
             setIntakeOptions([]);
             setSelectedOption(null);
             setSettings(null);
+            clearPendingCreditState();
+            clearPendingIntakeFlowState();
             setIntakeError('');
             setClarification(null);
             setClarificationDraft('');
@@ -708,15 +878,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     };
 
     const handleSelectOption = (option: BeeGameIntakeOption) => {
+        const nextSettings = settingsFromOption(option);
         setSelectedOption(option);
-        setSettings(settingsFromOption(option));
+        setSettings(nextSettings);
         setIntakePhase('configuring_details');
         setIsInputMenuOpen(false);
+        persistIntakeFlow('configuring_details', intakeOptions, option, nextSettings);
         setIntakeError('');
     };
 
     const updateSettings = (patch: Partial<BeeGameIntakeSettings>) => {
-        setSettings((current) => current ? { ...current, ...patch } : current);
+        setSettings((current) => {
+            if (!current) return current;
+            const nextSettings = { ...current, ...patch };
+            if (selectedOption && (intakePhase === 'configuring_details' || intakePhase === 'confirming_brief')) {
+                persistIntakeFlow(intakePhase, intakeOptions, selectedOption, nextSettings);
+            }
+            return nextSettings;
+        });
     };
 
     const toggleInput = (input: string) => {
@@ -726,9 +905,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             const nextInputs = hasInput
                 ? current.inputs.filter((item) => item !== input)
                 : [...current.inputs, input];
-            return {
+            const nextSettings = {
                 ...current,
                 inputs: nextInputs.length > 0 ? nextInputs : [input],
+            };
+            if (selectedOption && (intakePhase === 'configuring_details' || intakePhase === 'confirming_brief')) {
+                persistIntakeFlow(intakePhase, intakeOptions, selectedOption, nextSettings);
+            }
+            return {
+                ...nextSettings,
             };
         });
     };
@@ -737,6 +922,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         if (!selectedOption || !settings) return;
         setIsInputMenuOpen(false);
         setIntakePhase('confirming_brief');
+        persistIntakeFlow('confirming_brief', intakeOptions, selectedOption, settings);
     };
 
     const handleBackToOptions = () => {
@@ -744,6 +930,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSelectedOption(null);
         setSettings(null);
         setIsInputMenuOpen(false);
+        persistIntakeFlow('options_ready', intakeOptions);
     };
 
     const handleCloseIntake = () => {
@@ -756,6 +943,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakeError('');
         setClarification(null);
         setClarificationDraft('');
+        clearIntakeRecoveryState();
     };
 
     const handleConfirmIntakeCredit = () => {
@@ -780,6 +968,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakePhase('starting_build');
         try {
             await onStart(projectName.trim(), undefined, brief);
+            clearPendingIdeaDraftState();
+            clearPendingIntakeFlowState();
             setIsTransitioning(true);
         } catch (error) {
             setIsPreparing(false);

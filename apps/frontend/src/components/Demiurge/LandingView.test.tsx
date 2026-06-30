@@ -520,6 +520,68 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
     });
 
+    it('restores typed idea text after a page refresh without opening intake', () => {
+        const { unmount } = renderLanding();
+
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Draft snake idea' } });
+        unmount();
+        renderLanding();
+
+        expect(screen.getByRole('textbox')).toHaveValue('Draft snake idea');
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(runIdeaIntake).not.toHaveBeenCalled();
+    });
+
+    it('restores generated intake options after a page refresh without regenerating them', async () => {
+        const { unmount } = renderLanding();
+
+        await submitIdeaAndConfirmIntake('Cached options idea');
+        expect(await screen.findByRole('dialog', { name: '选择方案' })).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+        unmount();
+        renderLanding();
+
+        const dialog = await screen.findByRole('dialog', { name: '选择方案' });
+        expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
+        expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode B/ }));
+        expect(screen.getByRole('textbox')).toHaveValue('Cached options idea');
+        expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores selected intake settings after a page refresh', async () => {
+        const { unmount } = renderLanding();
+
+        await submitIdeaAndConfirmIntake('Cached settings idea');
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+        fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
+        fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: 'Keep the selected settings.' } });
+        unmount();
+        renderLanding();
+
+        expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: '引擎' })).toHaveValue('Godot');
+        expect(screen.getByRole('textbox', { name: '补充说明' })).toHaveValue('Keep the selected settings.');
+        expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores confirmed intake brief after a page refresh', async () => {
+        const { unmount } = renderLanding();
+
+        await submitIdeaAndConfirmIntake('Cached brief idea');
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+        fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
+        fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+        expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+        unmount();
+        renderLanding();
+
+        expect(await screen.findByRole('dialog', { name: '确认构建方案' })).toBeInTheDocument();
+        expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('LLM Mode A');
+        expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Godot');
+        expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+    });
+
     it('does not show platform settings for a non-owner account even if management permissions are present', async () => {
         mockCurrentUser = {
             id: 'developer-user',
