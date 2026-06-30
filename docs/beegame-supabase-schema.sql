@@ -353,9 +353,7 @@ begin
 
   return coalesce(
     workspace_owner_with_default,
-    platform_owner_with_default,
-    workspace_owner,
-    target_user_id
+    platform_owner_with_default
   );
 end
 $$;

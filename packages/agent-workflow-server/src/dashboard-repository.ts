@@ -50,6 +50,7 @@ import {
 } from './runtime-settings-store'
 import {
   getBearerToken,
+  hasBeeGamePermission,
   type BeeGameUserContext,
 } from './auth/user-context'
 import {
@@ -362,7 +363,10 @@ export class DashboardRepository {
 
   async listModelConfigs(request: Request, user: BeeGameUserContext) {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.listPublicModelConfigs(this.getModelConfigOwnerId(user))
+    if (supabase) {
+      const ownerId = this.getReadableModelConfigOwnerId(user)
+      return ownerId ? supabase.listPublicModelConfigs(ownerId) : []
+    }
     return listModelConfigs(user.id)
   }
 
@@ -372,7 +376,7 @@ export class DashboardRepository {
     input: CreateModelConfigInput,
   ) {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.createModelConfig(this.getModelConfigOwnerId(user), input)
+    if (supabase) return supabase.createModelConfig(this.getManageModelConfigOwnerId(user), input)
     const created = createModelConfig(user.id, input)
     this.persistLocalModelConfigs()
     return created
@@ -386,7 +390,7 @@ export class DashboardRepository {
   ) {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      return supabase.updateModelConfig(this.getModelConfigOwnerId(user), id, input)
+      return supabase.updateModelConfig(this.getManageModelConfigOwnerId(user), id, input)
     }
     const updated = updateModelConfig(id, input)
     if (updated) this.persistLocalModelConfigs()
@@ -399,7 +403,7 @@ export class DashboardRepository {
     id: string,
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.deleteModelConfig(this.getModelConfigOwnerId(user), id)
+    if (supabase) return supabase.deleteModelConfig(this.getManageModelConfigOwnerId(user), id)
     const deleted = deleteModelConfig(id)
     if (!deleted) return false
     this.persistLocalModelConfigs()
@@ -412,9 +416,11 @@ export class DashboardRepository {
     id: string,
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.hasModelConfig(this.getModelConfigOwnerId(user), id)
-      : listModelConfigs(user.id).some(config => config.id === id)
+    if (supabase) {
+      const ownerId = this.getReadableModelConfigOwnerId(user)
+      return ownerId ? supabase.hasModelConfig(ownerId, id) : false
+    }
+    return listModelConfigs(user.id).some(config => config.id === id)
   }
 
   async listCreditLedger(
@@ -604,9 +610,12 @@ export class DashboardRepository {
     return trimmed
   }
 
-  private getModelConfigOwnerId(user: BeeGameUserContext): string {
+  private getReadableModelConfigOwnerId(user: BeeGameUserContext): string | undefined {
     return user.modelConfigOwnerId?.trim() ||
-      user.workspaceOwnerId?.trim() ||
-      user.id
+      (hasBeeGamePermission(user, 'model_config.manage') ? user.id : undefined)
+  }
+
+  private getManageModelConfigOwnerId(user: BeeGameUserContext): string {
+    return user.id
   }
 }

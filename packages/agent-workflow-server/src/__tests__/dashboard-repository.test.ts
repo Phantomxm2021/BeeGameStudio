@@ -33,7 +33,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('uses the workspace owner as the Supabase model config scope', async () => {
+  test('uses the effective model config owner as the Supabase model config scope', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ url: string; body?: unknown }> = []
     const repository = new DashboardRepository({
@@ -91,6 +91,7 @@ describe('DashboardRepository Supabase boundaries', () => {
       id: 'developer-user',
       role: 'developer' as const,
       workspaceOwnerId: 'platform-owner',
+      modelConfigOwnerId: 'platform-owner',
     }
     const request = new Request('http://beegame.test/api/model-configs', {
       headers: { authorization: 'Bearer user-token' },
@@ -106,6 +107,43 @@ describe('DashboardRepository Supabase boundaries', () => {
 
       expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
       expect(calls[1]?.url).toContain('owner_id=eq.platform-owner')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not fall back to a regular user model config scope in Supabase mode', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: string[] = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
+          calls.push(String(input))
+          return Response.json([])
+        }) as unknown as typeof fetch,
+      }),
+    })
+    const user = {
+      id: 'developer-user',
+      role: 'developer' as const,
+      workspaceOwnerId: 'developer-user',
+    }
+    const request = new Request('http://beegame.test/api/model-configs', {
+      headers: { authorization: 'Bearer user-token' },
+    })
+
+    try {
+      expect(await repository.listModelConfigs(request, user)).toEqual([])
+      expect(await repository.modelConfigExists(
+        request,
+        user,
+        'llm_default',
+      )).toBe(false)
+      expect(calls).toEqual([])
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
