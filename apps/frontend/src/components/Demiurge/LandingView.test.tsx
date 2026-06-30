@@ -373,7 +373,7 @@ describe('LandingView bootstrap submission', () => {
         submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-        expect(screen.getByText('登录后继续你的项目、模型设置和生成进度。')).toBeInTheDocument();
+        expect(screen.getByText('登录后继续你的项目、生成进度和账号设置。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
     });
@@ -385,7 +385,7 @@ describe('LandingView bootstrap submission', () => {
 
         submitIdea('LLM generated idea');
 
-        expect(await screen.findByText('请先在管理员设置中配置默认模型，然后再生成方案。')).toBeInTheDocument();
+        expect(await screen.findByText('平台尚未配置默认模型。请管理员在管理控制台配置后再生成。')).toBeInTheDocument();
         expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
         expect(getCreditQuote).not.toHaveBeenCalled();
         expect(runIdeaIntake).not.toHaveBeenCalled();

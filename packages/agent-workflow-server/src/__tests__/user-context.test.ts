@@ -87,6 +87,34 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
+  test('keeps the model config owner separate from the project owner context', async () => {
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => Response.json({
+        id: 'developer-user',
+        role: 'developer',
+        workspace_id: 'workspace-1',
+        workspace_owner_id: 'workspace-owner',
+        model_config_owner_id: 'platform-owner',
+      }),
+    })
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer valid-token' },
+        }),
+      ),
+    ).toEqual({
+      id: 'developer-user',
+      role: 'developer',
+      workspaceId: 'workspace-1',
+      workspaceOwnerId: 'workspace-owner',
+      modelConfigOwnerId: 'platform-owner',
+    })
+  })
+
   test('extracts OAuth profile metadata from identity data without granting owner by default', async () => {
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co',

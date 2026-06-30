@@ -32,4 +32,82 @@ describe('DashboardRepository Supabase boundaries', () => {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
+
+  test('uses the workspace owner as the Supabase model config scope', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: Array<{ url: string; body?: unknown }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (
+          input: Parameters<typeof fetch>[0],
+          init?: Parameters<typeof fetch>[1],
+        ) => {
+          const url = String(input)
+          calls.push({
+            url,
+            ...(init?.body
+              ? { body: JSON.parse(String(init.body)) as unknown }
+              : {}),
+          })
+          if (url.includes('/beegame_model_configs')) {
+            return Response.json([
+              {
+                id: 'llm_platform_default',
+                owner_id: 'platform-owner',
+                name: 'Platform Default',
+                provider: 'openai-compatible',
+                base_url: 'https://llm.example/v1',
+                api_key_ciphertext: 'sk-secret',
+                models: { balanced: 'balanced-model' },
+                is_default: true,
+                created_at: '2026-06-30T00:00:00.000Z',
+                updated_at: '2026-06-30T00:00:00.000Z',
+              },
+            ])
+          }
+          if (url.includes('/rpc/beegame_set_default_model_config')) {
+            return Response.json({
+              id: 'llm_platform_default',
+              owner_id: 'platform-owner',
+              name: 'Platform Default',
+              provider: 'openai-compatible',
+              base_url: 'https://llm.example/v1',
+              api_key_ciphertext: 'sk-secret',
+              models: { balanced: 'balanced-model' },
+              is_default: true,
+              created_at: '2026-06-30T00:00:00.000Z',
+              updated_at: '2026-06-30T00:00:00.000Z',
+            })
+          }
+          return new Response('not found', { status: 404 })
+        }) as unknown as typeof fetch,
+      }),
+    })
+    const user = {
+      id: 'developer-user',
+      role: 'developer' as const,
+      workspaceOwnerId: 'platform-owner',
+    }
+    const request = new Request('http://beegame.test/api/model-configs', {
+      headers: { authorization: 'Bearer user-token' },
+    })
+
+    try {
+      await repository.listModelConfigs(request, user)
+      await repository.modelConfigExists(
+        request,
+        user,
+        'llm_platform_default',
+      )
+
+      expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
+      expect(calls[1]?.url).toContain('owner_id=eq.platform-owner')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
 })

@@ -256,7 +256,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         try {
             const modelConfigs = await listModelConfigs();
             if (modelConfigs.length === 0) {
-                setIntakeError('请先在管理员设置中配置默认模型，然后再生成方案。');
+                setIntakeError('平台尚未配置默认模型。请管理员在管理控制台配置后再生成。');
                 return;
             }
             const quote = await getCreditQuote('idea_intake');
@@ -873,7 +873,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             ? '输入注册邮箱，我们会发送密码重置邮件。'
                                             : authMode === 'register'
                                                 ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
-                                                : '登录后继续你的项目、模型设置和生成进度。'}
+                                                : '登录后继续你的项目、生成进度和账号设置。'}
                                     </p>
                                 </div>
                                 <button

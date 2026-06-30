@@ -293,6 +293,73 @@ as $$
     )
 $$;
 
+create or replace function public.beegame_is_platform_owner()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from auth.users u
+    where u.id = auth.uid()
+      and u.raw_app_meta_data->>'beegame_role' = 'owner'
+  )
+$$;
+
+create or replace function public.beegame_model_config_owner_id(target_user_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+declare
+  workspace_owner uuid;
+  workspace_owner_with_default uuid;
+  platform_owner_with_default uuid;
+begin
+  if target_user_id is null then
+    return null;
+  end if;
+
+  select w.owner_id
+  into workspace_owner
+  from public.beegame_workspaces w
+  join public.beegame_workspace_members m on m.workspace_id = w.id
+  where m.user_id = target_user_id
+  order by
+    case when w.owner_id = target_user_id then 0 else 1 end,
+    w.created_at asc
+  limit 1;
+
+  select c.owner_id
+  into workspace_owner_with_default
+  from public.beegame_model_configs c
+  where c.owner_id = coalesce(workspace_owner, target_user_id)
+    and c.is_default = true
+  order by c.updated_at desc, c.created_at desc, c.id desc
+  limit 1;
+
+  select c.owner_id
+  into platform_owner_with_default
+  from public.beegame_model_configs c
+  join auth.users u on u.id = c.owner_id
+  where u.raw_app_meta_data->>'beegame_role' = 'owner'
+    and c.is_default = true
+  order by c.updated_at desc, c.created_at desc, c.id desc
+  limit 1;
+
+  return coalesce(
+    workspace_owner_with_default,
+    platform_owner_with_default,
+    workspace_owner,
+    target_user_id
+  );
+end
+$$;
+
 create or replace function public.beegame_role_permissions(role_name text)
 returns text[]
 language sql
@@ -358,6 +425,7 @@ declare
   workspace_row public.beegame_workspaces%rowtype;
   member_role text;
   account_role text;
+  model_config_owner_id uuid;
 begin
   current_user_id := auth.uid();
   if current_user_id is null then
@@ -406,6 +474,8 @@ begin
     member_role := 'owner';
   end if;
 
+  model_config_owner_id := public.beegame_model_config_owner_id(current_user_id);
+
   return jsonb_build_object(
     'id', current_user_id,
     'email', profile_row.email,
@@ -413,6 +483,7 @@ begin
     'avatarUrl', profile_row.avatar_url,
     'workspaceId', workspace_row.id,
     'workspaceOwnerId', workspace_row.owner_id,
+    'modelConfigOwnerId', model_config_owner_id,
     'role', member_role,
     'permissions', public.beegame_role_permissions(member_role)
   );
@@ -571,6 +642,7 @@ declare
   settings_env jsonb := '{}'::jsonb;
   runtime_env jsonb := '{}'::jsonb;
   base_config_dir text;
+  config_owner_id uuid;
 begin
   if p_user_id is null then
     raise exception 'User id is required';
@@ -578,6 +650,7 @@ begin
   if auth.uid() is null or auth.uid() <> p_user_id then
     raise exception 'Forbidden';
   end if;
+  config_owner_id := public.beegame_model_config_owner_id(p_user_id);
 
   base_config_dir := trim(trailing '/' from coalesce(p_data_dir, ''));
   if base_config_dir <> '' then
@@ -594,7 +667,7 @@ begin
   select *
   into model_row
   from public.beegame_model_configs
-  where owner_id = p_user_id
+  where owner_id = config_owner_id
     and (
       (p_model_config_id is not null and id = p_model_config_id) or
       (p_model_config_id is null and is_default = true)
@@ -647,7 +720,7 @@ begin
   select *
   into web_row
   from public.beegame_web_tools
-  where owner_id = p_user_id
+  where owner_id = config_owner_id
   limit 1;
 
   if found then
@@ -662,7 +735,7 @@ begin
   select *
   into settings_row
   from public.beegame_runtime_settings
-  where owner_id = p_user_id
+  where owner_id = config_owner_id
   limit 1;
 
   if found then
@@ -1159,16 +1232,52 @@ create policy "session owner access" on public.beegame_sessions
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 drop policy if exists "model config owner access" on public.beegame_model_configs;
-create policy "model config owner access" on public.beegame_model_configs
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists "model config readable by effective owner" on public.beegame_model_configs;
+drop policy if exists "model config managed by platform owner" on public.beegame_model_configs;
+create policy "model config readable by effective owner" on public.beegame_model_configs
+  for select using (
+    owner_id = auth.uid() or
+    owner_id = public.beegame_model_config_owner_id(auth.uid())
+  );
+create policy "model config managed by platform owner" on public.beegame_model_configs
+  for all using (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  )
+  with check (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  );
 
 drop policy if exists "runtime settings owner access" on public.beegame_runtime_settings;
-create policy "runtime settings owner access" on public.beegame_runtime_settings
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists "runtime settings readable by effective owner" on public.beegame_runtime_settings;
+drop policy if exists "runtime settings managed by platform owner" on public.beegame_runtime_settings;
+create policy "runtime settings readable by effective owner" on public.beegame_runtime_settings
+  for select using (
+    owner_id = auth.uid() or
+    owner_id = public.beegame_model_config_owner_id(auth.uid())
+  );
+create policy "runtime settings managed by platform owner" on public.beegame_runtime_settings
+  for all using (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  )
+  with check (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  );
 
 drop policy if exists "web tools owner access" on public.beegame_web_tools;
-create policy "web tools owner access" on public.beegame_web_tools
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists "web tools readable by effective owner" on public.beegame_web_tools;
+drop policy if exists "web tools managed by platform owner" on public.beegame_web_tools;
+create policy "web tools readable by effective owner" on public.beegame_web_tools
+  for select using (
+    owner_id = auth.uid() or
+    owner_id = public.beegame_model_config_owner_id(auth.uid())
+  );
+create policy "web tools managed by platform owner" on public.beegame_web_tools
+  for all using (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  )
+  with check (
+    owner_id = auth.uid() and public.beegame_is_platform_owner()
+  );
 
 drop policy if exists "mcp server owner access" on public.beegame_mcp_servers;
 create policy "mcp server owner access" on public.beegame_mcp_servers
@@ -1196,6 +1305,12 @@ create policy "audit owner access" on public.beegame_audit_events
 
 revoke execute on function public.beegame_current_user_context() from public;
 grant execute on function public.beegame_current_user_context() to authenticated;
+
+revoke execute on function public.beegame_is_platform_owner() from public;
+grant execute on function public.beegame_is_platform_owner() to authenticated;
+
+revoke execute on function public.beegame_model_config_owner_id(uuid) from public;
+grant execute on function public.beegame_model_config_owner_id(uuid) to authenticated;
 
 revoke execute on function public.beegame_runtime_env(uuid, text, text) from public;
 grant execute on function public.beegame_runtime_env(uuid, text, text) to authenticated;

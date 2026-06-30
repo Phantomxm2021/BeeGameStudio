@@ -25,6 +25,7 @@ export type BeeGameUserContext = {
   role: BeeGameRole
   workspaceId?: string
   workspaceOwnerId?: string
+  modelConfigOwnerId?: string
   permissions?: BeeGamePermission[]
   email?: string
   displayName?: string
@@ -211,11 +212,14 @@ function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
   const workspaceId = stringField(value.workspaceId) ?? stringField(value.workspace_id)
   const workspaceOwnerId =
     stringField(value.workspaceOwnerId) ?? stringField(value.workspace_owner_id)
+  const modelConfigOwnerId =
+    stringField(value.modelConfigOwnerId) ?? stringField(value.model_config_owner_id)
   return {
     id,
     role,
     ...(workspaceId ? { workspaceId } : {}),
     ...(workspaceOwnerId ? { workspaceOwnerId } : {}),
+    ...(modelConfigOwnerId ? { modelConfigOwnerId } : {}),
     ...(permissions.length ? { permissions } : {}),
     ...(email ? { email } : {}),
     ...(displayName ? { displayName } : {}),

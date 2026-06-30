@@ -362,7 +362,7 @@ export class DashboardRepository {
 
   async listModelConfigs(request: Request, user: BeeGameUserContext) {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.listPublicModelConfigs(user.id)
+    if (supabase) return supabase.listPublicModelConfigs(this.getModelConfigOwnerId(user))
     return listModelConfigs(user.id)
   }
 
@@ -372,7 +372,7 @@ export class DashboardRepository {
     input: CreateModelConfigInput,
   ) {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.createModelConfig(user.id, input)
+    if (supabase) return supabase.createModelConfig(this.getModelConfigOwnerId(user), input)
     const created = createModelConfig(user.id, input)
     this.persistLocalModelConfigs()
     return created
@@ -386,7 +386,7 @@ export class DashboardRepository {
   ) {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      return supabase.updateModelConfig(user.id, id, input)
+      return supabase.updateModelConfig(this.getModelConfigOwnerId(user), id, input)
     }
     const updated = updateModelConfig(id, input)
     if (updated) this.persistLocalModelConfigs()
@@ -399,7 +399,7 @@ export class DashboardRepository {
     id: string,
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
-    if (supabase) return supabase.deleteModelConfig(user.id, id)
+    if (supabase) return supabase.deleteModelConfig(this.getModelConfigOwnerId(user), id)
     const deleted = deleteModelConfig(id)
     if (!deleted) return false
     this.persistLocalModelConfigs()
@@ -413,7 +413,7 @@ export class DashboardRepository {
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
     return supabase
-      ? supabase.hasModelConfig(user.id, id)
+      ? supabase.hasModelConfig(this.getModelConfigOwnerId(user), id)
       : listModelConfigs(user.id).some(config => config.id === id)
   }
 
@@ -602,5 +602,11 @@ export class DashboardRepository {
       throw new Error('Supabase user token is required for local runtime storage')
     }
     return trimmed
+  }
+
+  private getModelConfigOwnerId(user: BeeGameUserContext): string {
+    return user.modelConfigOwnerId?.trim() ||
+      user.workspaceOwnerId?.trim() ||
+      user.id
   }
 }
