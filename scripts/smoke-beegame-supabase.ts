@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 
+import {
+  assertSmokeRuntimeEnv,
+  summarizeRuntimeEnv,
+} from './beegame-smoke-runtime-env'
+
 type JsonObject = Record<string, unknown>
 
 loadEnvFile('.env.local')
@@ -96,6 +101,10 @@ try {
 if (!runtimeEnv) {
   throw new Error('beegame_runtime_env smoke check did not return a payload')
 }
+assertSmokeRuntimeEnv(runtimeEnv, {
+  modelConfigOwnerId: stringField(currentUser.modelConfigOwnerId) ||
+    stringField(currentUser.model_config_owner_id),
+})
 
 console.log(JSON.stringify({
   ok: true,
@@ -103,6 +112,8 @@ console.log(JSON.stringify({
     id: currentUser.id,
     role: currentUser.role,
     workspaceId,
+    modelConfigOwnerId: stringField(currentUser.modelConfigOwnerId) ||
+      stringField(currentUser.model_config_owner_id),
     permissionsCount: Array.isArray(currentUser.permissions)
       ? currentUser.permissions.length
       : 0,
@@ -500,23 +511,6 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function summarizeRuntimeEnv(env: JsonObject): JsonObject {
-  return Object.fromEntries(
-    Object.entries(env)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => [
-        key,
-        typeof value === 'string' && value
-          ? shouldRedact(key) ? '<redacted>' : '<set>'
-          : '<empty>',
-      ]),
-  )
-}
-
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function shouldRedact(key: string): boolean {
-  return /(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|AUTH)/i.test(key)
 }

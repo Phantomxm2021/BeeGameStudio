@@ -90,6 +90,23 @@ Admin Console may contain:
 
 The Admin Console must be visible only when `/api/current-user` returns the required named permissions.
 
+## Platform Default Model
+
+Hosted SaaS deployments should not require every user to configure their own
+LLM key. Before opening generation to regular users:
+
+- Mark at least one trusted account as a platform owner in Supabase-controlled
+  metadata.
+- Sign in as that owner and create a default model config from Admin Console.
+- Confirm ordinary users can list the masked default model metadata but cannot
+  create, update, or delete model configs.
+- Confirm `beegame_runtime_env` returns the model provider environment for an
+  ordinary authenticated user.
+
+If `bun run supabase:smoke` fails with `beegame_runtime_env did not return a
+usable model provider configuration`, the SQL/RLS path may be working, but no
+effective default model config is available to the smoke user.
+
 ## Smoke Check
 
 First run the local configuration preflight. It does not contact Supabase and does not print secret values:
