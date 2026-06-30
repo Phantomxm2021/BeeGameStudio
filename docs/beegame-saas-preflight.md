@@ -95,13 +95,25 @@ The Admin Console must be visible only when `/api/current-user` returns the requ
 Hosted SaaS deployments should not require every user to configure their own
 LLM key. Before opening generation to regular users:
 
-- Mark at least one trusted account as a platform owner in Supabase-controlled
-  metadata.
+- Apply the latest SQL so `beegame_platform_owner_invites` exists.
+- Configure one or more trusted bootstrap owner emails and run the one-time
+  bootstrap command from a deployment/admin machine:
+
+  ```bash
+  BEEGAME_BOOTSTRAP_OWNER_EMAILS=owner@example.com \
+  BEEGAME_SUPABASE_SERVICE_ROLE_KEY=... \
+  bun run supabase:bootstrap-owner
+  ```
+
+- Let the invited owner register or sign in through the normal frontend.
 - Sign in as that owner and create a default model config from Admin Console.
 - Confirm ordinary users can list the masked default model metadata but cannot
   create, update, or delete model configs.
 - Confirm `beegame_runtime_env` returns the model provider environment for an
   ordinary authenticated user.
+
+The service-role key is for this one-time deployment bootstrap command only. Do
+not put it in frontend builds or the long-running runtime host environment.
 
 If `bun run supabase:smoke` fails with `beegame_runtime_env did not return a
 usable model provider configuration`, the SQL/RLS path may be working, but no

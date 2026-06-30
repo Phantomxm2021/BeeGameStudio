@@ -263,6 +263,13 @@ create table if not exists public.beegame_audit_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_platform_owner_invites (
+  email text primary key,
+  created_at timestamptz not null default now(),
+  claimed_user_id uuid references auth.users(id) on delete set null,
+  claimed_at timestamptz
+);
+
 create or replace function public.beegame_workspace_role(target_workspace_id uuid)
 returns text
 language sql
@@ -305,6 +312,11 @@ as $$
     from auth.users u
     where u.id = auth.uid()
       and u.raw_app_meta_data->>'beegame_role' = 'owner'
+  ) or exists (
+    select 1
+    from public.beegame_platform_owner_invites i
+    where i.claimed_user_id = auth.uid()
+      and i.claimed_at is not null
   )
 $$;
 
@@ -346,7 +358,15 @@ begin
   into platform_owner_with_default
   from public.beegame_model_configs c
   join auth.users u on u.id = c.owner_id
-  where u.raw_app_meta_data->>'beegame_role' = 'owner'
+  where (
+      u.raw_app_meta_data->>'beegame_role' = 'owner'
+      or exists (
+        select 1
+        from public.beegame_platform_owner_invites i
+        where i.claimed_user_id = u.id
+          and i.claimed_at is not null
+      )
+    )
     and c.is_default = true
   order by c.updated_at desc, c.created_at desc, c.id desc
   limit 1;
@@ -499,7 +519,14 @@ declare
   profile_name text;
   profile_avatar_url text;
   initial_role text;
+  invited_platform_owner boolean;
 begin
+  invited_platform_owner := exists (
+    select 1
+    from public.beegame_platform_owner_invites i
+    where lower(i.email) = lower(new.email)
+      and (i.claimed_user_id is null or i.claimed_user_id = new.id)
+  );
   profile_name := coalesce(
     nullif(new.raw_user_meta_data->>'display_name', ''),
     nullif(new.raw_user_meta_data->>'full_name', ''),
@@ -514,7 +541,7 @@ begin
     nullif(new.raw_user_meta_data->>'photo_url', '')
   );
   initial_role := case
-    when new.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
+    when new.raw_app_meta_data->>'beegame_role' = 'owner' or invited_platform_owner then 'owner'
     else 'developer'
   end;
 
@@ -539,9 +566,17 @@ begin
   values (created_workspace_id, new.id, initial_role)
   on conflict (workspace_id, user_id) do update
   set role = case
-    when new.raw_app_meta_data->>'beegame_role' = 'owner' then 'owner'
+    when new.raw_app_meta_data->>'beegame_role' = 'owner' or invited_platform_owner then 'owner'
     else excluded.role
   end;
+
+  if invited_platform_owner then
+    update public.beegame_platform_owner_invites
+    set claimed_user_id = new.id,
+        claimed_at = coalesce(claimed_at, now())
+    where lower(email) = lower(new.email)
+      and (claimed_user_id is null or claimed_user_id = new.id);
+  end if;
 
   insert into public.beegame_credit_accounts (user_id)
   values (new.id)
@@ -610,6 +645,22 @@ select u.id
 from auth.users u
 on conflict (user_id) do nothing;
 
+update public.beegame_platform_owner_invites i
+set claimed_user_id = u.id,
+    claimed_at = coalesce(i.claimed_at, now())
+from auth.users u
+where lower(i.email) = lower(u.email)
+  and (i.claimed_user_id is null or i.claimed_user_id = u.id);
+
+update public.beegame_workspace_members m
+set role = 'owner'
+from public.beegame_workspaces w,
+     public.beegame_platform_owner_invites i
+where m.workspace_id = w.id
+  and m.user_id = w.owner_id
+  and i.claimed_user_id = m.user_id
+  and i.claimed_at is not null;
+
 update public.beegame_workspace_members m
 set role = 'developer'
 from public.beegame_workspaces w,
@@ -618,7 +669,13 @@ where m.workspace_id = w.id
   and m.user_id = u.id
   and m.user_id = w.owner_id
   and m.role = 'owner'
-  and coalesce(u.raw_app_meta_data->>'beegame_role', '') <> 'owner';
+  and coalesce(u.raw_app_meta_data->>'beegame_role', '') <> 'owner'
+  and not exists (
+    select 1
+    from public.beegame_platform_owner_invites i
+    where i.claimed_user_id = u.id
+      and i.claimed_at is not null
+  );
 
 create or replace function public.beegame_runtime_env(
   p_user_id uuid,
@@ -1196,6 +1253,7 @@ alter table public.beegame_previews enable row level security;
 alter table public.beegame_credit_accounts enable row level security;
 alter table public.beegame_credit_ledger enable row level security;
 alter table public.beegame_audit_events enable row level security;
+alter table public.beegame_platform_owner_invites enable row level security;
 
 drop policy if exists "profile owner access" on public.beegame_profiles;
 create policy "profile owner access" on public.beegame_profiles
