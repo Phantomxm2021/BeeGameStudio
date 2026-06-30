@@ -107,6 +107,27 @@ If `bun run supabase:smoke` fails with `beegame_runtime_env did not return a
 usable model provider configuration`, the SQL/RLS path may be working, but no
 effective default model config is available to the smoke user.
 
+If you previously configured a model before Supabase owner-scoped settings were
+enabled, it may still exist in the local dashboard store instead of Supabase.
+Check the local migration summary first:
+
+```bash
+BEEGAME_MIGRATION_EMAIL=owner@example.com \
+BEEGAME_MIGRATION_PASSWORD=... \
+bun scripts/migrate-beegame-local-to-supabase.ts
+```
+
+When the dry-run summary shows the expected model config count, apply it:
+
+```bash
+BEEGAME_MIGRATION_EMAIL=owner@example.com \
+BEEGAME_MIGRATION_PASSWORD=... \
+bun scripts/migrate-beegame-local-to-supabase.ts --apply
+```
+
+The migration uses the signed-in owner user by default. Use a platform owner
+account, not a regular smoke/developer account.
+
 ## Smoke Check
 
 First run the local configuration preflight. It does not contact Supabase and does not print secret values:
