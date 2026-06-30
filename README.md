@@ -142,6 +142,27 @@ bun run build
 
 如果遇到 bug 请直接提一个 issues, 我们优先解决
 
+### 🐝 BeeGame SaaS 首次部署
+
+BeeGame Web Dashboard 的 SaaS 部署使用 Supabase Auth/RLS。首次部署时不要求数据库里已经有用户账号；推荐流程是先预置平台 owner 邮箱，再让 owner 用同一个邮箱正常注册或登录。
+
+1. 在 Supabase SQL Editor 执行最新的 [`docs/beegame-supabase-schema.sql`](docs/beegame-supabase-schema.sql)。
+2. 在可信任的部署机器上执行一次 owner bootstrap：
+
+   ```bash
+   BEEGAME_BOOTSTRAP_OWNER_EMAILS=owner@example.com \
+   BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key \
+   bun run supabase:bootstrap-owner
+   ```
+
+3. 打开 BeeGame 前端，用 `BEEGAME_BOOTSTRAP_OWNER_EMAILS` 里的邮箱注册或登录。
+4. 系统会在用户创建或读取当前用户权限时领取 owner invite，并授予平台 owner 权限。
+5. owner 进入 Admin Console 配置平台默认模型、搜索、运行时等全局配置。
+
+`BEEGAME_SUPABASE_SERVICE_ROLE_KEY` 只允许用于这一次部署 bootstrap 命令。不要把 service-role key 放进前端构建、runtime host、dashboard dev server 或长期运行的环境变量里。
+
+如果 owner 邮箱已经先注册过，再补跑 `supabase:bootstrap-owner`，让该用户重新登录或刷新页面即可领取 owner invite。更完整的上线检查见 [`docs/beegame-saas-preflight.md`](docs/beegame-saas-preflight.md)。
+
 ### 👤 新人配置 /login
 
 首次运行后，在 REPL 中输入 `/login` 命令进入登录配置界面，选择 **Anthropic Compatible** 即可对接第三方 API 兼容服务（无需 Anthropic 官方账号）。

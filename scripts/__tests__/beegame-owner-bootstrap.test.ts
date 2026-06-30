@@ -39,4 +39,23 @@ describe('BeeGame owner bootstrap', () => {
       },
     ])
   })
+
+  test('lets an existing signed-in user claim a bootstrap owner invite', async () => {
+    const schema = await Bun.file(
+      new URL('../../docs/beegame-supabase-schema.sql', import.meta.url),
+    ).text()
+
+    expect(schema).toContain(
+      'create or replace function public.beegame_claim_platform_owner_invite()',
+    )
+    expect(schema).toMatch(
+      /create or replace function public\.beegame_current_user_context\(\)[\s\S]*perform public\.beegame_claim_platform_owner_invite\(\);/,
+    )
+    expect(schema).not.toMatch(
+      /create or replace function public\.beegame_current_user_context\(\)[\s\S]{0,260}\nstable\n/,
+    )
+    expect(schema).toContain(
+      'grant execute on function public.beegame_claim_platform_owner_invite() to authenticated;',
+    )
+  })
 })

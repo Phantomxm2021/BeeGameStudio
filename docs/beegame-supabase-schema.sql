@@ -270,6 +270,54 @@ create table if not exists public.beegame_platform_owner_invites (
   claimed_at timestamptz
 );
 
+create or replace function public.beegame_claim_platform_owner_invite()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid;
+  current_email text;
+  invite_claimed boolean;
+begin
+  current_user_id := auth.uid();
+  if current_user_id is null then
+    return false;
+  end if;
+
+  select u.email
+  into current_email
+  from auth.users u
+  where u.id = current_user_id
+  limit 1;
+
+  if nullif(trim(coalesce(current_email, '')), '') is null then
+    return false;
+  end if;
+
+  update public.beegame_platform_owner_invites
+  set claimed_user_id = current_user_id,
+      claimed_at = coalesce(claimed_at, now())
+  where lower(email) = lower(current_email)
+    and (claimed_user_id is null or claimed_user_id = current_user_id)
+  returning true into invite_claimed;
+
+  if coalesce(invite_claimed, false) is false then
+    return false;
+  end if;
+
+  update public.beegame_workspace_members m
+  set role = 'owner'
+  from public.beegame_workspaces w
+  where m.workspace_id = w.id
+    and m.user_id = current_user_id
+    and w.owner_id = current_user_id;
+
+  return true;
+end
+$$;
+
 create or replace function public.beegame_workspace_role(target_workspace_id uuid)
 returns text
 language sql
@@ -435,7 +483,6 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
-stable
 as $$
 declare
   current_user_id uuid;
@@ -449,6 +496,8 @@ begin
   if current_user_id is null then
     return null;
   end if;
+
+  perform public.beegame_claim_platform_owner_invite();
 
   select *
   into profile_row
@@ -488,7 +537,7 @@ begin
   limit 1;
 
   member_role := coalesce(member_role, 'viewer');
-  if account_role = 'owner' then
+  if account_role = 'owner' or public.beegame_is_platform_owner() then
     member_role := 'owner';
   end if;
 
@@ -1361,6 +1410,9 @@ create policy "audit owner access" on public.beegame_audit_events
 
 revoke execute on function public.beegame_current_user_context() from public;
 grant execute on function public.beegame_current_user_context() to authenticated;
+
+revoke execute on function public.beegame_claim_platform_owner_invite() from public;
+grant execute on function public.beegame_claim_platform_owner_invite() to authenticated;
 
 revoke execute on function public.beegame_is_platform_owner() from public;
 grant execute on function public.beegame_is_platform_owner() to authenticated;

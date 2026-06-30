@@ -106,6 +106,8 @@ LLM key. Before opening generation to regular users:
   ```
 
 - Let the invited owner register or sign in through the normal frontend.
+- If the owner account already exists, sign in or refresh after bootstrap; the
+  current-user RPC will claim the invite.
 - Sign in as that owner and create a default model config from Admin Console.
 - Confirm ordinary users can list the masked default model metadata but cannot
   create, update, or delete model configs.
