@@ -3,15 +3,16 @@ import { createAgentWorkflowApp } from './app'
 export { createAgentWorkflowApp }
 
 const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
+const host = process.env.AGENT_WORKFLOW_HOST || '127.0.0.1'
 let activeServer: ReturnType<typeof Bun.serve> | null = null
 
 if (import.meta.main) {
   activeServer = Bun.serve({
-    hostname: '127.0.0.1',
+    hostname: host,
     port,
     fetch: createAgentWorkflowApp({ modelConfigStore: {} }).fetch,
   })
   console.log(
-    `Agent workflow server listening on http://127.0.0.1:${activeServer.port}`,
+    `Agent workflow server listening on http://${host}:${activeServer.port}`,
   )
 }

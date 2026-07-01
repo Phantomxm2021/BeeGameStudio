@@ -1,10 +1,16 @@
 node_modules
 dist
 .git
+.DS_Store
+.env
+.env.*
+Projects
 .githooks
 .github
 docs
 *.md
+!.beegame/
+!.beegame/**
 packages/remote-control-server/data/*.db
 packages/remote-control-server/data/*.db-wal
 packages/remote-control-server/data/*.db-shm

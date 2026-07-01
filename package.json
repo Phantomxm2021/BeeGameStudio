@@ -66,6 +66,7 @@
     "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs",
     "docs:dev": "npx mintlify dev",
     "dashboard:dev": "bun run scripts/dashboard-dev.ts",
+    "dashboard:docker": "docker compose -f docker/docker-compose.yml --env-file docker/.env.production up -d --build",
     "saas:preflight": "bun run scripts/check-beegame-saas-preflight.ts",
     "supabase:bootstrap-owner": "bun run scripts/bootstrap-beegame-owner.ts",
     "supabase:smoke": "bun run scripts/smoke-beegame-supabase.ts",
