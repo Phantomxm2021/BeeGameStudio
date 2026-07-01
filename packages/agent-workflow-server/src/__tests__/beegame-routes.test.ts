@@ -105,8 +105,8 @@ class FakeBeeGameRuntime {
         toolName: 'Write',
         message: 'Write game files?',
         input: {
-          file_path: 'snake-game/src/main.ts',
-          content: 'console.log("snake")',
+          file_path: 'sample-game/src/main.ts',
+          content: 'console.log("sample")',
         },
       })
       this.permissionResults.push(decision.behavior)
@@ -121,7 +121,7 @@ class FakeBeeGameRuntime {
             type: 'tool_use',
             id: 'tool_build_complete_write',
             name: 'Write',
-            input: { file_path: 'snake-game/src/main.ts' },
+            input: { file_path: 'sample-game/src/main.ts' },
           }],
         },
       })
@@ -434,8 +434,8 @@ class FakeBeeGameRuntime {
         toolName: 'Write',
         message: 'Write game files?',
         input: {
-          file_path: 'snake-game/src/main.ts',
-          content: 'console.log("snake")',
+          file_path: 'sample-game/src/main.ts',
+          content: 'console.log("sample")',
         },
       })
       this.permissionResults.push(decision.behavior)
@@ -476,7 +476,7 @@ class FakeBeeGameRuntime {
         toolName: 'Bash',
         message: 'Run setup command?',
         input: {
-          command: 'npm create vite@latest snake-game -- --template react-ts',
+          command: 'npm create vite@latest sample-game -- --template react-ts',
         },
       })
       this.permissionResults.push(decision.behavior)
@@ -1083,7 +1083,7 @@ describe('beegame session routes', () => {
 
   test('creates a missing project workspace directory inside the configured Projects directory', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
-    const workspace = join(projectsRoot, 'snake-web')
+    const workspace = join(projectsRoot, 'sample-web-game')
     const fake = createFakeRunner()
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
@@ -1122,7 +1122,7 @@ describe('beegame session routes', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           workspacePath: outsideRoot,
-          projectName: 'Classic Snake Game',
+          projectName: 'Sample Classic Game',
         }),
       })
 
@@ -1133,7 +1133,7 @@ describe('beegame session routes', () => {
         resolvedProjectsRoot,
         'users',
         'user-example.com',
-        'classic-snake-game',
+        'sample-classic-game',
       )
       expect(session.cwd).toBe(expectedWorkspace)
       expect((await stat(expectedWorkspace)).isDirectory()).toBe(true)
@@ -2724,7 +2724,7 @@ describe('beegame session routes', () => {
         message: {
           content: [{
             type: 'text',
-            text: `${legacyTitle} Code created this in ${legacyPath}. Run ${legacyLower} snake.`,
+            text: `${legacyTitle} Code created this in ${legacyPath}. Run ${legacyLower} sample game.`,
           }],
           [`${legacyLower}_code_version`]: '2.8.0',
         },
@@ -2770,7 +2770,7 @@ describe('beegame session routes', () => {
       const serialized = JSON.stringify(await eventsRes.json())
       expect(serialized).not.toContain(legacyTitle)
       expect(serialized).toContain(
-        `BeeGame created this in ${legacyPath}. Run BeeGame snake.`,
+        `BeeGame created this in ${legacyPath}. Run BeeGame sample game.`,
       )
       expect(serialized).toContain('beegame_version')
       expect(serialized).toContain(`"file_path":"${legacyPath}"`)
@@ -3260,7 +3260,7 @@ describe('beegame session routes', () => {
       await app.request(`/api/beegame-sessions/${session.id}/input`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Create snake game immediately.' }),
+        body: JSON.stringify({ text: 'Create sample game immediately.' }),
       })
 
       await waitFor(() => fake.runtimes[0]?.permissionResults.length === 1)
@@ -3557,7 +3557,7 @@ describe('beegame session routes', () => {
       await app.request(`/api/beegame-sessions/${session.id}/input`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Create snake game immediately.' }),
+        body: JSON.stringify({ text: 'Create sample game immediately.' }),
       })
 
       await waitFor(() => fake.runtimes[0]?.permissionResults.length === 1)
@@ -4826,7 +4826,7 @@ describe('beegame session routes', () => {
 
   test('deletes session-created project directories without deleting the workspace root', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
-    const gameDir = join(workspace, 'snake-game')
+    const gameDir = join(workspace, 'sample-game')
     const keepDir = join(workspace, 'keep-me')
     const fake = createFakeRunner([
       {
@@ -4873,7 +4873,7 @@ describe('beegame session routes', () => {
       const inputRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Create snake game.' }),
+        body: JSON.stringify({ text: 'Create sample game.' }),
       })
       expect(inputRes.status).toBe(200)
       await waitFor(async () => {
@@ -4942,7 +4942,7 @@ describe('beegame session routes', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const resolvedWorkspace = await realpath(workspace)
     const sessionId = 'beegame_transcript_only'
-    const gameDir = join(resolvedWorkspace, 'snake-game')
+    const gameDir = join(resolvedWorkspace, 'sample-game')
     const transcriptPath = getTestTranscriptPath(resolvedWorkspace, resolvedWorkspace, sessionId)
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
@@ -5063,14 +5063,14 @@ describe('beegame session routes', () => {
             id: 1,
             sessionId,
             type: 'user.message',
-            text: '做一个贪吃蛇',
+            text: '做一个样例游戏',
             createdAt: '2026-06-21T00:00:01.000Z',
           }),
           JSON.stringify({
             id: 2,
             sessionId,
             type: 'assistant.message',
-            text: '已生成可玩的贪吃蛇原型。',
+            text: '已生成可玩的样例游戏原型。',
             createdAt: '2026-06-21T00:00:02.000Z',
           }),
         ].join('\n'),
@@ -5086,12 +5086,12 @@ describe('beegame session routes', () => {
         expect.objectContaining({
           id: 1,
           type: 'user.message',
-          text: '做一个贪吃蛇',
+          text: '做一个样例游戏',
         }),
         expect.objectContaining({
           id: 2,
           type: 'assistant.message',
-          text: '已生成可玩的贪吃蛇原型。',
+          text: '已生成可玩的样例游戏原型。',
         }),
       ])
     } finally {

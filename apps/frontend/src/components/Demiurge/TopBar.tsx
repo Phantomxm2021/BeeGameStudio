@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { translations, type Language } from './AgentsConfig';
-import { getBeeGameText } from './BeeGameI18n';
+import type { Language } from './AgentsConfig';
+import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 
 interface TopBarProps {
     projectName: string;
@@ -19,8 +18,8 @@ interface TopBarProps {
 export function TopBar({ projectName, lang, status, progress, tokens, isSyncing, onRename, mode = 'demiurge', phaseLabel }: TopBarProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [tempName, setTempName] = useState(projectName);
-    const t = translations[lang];
-    const uiText = getBeeGameText(lang);
+    const t = useCommonText(lang);
+    const uiText = useBeeGameText(lang);
 
     useEffect(() => {
         setTempName(projectName);
@@ -64,16 +63,14 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
 
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
+        <div
             className="absolute top-8 left-8 z-40 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/50 p-4 rounded-3xl shadow-lg flex flex-col pointer-events-auto transition-colors duration-700"
         >
             <div className="flex items-center space-x-4 mb-3">
                 {isEditing ? (
                     <input
                         autoFocus
-                        className="text-4xl font-black tracking-tighter uppercase bg-transparent border-b-2 border-zinc-900 dark:border-zinc-100 outline-none text-zinc-900 dark:text-zinc-100 w-auto min-w-[200px]"
+                        className="type-title-2 w-auto min-w-[200px] max-w-[34rem] truncate border-b-2 border-zinc-900 bg-transparent text-zinc-900 outline-none dark:border-zinc-100 dark:text-zinc-100"
                         value={tempName}
                         onChange={(e) => setTempName(e.target.value)}
                         onBlur={handleBlur}
@@ -82,7 +79,7 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
                 ) : (
                     <h1
                         onDoubleClick={() => setIsEditing(true)}
-                        className="text-4xl font-black tracking-tighter opacity-70 dark:opacity-80 uppercase text-zinc-900 dark:text-zinc-100 cursor-text hover:opacity-100 transition-opacity"
+                        className="type-title-2 max-w-[34rem] cursor-text truncate text-zinc-900 opacity-80 transition-opacity hover:opacity-100 dark:text-zinc-100"
                     >
                         {projectName}
                     </h1>
@@ -90,14 +87,14 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
 
                 <div className="flex items-center space-x-2 px-3 py-1 bg-zinc-100/80 dark:bg-zinc-800/80 rounded-full shadow-inner">
                     <div className={`w-2 h-2 rounded-full ${statusColors[status] || statusColors.idle} ${status === 'running' || status === 'offline' ? 'animate-pulse' : ''}`} />
-                    <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-600 dark:text-zinc-300">
+                    <span className="type-footnote text-zinc-600 dark:text-zinc-300">
                         {getStatusText()}
                     </span>
                 </div>
 
                 {isSyncing && (
                     <div className="flex items-center space-x-1 px-2 py-0.5 bg-zinc-100/50 dark:bg-zinc-800/50 rounded-md border border-zinc-200/50 dark:border-zinc-700/50 animate-pulse">
-                        <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                        <span className="type-footnote text-zinc-500">
                             Syncing...
                         </span>
                     </div>
@@ -106,10 +103,10 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
 
             <div className="flex items-center space-x-8 px-1">
                 <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">
+                    <span className="type-caption-1 mb-0.5 text-zinc-400">
                         {mode === 'beegame' ? (t.phase || 'Phase') : t.progress}
                     </span>
-                    <span className="font-mono text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                    <span className="type-headline text-zinc-800 dark:text-zinc-200">
                         {mode === 'beegame'
                             ? (phaseLabel || status.toUpperCase().replace('_', ' '))
                             : `${Math.floor(progress)}%`}
@@ -119,14 +116,14 @@ export function TopBar({ projectName, lang, status, progress, tokens, isSyncing,
                 <div className="w-px h-6 bg-zinc-200 dark:bg-zinc-800" />
 
                 <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">
+                    <span className="type-caption-1 mb-0.5 text-zinc-400">
                         {t.tokens}
                     </span>
-                    <span className="font-mono text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                    <span className="type-headline text-zinc-800 dark:text-zinc-200">
                         {tokens.toLocaleString()}
                     </span>
                 </div>
             </div>
-        </motion.div>
+        </div>
     );
 }

@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { FileText, ChevronRight, BookOpen } from 'lucide-react';
 import { artifactProcessor } from '../../../utils/artifactProcessor';
 
@@ -36,9 +35,8 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
     const isGDD = normalizedArtifactType === 'GDD' || /GDD/i.test(displayTitle) || /游戏设计文档/i.test(content);
 
     return (
-        <motion.div
-            whileHover={{ y: -1 }}
-            className="group cursor-pointer rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 bg-white/80 dark:bg-zinc-900/60 p-5 backdrop-blur-md transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/80 hover:shadow-lg hover:shadow-zinc-200/20 dark:hover:shadow-none overflow-hidden"
+        <div
+            className="group cursor-pointer rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 bg-white/80 dark:bg-zinc-900/60 p-5 backdrop-blur-md transition-all hover:-translate-y-px hover:bg-zinc-50 dark:hover:bg-zinc-800/80 hover:shadow-lg hover:shadow-zinc-200/20 dark:hover:shadow-none overflow-hidden"
             onClick={onPreview}
         >
             <div className="flex items-center gap-4">
@@ -50,31 +48,31 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
                 {/* Content Section */}
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
-                        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate pr-4 tracking-tight group-hover:text-black dark:group-hover:text-white transition-colors">
+                        <h3 className="type-footnote text-zinc-900 dark:text-zinc-100 truncate pr-4 group-hover:text-black dark:group-hover:text-white transition-colors">
                             {displayTitle}
                         </h3>
                     </div>
 
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-1 opacity-70 mb-2">
+                    <p className="type-footnote text-zinc-500 dark:text-zinc-400 line-clamp-1 opacity-70 mb-2">
                         {summary}
                     </p>
 
                     {/* Footer Info - Decoupled to avoid overlaps */}
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50">
-                        <div className="flex items-center text-[9px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                        <div className="type-caption-1 flex items-center text-zinc-400 dark:text-zinc-500">
                             <span className="truncate max-w-[80px]">{sender}</span>
                             <span className="mx-1.5 opacity-30">•</span>
                             <span className="whitespace-nowrap">{normalizedArtifactType || (isGDD ? 'GDD' : 'Artifact')}</span>
                         </div>
                         
-                        <div className="flex items-center text-[10px] font-bold text-zinc-900 dark:text-zinc-200 opacity-40 group-hover:opacity-100 transition-all duration-300">
+                        <div className="type-footnote flex items-center text-zinc-900 dark:text-zinc-200 opacity-40 group-hover:opacity-100 transition-all duration-300">
                             <span className="mr-1 hidden sm:inline">Open Preview</span>
                             <ChevronRight className="w-3 h-3 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100" />
                         </div>
                     </div>
                 </div>
             </div>
-        </motion.div>
+        </div>
     );
 };
 

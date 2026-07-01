@@ -41,6 +41,9 @@ const smokeId = `smoke_${Date.now().toString(36)}`
 
 const currentUser = await rpc<JsonObject>('beegame_current_user_context', {})
 assertCurrentUser(currentUser)
+const accountId = stringField(currentUser.accountId) ||
+  stringField(currentUser.account_id) ||
+  userId
 
 const workspaceId = stringField(currentUser.workspaceId) ||
   stringField(currentUser.workspace_id)
@@ -63,7 +66,7 @@ try {
   avatarObjectPath = await uploadSmokeAvatarObject()
   storageObjectPath = await uploadSmokeAssetObject(projectId)
   const creditReservation = await rpc<JsonObject>('beegame_reserve_credits', {
-    p_user_id: userId,
+    p_user_id: accountId,
     p_credits: 1,
     p_kind: 'supabase_smoke',
     p_project_id: projectId,
@@ -73,7 +76,7 @@ try {
     },
   })
   await rpc<JsonObject>('beegame_refund_credit_reservation', {
-    p_user_id: userId,
+    p_user_id: accountId,
     p_reservation_id: requireStringField(
       creditReservation,
       'reservation_id',
@@ -110,6 +113,7 @@ console.log(JSON.stringify({
   ok: true,
   currentUser: {
     id: currentUser.id,
+    accountId,
     role: currentUser.role,
     workspaceId,
     modelConfigOwnerId: stringField(currentUser.modelConfigOwnerId) ||

@@ -253,10 +253,10 @@ describe('beeGameAdapter prompt rules', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.runIdeaIntake({ idea: '做一个贪吃蛇', language: 'zh' });
+    await beeGameAdapter.runIdeaIntake({ idea: '做一个样例游戏', language: 'zh' });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
-    expect(requestBody).toEqual({ idea: '做一个贪吃蛇', language: 'zh' });
+    expect(requestBody).toEqual({ idea: '做一个样例游戏', language: 'zh' });
   });
 
   it('accepts structured clarification without synthesizing local options', async () => {
@@ -319,7 +319,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_scoped/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_scoped',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -334,7 +334,7 @@ describe('beeGameAdapter prompt rules', () => {
       idea: 'LLM generated idea',
       title: 'LLM Project',
       option: {
-        id: 'snake_web',
+        id: 'sample_web',
         title: 'LLM Project',
         pitch: 'LLM generated pitch.',
         gameplay: '吃食物、增长、避免撞墙。',
@@ -520,7 +520,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_migrated',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -564,7 +564,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
         return jsonResponse({ error: 'Session not found' }, 404);
       }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
         return jsonResponse([
           {
             id: 1,
@@ -591,14 +591,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     const history = await beeGameAdapter.getChatHistory(project.id);
@@ -749,7 +749,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
         return jsonResponse({ error: 'Session not found' }, 404);
       }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
         return jsonResponse([
           {
             id: 1,
@@ -767,14 +767,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     await beeGameAdapter.getProjectStatus(project.id);
@@ -802,7 +802,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
         return jsonResponse({ error: 'Session not found' }, 404);
       }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
         return jsonResponse(transcript);
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -810,14 +810,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     const status = await beeGameAdapter.getProjectStatus(project.id);
@@ -840,8 +840,8 @@ describe('beeGameAdapter prompt rules', () => {
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_stopped/runtime-snapshot?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
-        return jsonResponse({ sessionId: 'beegame_stopped', workspacePath: '/tmp/beegame-projects/snake-web', phaseName: 'idle', phaseStatus: 'idle' });
+      if (path === '/api/beegame-sessions/beegame_stopped/runtime-snapshot?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
+        return jsonResponse({ sessionId: 'beegame_stopped', workspacePath: '/tmp/beegame-projects/sample-web-game', phaseName: 'idle', phaseStatus: 'idle' });
       }
       if (path === '/api/beegame-sessions/beegame_stopped/events?after=0') {
         return jsonResponse(transcript);
@@ -854,14 +854,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_stopped',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     const status = await beeGameAdapter.getProjectStatus(project.id);
@@ -940,7 +940,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_restart') {
         return jsonResponse({ error: 'Session not found' }, 404);
       }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
         return jsonResponse([
           {
             id: 1,
@@ -965,7 +965,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_new',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'idle',
           createdAt: '2026-06-21T00:00:03.000Z',
@@ -975,7 +975,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_new/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_new',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:03.000Z',
@@ -987,14 +987,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     await beeGameAdapter.sendMessage({
@@ -1026,13 +1026,13 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_stopped') {
         return jsonResponse({
           id: 'beegame_stopped',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'stopped',
           turnStatus: 'idle',
           modelConfigId: 'model_default',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_stopped/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsnake-web') {
+      if (path === '/api/beegame-sessions/beegame_stopped/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
         return jsonResponse([
           sessionStoppedEvent(1, 'beegame_stopped', 'turn-1'),
         ]);
@@ -1040,7 +1040,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_stopped',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'idle',
           modelConfigId: 'model_default',
@@ -1049,7 +1049,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_stopped/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_stopped',
-          cwd: '/tmp/beegame-projects/snake-web',
+          cwd: '/tmp/beegame-projects/sample-web-game',
           status: 'running',
           turnStatus: 'running',
         });
@@ -1059,14 +1059,14 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.createProject({
-      name: 'snake-web',
-      root_path: '/tmp/beegame-projects/snake-web',
+      name: 'sample-web-game',
+      root_path: '/tmp/beegame-projects/sample-web-game',
     });
     const project = (await beeGameAdapter.getProjects())[0];
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
       projectId: project.id,
       sessionId: 'beegame_stopped',
-      workspacePath: '/tmp/beegame-projects/snake-web',
+      workspacePath: '/tmp/beegame-projects/sample-web-game',
     }]));
 
     await beeGameAdapter.sendMessage({
@@ -1348,8 +1348,8 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).not.toContain('/packages/');
     expect(body.text).not.toContain('current working directory is already the project directory')
     expect(body.text).not.toContain('Do not create another top-level folder')
-    expect(body.text).not.toContain('./snake-game');
-    expect(body.text).not.toContain('./games/snake');
+    expect(body.text).not.toContain('./sample-game');
+    expect(body.text).not.toContain('./games/sample');
   });
 
   it('restores the visible idea from transcript display metadata instead of the transport prompt', async () => {
@@ -1362,10 +1362,10 @@ describe('beeGameAdapter prompt rules', () => {
             sessionId: 'beegame_display',
             turnId: 'turn-1',
             type: 'user.message',
-            text: '请使用中文与用户沟通。\n我要做一个完整游戏项目。\n原始想法：做一个你画我猜多人版本',
+            text: '请使用中文与用户沟通。\n我要做一个完整游戏项目。\n原始想法：用户输入的完整游戏想法',
             payload: {
               type: 'user.message',
-              displayText: '做一个你画我猜多人版本',
+              displayText: '用户输入的完整游戏想法',
               displayKind: 'confirmed_brief',
             },
             createdAt: '2026-06-21T00:00:01.000Z',
@@ -1393,7 +1393,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(history).toEqual(expect.arrayContaining([
       expect.objectContaining({
         sender: 'user',
-        content: '做一个你画我猜多人版本',
+        content: '用户输入的完整游戏想法',
       }),
     ]));
     expect(history.map(message => message.content).join('\n')).not.toContain('请使用中文与用户沟通');
@@ -1410,7 +1410,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_brief',
-          cwd: '/tmp/beegame-projects/snake-game',
+          cwd: '/tmp/beegame-projects/sample-game',
           status: 'running',
           turnStatus: 'idle',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -1425,8 +1425,8 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: '做一个贪吃蛇',
-      title: '贪吃蛇',
+      idea: '做一个样例游戏',
+      title: '样例游戏',
       option: makeLlmOption(),
       settings: {
         platform: 'Web',
@@ -1472,7 +1472,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'Build a snake game',
+      idea: 'Build a sample game',
       title: 'Snake Game',
       option: makeLlmOption({ title: 'Snake Game' }),
       settings: {
@@ -2144,21 +2144,21 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
     expect(polled.messages[0].content).toContain('Tool: Read');
     expect(polled.messages[0].content).toContain('Status: running');
-    expect(polled.messages[0].content).toContain('Target: snake-game/src/main.ts');
+    expect(polled.messages[0].content).toContain('Target: sample-game/src/main.ts');
     expect(polled.messages[0]).toEqual(expect.objectContaining({
       tool: 'Read',
       tool_status: 'running',
-      tool_detail: 'Target: snake-game/src/main.ts',
+      tool_detail: 'Target: sample-game/src/main.ts',
       is_subagent_tool: false,
     }));
     expect(polled.messages[1].content).toContain('Status: completed');
-    expect(polled.messages[1].content).toContain('Target: snake-game/src/main.ts');
+    expect(polled.messages[1].content).toContain('Target: sample-game/src/main.ts');
     expect(polled.messages[1]).toEqual(expect.objectContaining({
       tool: 'Read',
       tool_status: 'completed',
-      tool_detail: 'Target: snake-game/src/main.ts',
+      tool_detail: 'Target: sample-game/src/main.ts',
     }));
-    expect(polled.messages[3].content).toContain('Target: snake-game/src/main.ts');
+    expect(polled.messages[3].content).toContain('Target: sample-game/src/main.ts');
   });
 
   it('formats Agent tool events as subagent cards', async () => {
@@ -2479,7 +2479,7 @@ describe('beeGameAdapter prompt rules', () => {
         });
       }
       if (path === '/api/beegame-sessions/beegame_delete?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects' && init?.method === 'DELETE') {
-        return jsonResponse({ deleted: true, deletedArtifactPaths: ['/tmp/beegame-projects/snake-game'] });
+        return jsonResponse({ deleted: true, deletedArtifactPaths: ['/tmp/beegame-projects/sample-game'] });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -2508,7 +2508,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_delete_missing',
-          cwd: '/tmp/beegame-projects/classic-match3-levels',
+          cwd: '/tmp/beegame-projects/sample-level-game',
           status: 'running',
           turnStatus: 'idle',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -2518,7 +2518,7 @@ describe('beeGameAdapter prompt rules', () => {
       if (path === '/api/beegame-sessions/beegame_delete_missing/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_delete_missing',
-          cwd: '/tmp/beegame-projects/classic-match3-levels',
+          cwd: '/tmp/beegame-projects/sample-level-game',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -2526,11 +2526,11 @@ describe('beeGameAdapter prompt rules', () => {
         });
       }
       if (
-        path === '/api/beegame-sessions/beegame_delete_missing?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects%2Fclassic-match3-levels' &&
+        path === '/api/beegame-sessions/beegame_delete_missing?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-level-game' &&
         init?.method === 'DELETE'
       ) {
         return jsonResponse({
-          error: "ENOENT: no such file or directory, lstat '/tmp/beegame-projects/classic-match3-levels'",
+          error: "ENOENT: no such file or directory, lstat '/tmp/beegame-projects/sample-level-game'",
         }, 404);
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -2542,7 +2542,7 @@ describe('beeGameAdapter prompt rules', () => {
       root_path: '/tmp/beegame-projects',
       confirmedBrief: {
         title: 'Classic Match3 Levels',
-        projectFolderName: 'classic-match3-levels',
+        projectFolderName: 'sample-level-game',
       },
     } as any);
 
@@ -2555,7 +2555,7 @@ describe('beeGameAdapter prompt rules', () => {
       {
         projectId: 'project_docs',
         sessionId: 'beegame_docs',
-        workspacePath: '/tmp/beegame-projects/snake-game',
+        workspacePath: '/tmp/beegame-projects/sample-game',
       },
     ]));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -2577,7 +2577,7 @@ describe('beeGameAdapter prompt rules', () => {
       'docs/GDD.md',
       'docs/TECH_SPEC.md',
     ]);
-    expect(artifacts.map(artifact => artifact.name)).toContain('snake-game.zip');
+    expect(artifacts.map(artifact => artifact.name)).toContain('sample-game.zip');
     expect(artifacts.find(artifact => artifact.package_download)).toEqual(expect.objectContaining({
       artifact_type: 'Project Package',
     }));
@@ -2910,7 +2910,7 @@ function toolStartedEvent(id: number, sessionId: string, toolUseID: string, tool
       toolName,
       input: toolName === 'Bash'
         ? { command: 'bun run build' }
-        : { file_path: '/tmp/beegame-projects/snake-game/src/main.ts' },
+        : { file_path: '/tmp/beegame-projects/sample-game/src/main.ts' },
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
   };
@@ -3082,7 +3082,7 @@ function permissionRequestedEvent(id: number, sessionId: string, turnId: string,
       toolUseID: `tool_${id}`,
       toolName,
       message: `${toolName} game files?`,
-      input: { file_path: 'snake-game/src/main.ts' },
+      input: { file_path: 'sample-game/src/main.ts' },
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
   };
@@ -3101,7 +3101,7 @@ function toolCompletedEvent(id: number, sessionId: string, toolUseID: string, to
       toolName,
       input: toolName === 'Bash'
         ? { command: 'bun run build' }
-        : { file_path: '/tmp/beegame-projects/snake-game/src/main.ts' },
+        : { file_path: '/tmp/beegame-projects/sample-game/src/main.ts' },
       output: text,
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,

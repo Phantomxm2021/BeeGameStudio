@@ -523,11 +523,11 @@ describe('LandingView bootstrap submission', () => {
     it('restores typed idea text after a page refresh without opening intake', () => {
         const { unmount } = renderLanding();
 
-        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Draft snake idea' } });
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Draft sample idea' } });
         unmount();
         renderLanding();
 
-        expect(screen.getByRole('textbox')).toHaveValue('Draft snake idea');
+        expect(screen.getByRole('textbox')).toHaveValue('Draft sample idea');
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
     });
@@ -992,8 +992,8 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).not.toHaveTextContent('为什么适合');
         expect(dialog).not.toHaveTextContent('首版原型');
         const cards = within(dialog).getAllByTestId('intake-option-card');
-        expect(cards[0]).toHaveClass('grid', 'h-[24rem]', 'grid-rows-[4.75rem_1.25rem_minmax(0,1fr)_2.75rem]');
-        expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('max-h-12', 'overflow-hidden');
+        expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)_2.75rem]');
+        expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
         expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('min-h-0', 'overflow-y-auto');
         expect(within(cards[0]).getByTestId('intake-option-tags')).toHaveClass('items-end');
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
@@ -1139,13 +1139,26 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByRole('combobox', { name: '范围' })).not.toBeInTheDocument();
         expect(screen.queryByText('Auto')).not.toBeInTheDocument();
 
+        const engineSelect = screen.getByRole('combobox', { name: '引擎' });
+        expect(within(engineSelect).getAllByRole('option').map((option) => option.textContent)).toEqual([
+            'React',
+            'Unity',
+            'Godot',
+            'Unreal',
+        ]);
         fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
-        fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
+        fireEvent.change(engineSelect, { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
         fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
         fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Minimal' } });
-        fireEvent.click(screen.getByRole('button', { name: /Keyboard\/mouse/ }));
-        fireEvent.click(screen.getByRole('option', { name: 'Voice' }));
+        fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
+        const inputListbox = screen.getByRole('listbox', { name: '输入方式' });
+        expect(inputListbox).toHaveAttribute('data-surface', 'frosted-glass');
+        expect(inputListbox).toHaveAttribute('data-glass-density', 'reinforced');
+        expect(inputListbox).toHaveAttribute('data-floating-layer', 'true');
+        expect(inputListbox).toHaveClass('fixed', 'z-[220]');
+        expect(inputListbox).toHaveClass('backdrop-blur-2xl');
+        fireEvent.click(screen.getByRole('option', { name: '语音' }));
         fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: '优先验证关卡节奏。' } });
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
@@ -1175,12 +1188,28 @@ describe('LandingView bootstrap submission', () => {
         });
     });
 
+    it('closes the input method dropdown when clicking outside it', async () => {
+        renderLanding();
+
+        await submitIdeaAndConfirmIntake('LLM generated idea');
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+        fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
+
+        expect(screen.getByRole('listbox', { name: '输入方式' })).toBeInTheDocument();
+
+        fireEvent.pointerDown(document.body);
+
+        await waitFor(() => {
+            expect(screen.queryByRole('listbox', { name: '输入方式' })).not.toBeInTheDocument();
+        });
+    });
+
     it('renders localized English hero copy and idea placeholder', () => {
         renderLanding({ lang: 'en' });
 
         expect(screen.getByRole('heading', { name: 'Start with an idea.' })).toBeInTheDocument();
         expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
-        expect(screen.getByPlaceholderText('Describe the game, tool, or interactive experience you want to build')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('What game do you want to make? e.g. a mobile puzzle game')).toBeInTheDocument();
         expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
     });
 

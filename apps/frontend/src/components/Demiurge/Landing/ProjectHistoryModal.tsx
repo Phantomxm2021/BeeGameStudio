@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
-import { translations, type Language } from '../AgentsConfig';
-import { getBeeGameText } from '../BeeGameI18n';
+import type { Language } from '../AgentsConfig';
+import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
 import { useSystemStore } from '../../../store/systemStore';
 import { getCreditSummary, type BeeGameCreditSummary } from '../../../services/creditsApi';
@@ -32,8 +31,8 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
     const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameCreditSummary>>({});
-    const t = translations[lang];
-    const text = getBeeGameText(lang);
+    const t = useCommonText(lang);
+    const text = useBeeGameText(lang);
 
     const closeMenu = () => {
         setActiveMenuId(null);
@@ -94,39 +93,32 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
         };
     }, [isOpen, projects]);
 
+    if (!isOpen) return null;
+
     return (
-        <AnimatePresence>
-            {isOpen && (
                 <>
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                    <div
                         onClick={() => {
                             closeMenu();
                             onClose();
                         }}
                         className="fixed inset-0 z-[60] bg-zinc-950/45 backdrop-blur-sm"
                     />
-                    <motion.div
+                    <div
                         role="dialog"
                         aria-modal="true"
                         aria-label={t.historyProjects}
-                        initial={{ opacity: 0, y: 18, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 18, scale: 0.96 }}
-                        transition={{ duration: 0.24, ease: 'easeOut' }}
                         data-surface="frosted-glass"
                         data-style-source="pixelfork"
                         data-glass-density="reinforced"
-                        className="input-surface fixed left-1/2 top-1/2 z-[70] flex max-h-[min(620px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-white/20 p-5 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]"
+                        className="input-surface glass-panel fixed left-1/2 top-1/2 z-[70] flex max-h-[min(620px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[32px] p-5 text-zinc-100"
                     >
                         <div className="relative z-10 mb-5 flex items-center justify-between">
                             <div>
-                                <h2 className="text-2xl font-semibold tracking-normal text-white">
+                                <h2 className="type-title-3 text-white">
                                     {t.historyProjects}
                                 </h2>
-                                <p className="mt-2 text-sm font-medium text-zinc-400">
+                                <p className="type-footnote mt-2 text-zinc-400">
                                     {projects.length} {t.recentProjects}
                                 </p>
                             </div>
@@ -137,7 +129,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                     closeMenu();
                                     onClose();
                                 }}
-                                className="flex h-10 w-10 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition-colors hover:bg-[#757575]/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+	                                className="glass-icon-button flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -147,15 +139,14 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             {projects.length === 0 ? (
                                 <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] text-zinc-400">
                                     <Clock className="h-8 w-8 stroke-1" />
-                                    <span className="text-xs font-bold uppercase tracking-widest">{text.noProjectsFound}</span>
+                                    <span className="type-caption-1">{text.noProjectsFound}</span>
                                 </div>
                             ) : (
                                 projects.map((project) => (
                                     <div key={project.id} className="relative">
-                                        <motion.div
+                                        <div
                                             role="button"
                                             tabIndex={0}
-                                            whileHover={{ x: 3 }}
                                             onClick={() => onSelectProject(project.id)}
                                             onKeyDown={(event) => {
                                                 if (event.key === 'Enter' || event.key === ' ') {
@@ -163,18 +154,18 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                                     onSelectProject(project.id);
                                                 }
                                             }}
-                                            className="flex w-full cursor-pointer items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all hover:border-white/20 hover:bg-white/[0.075] focus-visible:ring-2 focus-visible:ring-white/35"
+                                            className="flex w-full cursor-pointer items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all hover:translate-x-1 hover:border-white/20 hover:bg-white/[0.075] focus-visible:ring-2 focus-visible:ring-white/35"
                                         >
                                             <div className="min-w-0 pr-4">
-                                                <span className="block truncate text-base font-semibold text-white">
+                                                <span className="type-callout block truncate text-white">
                                                     {project.name || text.untitledProject}
                                                 </span>
-                                                <span className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+                                                <span className="type-caption-1 mt-2 flex items-center gap-1.5 text-zinc-400">
                                                     <Clock className="h-3 w-3" />
                                                     {formatProjectDate(project.created_at)}
                                                 </span>
                                                 {creditSummaries[project.id] ? (
-                                                    <span className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-amber-200">
+                                                    <span className="type-footnote mt-2 flex flex-wrap items-center gap-2 text-amber-200">
                                                         <span>{creditSummaries[project.id].settledCredits.toLocaleString()} credits</span>
                                                         {creditSummaries[project.id].outstandingReservedCredits > 0 ? (
                                                             <span className="text-zinc-500">
@@ -192,28 +183,24 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             >
                                                 <MoreHorizontal className="h-4 w-4" />
                                             </button>
-                                        </motion.div>
+                                        </div>
                                     </div>
                                 ))
                             )}
                         </div>
-                    </motion.div>
+                    </div>
                     {activeProject && menuPosition
                         ? createPortal(
-                            <AnimatePresence>
-                                <motion.div
-                                    initial={{ opacity: 0, y: -4, scale: 0.96 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: -4, scale: 0.96 }}
+                                <div
                                     style={{ left: menuPosition.left, top: menuPosition.top }}
                                     data-surface="frosted-glass"
-                                    className="input-surface fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl border border-white/15 p-1.5 text-zinc-100 shadow-xl"
+                                    className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
                                 >
                                     {canDeleteProject ? (
                                         <button
                                             type="button"
                                             onClick={(event) => handleDelete(event, activeProject.id)}
-                                            className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-xs font-bold transition-colors ${confirmingDeleteId === activeProject.id
+                                            className={`type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-colors ${confirmingDeleteId === activeProject.id
                                                 ? 'bg-rose-500 text-white'
                                                 : 'text-zinc-300 hover:bg-rose-500/10 hover:text-rose-200'
                                                 }`}
@@ -222,13 +209,10 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
                                         </button>
                                     ) : null}
-                                </motion.div>
-                            </AnimatePresence>,
+                                </div>,
                             document.body,
                         )
                         : null}
                 </>
-            )}
-        </AnimatePresence>
     );
 }

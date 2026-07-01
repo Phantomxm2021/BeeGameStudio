@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { Camera, Check, ChevronDown, X } from 'lucide-react';
-import { translations, type Language } from './AgentsConfig';
+import type { Language } from './AgentsConfig';
+import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
@@ -49,83 +51,225 @@ type IntakePhase =
     | 'starting_build';
 
 const platformOptions = ['Web', 'Mobile', 'Desktop', 'XR', 'Console'];
-const engineOptions = ['React', 'Phaser', 'Three.js', 'PlayCanvas', 'Unity', 'Godot', 'Unreal Engine', 'Native'];
+const engineOptions = ['React', 'Unity', 'Godot', 'Unreal'];
 const dimensionOptions = ['2D', '3D', 'Mixed'];
 const genreOptions = ['Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy', 'RPG'];
 const styleOptions = ['Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
 const inputOptions = ['Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
 
+type IntakeCopy = {
+    modal: {
+        chooseOption: string;
+        productionSettings: string;
+        confirmBuildBrief: string;
+        startBuild: string;
+        close: string;
+    };
+    optionCard: {
+        mode: string;
+        gameplay: string;
+    };
+    fields: {
+        platform: string;
+        engine: string;
+        dimension: string;
+        genre: string;
+        style: string;
+        inputs: string;
+        notes: string;
+        presentation: string;
+        type: string;
+    };
+    actions: {
+        chooseAgain: string;
+        confirmBrief: string;
+        edit: string;
+        building: string;
+        startBuild: string;
+        continue: string;
+        backToLogin: string;
+        cancel: string;
+        confirmGenerate: string;
+        confirmBuild: string;
+    };
+    clarification: {
+        title: string;
+        freeformLabel: string;
+        placeholder: string;
+    };
+    errors: {
+        missingPlatformModel: string;
+        insufficientCredits: (taskName: string, reservedCredits: number, balanceCredits: number) => string;
+        quoteFailed: string;
+        projectStartFailed: string;
+        authNotConfigured: string;
+        missingEmailPassword: string;
+        missingDisplayName: string;
+        termsRequired: string;
+    };
+    placeholders: {
+        notes: string;
+    };
+    profile: {
+        displayNameFallback: string;
+        emailFallback: string;
+        balance: string;
+        consumed: string;
+        reserved: string;
+        loadingCreditDetails: string;
+        viewCreditDetails: string;
+        ledgerCount: (count: number) => string;
+        noLedgerRecords: string;
+        closeCreditDetails: string;
+        deleteAccount: string;
+        deleteConfirm: string;
+        deleteFailed: string;
+        finish: string;
+        saving: string;
+    };
+    credits: {
+        intakeTask: string;
+        buildTask: string;
+        title: (taskName: string) => string;
+        description: (taskName: string, reservedCredits: number) => string;
+        refundRule: string;
+        balance: string;
+        reserved: string;
+    };
+    auth: {
+        oauthDivider: string;
+        signingIn: string;
+        sendReset: string;
+        registerAndContinue: string;
+        signInAndContinue: string;
+        oauthFailed: string;
+        forgotPassword: string;
+        acceptTermsAria: string;
+        acceptTermsPrefix: string;
+        termsLabel: string;
+        privacyLabel: string;
+        acceptTermsConnector: string;
+        acceptTermsSuffix: string;
+    };
+};
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
+    modal: {
+        chooseOption: translate('modal.chooseOption'),
+        productionSettings: translate('modal.productionSettings'),
+        confirmBuildBrief: translate('modal.confirmBuildBrief'),
+        startBuild: translate('modal.startBuild'),
+        close: translate('modal.close'),
+    },
+    optionCard: {
+        mode: translate('optionCard.mode'),
+        gameplay: translate('optionCard.gameplay'),
+    },
+    fields: {
+        platform: translate('fields.platform'),
+        engine: translate('fields.engine'),
+        dimension: translate('fields.dimension'),
+        genre: translate('fields.genre'),
+        style: translate('fields.style'),
+        inputs: translate('fields.inputs'),
+        notes: translate('fields.notes'),
+        presentation: translate('fields.presentation'),
+        type: translate('fields.type'),
+    },
+    actions: {
+        chooseAgain: translate('actions.chooseAgain'),
+        confirmBrief: translate('actions.confirmBrief'),
+        edit: translate('actions.edit'),
+        building: translate('actions.building'),
+        startBuild: translate('actions.startBuild'),
+        continue: translate('actions.continue'),
+        backToLogin: translate('actions.backToLogin'),
+        cancel: translate('actions.cancel'),
+        confirmGenerate: translate('actions.confirmGenerate'),
+        confirmBuild: translate('actions.confirmBuild'),
+    },
+    clarification: {
+        title: translate('clarification.title'),
+        freeformLabel: translate('clarification.freeformLabel'),
+        placeholder: translate('clarification.placeholder'),
+    },
+    errors: {
+        missingPlatformModel: translate('errors.missingPlatformModel'),
+        insufficientCredits: (taskName, reservedCredits, balanceCredits) => translate('errors.insufficientCredits', {
+            taskName,
+            reservedCredits,
+            balanceCredits,
+        }),
+        quoteFailed: translate('errors.quoteFailed'),
+        projectStartFailed: translate('errors.projectStartFailed'),
+        authNotConfigured: translate('errors.authNotConfigured'),
+        missingEmailPassword: translate('errors.missingEmailPassword'),
+        missingDisplayName: translate('errors.missingDisplayName'),
+        termsRequired: translate('errors.termsRequired'),
+    },
+    placeholders: {
+        notes: translate('placeholders.notes'),
+    },
+    profile: {
+        displayNameFallback: translate('profile.displayNameFallback'),
+        emailFallback: translate('profile.emailFallback'),
+        balance: translate('profile.balance'),
+        consumed: translate('profile.consumed'),
+        reserved: translate('profile.reserved'),
+        loadingCreditDetails: translate('profile.loadingCreditDetails'),
+        viewCreditDetails: translate('profile.viewCreditDetails'),
+        ledgerCount: count => translate('profile.ledgerCount', { count }),
+        noLedgerRecords: translate('profile.noLedgerRecords'),
+        closeCreditDetails: translate('profile.closeCreditDetails'),
+        deleteAccount: translate('profile.deleteAccount'),
+        deleteConfirm: translate('profile.deleteConfirm'),
+        deleteFailed: translate('profile.deleteFailed'),
+        finish: translate('profile.finish'),
+        saving: translate('profile.saving'),
+    },
+    credits: {
+        intakeTask: translate('credits.task.ideaIntake'),
+        buildTask: translate('credits.task.fullBuild'),
+        title: taskName => (
+            taskName === translate('credits.task.ideaIntake')
+                ? translate('credits.title.ideaIntake')
+                : translate('credits.title.fullBuild')
+        ),
+        description: (taskName, reservedCredits) => translate('credits.description', {
+            taskName,
+            reservedCredits,
+        }),
+        refundRule: translate('credits.refundRule'),
+        balance: translate('credits.balance'),
+        reserved: translate('credits.reserved'),
+    },
+    auth: {
+        oauthDivider: translate('auth.oauthDivider'),
+        signingIn: translate('auth.signingIn'),
+        sendReset: translate('auth.sendReset'),
+        registerAndContinue: translate('auth.registerAndContinue'),
+        signInAndContinue: translate('auth.signInAndContinue'),
+        oauthFailed: translate('auth.oauthFailed'),
+        forgotPassword: translate('auth.forgotPassword'),
+        acceptTermsAria: translate('auth.acceptTermsAria'),
+        acceptTermsPrefix: translate('auth.acceptTermsPrefix'),
+        termsLabel: translate('auth.termsLabel'),
+        privacyLabel: translate('auth.privacyLabel'),
+        acceptTermsConnector: translate('auth.acceptTermsConnector'),
+        acceptTermsSuffix: translate('auth.acceptTermsSuffix'),
+    },
+});
+
 type LegalDocumentKind = 'terms' | 'privacy';
 
-const legalDocuments: Record<LegalDocumentKind, {
+type LegalDocumentBundle = Record<LegalDocumentKind, {
     title: string;
     updatedAt: string;
     intro: string;
     sections: Array<{ title: string; body: string }>;
-}> = {
-    terms: {
-        title: 'BeeGame 用户协议',
-        updatedAt: '2026-06-27',
-        intro: '欢迎使用 BeeGame。本协议说明你在使用 BeeGame 生成、管理和预览游戏项目时的基本权利与责任。',
-        sections: [
-            {
-                title: '账号与安全',
-                body: '你需要提供真实可用的邮箱和昵称来创建账号。请妥善保管登录凭证，不要共享账号或用于规避系统限制。',
-            },
-            {
-                title: '生成服务与 Credit',
-                body: 'BeeGame 会根据你的输入调用模型、工具和项目运行环境生成游戏文档、代码、资源占位和预览。生成行为会消耗 credit，实际消耗可能因项目复杂度、模型、工具调用和重试次数变化。',
-            },
-            {
-                title: '内容与项目归属',
-                body: '你保留自己输入的 idea、上传资源和项目文件的权利。你需要确认输入、上传和分发的内容不侵犯第三方权利，也不违反适用法律或平台规则。',
-            },
-            {
-                title: '可用性与风险',
-                body: 'BeeGame 会尽力帮助你创建可运行的游戏项目，但生成内容可能包含错误、遗漏或不适合商业发布的部分。正式发布前，你应自行审查、测试并确认合规。',
-            },
-            {
-                title: '禁止行为',
-                body: '不得使用 BeeGame 生成恶意软件、规避安全策略、侵犯他人权益、违反法律法规或破坏服务稳定性的内容。',
-            },
-            {
-                title: '变更与终止',
-                body: 'BeeGame 可根据产品、安全或合规要求调整功能、计费和使用规则。你可以在个人主页注销账号；注销后云端账号和关联数据将按系统策略删除。',
-            },
-        ],
-    },
-    privacy: {
-        title: 'BeeGame 隐私条款',
-        updatedAt: '2026-06-27',
-        intro: '本条款说明 BeeGame 如何处理登录、生成游戏和管理项目过程中涉及的数据。',
-        sections: [
-            {
-                title: '我们收集的数据',
-                body: '我们会处理你的账号信息、邮箱、昵称、头像地址、模型配置、项目元数据、生成记录、工具日志、credit 记录以及你主动上传的资源。',
-            },
-            {
-                title: '数据用途',
-                body: '这些数据用于身份验证、保存项目、同步配置、执行生成任务、展示历史记录、计算 credit、排查错误和改进产品体验。',
-            },
-            {
-                title: '模型与第三方服务',
-                body: '当你配置第三方 LLM、搜索、MCP 或托管服务时，相关请求可能会发送到你选择的服务商。请确认这些服务商的隐私和数据处理规则符合你的需求。',
-            },
-            {
-                title: '资源与项目文件',
-                body: '你上传的素材和生成的项目文件会用于当前项目构建、预览和后续修改。请不要上传你无权使用的素材、敏感身份信息或密钥。',
-            },
-            {
-                title: '数据保留与删除',
-                body: '你可以在个人主页注销账号。注销会触发账号删除流程，并按数据库关联规则清理云端账号数据。部分本地工作目录、导出包或备份需要你自行管理。',
-            },
-            {
-                title: '安全',
-                body: 'BeeGame 会通过登录鉴权、权限控制和隔离的项目工作目录降低风险。你仍应避免在项目或提示词中写入未加保护的密钥、凭证和隐私信息。',
-            },
-        ],
-    },
-};
+}>;
 
 interface LandingViewProps {
     onStart: (projectName: string, clarification?: Record<string, string>, brief?: BeeGameBuildBrief) => StartProjectResult | Promise<StartProjectResult>;
@@ -160,7 +304,7 @@ function normalizeInputs(inputs: string[]): string[] {
     return normalized.length > 0 ? normalized : ['Keyboard/mouse'];
 }
 
-function normalizeOptionValue(options: string[], value: string | undefined, fallback: string): string {
+function normalizeOptionValue(_options: string[], value: string | undefined, fallback: string): string {
     const normalized = value?.trim();
     if (!normalized || normalized === 'Auto') return fallback;
     return normalized;
@@ -176,10 +320,15 @@ function inferPlatform(value: string | undefined): string {
 function inferEngine(value: string | undefined): string {
     const normalized = value?.trim();
     if (!normalized || normalized === 'Auto') return 'React';
+    if (normalized === 'Unreal Engine') return 'Unreal';
     if (engineOptions.includes(normalized)) return normalized;
     if (normalized === 'Web') return 'React';
     if (normalized === 'XR') return 'Unity';
     return 'React';
+}
+
+function normalizeEngine(value: string | undefined): string {
+    return normalizeOptionValue(engineOptions, value === 'Unreal Engine' ? 'Unreal' : value, 'React');
 }
 
 const pendingCreditStorageKey = 'beegame.pendingCreditQuote.v1';
@@ -213,6 +362,12 @@ type PendingIntakeFlowState = {
     selectedOption?: BeeGameIntakeOption;
     settings?: BeeGameIntakeSettings;
     createdAt: number;
+};
+
+type InputMenuPosition = {
+    left: number;
+    top: number;
+    width: number;
 };
 
 function readPendingCreditState(): PendingCreditState | null {
@@ -407,6 +562,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
+    const { t: translate, i18n } = useTranslation();
     const [restoredPendingCredit] = useState<PendingCreditState | null>(() => readPendingCreditState());
     const [restoredIntakeFlow] = useState<PendingIntakeFlowState | null>(() => readPendingIntakeFlowState());
     const [restoredIdeaDraft] = useState<PendingIdeaDraftState | null>(() => readPendingIdeaDraftState());
@@ -463,18 +619,31 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         restoredPendingCredit?.kind === 'build' ? restoredPendingCredit.brief : null,
     );
     const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
-    const t = translations[lang];
+    const inputMenuRef = useRef<HTMLDivElement | null>(null);
+    const inputMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+    const inputMenuDropdownRef = useRef<HTMLDivElement | null>(null);
+    const [inputMenuPosition, setInputMenuPosition] = useState<InputMenuPosition | null>(null);
+    useEffect(() => {
+        void i18n.changeLanguage(normalizeI18nLanguage(lang));
+    }, [i18n, lang]);
+
+    const t = useCommonText(lang);
+    const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
+    const intakeText = createLandingIntakeCopy(intakeTranslate);
+    const legalDocuments = translate('legal', { returnObjects: true }) as LegalDocumentBundle;
+    const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
+    const localizedInputs = (inputs: string[]): string => inputs.map(localizedOptionLabel).join(' / ');
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
-        ? '选择方案'
+        ? intakeText.modal.chooseOption
         : intakePhase === 'configuring_details'
-            ? selectedOption?.title || '制作设置'
+            ? selectedOption?.title || intakeText.modal.productionSettings
             : intakePhase === 'confirming_brief'
-                ? '确认构建方案'
-                : '启动构建';
+                ? intakeText.modal.confirmBuildBrief
+                : intakeText.modal.startBuild;
     const intakeModalWidthClass = intakePhase === 'options_ready'
         ? 'max-w-5xl'
-        : 'max-w-xl';
+        : 'max-w-[34rem]';
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
     const currentUser = useSystemStore(state => state.currentUser);
@@ -568,19 +737,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         try {
             const modelConfigs = await listModelConfigs();
             if (modelConfigs.length === 0) {
-                setIntakeError('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。');
+                setIntakeError(intakeText.errors.missingPlatformModel);
                 return;
             }
             const quote = await getCreditQuote('idea_intake');
             if (!quote.canStart) {
-                setIntakeError(`Credit 不足。本次方案生成需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
+                setIntakeError(intakeText.errors.insufficientCredits(
+                    intakeText.credits.intakeTask,
+                    quote.reservedCredits,
+                    quote.balanceCredits,
+                ));
                 return;
             }
             setPendingIntakeIdea(idea);
             setIntakeCreditQuote(quote);
             writePendingCreditState({ kind: 'intake', idea, quote });
         } catch (error) {
-            setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
+            setIntakeError(error instanceof Error ? error.message : intakeText.errors.quoteFailed);
             console.error('Failed to quote intake credits:', error);
         } finally {
             setIsPreparing(false);
@@ -599,6 +772,39 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIsLoginPromptOpen(false);
         void requestIntakeCreditConfirmation(pendingAuthIdea.idea);
     }, [currentUser?.id]);
+
+    useEffect(() => {
+        if (!isInputMenuOpen) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (inputMenuRef.current?.contains(target)) return;
+            if (inputMenuDropdownRef.current?.contains(target)) return;
+            setIsInputMenuOpen(false);
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isInputMenuOpen]);
+
+    useEffect(() => {
+        if (!isInputMenuOpen) return;
+        const updatePosition = () => {
+            const rect = inputMenuButtonRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setInputMenuPosition({
+                left: rect.left,
+                top: rect.bottom + 8,
+                width: rect.width,
+            });
+        };
+        updatePosition();
+        window.addEventListener('resize', updatePosition);
+        window.addEventListener('scroll', updatePosition, true);
+        return () => {
+            window.removeEventListener('resize', updatePosition);
+            window.removeEventListener('scroll', updatePosition, true);
+        };
+    }, [isInputMenuOpen]);
 
     const runIntake = async (idea: string) => {
         setIntakeError('');
@@ -624,7 +830,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 setClarification({
                     prompt: intake.clarificationQuestions[0],
                     options: [],
-                    freeformLabel: '我来补充',
+                    freeformLabel: translate('intake.clarification.freeformOption'),
                 });
                 return;
             }
@@ -659,7 +865,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsPreparing(false);
             setIntakePhase('idle');
             setIsTransitioning(false);
-            setIntakeError(error instanceof Error ? error.message : '方案生成失败，请重试。');
+            setIntakeError(error instanceof Error ? error.message : translate('intake.errors.intakeFailed'));
             console.error('Failed to generate intake options:', error);
         }
     };
@@ -690,21 +896,21 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setLoginError('');
         setLoginNotice('');
         if (!isSupabaseAuthConfigured()) {
-            setLoginError('Supabase Auth 尚未配置。');
+            setLoginError(intakeText.errors.authNotConfigured);
             return;
         }
         const email = loginEmail.trim();
         if (!email || !loginPassword) {
-            setLoginError('请输入邮箱和密码。');
+            setLoginError(intakeText.errors.missingEmailPassword);
             return;
         }
         if (authMode === 'register') {
             if (!registerDisplayName.trim()) {
-                setLoginError('请设置昵称。');
+                setLoginError(intakeText.errors.missingDisplayName);
                 return;
             }
             if (!hasAcceptedTerms) {
-                setLoginError('请先阅读并同意用户协议。');
+                setLoginError(intakeText.errors.termsRequired);
                 return;
             }
         }
@@ -735,7 +941,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 }
             }
         } catch (error) {
-            setLoginError(error instanceof Error ? error.message : '登录失败，请重试。');
+            setLoginError(error instanceof Error ? error.message : translate('intake.errors.loginFailed'));
         } finally {
             setIsSigningIn(false);
         }
@@ -746,15 +952,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setLoginNotice('');
         const email = loginEmail.trim();
         if (!email) {
-            setLoginError('请输入邮箱，我们会发送重置密码邮件。');
+            setLoginError(translate('intake.errors.resetEmailRequired'));
             return;
         }
         setIsSigningIn(true);
         try {
             await sendSupabasePasswordReset(email);
-            setLoginNotice('重置密码邮件已发送，请检查邮箱。');
+            setLoginNotice(translate('intake.errors.resetEmailSent'));
         } catch (error) {
-            setLoginError(error instanceof Error ? error.message : '重置密码邮件发送失败。');
+            setLoginError(error instanceof Error ? error.message : translate('intake.errors.resetEmailFailed'));
         } finally {
             setIsSigningIn(false);
         }
@@ -780,21 +986,21 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProfileError('');
         setProfileNotice('');
         if (!file.type.startsWith('image/')) {
-            setProfileError('请选择图片文件。');
+            setProfileError(translate('intake.errors.profileImageRequired'));
             return;
         }
         if (file.size > 2 * 1024 * 1024) {
-            setProfileError('头像图片不能超过 2MB。');
+            setProfileError(translate('intake.errors.profileImageTooLarge'));
             return;
         }
         setIsSavingProfile(true);
         void uploadSupabaseAvatarImage(file)
             .then(url => {
                 setAvatarDraft(url);
-                setProfileNotice('头像已选择，点击完成后保存。');
+                setProfileNotice(translate('intake.errors.profileAvatarSelected'));
             })
             .catch(error => {
-                setProfileError(error instanceof Error ? error.message : '头像上传失败，请换一张图片。');
+                setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
             })
             .finally(() => setIsSavingProfile(false));
     };
@@ -815,7 +1021,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             await loadCurrentUser();
             setIsProfileOpen(false);
         } catch (error) {
-            setProfileError(error instanceof Error ? error.message : '头像更新失败。');
+            setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
         } finally {
             setIsSavingProfile(false);
         }
@@ -824,7 +1030,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleDeleteAccount = async () => {
         setProfileError('');
         setProfileNotice('');
-        const confirmed = window.confirm('注销账户会删除你的 BeeGame 登录账号和云端数据。此操作无法撤销，是否继续？');
+        const confirmed = window.confirm(intakeText.profile.deleteConfirm);
         if (!confirmed) return;
         try {
             await deleteCurrentUser();
@@ -832,7 +1038,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsProfileOpen(false);
             await loadCurrentUser();
         } catch (error) {
-            setProfileError(error instanceof Error ? error.message : '注销账户失败，请稍后重试。');
+            setProfileError(error instanceof Error ? error.message : intakeText.profile.deleteFailed);
         }
     };
 
@@ -843,7 +1049,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             await signInWithSupabaseOAuth(provider);
         } catch (error) {
             clearPendingAuthIdeaState();
-            setLoginError(error instanceof Error ? error.message : '第三方登录启动失败。');
+            setLoginError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
         }
     };
 
@@ -974,7 +1180,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         } catch (error) {
             setIsPreparing(false);
             setIntakePhase('confirming_brief');
-            setIntakeError(error instanceof Error ? error.message : '项目启动失败，请检查服务后重试。');
+            setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
             console.error('Failed to start confirmed project:', error);
         }
     };
@@ -984,7 +1190,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         const brief: BeeGameBuildBrief = {
             idea: projectName.trim(),
             option: selectedOption,
-            settings,
+            settings: {
+                ...settings,
+                engine: normalizeEngine(settings.engine),
+            },
             title: selectedOption.title,
             language: lang,
         };
@@ -993,14 +1202,18 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         try {
             const quote = await getCreditQuote('full_build');
             if (!quote.canStart) {
-                setIntakeError(`Credit 不足。本次构建需要预扣 ${quote.reservedCredits} credits，你当前有 ${quote.balanceCredits} credits。`);
+                setIntakeError(intakeText.errors.insufficientCredits(
+                    intakeText.credits.buildTask,
+                    quote.reservedCredits,
+                    quote.balanceCredits,
+                ));
                 return;
             }
             setPendingBuildBrief(brief);
             setBuildCreditQuote(quote);
             writePendingCreditState({ kind: 'build', brief, quote });
         } catch (error) {
-            setIntakeError(error instanceof Error ? error.message : '无法获取 credit 预估，请检查服务后重试。');
+            setIntakeError(error instanceof Error ? error.message : intakeText.errors.quoteFailed);
             console.error('Failed to quote build credits:', error);
         } finally {
             setIsPreparing(false);
@@ -1034,14 +1247,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
     };
     return (
-        <AnimatePresence mode="wait">
-            <motion.div
+            <div
                 key="landing"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0, scale: 1.05, filter: 'blur(20px)' }}
-                transition={{ duration: 0.8 }}
-                className="absolute inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-white dark:bg-zinc-950"
+                className={`absolute inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-white opacity-100 transition-opacity duration-300 dark:bg-zinc-950 ${isTransitioning ? 'opacity-0' : ''}`}
             >
                 <FaultyTerminalBackground isTransitioning={isTransitioning} />
 
@@ -1091,37 +1299,37 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     <div
                         role="dialog"
                         aria-modal="true"
-                        aria-label="个人主页"
+                        aria-label={translate('intake.profile.title')}
                         data-surface="frosted-glass"
                         className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
                     >
-                        <div className="input-surface w-full max-w-md rounded-[28px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]">
+                        <div className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100">
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <h2 className="text-2xl font-semibold text-white">个人主页</h2>
-                                    <p className="mt-3 text-sm leading-6 text-zinc-300">
-                                        管理你的 BeeGame 账号资料和登录状态。
+                                    <h2 className="type-title-3 text-white">{translate('intake.profile.title')}</h2>
+                                    <p className="type-callout mt-3 text-zinc-300">
+                                        {translate('intake.profile.description')}
                                     </p>
                                 </div>
                                 <button
                                     type="button"
-                                    aria-label="关闭个人主页"
+                                    aria-label={translate('intake.profile.close')}
                                     onClick={() => setIsProfileOpen(false)}
-                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
                             </div>
 
                             <div className="mt-8 flex flex-col items-center text-center">
-                                <label className="group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-3xl font-black text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition hover:border-amber-200/70">
+                                <label className="type-title-3 group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition hover:border-amber-200/70">
                                     {avatarDraft ? (
                                         <img src={avatarDraft} alt="" className="h-full w-full object-cover" />
                                     ) : (
                                         getDisplayInitial(currentUser.displayName || currentUser.email || currentUser.id)
                                     )}
                                     <input
-                                        aria-label="上传头像"
+                                        aria-label={translate('intake.profile.uploadAvatar')}
                                         type="file"
                                         accept="image/*"
                                         onChange={handleAvatarFileChange}
@@ -1131,42 +1339,42 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         <Camera className="h-6 w-6 text-white" />
                                     </span>
                                 </label>
-                                <div className="mt-5 max-w-full truncate text-2xl font-semibold text-white">
-                                    {currentUser.displayName || '未设置昵称'}
+                                <div className="type-headline mt-5 max-w-full truncate text-white">
+                                    {currentUser.displayName || intakeText.profile.displayNameFallback}
                                 </div>
-                                <div className="mt-1 max-w-full truncate text-sm text-zinc-400">
-                                    {currentUser.email || '邮箱未公开'}
+                                <div className="type-footnote mt-1 max-w-full truncate text-zinc-400">
+                                    {currentUser.email || intakeText.profile.emailFallback}
                                 </div>
                             </div>
 
-                            {profileError ? <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">{profileError}</div> : null}
-                            {profileNotice ? <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">{profileNotice}</div> : null}
+                            {profileError ? <div className="type-footnote mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-red-100">{profileError}</div> : null}
+                            {profileNotice ? <div className="type-footnote mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-emerald-100">{profileNotice}</div> : null}
 
                             <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-left">
                                 <div className="flex items-center justify-between gap-3">
-                                    <div className="text-sm font-semibold text-white">Credit 用量</div>
+                                    <div className="type-callout text-white">{translate('intake.profile.creditUsage')}</div>
                                     {creditBalance ? (
-                                        <div className="text-xs font-bold text-emerald-200">
+                                        <div className="type-footnote text-emerald-200">
                                             {creditBalance.balanceCredits} credits
                                         </div>
                                     ) : null}
                                 </div>
                                 {creditBalance ? (
                                     <div className="mt-4 grid grid-cols-3 gap-2">
-                                        <CreditMetric label="余额" value={creditBalance.balanceCredits} tone="positive" />
-                                        <CreditMetric label="已用" value={creditBalance.consumedCredits} />
-                                        <CreditMetric label="冻结" value={creditBalance.reservedCredits} />
+                                        <CreditMetric label={intakeText.profile.balance} value={creditBalance.balanceCredits} tone="positive" />
+                                        <CreditMetric label={intakeText.profile.consumed} value={creditBalance.consumedCredits} />
+                                        <CreditMetric label={intakeText.profile.reserved} value={creditBalance.reservedCredits} />
                                     </div>
                                 ) : null}
                                 <button
                                     type="button"
                                     onClick={() => setIsCreditLedgerExpanded(true)}
                                     disabled={isCreditLedgerLoading}
-                                    className="mt-4 flex h-12 w-full items-center justify-between rounded-2xl border border-white/15 bg-black/15 px-4 text-left text-sm font-bold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="type-button mt-4 flex h-12 w-full items-center justify-between rounded-2xl border border-white/15 bg-black/15 px-4 text-left text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    <span>{isCreditLedgerLoading ? '正在加载记录...' : '查看 Credit 明细'}</span>
-                                    <span className="text-xs font-black text-zinc-500">
-                                        {creditLedger.length > 0 ? `${creditLedger.length} 条` : '暂无记录'}
+                                    <span>{isCreditLedgerLoading ? intakeText.profile.loadingCreditDetails : intakeText.profile.viewCreditDetails}</span>
+                                    <span className="type-footnote text-zinc-500">
+                                        {creditLedger.length > 0 ? intakeText.profile.ledgerCount(creditLedger.length) : intakeText.profile.noLedgerRecords}
                                     </span>
                                 </button>
                             </div>
@@ -1175,17 +1383,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <button
                                     type="button"
                                     onClick={() => void handleDeleteAccount()}
-                                    className="rounded-full border border-red-300/25 px-5 py-2.5 text-sm font-bold text-red-200 transition hover:border-red-200/50 hover:bg-red-500/10"
+                                    className="type-button rounded-full border border-red-300/25 px-5 py-2.5 text-red-200 transition hover:border-red-200/50 hover:bg-red-500/10"
                                 >
-                                    注销账户
+                                    {intakeText.profile.deleteAccount}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => void handleFinishProfile()}
                                     disabled={isSavingProfile}
-                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {isSavingProfile ? '保存中...' : '完成'}
+                                    {isSavingProfile ? intakeText.profile.saving : intakeText.profile.finish}
                                 </button>
                             </div>
                         </div>
@@ -1196,23 +1404,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     <div
                         role="dialog"
                         aria-modal="true"
-                        aria-label="Credit 明细"
+                        aria-label={translate('intake.profile.creditDetailsTitle')}
                         data-surface="frosted-glass"
                         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
                     >
-                        <div className="input-surface flex max-h-[78vh] w-full max-w-lg flex-col rounded-[28px] border border-white/20 p-5 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
+                        <div className="input-surface glass-panel flex max-h-[78vh] w-full max-w-lg flex-col rounded-[28px] p-5 text-zinc-100">
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <h2 className="text-2xl font-semibold text-white">Credit 明细</h2>
-                                    <p className="mt-2 text-sm text-zinc-400">
-                                        按任务环节记录预扣、结算和退回。
+                                    <h2 className="type-title-3 text-white">{translate('intake.profile.creditDetailsTitle')}</h2>
+                                    <p className="type-footnote mt-2 text-zinc-400">
+                                        {translate('intake.profile.creditDetailsDescription')}
                                     </p>
                                 </div>
-                                <button
-                                    type="button"
-                                    aria-label="关闭 Credit 明细"
+	                                <button
+	                                    type="button"
+	                                    aria-label={intakeText.profile.closeCreditDetails}
                                     onClick={() => setIsCreditLedgerExpanded(false)}
-                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
@@ -1220,10 +1428,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             <div className="mt-5 max-h-[52vh] space-y-2 overflow-y-auto pr-1" data-credit-ledger-scroll="true">
                                 {creditLedger.length > 0 ? (
                                     creditLedger.map(entry => (
-                                        <CreditLedgerRow key={entry.id} entry={entry} />
+                                        <CreditLedgerRow key={entry.id} entry={entry} translate={intakeTranslate} />
                                     ))
                                 ) : (
-                                    <div className="text-sm text-zinc-500">暂无记录</div>
+	                                    <div className="type-footnote text-zinc-500">{intakeText.profile.noLedgerRecords}</div>
                                 )}
                             </div>
                         </div>
@@ -1234,36 +1442,28 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     <div
                         role="dialog"
                         aria-modal="true"
-                        aria-label="登录 / 注册 BeeGame"
+                        aria-label={translate('intake.auth.dialogLabel')}
                         data-surface="frosted-glass"
                         className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
                     >
                         <form
                             onSubmit={handleLoginSubmit}
-                            className="input-surface w-full max-w-md rounded-[28px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                            className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100"
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <h2 className="text-2xl font-semibold text-white">
-                                        {authMode === 'resetPassword'
-                                            ? '重置密码'
-                                            : authMode === 'register'
-                                                ? '创建 BeeGame 账号'
-                                                : '欢迎回来'}
+                                    <h2 className="type-title-3 text-white">
+                                        {translate(`intake.auth.title.${authMode === 'resetPassword' ? 'resetPassword' : authMode === 'register' ? 'register' : 'login'}`)}
                                     </h2>
-                                    <p className="mt-3 text-sm leading-6 text-zinc-300">
-                                        {authMode === 'resetPassword'
-                                            ? '输入注册邮箱，我们会发送密码重置邮件。'
-                                            : authMode === 'register'
-                                                ? '设置昵称后即可保存项目、同步配置，并继续生成游戏方案。'
-                                                : '登录后继续你的项目、生成进度和账号设置。'}
+                                    <p className="type-callout mt-3 text-zinc-300">
+                                        {translate(`intake.auth.description.${authMode === 'resetPassword' ? 'resetPassword' : authMode === 'register' ? 'register' : 'login'}`)}
                                     </p>
                                 </div>
                                 <button
                                     type="button"
-                                    aria-label="关闭登录弹窗"
+                                    aria-label={translate('intake.auth.close')}
                                     onClick={handleCloseLoginPrompt}
-                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
@@ -1277,9 +1477,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                        className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                    className={`type-button rounded-full px-3 py-2 transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
                                     >
-                                        登录
+                                        {translate('intake.auth.tabs.login')}
                                     </button>
                                     <button
                                         type="button"
@@ -1288,50 +1488,50 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                        className={`rounded-full px-3 py-2 text-sm font-semibold transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                    className={`type-button rounded-full px-3 py-2 transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
                                     >
-                                        注册账号
+                                        {translate('intake.auth.tabs.register')}
                                     </button>
                                 </div>
                             ) : null}
                             <div className="mt-6 space-y-3">
                                 {authMode === 'register' ? (
-                                    <label className="block text-sm font-semibold text-zinc-200">
-                                        昵称
+                                    <label className="type-subheadline block text-zinc-200">
+                                        {translate('intake.auth.fields.displayName')}
                                         <input
-                                            aria-label="注册昵称"
+                                            aria-label={translate('intake.auth.fields.displayNameAria')}
                                             type="text"
                                             value={registerDisplayName}
                                             onChange={(event) => setRegisterDisplayName(event.target.value)}
-                                            className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                            className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
                                             autoComplete="nickname"
-                                            placeholder="例如：Bee Maker"
+                                            placeholder={translate('intake.auth.fields.displayNamePlaceholder')}
                                         />
                                     </label>
                                 ) : null}
-                                <label className="block text-sm font-semibold text-zinc-200">
-                                    邮箱
+                                <label className="type-subheadline block text-zinc-200">
+                                    {translate('intake.auth.fields.email')}
                                     <input
-                                        aria-label="邮箱"
+                                        aria-label={translate('intake.auth.fields.emailAria')}
                                         type="email"
                                         value={loginEmail}
                                         onChange={(event) => setLoginEmail(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                        className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
                                         autoComplete="email"
                                         placeholder="you@example.com"
                                     />
                                 </label>
                                 {authMode !== 'resetPassword' ? (
-                                    <label className="block text-sm font-semibold text-zinc-200">
-                                    密码
+                                    <label className="type-subheadline block text-zinc-200">
+                                    {translate('intake.auth.fields.password')}
                                     <input
-                                        aria-label="密码"
+                                        aria-label={translate('intake.auth.fields.passwordAria')}
                                         type="password"
                                         value={loginPassword}
                                         onChange={(event) => setLoginPassword(event.target.value)}
-                                        className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-black/15 px-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70"
+                                        className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
                                         autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                                        placeholder={authMode === 'register' ? '至少 6 位密码' : '输入密码'}
+                                        placeholder={authMode === 'register' ? translate('intake.auth.fields.passwordNewPlaceholder') : translate('intake.auth.fields.passwordPlaceholder')}
                                     />
                                     </label>
                                 ) : null}
@@ -1344,56 +1544,56 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginNotice('');
                                         }}
                                         disabled={isSigningIn}
-                                        className="mx-auto block text-center text-sm font-semibold text-zinc-300 transition hover:text-white disabled:opacity-60"
+                                        className="type-button mx-auto block text-center text-zinc-300 transition hover:text-white disabled:opacity-60"
                                     >
-                                        忘记密码？
+	                                        {intakeText.auth.forgotPassword}
                                     </button>
                                 ) : (
-                                    <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300">
+                                    <label className="type-callout flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-zinc-300">
                                         <input
-                                            aria-label="同意用户协议"
+	                                            aria-label={intakeText.auth.acceptTermsAria}
                                             type="checkbox"
                                             checked={hasAcceptedTerms}
                                             onChange={(event) => setHasAcceptedTerms(event.target.checked)}
                                             className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30"
                                         />
                                         <span>
-                                            我已阅读并同意 BeeGame{' '}
+	                                            {intakeText.auth.acceptTermsPrefix}{' '}
                                             <button
                                                 type="button"
                                                 onClick={() => setActiveLegalDocument('terms')}
-                                                className="font-semibold text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+	                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
                                             >
-                                                用户协议
+	                                                {intakeText.auth.termsLabel}
                                             </button>
-                                            {' '}与{' '}
+	                                            {' '}{intakeText.auth.acceptTermsConnector}{' '}
                                             <button
                                                 type="button"
                                                 onClick={() => setActiveLegalDocument('privacy')}
-                                                className="font-semibold text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+	                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
                                             >
-                                                隐私条款
+	                                                {intakeText.auth.privacyLabel}
                                             </button>
-                                            ，理解生成内容会消耗 credit。
+	                                            {intakeText.auth.acceptTermsSuffix}
                                         </span>
                                     </label>
                                 )}
                             </div>
                             {loginError ? (
-                                <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-sm text-red-100">
+                                <div className="type-footnote mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-red-100">
                                     {loginError}
                                 </div>
                             ) : null}
                             {loginNotice ? (
-                                <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-100">
+                                <div className="type-footnote mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-emerald-100">
                                     {loginNotice}
                                 </div>
                             ) : null}
                             {authMode === 'login' ? (
                                 <>
-                                    <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                    <div className="type-caption-1 my-5 flex items-center gap-3 text-zinc-500">
                                         <span className="h-px flex-1 bg-white/10" />
-                                        <span>或使用第三方账号</span>
+                                        <span>{intakeText.auth.oauthDivider}</span>
                                         <span className="h-px flex-1 bg-white/10" />
                                     </div>
                                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1414,23 +1614,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                        className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                                        className="secondary-pill type-button px-5 py-2.5"
                                     >
-                                        返回登录
+                                        {intakeText.actions.backToLogin}
                                     </button>
                                 ) : null}
                                 <button
                                     type="submit"
                                     disabled={isSigningIn}
-                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {isSigningIn
-                                        ? '处理中...'
+                                        ? intakeText.auth.signingIn
                                         : authMode === 'resetPassword'
-                                            ? '发送重置邮件'
+                                            ? intakeText.auth.sendReset
                                             : authMode === 'register'
-                                                ? '注册并继续'
-                                                : '登录并继续'}
+                                                ? intakeText.auth.registerAndContinue
+                                                : intakeText.auth.signInAndContinue}
                                 </button>
                             </div>
                         </form>
@@ -1445,24 +1645,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         data-surface="frosted-glass"
                         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm"
                     >
-                        <div className="input-surface flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-[30px] border border-white/20 p-6 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-7">
+                        <div className="input-surface glass-panel flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-[30px] p-6 text-zinc-100 sm:p-7">
                             <div className="flex items-start justify-between gap-4">
                                 <div className="min-w-0">
-                                    <h2 className="text-2xl font-semibold text-white">
+                                    <h2 className="type-title-3 text-white">
                                         {legalDocuments[activeLegalDocument].title}
                                     </h2>
-                                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                        Updated {legalDocuments[activeLegalDocument].updatedAt}
+                                    <p className="type-caption-1 mt-2 text-zinc-500">
+                                        {translate('intake.auth.legalUpdated', { date: legalDocuments[activeLegalDocument].updatedAt })}
                                     </p>
-                                    <p className="mt-4 text-sm leading-6 text-zinc-300">
+                                    <p className="type-callout mt-4 text-zinc-300">
                                         {legalDocuments[activeLegalDocument].intro}
                                     </p>
                                 </div>
                                 <button
                                     type="button"
-                                    aria-label="关闭法律文档"
+                                    aria-label={translate('intake.auth.legalClose')}
                                     onClick={() => setActiveLegalDocument(null)}
-                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white"
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>
@@ -1471,8 +1671,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <div className="space-y-4">
                                     {legalDocuments[activeLegalDocument].sections.map(section => (
                                         <section key={section.title} className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-                                            <h3 className="text-sm font-bold text-white">{section.title}</h3>
-                                            <p className="mt-2 text-sm leading-6 text-zinc-300">{section.body}</p>
+                                            <h3 className="type-subheadline text-white">{section.title}</h3>
+                                            <p className="type-callout mt-2 text-zinc-300">{section.body}</p>
                                         </section>
                                     ))}
                                 </div>
@@ -1481,9 +1681,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <button
                                     type="button"
                                     onClick={() => setActiveLegalDocument(null)}
-                                    className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-amber-200"
+                                    className="primary-pill type-button px-5 py-2.5"
                                 >
-                                    我已了解
+                                    {translate('intake.auth.legalUnderstand')}
                                 </button>
                             </div>
                         </div>
@@ -1513,20 +1713,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     data-intake-modal="true"
                     className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm"
                 >
-                    <div className={`input-surface relative flex max-h-[calc(100vh-3rem)] w-full ${intakeModalWidthClass} flex-col overflow-hidden rounded-[32px] border border-white/20 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)]`}>
+                    <div className={`input-surface glass-panel relative flex max-h-[calc(100vh-3rem)] w-full ${intakeModalWidthClass} flex-col overflow-hidden rounded-[32px] text-zinc-100`}>
                         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,212,54,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.08),transparent_38%)]" />
                         <div className="relative z-10 flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
                             <div className="min-w-0">
-                                <h2 className="text-2xl font-semibold tracking-normal text-white">
+                                <h2 className="type-title-2 text-white">
                                     {modalTitle}
                                 </h2>
                             </div>
                             <button
                                 type="button"
-                                aria-label="关闭方案弹窗"
+                                aria-label={intakeText.modal.close}
                                 disabled={isPreparing || isTransitioning}
                                 onClick={handleCloseIntake}
-                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#757575]/10 text-[#c5c1b9] transition hover:bg-[#757575]/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -1542,31 +1742,31 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="button"
                                         onClick={() => handleSelectOption(option)}
                                         data-testid="intake-option-card"
-                                        className="group grid h-[24rem] grid-rows-[4.75rem_1.25rem_minmax(0,1fr)_2.75rem] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
+                                        className="group grid h-[25rem] grid-rows-[5.25rem_1.75rem_minmax(0,1fr)_2.75rem] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
                                     >
                                         <div className="min-h-0">
-                                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">游戏模式</div>
+                                            <div className="type-caption-1 text-amber-300">{intakeText.optionCard.mode}</div>
                                             <div
                                                 data-testid="intake-option-title"
-                                                className="mt-2 max-h-12 overflow-hidden text-2xl font-semibold leading-tight tracking-normal text-white"
+                                                className="type-title-3 mt-2 line-clamp-2 overflow-hidden text-white"
                                             >
                                                 {option.title}
                                             </div>
                                         </div>
-                                        <div className="self-start text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">玩法</div>
+                                        <div className="type-caption-1 self-start text-amber-300">{intakeText.optionCard.gameplay}</div>
                                         <div
                                             data-testid="intake-option-gameplay"
-                                            className="min-h-0 overflow-y-auto pr-1 text-[15px] font-medium leading-7 text-zinc-300 [scrollbar-width:thin]"
+                                            className="type-body min-h-0 overflow-y-auto pr-1 text-zinc-300 [scrollbar-width:thin]"
                                         >
                                             {option.gameplay}
                                         </div>
                                         {optionTags(option).length > 0 ? (
                                             <div
                                                 data-testid="intake-option-tags"
-                                                className="flex min-h-0 items-end gap-2 overflow-hidden text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300"
+                                                className="type-caption-2 flex min-h-0 items-end gap-2 overflow-hidden text-zinc-300"
                                             >
                                                 {optionTags(option).map(tag => (
-                                                    <span key={tag} className="shrink-0 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5">{tag}</span>
+                                                    <span key={tag} className="shrink-0 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5">{localizedOptionLabel(tag)}</span>
                                                 ))}
                                             </div>
                                         ) : null}
@@ -1579,88 +1779,69 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     {intakePhase === 'configuring_details' && selectedOption && settings ? (
                         <div className="space-y-4" data-testid="intake-settings" data-panel-depth="single">
                             <div className="grid gap-3 sm:grid-cols-2">
-                                <label className="text-sm font-semibold text-zinc-300">
-                                    平台
-                                    <select aria-label="平台" value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
-                                        {optionsWithCurrentValue(platformOptions, settings.platform).map((option) => <option key={option}>{option}</option>)}
+                                <label className="type-subheadline text-zinc-300">
+                                    {intakeText.fields.platform}
+                                    <select aria-label={intakeText.fields.platform} value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
+                                        {optionsWithCurrentValue(platformOptions, settings.platform).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-semibold text-zinc-300">
-                                    引擎
-                                    <select aria-label="引擎" value={settings.engine || 'React'} onChange={(event) => updateSettings({ engine: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
-                                        {optionsWithCurrentValue(engineOptions, settings.engine || 'React').map((option) => <option key={option}>{option}</option>)}
+                                <label className="type-subheadline text-zinc-300">
+                                    {intakeText.fields.engine}
+                                    <select aria-label={intakeText.fields.engine} value={normalizeEngine(settings.engine)} onChange={(event) => updateSettings({ engine: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
+                                        {engineOptions.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-semibold text-zinc-300">
-                                    表现形式
-                                    <select aria-label="表现形式" value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
-                                        {optionsWithCurrentValue(dimensionOptions, settings.dimension).map((option) => <option key={option}>{option}</option>)}
+                                <label className="type-subheadline text-zinc-300">
+                                    {intakeText.fields.dimension}
+                                    <select aria-label={intakeText.fields.dimension} value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
+                                        {optionsWithCurrentValue(dimensionOptions, settings.dimension).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-semibold text-zinc-300">
-                                    游戏类型
-                                    <select aria-label="游戏类型" value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
-                                        {optionsWithCurrentValue(genreOptions, settings.genre).map((option) => <option key={option}>{option}</option>)}
+                                <label className="type-subheadline text-zinc-300">
+                                    {intakeText.fields.genre}
+                                    <select aria-label={intakeText.fields.genre} value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
+                                        {optionsWithCurrentValue(genreOptions, settings.genre).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="text-sm font-semibold text-zinc-300">
-                                    风格
-                                    <select aria-label="风格" value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-sm font-semibold text-white outline-none transition focus:border-white/35">
-                                        {optionsWithCurrentValue(styleOptions, settings.visualStyle).map((option) => <option key={option}>{option}</option>)}
+                                <label className="type-subheadline text-zinc-300">
+                                    {intakeText.fields.style}
+                                    <select aria-label={intakeText.fields.style} value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
+                                        {optionsWithCurrentValue(styleOptions, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <div className="relative text-sm font-semibold text-zinc-300">
-                                    输入方式
+                                <div ref={inputMenuRef} className="type-subheadline relative text-zinc-300">
+                                    {intakeText.fields.inputs}
                                     <button
+                                        ref={inputMenuButtonRef}
                                         type="button"
                                         aria-haspopup="listbox"
                                         aria-expanded={isInputMenuOpen}
                                         onClick={() => setIsInputMenuOpen(value => !value)}
-                                        className="mt-2 flex h-11 w-full items-center justify-between gap-3 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-left text-sm font-semibold text-white outline-none transition hover:bg-white/[0.07] focus-visible:border-white/35"
+                                        className="glass-control type-input mt-2 flex h-11 w-full items-center justify-between gap-3 rounded-2xl px-3 text-left"
                                     >
-                                        <span className="min-w-0 truncate">{settings.inputs.join(' / ')}</span>
+                                        <span className="min-w-0 truncate">{localizedInputs(settings.inputs)}</span>
                                         <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-400 transition ${isInputMenuOpen ? 'rotate-180' : ''}`} />
                                     </button>
-                                    {isInputMenuOpen ? (
-                                        <div role="listbox" aria-label="输入方式" className="input-surface absolute left-0 right-0 top-[4.75rem] z-[85] overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40">
-                                            {inputOptions.map((input) => {
-                                                const active = settings.inputs.includes(input);
-                                                return (
-                                                    <button
-                                                        key={input}
-                                                        type="button"
-                                                        role="option"
-                                                        aria-selected={active}
-                                                        onClick={() => toggleInput(input)}
-                                                        className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
-                                                    >
-                                                        <span>{input}</span>
-                                                        {active ? <Check className="h-4 w-4 text-emerald-200" /> : null}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : null}
                                 </div>
                             </div>
 
-                            <label className="block text-sm font-semibold text-zinc-300">
-                                补充说明
+                            <label className="type-subheadline block text-zinc-300">
+                                {intakeText.fields.notes}
                                 <textarea
-                                    aria-label="补充说明"
+                                    aria-label={intakeText.fields.notes}
                                     value={settings.notes || ''}
                                     onChange={(event) => updateSettings({ notes: event.target.value })}
-                                    placeholder="可补充目标用户、参考游戏、特殊限制或你想优先验证的体验。"
-                                    className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-sm font-medium leading-6 text-white outline-none placeholder:text-zinc-500 focus:border-white/35"
+                                    placeholder={intakeText.placeholders.notes}
+                                    className="glass-control type-callout mt-2 min-h-24 w-full resize-none rounded-2xl px-3 py-3 placeholder:text-zinc-500"
                                 />
                             </label>
 
                             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                                <button type="button" onClick={handleBackToOptions} className="rounded-full border border-white/15 bg-black/10 px-5 py-2.5 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10">
-                                    重新选择
+                                <button type="button" onClick={handleBackToOptions} className="secondary-pill type-button px-5 py-2.5">
+                                    {intakeText.actions.chooseAgain}
                                 </button>
-                                <button type="button" onClick={handleConfirmSettings} className="rounded-full bg-white px-6 py-2.5 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100">
-                                    确认方案
+                                <button type="button" onClick={handleConfirmSettings} className="primary-pill type-button px-6 py-2.5">
+                                    {intakeText.actions.confirmBrief}
                                 </button>
                             </div>
                         </div>
@@ -1668,23 +1849,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                     {intakePhase === 'confirming_brief' && selectedOption && settings ? (
                         <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
-                            <h3 className="text-2xl font-semibold text-white">{selectedOption.title}</h3>
-                            <p className="mt-3 text-sm leading-6 text-zinc-300">{selectedOption.pitch}</p>
-                            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                                <div><dt className="text-zinc-500">平台</dt><dd className="font-semibold text-white">{settings.platform}</dd></div>
-                                <div><dt className="text-zinc-500">引擎</dt><dd className="font-semibold text-white">{settings.engine || 'React'}</dd></div>
-                                <div><dt className="text-zinc-500">表现</dt><dd className="font-semibold text-white">{settings.dimension}</dd></div>
-                                <div><dt className="text-zinc-500">类型</dt><dd className="font-semibold text-white">{settings.genre}</dd></div>
-                                <div><dt className="text-zinc-500">风格</dt><dd className="font-semibold text-white">{settings.visualStyle}</dd></div>
-                                <div><dt className="text-zinc-500">输入</dt><dd className="font-semibold text-white">{settings.inputs.join(' / ')}</dd></div>
+                            <h3 className="type-title-3 text-white">{selectedOption.title}</h3>
+                            <p className="type-body mt-3 text-zinc-300">{selectedOption.pitch}</p>
+                            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.platform}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd></div>
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.engine}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.engine || 'React')}</dd></div>
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.presentation}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.dimension)}</dd></div>
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.type}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.genre)}</dd></div>
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.style}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.visualStyle)}</dd></div>
+	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.inputs}</dt><dd className="type-callout mt-1 text-white">{localizedInputs(settings.inputs)}</dd></div>
                             </dl>
-                            {settings.notes ? <p className="mt-4 rounded-2xl bg-white/5 p-3 text-sm text-zinc-300">{settings.notes}</p> : null}
+                            {settings.notes ? <p className="type-footnote mt-4 rounded-2xl bg-white/5 p-3 text-zinc-300">{settings.notes}</p> : null}
                             <div className="mt-5 flex flex-wrap justify-end gap-3">
-                                <button type="button" onClick={() => setIntakePhase('configuring_details')} className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-semibold text-zinc-200 hover:bg-white/10">
-                                    返回修改
+                                <button type="button" onClick={() => setIntakePhase('configuring_details')} className="secondary-pill type-button px-5 py-2.5">
+                                    {intakeText.actions.edit}
                                 </button>
-                                <button type="button" disabled={isPreparing} onClick={handleStartBuild} className="rounded-full bg-emerald-400 px-5 py-2.5 text-sm font-bold text-zinc-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60">
-                                    {isPreparing ? '正在启动...' : '开始构建'}
+                                <button type="button" disabled={isPreparing} onClick={handleStartBuild} className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60">
+                                    {isPreparing ? intakeText.actions.building : intakeText.actions.startBuild}
                                 </button>
                             </div>
                         </div>
@@ -1694,6 +1875,45 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 </div>
                 ) : null}
 
+                {isInputMenuOpen && settings && inputMenuPosition && typeof document !== 'undefined'
+                    ? createPortal(
+                        <div
+                            ref={inputMenuDropdownRef}
+                            role="listbox"
+                            aria-label={intakeText.fields.inputs}
+                            data-surface="frosted-glass"
+                            data-glass-density="reinforced"
+                            data-floating-layer="true"
+                            style={{
+                                left: inputMenuPosition.left,
+                                top: inputMenuPosition.top,
+                                width: inputMenuPosition.width,
+                            }}
+                            className="input-surface glass-panel fixed z-[220] overflow-hidden rounded-3xl p-1.5 text-zinc-100 backdrop-blur-2xl"
+                        >
+                            <div className="relative z-10">
+                                {inputOptions.map((input) => {
+                                    const active = settings.inputs.includes(input);
+                                    return (
+                                        <button
+                                            key={input}
+                                            type="button"
+                                            role="option"
+                                            aria-selected={active}
+                                            onClick={() => toggleInput(input)}
+                                            className="type-button flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-zinc-200 transition hover:bg-white/10"
+                                        >
+                                            <span>{localizedOptionLabel(input)}</span>
+                                            {active ? <Check className="h-4 w-4 text-emerald-200" /> : null}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>,
+                        document.body,
+                    )
+                    : null}
+
                 {clarification ? (
                     <div
                         role="status"
@@ -1701,8 +1921,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         data-testid="intake-clarification"
                         className="relative z-20 mt-4 w-[min(760px,calc(100vw-2rem))] rounded-[24px] border border-white/15 bg-zinc-950/60 px-5 py-4 text-left text-zinc-100 shadow-[0_18px_55px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
                     >
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">需求补充</div>
-                        <p className="mt-2 text-sm leading-6 text-zinc-200">{clarification.prompt}</p>
+                        <div className="type-caption-1 text-amber-300">{intakeText.clarification.title}</div>
+                        <p className="type-callout mt-2 text-zinc-200">{clarification.prompt}</p>
                         {clarification.options.length > 0 ? (
                             <div className="mt-4 grid gap-2 sm:grid-cols-2">
                                 {clarification.options.map((option) => (
@@ -1713,9 +1933,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         onClick={() => handleClarificationAnswer(option.value || option.label)}
                                         className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-left transition hover:border-amber-300/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                                     >
-                                        <span className="block text-sm font-semibold text-white">{option.label}</span>
+                                        <span className="type-subheadline block text-white">{option.label}</span>
                                         {option.description ? (
-                                            <span className="mt-1 block text-xs leading-5 text-zinc-400">{option.description}</span>
+                                            <span className="type-callout mt-1 block text-zinc-400">{option.description}</span>
                                         ) : null}
                                     </button>
                                 ))}
@@ -1729,19 +1949,19 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             }}
                         >
                             <input
-                                aria-label={clarification.freeformLabel || '补充说明'}
+                                aria-label={clarification.freeformLabel || intakeText.clarification.freeformLabel}
                                 value={clarificationDraft}
                                 disabled={isPreparing || isTransitioning}
                                 onChange={(event) => setClarificationDraft(event.target.value)}
-                                placeholder={clarification.freeformLabel || '也可以直接补充你的理解'}
-                                className="min-w-0 flex-1 rounded-full border border-white/15 bg-zinc-900/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-amber-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                                placeholder={clarification.freeformLabel || intakeText.clarification.placeholder}
+                                className="glass-control type-input min-w-0 flex-1 rounded-full px-4 py-3 placeholder:text-zinc-500 disabled:cursor-not-allowed disabled:opacity-60"
                             />
                             <button
                                 type="submit"
                                 disabled={!clarificationDraft.trim() || isPreparing || isTransitioning}
-                                className="rounded-full bg-white px-5 py-3 text-sm font-bold text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="primary-pill type-button px-5 py-3 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                继续
+                                {intakeText.actions.continue}
                             </button>
                         </form>
                     </div>
@@ -1750,7 +1970,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 {intakeCreditQuote ? (
                     <CreditConfirmDialog
                         quote={intakeCreditQuote}
-                        lang={lang}
                         onCancel={handleCancelIntakeCredit}
                         onConfirm={handleConfirmIntakeCredit}
                     />
@@ -1759,35 +1978,33 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 {buildCreditQuote ? (
                     <CreditConfirmDialog
                         quote={buildCreditQuote}
-                        lang={lang}
                         onCancel={handleCancelBuildCredit}
                         onConfirm={handleConfirmBuildCredit}
                     />
                 ) : null}
 
                 {intakeError ? (
-                    <div className="relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-sm text-red-100 shadow-lg backdrop-blur">
+                    <div className="type-footnote relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
                         {intakeError}
                     </div>
                 ) : null}
-            </motion.div>
-        </AnimatePresence>
+            </div>
     );
 }
 
 function CreditConfirmDialog({
     quote,
-    lang,
     onCancel,
     onConfirm,
 }: {
     quote: BeeGameCreditQuote;
-    lang: Language;
     onCancel: () => void;
     onConfirm: () => void;
 }) {
-    const isZh = lang === 'zh' || lang === 'zh-TW';
+    const { t: translate } = useTranslation();
+    const copy = createLandingIntakeCopy((key, options) => translate(`intake.${key}`, options));
     const isIntake = quote.taskType === 'idea_intake';
+    const taskName = isIntake ? copy.credits.intakeTask : copy.credits.buildTask;
     const titleId = `beegame-${quote.taskType}-credit-title`;
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
@@ -1796,32 +2013,33 @@ function CreditConfirmDialog({
                 aria-modal="true"
                 aria-labelledby={titleId}
                 data-surface="frosted-glass"
-                className="input-surface w-full max-w-2xl rounded-[30px] border border-white/20 p-6 text-left text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
+                className="input-surface glass-panel w-full max-w-2xl rounded-[30px] p-6 text-left text-zinc-100 sm:p-8"
             >
-                <h2 id={titleId} className="text-3xl font-black leading-tight text-white sm:text-4xl">
-                    {isZh
-                        ? isIntake ? '确认生成方案' : '确认开始构建'
-                        : isIntake ? 'Confirm idea generation' : 'Confirm build'}
+                <h2 id={titleId} className="type-title-2 text-white">
+                    {copy.credits.title(taskName)}
                 </h2>
-                <p className="mt-5 max-w-[58rem] text-base font-medium leading-8 text-zinc-300 sm:text-lg">
-                    {isZh
-                        ? `本次${isIntake ? '方案生成' : '构建'}将预扣 ${quote.reservedCredits} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。`
-                        : `This ${isIntake ? 'idea generation' : 'build'} will reserve ${quote.reservedCredits} credits. It settles against actual token and tool usage, and unused credits are refunded.`}
+                <p className="type-body mt-5 max-w-[58rem] text-zinc-300">
+                    {copy.credits.description(taskName, quote.reservedCredits)}
                 </p>
+                <div className="type-callout mt-5 rounded-[24px] border border-emerald-200/20 bg-emerald-300/[0.07] px-5 py-4 text-emerald-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    <span className="border-b border-emerald-100/55 pb-0.5">
+                        {copy.credits.refundRule}
+                    </span>
+                </div>
                 <div className="mt-7 grid gap-4 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:grid-cols-2 sm:p-6">
                     <div className="min-w-0">
-                        <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
-                            {isZh ? '当前余额' : 'Balance'}
+                        <div className="type-caption-1 text-zinc-500">
+                            {copy.credits.balance}
                         </div>
-                        <div className="mt-3 text-3xl font-black leading-none text-emerald-200">
+                        <div className="type-title-3 mt-3 text-emerald-200">
                             {quote.balanceCredits} credits
                         </div>
                     </div>
                     <div className="min-w-0">
-                        <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
-                            {isZh ? '本次预扣' : 'Reserved'}
+                        <div className="type-caption-1 text-zinc-500">
+                            {copy.credits.reserved}
                         </div>
-                        <div className="mt-3 text-3xl font-black leading-none text-white">
+                        <div className="type-title-3 mt-3 text-white">
                             {quote.reservedCredits} credits
                         </div>
                     </div>
@@ -1830,16 +2048,16 @@ function CreditConfirmDialog({
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="rounded-full border border-white/15 bg-black/10 px-6 py-3 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+                        className="secondary-pill type-button px-6 py-3"
                     >
-                        {isZh ? '取消' : 'Cancel'}
+                        {copy.actions.cancel}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100"
+                        className="primary-pill type-button px-7 py-3"
                     >
-                        {isZh ? isIntake ? '确认生成' : '确认构建' : isIntake ? 'Start generation' : 'Start build'}
+                        {isIntake ? copy.actions.confirmGenerate : copy.actions.confirmBuild}
                     </button>
                 </div>
             </div>
@@ -1858,8 +2076,8 @@ function CreditMetric({
 }) {
     return (
         <div className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
-            <div className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</div>
-            <div className={`mt-1 truncate text-sm font-black ${tone === 'positive' ? 'text-emerald-200' : 'text-zinc-100'}`}>
+            <div className="type-caption-1 text-zinc-500">{label}</div>
+            <div className={`type-headline mt-1 truncate ${tone === 'positive' ? 'text-emerald-200' : 'text-zinc-100'}`}>
                 {value}
             </div>
         </div>
@@ -1868,54 +2086,43 @@ function CreditMetric({
 
 function CreditLedgerRow({
     entry,
+    translate,
     compact = false,
 }: {
     entry: BeeGameCreditLedgerEntry;
+    translate: Translate;
     compact?: boolean;
 }) {
     return (
         <div className={`flex items-center justify-between gap-3 rounded-2xl bg-black/20 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
             <div className="min-w-0">
-                <div className={`${compact ? 'text-sm' : 'text-base'} truncate font-bold text-zinc-200`}>
-                    {formatCreditLedgerTitle(entry)}
+                <div className="type-callout truncate text-zinc-200">
+                    {formatCreditLedgerTitle(entry, translate)}
                 </div>
-                <div className="mt-0.5 truncate text-xs text-zinc-500">
+                <div className="type-footnote mt-0.5 truncate text-zinc-500">
                     {formatCreditLedgerMeta(entry)}
                 </div>
             </div>
-            <div className={`shrink-0 text-sm font-black ${getCreditLedgerAmountClass(entry.kind)}`}>
+            <div className={`type-headline shrink-0 ${getCreditLedgerAmountClass(entry.kind)}`}>
                 {formatCreditLedgerAmount(entry)}
             </div>
         </div>
     );
 }
 
-function formatCreditLedgerKind(kind: BeeGameCreditLedgerEntry['kind']): string {
-    switch (kind) {
-        case 'estimate':
-            return '预估';
-        case 'reserve':
-            return '预扣';
-        case 'settle':
-            return '结算';
-        case 'refund':
-            return '退回';
-        case 'grant':
-            return '发放';
-        default:
-            return kind;
-    }
+function formatCreditLedgerKind(kind: BeeGameCreditLedgerEntry['kind'], translate: Translate): string {
+    return translate(`credits.kind.${kind}`, { defaultValue: kind });
 }
 
-function formatCreditLedgerTitle(entry: BeeGameCreditLedgerEntry): string {
-    return `${formatCreditLedgerStage(entry)} · ${formatCreditLedgerKind(entry.kind)}`;
+function formatCreditLedgerTitle(entry: BeeGameCreditLedgerEntry, translate: Translate): string {
+    return `${formatCreditLedgerStage(entry, translate)} · ${formatCreditLedgerKind(entry.kind, translate)}`;
 }
 
-function formatCreditLedgerStage(entry: BeeGameCreditLedgerEntry): string {
+function formatCreditLedgerStage(entry: BeeGameCreditLedgerEntry, translate: Translate): string {
     const taskType = typeof entry.metadata?.taskType === 'string'
         ? entry.metadata.taskType
         : undefined;
-    if (taskType) return formatCreditTaskType(taskType);
+    if (taskType) return formatCreditTaskType(taskType, translate);
     const displayName = typeof entry.metadata?.displayName === 'string'
         ? entry.metadata.displayName.trim()
         : '';
@@ -1923,25 +2130,10 @@ function formatCreditLedgerStage(entry: BeeGameCreditLedgerEntry): string {
     return 'Credit';
 }
 
-function formatCreditTaskType(taskType: string): string {
-    switch (taskType) {
-        case 'idea_intake':
-            return '方案生成';
-        case 'full_build':
-            return '完整构建';
-        case 'edit_turn':
-            return '修改任务';
-        case 'continue_turn':
-            return '继续任务';
-        case 'asset_integration':
-            return '资源集成';
-        case 'large_build':
-            return '大型构建';
-        case 'agent_turn':
-            return 'Agent 任务';
-        default:
-            return taskType.replaceAll('_', ' ');
-    }
+function formatCreditTaskType(taskType: string, translate: Translate): string {
+    return translate(`credits.task.${taskType}`, {
+        defaultValue: taskType.replaceAll('_', ' '),
+    });
 }
 
 function formatCreditLedgerMeta(entry: BeeGameCreditLedgerEntry): string {
@@ -1987,7 +2179,7 @@ function OAuthButton({
             type="button"
             aria-label={label}
             onClick={() => void onClick(provider)}
-            className={`inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/10 ${iconOnly ? 'gap-0' : 'gap-2.5'} ${wide ? 'sm:col-span-2' : ''}`}
+            className={`type-button inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-zinc-100 transition hover:bg-white/10 ${iconOnly ? 'gap-0' : 'gap-2.5'} ${wide ? 'sm:col-span-2' : ''}`}
         >
             <OAuthProviderIcon provider={provider} />
             {iconOnly ? <span className="sr-only">{label}</span> : <span>{label}</span>}

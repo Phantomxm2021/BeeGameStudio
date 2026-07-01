@@ -33,6 +33,57 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
+  test('uses canonical account id for Supabase credit balance and ledger', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: string[] = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
+          const url = String(input)
+          calls.push(url)
+          if (url.includes('/beegame_credit_accounts')) {
+            return Response.json([{
+              user_id: 'canonical-user',
+              plan: 'free',
+              included_credits: 300,
+              consumed_credits: 7,
+              reserved_credits: 2,
+              updated_at: '2026-07-01T00:00:00.000Z',
+            }])
+          }
+          if (url.includes('/beegame_credit_ledger')) {
+            return Response.json([])
+          }
+          return new Response('not found', { status: 404 })
+        }) as unknown as typeof fetch,
+      }),
+    })
+    const request = new Request('http://beegame.test/api/credits', {
+      headers: { authorization: 'Bearer user-token' },
+    })
+    const user = {
+      id: 'oauth-provider-user',
+      accountId: 'canonical-user',
+      role: 'developer' as const,
+    }
+
+    try {
+      const balance = await repository.getCreditBalance(request, user)
+      await repository.listCreditLedger(request, user)
+
+      expect(balance.userId).toBe('canonical-user')
+      expect(calls[0]).toContain('user_id=eq.canonical-user')
+      expect(calls[1]).toContain('user_id=eq.canonical-user')
+      expect(calls.join('\n')).not.toContain('oauth-provider-user')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('lists Supabase RLS-readable model configs without requiring an app-level owner scope', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ url: string; body?: unknown }> = []

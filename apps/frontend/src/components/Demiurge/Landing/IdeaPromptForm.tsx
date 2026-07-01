@@ -50,7 +50,7 @@ export function IdeaPromptForm({
                     <button
                         type="button"
                         aria-label="Upload attachment"
-                        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#757575]/20 p-2 text-[#c5c1b9] transition-colors hover:bg-[#3f3f3e] hover:text-[#ececec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95"
+                        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full glass-icon-button p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95"
                     >
                         <span className="relative block h-6 w-6" aria-hidden="true">
                             <Paperclip className="h-6 w-6" />
@@ -58,7 +58,7 @@ export function IdeaPromptForm({
                     </button>
 
                     <input
-                        className="my-auto min-w-0 flex-1 bg-transparent py-0 text-base font-normal tracking-normal text-[#c5c1b9] outline-none placeholder:text-[#818080] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="type-input my-auto min-w-0 flex-1 bg-transparent py-0 text-zinc-300 outline-none placeholder:text-zinc-500 disabled:cursor-not-allowed disabled:opacity-60"
                         placeholder={placeholder}
                         value={value}
                         onChange={(event) => onChange(event.target.value)}
@@ -69,12 +69,12 @@ export function IdeaPromptForm({
                     <button
                         type="submit"
                         disabled={!value.trim() || isTransitioning}
-                        className={`flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold tracking-normal text-[#ececec] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95 disabled:cursor-not-allowed sm:px-5 ${isTransitioning ? 'bg-[#3f3f3e] opacity-100' : 'bg-[#757575]/20 hover:bg-[#3f3f3e] disabled:opacity-50'
+	                        className={`type-button flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 active:scale-95 disabled:cursor-not-allowed sm:px-5 ${isTransitioning ? 'bg-white/10 opacity-100' : 'bg-white/10 hover:bg-white/15 disabled:opacity-50'
                             }`}
                     >
                         <ShinyText text={generateLabel} disabled={!isTransitioning} speed={0.5} />
                         {isTransitioning ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-[#c5c1b9]" />
+                            <Loader2 className="h-4 w-4 animate-spin text-zinc-300" />
                         ) : (
                             <Sparkles className="h-4 w-4" />
                         )}

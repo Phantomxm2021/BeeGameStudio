@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { FileArchive, FileText, Eye, Download } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
-import { getBeeGameText } from '../BeeGameI18n';
+import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
 interface ArtifactsPanelProps {
     artifacts: any[];
@@ -23,12 +23,12 @@ export const ArtifactsPanel = memo(({
     canExportProject = true,
     lang = 'en',
 }: ArtifactsPanelProps) => {
-    const text = getBeeGameText(lang);
+    const text = useBeeGameText(lang);
     if (isLoading && artifacts.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100"></div>
-                <div className="text-sm">{text.loadingArtifacts}</div>
+                <div className="type-callout">{text.loadingArtifacts}</div>
             </div>
         );
     }
@@ -37,7 +37,7 @@ export const ArtifactsPanel = memo(({
         return (
             <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
                 <FileText className="w-12 h-12" />
-                <div className="text-sm">{text.noArtifacts}</div>
+                <div className="type-callout">{text.noArtifacts}</div>
             </div>
         );
     }
@@ -66,9 +66,9 @@ export const ArtifactsPanel = memo(({
                                     <Icon className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{art.name || `${type} Doc`}</div>
+                                    <div className="type-footnote text-zinc-900 dark:text-zinc-100">{art.name || `${type} Doc`}</div>
                                     <div className="flex items-center space-x-2 mt-0.5">
-                                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-mono tracking-tighter">
+	                                        <div className="type-code-sm text-zinc-500 dark:text-zinc-400">
                                             {isProjectPackage ? text.generatedOnDownload : `@${art.created_by || art.author || art.agent_id || text.byUnknown} • ${review ? `${text.review}: ${review.outcome || text.pending}` : text.locked}`}
                                         </div>
                                         {review && (

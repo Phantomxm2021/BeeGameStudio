@@ -235,6 +235,16 @@ create table if not exists public.beegame_credit_accounts (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_account_links (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  account_id uuid not null references auth.users(id) on delete cascade,
+  email text not null,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists beegame_account_links_email_idx
+  on public.beegame_account_links (lower(email));
+
 create table if not exists public.beegame_credit_ledger (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -478,6 +488,24 @@ as $$
   end
 $$;
 
+create or replace function public.beegame_account_id(p_user_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (
+      select account_id
+      from public.beegame_account_links
+      where user_id = p_user_id
+      limit 1
+    ),
+    p_user_id
+  )
+$$;
+
 create or replace function public.beegame_current_user_context()
 returns jsonb
 language plpgsql
@@ -490,6 +518,7 @@ declare
   workspace_row public.beegame_workspaces%rowtype;
   member_role text;
   account_role text;
+  account_user_id uuid;
   model_config_owner_id uuid;
 begin
   current_user_id := auth.uid();
@@ -498,6 +527,7 @@ begin
   end if;
 
   perform public.beegame_claim_platform_owner_invite();
+  account_user_id := public.beegame_account_id(current_user_id);
 
   select *
   into profile_row
@@ -520,6 +550,7 @@ begin
   if workspace_row.id is null then
     return jsonb_build_object(
       'id', current_user_id,
+      'accountId', account_user_id,
       'email', profile_row.email,
       'displayName', profile_row.display_name,
       'avatarUrl', profile_row.avatar_url,
@@ -549,6 +580,7 @@ begin
 
   return jsonb_build_object(
     'id', current_user_id,
+    'accountId', account_user_id,
     'email', profile_row.email,
     'displayName', profile_row.display_name,
     'avatarUrl', profile_row.avatar_url,
@@ -569,6 +601,7 @@ set search_path = public
 as $$
 declare
   created_workspace_id uuid;
+  canonical_account_id uuid;
   profile_name text;
   profile_avatar_url text;
   initial_role text;
@@ -597,6 +630,26 @@ begin
     when new.raw_app_meta_data->>'beegame_role' = 'owner' or invited_platform_owner then 'owner'
     else 'developer'
   end;
+  canonical_account_id := new.id;
+  if nullif(new.email, '') is not null and new.email_confirmed_at is not null then
+    select l.account_id
+    into canonical_account_id
+    from public.beegame_account_links l
+    where lower(l.email) = lower(new.email)
+    order by
+      case when l.account_id = l.user_id then 0 else 1 end,
+      l.updated_at asc,
+      l.account_id::text asc
+    limit 1;
+    canonical_account_id := coalesce(canonical_account_id, new.id);
+  end if;
+
+  insert into public.beegame_account_links (user_id, account_id, email)
+  values (new.id, canonical_account_id, coalesce(new.email, new.id::text))
+  on conflict (user_id) do update
+  set account_id = excluded.account_id,
+      email = excluded.email,
+      updated_at = now();
 
   insert into public.beegame_profiles (user_id, display_name, email, avatar_url)
   values (new.id, profile_name, new.email, profile_avatar_url)
@@ -632,7 +685,7 @@ begin
   end if;
 
   insert into public.beegame_credit_accounts (user_id)
-  values (new.id)
+  values (canonical_account_id)
   on conflict (user_id) do nothing;
 
   return new;
@@ -641,8 +694,67 @@ $$;
 
 drop trigger if exists beegame_after_auth_user_created on auth.users;
 create trigger beegame_after_auth_user_created
-  after insert or update of email, raw_user_meta_data, raw_app_meta_data on auth.users
+  after insert or update of email, email_confirmed_at, raw_user_meta_data, raw_app_meta_data on auth.users
   for each row execute function public.beegame_handle_new_user();
+
+insert into public.beegame_account_links (user_id, account_id, email)
+select
+  u.id,
+  first_value(u.id) over (
+    partition by case
+      when nullif(u.email, '') is not null and u.email_confirmed_at is not null
+        then lower(u.email)
+      else u.id::text
+    end
+    order by u.created_at asc, u.id::text asc
+  ) as account_id,
+  coalesce(u.email, u.id::text) as email
+from auth.users u
+on conflict (user_id) do update
+set account_id = excluded.account_id,
+    email = excluded.email,
+    updated_at = now();
+
+update public.beegame_credit_ledger l
+set user_id = a.account_id
+from public.beegame_account_links a
+where l.user_id = a.user_id
+  and a.account_id <> a.user_id;
+
+with grouped_credit_accounts as (
+  select
+    a.account_id as user_id,
+    max(c.included_credits) as included_credits,
+    sum(c.consumed_credits) as consumed_credits,
+    sum(c.reserved_credits) as reserved_credits
+  from public.beegame_credit_accounts c
+  join public.beegame_account_links a on a.user_id = c.user_id
+  group by a.account_id
+)
+insert into public.beegame_credit_accounts (
+  user_id,
+  included_credits,
+  consumed_credits,
+  reserved_credits,
+  updated_at
+)
+select
+  user_id,
+  included_credits,
+  consumed_credits,
+  reserved_credits,
+  now()
+from grouped_credit_accounts
+on conflict (user_id) do update
+set included_credits = excluded.included_credits,
+    consumed_credits = excluded.consumed_credits,
+    reserved_credits = excluded.reserved_credits,
+    updated_at = now();
+
+delete from public.beegame_credit_accounts c
+using public.beegame_account_links a
+where c.user_id = a.user_id
+  and a.account_id <> a.user_id;
 
 insert into public.beegame_profiles (user_id, display_name, email, avatar_url)
 select
@@ -694,8 +806,8 @@ set role = case
 end;
 
 insert into public.beegame_credit_accounts (user_id)
-select u.id
-from auth.users u
+select distinct a.account_id
+from public.beegame_account_links a
 on conflict (user_id) do nothing;
 
 update public.beegame_platform_owner_invites i
@@ -954,7 +1066,7 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or auth.uid() <> p_user_id then
+  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
     raise exception 'Forbidden';
   end if;
   if p_credits is null or p_credits <= 0 then
@@ -1047,7 +1159,7 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or auth.uid() <> p_user_id then
+  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
     raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
@@ -1176,7 +1288,7 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or auth.uid() <> p_user_id then
+  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
     raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
@@ -1303,6 +1415,7 @@ alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_previews enable row level security;
+alter table public.beegame_account_links enable row level security;
 alter table public.beegame_credit_accounts enable row level security;
 alter table public.beegame_credit_ledger enable row level security;
 alter table public.beegame_audit_events enable row level security;
@@ -1400,13 +1513,18 @@ drop policy if exists "preview owner access" on public.beegame_previews;
 create policy "preview owner access" on public.beegame_previews
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
+drop policy if exists "account link owner access" on public.beegame_account_links;
+create policy "account link owner access" on public.beegame_account_links
+  for select using (user_id = auth.uid() or account_id = public.beegame_account_id(auth.uid()));
+
 drop policy if exists "credit account owner access" on public.beegame_credit_accounts;
 create policy "credit account owner access" on public.beegame_credit_accounts
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+  for all using (user_id = public.beegame_account_id(auth.uid()))
+  with check (user_id = public.beegame_account_id(auth.uid()));
 
 drop policy if exists "credit ledger owner access" on public.beegame_credit_ledger;
 create policy "credit ledger owner access" on public.beegame_credit_ledger
-  for select using (user_id = auth.uid());
+  for select using (user_id = public.beegame_account_id(auth.uid()));
 
 drop policy if exists "audit owner access" on public.beegame_audit_events;
 create policy "audit owner access" on public.beegame_audit_events
@@ -1420,6 +1538,9 @@ grant execute on function public.beegame_claim_platform_owner_invite() to authen
 
 revoke execute on function public.beegame_is_platform_owner() from public;
 grant execute on function public.beegame_is_platform_owner() to authenticated;
+
+revoke execute on function public.beegame_account_id(uuid) from public;
+grant execute on function public.beegame_account_id(uuid) to authenticated;
 
 revoke execute on function public.beegame_model_config_owner_id(uuid) from public;
 grant execute on function public.beegame_model_config_owner_id(uuid) to authenticated;

@@ -245,12 +245,12 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
 
     return (
         <MarkdownErrorBoundary messageId={messageId} rawContent={content}>
-            <div className={`text-sm leading-relaxed max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`}>
+            <div className={`type-body max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`}>
                 {thoughtContent && (
                     <div className="mb-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                         <button
                             onClick={() => setIsThoughtExpanded(!isThoughtExpanded)}
-                            className="w-full px-4 py-2 flex items-center justify-between text-[10px] font-black uppercase tracking-widest opacity-50 hover:opacity-100 transition-opacity"
+                            className="type-caption-1 w-full px-4 py-2 flex items-center justify-between opacity-50 hover:opacity-100 transition-opacity"
                         >
                             <span className="flex items-center space-x-2">
                                 <MessageSquare className="w-3 h-3" />
@@ -264,7 +264,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
                                     exit={{ height: 0, opacity: 0 }}
-                                    className="px-4 pb-4 text-[13px] italic opacity-70 border-t border-zinc-200 dark:border-zinc-700 mt-2 pt-4"
+                                    className="type-footnote px-4 pb-4 italic opacity-70 border-t border-zinc-200 dark:border-zinc-700 mt-2 pt-4"
                                 >
                                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                                         {thoughtContent}
@@ -278,11 +278,11 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                 <div className={`mt-1`}>
                     {renderAsCsv && csvData ? (
                         <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                            <table className="w-full border-collapse text-sm">
+	                            <table className="type-callout w-full border-collapse">
                                 <thead className="bg-zinc-100/50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800">
                                     <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors">
                                         {csvData.header.map((cell, idx) => (
-                                            <th key={`${cell}-${idx}`} className="px-4 py-3 text-left font-black uppercase text-[10px] tracking-widest text-zinc-500 dark:text-zinc-400">
+	                                            <th key={`${cell}-${idx}`} className="type-caption-1 px-4 py-3 text-left text-zinc-500 dark:text-zinc-400">
                                                 {cell}
                                             </th>
                                         ))}
@@ -294,7 +294,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                             {row.map((cell, cIdx) => {
                                                 const color = detectColor(cell);
                                                 return (
-                                                    <td key={`cell-${rIdx}-${cIdx}`} className="px-4 py-3 leading-relaxed border-zinc-200 dark:border-zinc-800 font-mono text-[12px] whitespace-pre-wrap break-words">
+	                                                    <td key={`cell-${rIdx}-${cIdx}`} className="type-code-sm px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words">
                                                         {color && <ColorSwatch color={color} />}
                                                         {cell}
                                                     </td>
@@ -313,32 +313,32 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 ul: (props) => <ul className="list-disc ml-4 mb-3 opacity-90" {...props} />,
                                 ol: (props) => <ol className="list-decimal ml-4 mb-3 opacity-90" {...props} />,
                                 li: (props) => <li className="mb-1 break-words [overflow-wrap:anywhere]" {...props} />,
-                                h1: (props) => <h1 className="text-lg font-bold border-b border-zinc-200 dark:border-zinc-700 pb-1 mb-2" {...props} />,
-                                h2: (props) => <h2 className="text-md font-bold mt-3 mb-2" {...props} />,
-                                h3: (props) => <h3 className="text-sm font-bold mt-2 mb-1" {...props} />,
-                                a: (props) => <a className="text-blue-500 hover:text-blue-400 underline" target="_blank" rel="noreferrer" {...props} />,
-                                strong: (props) => <strong className="font-bold opacity-100" {...props} />,
+                                h1: (props) => <h1 className="type-title-3 border-b border-zinc-200 dark:border-zinc-700 pb-1 mb-2" {...props} />,
+                                h2: (props) => <h2 className="type-headline mt-3 mb-2" {...props} />,
+                                h3: (props) => <h3 className="type-subheadline mt-2 mb-1" {...props} />,
+	                                a: (props) => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-4 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
+	                                strong: (props) => <strong className="opacity-100" {...props} />,
                                 table: (props) => (
                                     <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                                        <table className="w-full border-collapse text-sm" {...props} />
+	                                        <table className="type-callout w-full border-collapse" {...props} />
                                     </div>
                                 ),
                                 thead: (props) => <thead className="bg-zinc-100/50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800" {...props} />,
                                 tbody: (props) => <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800" {...props} />,
                                 tr: (props) => <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors" {...props} />,
-                                th: (props) => <th className="px-4 py-3 text-left font-black uppercase text-[10px] tracking-widest text-zinc-500 dark:text-zinc-400" {...props} />,
+	                                th: (props) => <th className="type-caption-1 px-4 py-3 text-left text-zinc-500 dark:text-zinc-400" {...props} />,
                                 td: ({ children, ...props }) => {
                                     const cellContent = Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : String(children);
                                     const color = detectColor(cellContent);
                                     return (
-                                        <td className="px-4 py-3 leading-relaxed border-zinc-200 dark:border-zinc-800 font-mono text-[12px] whitespace-pre-wrap break-words" {...props}>
+	                                        <td className="type-code-sm px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words" {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </td>
                                     );
                                 },
                                 pre: (props) => (
-                                    <pre className={`${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} text-zinc-100 rounded-lg p-4 overflow-x-auto my-4 text-xs font-mono leading-relaxed border`}>
+	                                    <pre className={`type-code ${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} text-zinc-100 rounded-lg p-4 overflow-x-auto my-4 border`}>
                                         {props.children}
                                     </pre>
                                 ),
@@ -350,7 +350,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                     if (isInline) {
                                       const color = typeof children === 'string' ? detectColor(children) : null;
                                       return (
-                                        <code className={`${isBeeGameVariant ? 'bg-zinc-950 text-zinc-300' : 'bg-zinc-200 dark:bg-zinc-700'} rounded px-1.5 py-0.5 text-[0.85em] font-mono break-words`} {...props}>
+	                                        <code className={`type-code-sm ${isBeeGameVariant ? 'bg-zinc-950 text-zinc-300' : 'bg-zinc-200 dark:bg-zinc-700'} rounded px-1.5 py-0.5 break-words`} {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </code>
@@ -433,7 +433,7 @@ const ToolMessageCard = memo(({ message, variant = 'legacy' }: { message: ChatDi
         ? 'text-emerald-500'
         : tool.status === 'failed'
             ? 'text-rose-500'
-            : 'text-blue-500';
+            : 'text-emerald-300';
 
     return (
         <motion.div
@@ -455,20 +455,20 @@ const ToolMessageCard = memo(({ message, variant = 'legacy' }: { message: ChatDi
             <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                     <StatusIcon className={`h-4 w-4 shrink-0 ${statusClass}`} />
-                    <div className={isBeeGameVariant ? 'truncate text-sm font-bold text-zinc-100' : 'truncate text-[11px] font-black uppercase tracking-[0.18em]'}>
+	                    <div className={isBeeGameVariant ? 'type-footnote truncate text-zinc-100' : 'type-caption-1 truncate'}>
                         {tool.name} {tool.status}
                     </div>
                 </div>
                 {tool.detail ? (
                     <div className={isBeeGameVariant
-                        ? 'mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]'
-                        : 'mt-1 line-clamp-2 font-mono text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere] dark:text-zinc-400'
+	                        ? 'type-code-sm mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-400 [overflow-wrap:anywhere]'
+	                        : 'type-code-sm mt-1 line-clamp-2 text-zinc-500 [overflow-wrap:anywhere] dark:text-zinc-400'
                     }>
                         {tool.detail}
                     </div>
                 ) : null}
                 {tool.output ? (
-                    <div className={isBeeGameVariant ? 'mt-2 line-clamp-2 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]' : 'mt-1 line-clamp-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere] dark:text-zinc-500'}>
+                    <div className={isBeeGameVariant ? 'type-footnote mt-2 line-clamp-2 text-zinc-500 [overflow-wrap:anywhere]' : 'type-footnote mt-1 line-clamp-1 text-zinc-400 [overflow-wrap:anywhere] dark:text-zinc-500'}>
                         {tool.output}
                     </div>
                 ) : null}
@@ -491,7 +491,7 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
             <button
                 type="button"
                 onClick={() => setIsExpanded((value) => !value)}
-                className="group flex w-full items-center gap-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400 transition-colors hover:text-zinc-700 dark:text-zinc-600 dark:hover:text-zinc-300"
+                className="type-caption-1 group flex w-full items-center gap-3 py-1 text-zinc-400 transition-colors hover:text-zinc-700 dark:text-zinc-600 dark:hover:text-zinc-300"
                 aria-expanded={isExpanded}
             >
                 <span className="h-px flex-1 bg-zinc-200 transition-colors group-hover:bg-zinc-300 dark:bg-zinc-800 dark:group-hover:bg-zinc-700" />
@@ -530,11 +530,11 @@ const DeliveryReviewAlert = memo(({ message, variant = 'legacy' }: { message: Ch
             : 'w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100'
         }
     >
-        <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-300">
+        <div className="type-caption-1 mb-2 flex items-center gap-2 text-sky-600 dark:text-sky-300">
             <CheckCircle2 className="h-4 w-4" />
             Evidence for review
         </div>
-        <div className="text-sm leading-6 opacity-85 [overflow-wrap:anywhere]">
+        <div className="type-callout opacity-85 [overflow-wrap:anywhere]">
             <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} variant={variant} />
         </div>
     </motion.div>
@@ -590,17 +590,17 @@ export const MessageItem = memo(({
             >
                 <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                    <div className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-1">
+                    <div className="type-caption-1 text-amber-600 dark:text-amber-400 mb-1">
                         Last check failed
                     </div>
-                    <div className="text-sm text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+                    <div className="type-callout text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
                         {m.content}
                     </div>
                     <button
                         type="button"
                         disabled={!onContinueFixing}
                         onClick={() => onContinueFixing?.(continueMessage)}
-                        className="mt-3 inline-flex items-center justify-center rounded-full bg-zinc-950 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                        className="primary-pill mt-3 inline-flex items-center justify-center px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Continue fixing
                     </button>
@@ -623,8 +623,8 @@ export const MessageItem = memo(({
             >
                 <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                    <div className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-1">System Error</div>
-                    <div className="text-sm text-rose-900 dark:text-rose-100 opacity-80 break-words [overflow-wrap:anywhere]">{m.content}</div>
+                    <div className="type-caption-1 text-rose-500 mb-1">System Error</div>
+                    <div className="type-callout text-rose-900 dark:text-rose-100 opacity-80 break-words [overflow-wrap:anywhere]">{m.content}</div>
                 </div>
             </motion.div>
         );
@@ -643,7 +643,7 @@ export const MessageItem = memo(({
                     onMouseLeave={() => !isUser && setIsHovered(false)}
                     whileHover={{ scale: 1.1 }}
                     className={isBeeGameVariant
-                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'overflow-hidden border border-orange-400/35 bg-[#2a1a12] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]'}`
+                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'overflow-hidden border border-orange-400/35 bg-orange-950/40 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]'}`
                         : `w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
                             ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
                             : (agent?.color || 'bg-zinc-500') + ' text-white'
@@ -672,9 +672,9 @@ export const MessageItem = memo(({
                             exit={{ opacity: 0 }}
                             className={`absolute ${isUser ? 'right-full' : 'left-full'} top-0 w-56 p-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl z-50 shadow-2xl border border-white/10 mx-3 pointer-events-none`}
                         >
-                            <div className="text-[10px] font-black uppercase opacity-50 mb-1">{agent.role}</div>
-                            <div className="font-bold text-sm mb-2">{agent.name}</div>
-                            <p className="text-[11px] leading-relaxed opacity-70 italic">{agent.bio}</p>
+                            <div className="type-caption-1 opacity-50 mb-1">{agent.role}</div>
+                            <div className="type-footnote mb-2">{agent.name}</div>
+                            <p className="type-footnote opacity-70 italic">{agent.bio}</p>
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -691,7 +691,7 @@ export const MessageItem = memo(({
                 }
             >
                 {m.sender !== 'user' && agent && (
-                    <div className={`text-[10px] font-black mb-2 flex items-center space-x-2 ${isBeeGameVariant ? 'text-orange-300' : agent.text}`}>
+                    <div className={`type-caption-1 mb-2 flex items-center space-x-2 ${isBeeGameVariant ? 'text-orange-300' : agent.text}`}>
                         <span>{agent.role}</span>
                         <span className="opacity-30">•</span>
                         <span>{agent.name}</span>
@@ -721,7 +721,7 @@ export const MessageItem = memo(({
                     if (!isUser && semanticType === 'system_status') {
                         return (
                             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/80 dark:bg-zinc-900/40 px-4 py-3">
-                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400 mb-1">
+                                <div className="type-caption-1 text-zinc-500 dark:text-zinc-400 mb-1">
                                     {getSystemStatusLabel(m)}
                                 </div>
                                 <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />
@@ -737,11 +737,11 @@ export const MessageItem = memo(({
                         return (
                             <div className={`mt-2 pt-3 border-t ${borderColor}`}>
                                 <div className="flex items-center justify-between gap-3 mb-2">
-                                    <div className={`text-[10px] font-black uppercase tracking-widest ${accentColor}`}>
+                                    <div className={`type-caption-1 ${accentColor}`}>
                                         {title}
                                     </div>
                                     {m.nextAction ? (
-                                        <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                                        <div className="type-caption-1 text-zinc-500 dark:text-zinc-400">
                                             {m.nextAction.replace(/_/g, ' ')}
                                         </div>
                                     ) : null}
@@ -754,8 +754,8 @@ export const MessageItem = memo(({
                 })()}
 
                 {m.thought && !isUser && (
-                    <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-700/50 text-xs text-zinc-500 dark:text-zinc-400 italic bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl">
-                        <span className="font-bold mr-2">🤔 Thinking:</span>
+                    <div className="type-footnote mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-700/50 text-zinc-500 dark:text-zinc-400 italic bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl">
+	                        <span className="mr-2 text-zinc-100">🤔 Thinking:</span>
                         <span>{m.thought}</span>
                     </div>
                 )}

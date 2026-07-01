@@ -87,7 +87,7 @@ describe('ArtifactsPanel', () => {
                     {
                         id: 'beegame-project-package:proj_1',
                         artifact_id: 'beegame-project-package:proj_1',
-                        name: 'snake-game.zip',
+                        name: 'sample-game.zip',
                         artifact_type: 'Project Package',
                         package_download: true,
                     },
@@ -105,7 +105,7 @@ describe('ArtifactsPanel', () => {
         await user.click(screen.getByTitle('Download'));
 
         expect(onPreview).not.toHaveBeenCalled();
-        expect(onDownload).toHaveBeenCalledWith('beegame-project-package:proj_1', 'snake-game.zip');
+        expect(onDownload).toHaveBeenCalledWith('beegame-project-package:proj_1', 'sample-game.zip');
     });
 
     it('hides project package downloads when export permission is missing', () => {
@@ -115,7 +115,7 @@ describe('ArtifactsPanel', () => {
                     {
                         id: 'beegame-project-package:proj_1',
                         artifact_id: 'beegame-project-package:proj_1',
-                        name: 'snake-game.zip',
+                        name: 'sample-game.zip',
                         artifact_type: 'Project Package',
                         package_download: true,
                     },

@@ -1,0 +1,591 @@
+{
+  "common": {
+    "placeholder": "프로젝트 비전을 입력하세요...",
+    "newProject": "새 프로젝트",
+    "stop": "프로젝트 중지",
+    "resume": "프로젝트 재개",
+    "active": "실행 중",
+    "idle": "대기 중",
+    "stopped": "중지됨",
+    "chat": "팀 협업",
+    "runtime": "런타임",
+    "artifacts": "결과물",
+    "tokens": "사용량",
+    "progress": "진행률",
+    "phase": "단계",
+    "paused": "일시 중지됨",
+    "settings": "설정",
+    "theme": "테마 전환",
+    "darkMode": "다크 모드",
+    "language": "언어 선택",
+    "systemSettings": "시스템 설정",
+    "offline": "서버에 연결할 수 없음",
+    "tasks": "작업 보드",
+    "projectLibrary": "프로젝트 라이브러리",
+    "historyProjects": "이전 프로젝트",
+    "recentProjects": "최근 프로젝트",
+    "open": "열기",
+    "landingTitle": "하나의 아이디어에서 시작하세요.",
+    "landingSubtitle": "몇 마디면 시작하기에 충분합니다.",
+    "ideaPlaceholder": "어떤 게임을 만들까요? 예: 모바일 퍼즐 게임",
+    "generate": "생성",
+    "assets": "Assets",
+    "userMenu": "User menu",
+    "signOut": "Sign out",
+    "signInRegister": "Sign in / Register",
+    "profile": "Profile",
+    "account": "Account"
+  },
+  "beegame": {
+    "previewTitle": "미리보기",
+    "collabFlow": "협업 흐름",
+    "deliverables": "결과물",
+    "you": "나",
+    "expandMessage": "BeeGame 메시지 펼치기",
+    "collapseMessage": "BeeGame 메시지 접기",
+    "viewSummaryDetails": "상세 보기",
+    "hideSummaryDetails": "상세 숨기기",
+    "toolRunning": "진행 중",
+    "toolCompleted": "완료",
+    "toolFailed": "실패",
+    "open": "열기",
+    "diff": "비교",
+    "loadingArtifacts": "결과물 불러오는 중...",
+    "noArtifacts": "아직 결과물이 없습니다",
+    "noMessages": "아직 메시지가 없습니다",
+    "generatedOnDownload": "다운로드 시 생성",
+    "byUnknown": "알 수 없음",
+    "review": "검토",
+    "pending": "대기 중",
+    "locked": "잠김",
+    "preview": "미리보기",
+    "download": "다운로드",
+    "artifactOnlinePreview": "결과물 미리보기",
+    "fetchingContent": "내용 불러오는 중...",
+    "actionRequired": "작업 필요",
+    "resourceManifestDescription": "에이전트가 기본 리소스 매니페스트를 생성했습니다. 사용자 CSV를 업로드해 덮어쓰거나 기본값을 사용할 수 있습니다.",
+    "skip": "건너뛰기",
+    "upload": "업로드",
+    "approve": "승인",
+    "revise": "수정",
+    "reject": "거부",
+    "allow": "허용",
+    "deny": "거부",
+    "continue": "계속",
+    "submitting": "제출 중",
+    "starting": "시작 중",
+    "refreshing": "새로고침 중",
+    "permissionRequired": "권한 필요",
+    "clarificationRequired": "확인 필요",
+    "approvalRequired": "승인 필요",
+    "revisionRequired": "수정 필요",
+    "clarificationDescription": "확인 질문에 답하거나 현재 브리프를 어떻게 진행할지 선택하세요.",
+    "aiProcessing": "AI 처리 중...",
+    "settingsGeneral": "일반",
+    "settingsModel": "모델",
+    "closeSettings": "설정 닫기",
+    "workspacePath": "작업 경로",
+    "resetDefault": "기본값 복원",
+    "webSearch": "웹 검색",
+    "searchBackend": "검색 백엔드",
+    "provider": "Provider",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "models": "모델",
+    "fast": "Fast",
+    "balanced": "Balanced",
+    "strong": "Strong",
+    "fastModel": "Fast 모델",
+    "balancedModel": "Balanced 모델",
+    "strongModel": "Strong 모델",
+    "saveSettings": "설정 저장",
+    "saving": "저장 중",
+    "subagents": "Subagents",
+    "savedPrefix": "저장됨",
+    "modelSaveFailed": "모델 설정 저장 실패",
+    "workspaceReadFailed": "작업 경로 읽기 실패",
+    "workspaceSaveFailed": "작업 경로 저장 실패",
+    "workspaceResetFailed": "기본 작업 경로 복원 실패",
+    "webToolsReadFailed": "웹 검색 설정 읽기 실패",
+    "webSearchSaveFailed": "웹 검색 설정 저장 실패",
+    "close": "닫기",
+    "noProjectsFound": "프로젝트가 없습니다",
+    "untitledProject": "제목 없는 프로젝트",
+    "moreActionsFor": "추가 작업",
+    "deleteProject": "프로젝트 삭제",
+    "confirmDelete": "삭제 확인",
+    "artifactDownloadFailed": "다운로드에 실패했습니다. 나중에 다시 시도하세요.",
+    "artifactPreviewFailed": "결과물 내용을 불러오지 못했습니다. 다운로드를 시도하세요.",
+    "paused": "일시 중지",
+    "turnComplete": "턴 완료",
+    "approvalRequestShort": "승인 필요",
+    "completed": "완료",
+    "dashboard": {
+      "phase": {
+        "idea_intake": "Idea Intake",
+        "brief": "Build Brief",
+        "gdd": "Playable Spec",
+        "architecture": "Architecture",
+        "art_direction": "Art Direction",
+        "ui": "UI",
+        "asset": "Assets",
+        "implementation": "Implementation",
+        "qa": "Playability Review",
+        "polish": "Polish",
+        "build": "Build Preview"
+      },
+      "turn": {
+        "running": "Working",
+        "waiting_approval": "Waiting for approval",
+        "paused": "Needs attention",
+        "offline": "Offline",
+        "finished": "Ready for review",
+        "idle": "Ready"
+      },
+      "creditQuote": {
+        "settlementNote": "Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.",
+        "title": "Confirm request",
+        "description": "This request will reserve {{reservedCredits}} credits. It will settle against actual usage, and unused credits will be refunded.",
+        "balance": "Balance",
+        "reserved": "Reserved",
+        "cancel": "Cancel",
+        "confirm": "Confirm and send"
+      },
+      "approvalWaiting": "This project is waiting for approval. Resolve the approval request before sending a normal message."
+    },
+    "livePreview": {
+      "title": "Live Game Preview",
+      "starting": "Preparing preview",
+      "waiting": "Waiting for a playable surface",
+      "noPreview": "The game preview appears here after a build is available",
+      "failed": "Preview unavailable",
+      "stopped": "Runtime stopped",
+      "live": "Live",
+      "reload": "Reload preview",
+      "open": "Open in new window",
+      "stop": "Stop preview",
+      "play": "Start preview",
+      "build": "Build",
+      "health": "Health",
+      "entrypoint": "Entrypoint",
+      "unavailable": "Unavailable",
+      "tokens": "Tokens",
+      "credits": "Credits",
+      "reserved": "Reserved",
+      "phase": "Phase",
+      "model": "Model",
+      "syncing": "Syncing",
+      "back": "Back to projects",
+      "settings": "Settings",
+      "language": "Language"
+    },
+    "assets": {
+      "title": "Asset Contracts",
+      "empty": "No asset contract yet. BeeGame will ask the agent to create assets/asset-manifest.json on the next build.",
+      "loading": "Loading asset contracts...",
+      "upload": "Upload replacement",
+      "uploading": "Uploading...",
+      "requestIntegration": "Ask BeeGame to integrate",
+      "verifyIntegration": "Re-integrate / verify",
+      "integrateAllPending": "Integrate all pending",
+      "required": "Required",
+      "optional": "Optional",
+      "placeholder": "Placeholder",
+      "uploaded": "Pending integration",
+      "integrated": "Integrated",
+      "uploadedHint": "Uploaded, but not confirmed in runtime yet.",
+      "mcp": "MCP integration",
+      "filesystem": "File integration",
+      "manual": "Manual integration",
+      "target": "Target",
+      "formats": "Formats",
+      "specs": "Specs",
+      "noPurpose": "No purpose provided"
+    },
+    "savedPrefixSeparator": ": "
+  },
+  "settings": {
+    "runtimeCapabilities": {
+      "title": "기능",
+      "subagents": {
+        "description": "필요할 때 BeeGame이 독립 하위 작업을 위임할 수 있습니다.",
+        "note": "큰 구현과 검증에 적합합니다. 단순 작업은 보통 단일 에이전트로 유지됩니다."
+      },
+      "items": {
+        "autoMemoryEnabled": {
+          "label": "runtime.autoMemory",
+          "description": "선호, 프로젝트 결정, 자주 쓰는 맥락을 기억합니다.",
+          "note": "소량의 백그라운드 쓰기와 token 비용이 있습니다. 민감한 프로젝트에서는 끌 수 있습니다.",
+          "scope": "newSession"
+        },
+        "autoDreamEnabled": {
+          "label": "runtime.autoDream",
+          "description": "장기 기억을 정리해 중복과 오래된 정보를 줄입니다.",
+          "note": "시간과 세션 수 조건을 만족한 뒤 백그라운드로 실행됩니다.",
+          "scope": "newSession"
+        },
+        "skillSearchEnabled": {
+          "label": "Skill Search",
+          "description": "현재 작업에 맞는 스킬을 자동으로 찾습니다.",
+          "note": "가벼운 검색 비용이 있으며 가끔 약한 매칭을 고를 수 있습니다.",
+          "scope": "newSession"
+        },
+        "treeSitterBashEnabled": {
+          "label": "Bash AST parser",
+          "description": "AST로 Bash 구조와 주입 위험을 이해합니다.",
+          "note": "runtime을 FEATURE_TREE_SITTER_BASH와 함께 시작해야 합니다. 복잡한 명령은 더 보수적으로 처리됩니다.",
+          "scope": "restart"
+        },
+        "webBrowserToolEnabled": {
+          "label": "Browser fetch tool",
+          "description": "runtime이 웹페이지 HTML 텍스트를 읽을 수 있게 합니다.",
+          "note": "문서와 페이지 확인에 적합합니다. 클릭, 입력, JS 실행이 되는 전체 브라우저는 아닙니다.",
+          "scope": "restart"
+        },
+        "bashClassifierEnabled": {
+          "label": "Bash classifier",
+          "description": "모델로 Bash 명령 위험 판단을 보조합니다.",
+          "note": "반복 승인을 줄일 수 있지만 모델 호출이 늘어납니다. 잘못된 분류는 권한 흐름에 영향을 줍니다.",
+          "scope": "restart"
+        },
+        "mcpSkillsEnabled": {
+          "label": "MCP skills",
+          "description": "MCP의 skill:// 리소스를 스킬 시스템에 포함합니다.",
+          "note": "품질은 MCP server 리소스에 달려 있으며 feature 시작이 필요합니다.",
+          "scope": "restart"
+        }
+      }
+    },
+    "mcp": {
+      "title": "MCP",
+      "intro": "MCP는 외부 에디터, 엔진, 도구를 BeeGame runtime에 연결합니다. 현재 dashboard는 진입점과 범위를 보여주며 server 관리는 runtime 설정에 남깁니다.",
+      "rows": [
+        {
+          "title": "Server 설정",
+          "description": "MCP server는 runtime MCP 설정에서 관리합니다.",
+          "note": "dashboard에는 아직 MCP server를 안전하게 읽고 쓰거나 재시작하는 백엔드 라우트가 없습니다."
+        },
+        {
+          "title": "프로젝트 리소스 통합",
+          "description": "Unity, Godot, Blender 같은 프로젝트는 asset manifest에 mcp와 mcp_server를 선언할 수 있습니다.",
+          "note": "결과물 패널은 이 통합 정보를 표시하지만 editor가 연결됐다고 가정하지 않습니다."
+        },
+        {
+          "title": "스킬 발견",
+          "description": "기능 탭에서 MCP skills를 켜면 runtime이 skill:// 리소스를 포함할 수 있습니다.",
+          "note": "새로 시작하는 BeeGame turn에만 적용되며 실제 사용 가능한 MCP server에 의존합니다."
+        }
+      ],
+      "configured": "Configured",
+      "newServer": "New server",
+      "noServers": "No MCP servers yet",
+      "form": {
+        "name": "Name",
+        "enabled": "Enabled",
+        "transport": "Transport",
+        "scope": "Scope",
+        "command": "Command",
+        "args": "Arguments",
+        "url": "URL",
+        "cwd": "Working directory",
+        "env": "Environment",
+        "argsHint": "One argument per line",
+        "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
+        "stdio": "stdio",
+        "sse": "SSE",
+        "http": "HTTP",
+        "beegame": "BeeGame",
+        "global": "Global",
+        "project": "Project",
+        "edit": "Edit",
+        "delete": "Delete",
+        "cancel": "Cancel",
+        "save": "Save server",
+        "saving": "Saving",
+        "scanLocal": "Import config",
+        "scanActive": "Find local services",
+        "scanning": "Scanning",
+        "discovered": "Importable config",
+        "activeDiscovered": "Local services",
+        "noDiscovered": "No importable MCP servers found",
+        "noActiveDiscovered": "No running MCP servers found",
+        "importServer": "Import",
+        "existing": "Exists",
+        "source": "Source",
+        "testConnection": "Test",
+        "testingConnection": "Testing",
+        "available": "Available",
+        "unavailable": "Unavailable",
+        "untested": "Untested",
+        "advanced": "Advanced",
+        "actions": "Actions"
+      }
+    },
+    "admin": {
+      "title": "Settings",
+      "platform": "Platform",
+      "deployment": "Deployment",
+      "workspaceManaged": "Managed by server deployment",
+      "workspaceNote": "In server mode, the workspace root is a global sandbox boundary. Users cannot override it; project paths are assigned by the platform per account."
+    },
+    "runtime": {
+      "autoMemory": "Auto Memory",
+      "autoDream": "Auto Dream"
+    }
+  },
+  "landing": {
+    "intake": {
+      "modal": {
+        "chooseOption": "Choose a direction",
+        "productionSettings": "Build settings",
+        "confirmBuildBrief": "Confirm build brief",
+        "startBuild": "Start build",
+        "close": "Close direction dialog"
+      },
+      "optionCard": {
+        "mode": "Game mode",
+        "gameplay": "Gameplay"
+      },
+      "fields": {
+        "platform": "Platform",
+        "engine": "Engine",
+        "dimension": "Presentation",
+        "genre": "Genre",
+        "style": "Style",
+        "inputs": "Inputs",
+        "notes": "Notes",
+        "presentation": "Presentation",
+        "type": "Type"
+      },
+      "actions": {
+        "chooseAgain": "Choose again",
+        "confirmBrief": "Confirm brief",
+        "edit": "Edit",
+        "building": "Starting...",
+        "startBuild": "Start build",
+        "continue": "Continue",
+        "backToLogin": "Back to sign in",
+        "cancel": "Cancel",
+        "confirmGenerate": "Confirm generation",
+        "confirmBuild": "Confirm build"
+      },
+      "clarification": {
+        "title": "Clarification",
+        "freeformLabel": "Additional notes",
+        "placeholder": "You can also add your own clarification",
+        "freeformOption": "I will add details"
+      },
+      "errors": {
+        "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
+        "insufficientCredits": "Not enough credits. This {{taskName}} requires {{reservedCredits}} reserved credits; you currently have {{balanceCredits}} credits.",
+        "quoteFailed": "Unable to estimate credits. Check the service and try again.",
+        "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "authNotConfigured": "Supabase Auth is not configured.",
+        "missingEmailPassword": "Enter your email and password.",
+        "missingDisplayName": "Set a display name.",
+        "termsRequired": "Read and accept the terms first.",
+        "intakeFailed": "Failed to generate options. Please try again.",
+        "loginFailed": "Sign-in failed. Please try again.",
+        "resetEmailRequired": "Enter your email and we will send a password reset email.",
+        "resetEmailSent": "Password reset email sent. Check your inbox.",
+        "resetEmailFailed": "Unable to send password reset email.",
+        "profileImageRequired": "Choose an image file.",
+        "profileImageTooLarge": "Avatar image must be under 2 MB.",
+        "profileAvatarSelected": "Avatar selected. Click Done to save.",
+        "profileAvatarUploadFailed": "Avatar upload failed. Try another image.",
+        "profileAvatarUpdateFailed": "Unable to update avatar."
+      },
+      "placeholders": {
+        "notes": "Add target audience, reference games, constraints, or the experience you want to validate first."
+      },
+      "profile": {
+        "displayNameFallback": "No display name",
+        "emailFallback": "Email not shared",
+        "balance": "Balance",
+        "consumed": "Used",
+        "reserved": "Reserved",
+        "loadingCreditDetails": "Loading records...",
+        "viewCreditDetails": "View credit details",
+        "ledgerCount": "{{count}} entries",
+        "noLedgerRecords": "No records",
+        "closeCreditDetails": "Close credit details",
+        "deleteAccount": "Delete account",
+        "deleteConfirm": "Deleting your account removes your BeeGame login account and cloud data. This cannot be undone. Continue?",
+        "deleteFailed": "Unable to delete account. Try again later.",
+        "finish": "Done",
+        "saving": "Saving...",
+        "title": "Profile",
+        "description": "Manage your BeeGame account profile and sign-in state.",
+        "close": "Close profile",
+        "uploadAvatar": "Upload avatar",
+        "creditUsage": "Credit usage",
+        "creditDetailsTitle": "Credit details",
+        "creditDetailsDescription": "Records reservations, settlements, and refunds by task stage."
+      },
+      "credits": {
+        "task": {
+          "ideaIntake": "idea generation",
+          "fullBuild": "build",
+          "idea_intake": "Idea generation",
+          "full_build": "Full build",
+          "edit_turn": "Edit request",
+          "continue_turn": "Continue request",
+          "asset_integration": "Asset integration",
+          "large_build": "Large build",
+          "agent_turn": "Agent task"
+        },
+        "title": {
+          "ideaIntake": "Confirm idea generation",
+          "fullBuild": "Confirm build"
+        },
+        "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
+        "balance": "Balance",
+        "reserved": "Reserved",
+        "kind": {
+          "estimate": "Estimate",
+          "reserve": "Reserve",
+          "settle": "Settle",
+          "refund": "Refund",
+          "grant": "Grant"
+        }
+      },
+      "auth": {
+        "oauthDivider": "Or continue with",
+        "signingIn": "Processing...",
+        "sendReset": "Send reset email",
+        "registerAndContinue": "Register and continue",
+        "signInAndContinue": "Sign in and continue",
+        "oauthFailed": "Unable to start third-party sign-in.",
+        "forgotPassword": "Forgot password?",
+        "acceptTermsAria": "Accept terms",
+        "acceptTermsPrefix": "I have read and accept BeeGame",
+        "termsLabel": "Terms",
+        "privacyLabel": "Privacy Policy",
+        "acceptTermsConnector": "and",
+        "acceptTermsSuffix": ", and I understand generation consumes credits.",
+        "dialogLabel": "Sign in / Register BeeGame",
+        "close": "Close sign-in dialog",
+        "title": {
+          "resetPassword": "Reset password",
+          "register": "Create BeeGame account",
+          "login": "Welcome back"
+        },
+        "description": {
+          "resetPassword": "Enter your account email and we will send a password reset email.",
+          "register": "Set a display name to save projects, sync settings, and continue generating game directions.",
+          "login": "Sign in to continue your projects, generation progress, and account settings."
+        },
+        "tabs": {
+          "login": "Sign in",
+          "register": "Register"
+        },
+        "fields": {
+          "displayName": "Display name",
+          "displayNameAria": "Registration display name",
+          "displayNamePlaceholder": "For example: Bee Maker",
+          "email": "Email",
+          "emailAria": "Email",
+          "password": "Password",
+          "passwordAria": "Password",
+          "passwordNewPlaceholder": "At least 6 characters",
+          "passwordPlaceholder": "Enter password"
+        },
+        "legalClose": "Close legal document",
+        "legalUpdated": "Updated {{date}}",
+        "legalUnderstand": "I understand"
+      },
+      "options": {
+        "Mobile": "Mobile",
+        "Desktop": "Desktop",
+        "Console": "Console",
+        "Mixed": "Mixed",
+        "Arcade": "Arcade",
+        "Puzzle": "Puzzle",
+        "Action": "Action",
+        "Adventure": "Adventure",
+        "Casual": "Casual",
+        "Simulation": "Simulation",
+        "Strategy": "Strategy",
+        "Pixel": "Pixel",
+        "Cartoon": "Cartoon",
+        "Minimal": "Minimal",
+        "Painterly": "Painterly",
+        "Sci-fi": "Sci-fi",
+        "Fantasy": "Fantasy",
+        "Realistic": "Realistic",
+        "Keyboard/mouse": "Keyboard/mouse",
+        "Gamepad": "Gamepad",
+        "Touch": "Touch",
+        "Voice": "Voice",
+        "Hand tracking XR": "Hand tracking XR"
+      }
+    },
+    "legal": {
+      "terms": {
+        "title": "BeeGame Terms",
+        "updatedAt": "2026-06-27",
+        "intro": "Welcome to BeeGame. These terms explain your basic rights and responsibilities when generating, managing, and previewing game projects.",
+        "sections": [
+          {
+            "title": "Account and security",
+            "body": "You need a valid email and display name to create an account. Keep your credentials secure and do not share accounts or use them to bypass system limits."
+          },
+          {
+            "title": "Generation service and credits",
+            "body": "BeeGame may call models, tools, and runtime environments to generate game documents, code, placeholder assets, and previews from your input. Generation consumes credits, and actual usage can vary by project complexity, model, tool calls, and retries."
+          },
+          {
+            "title": "Content and project ownership",
+            "body": "You retain rights to your ideas, uploaded assets, and project files. You are responsible for ensuring that your input, uploads, and distribution do not violate third-party rights, laws, or platform rules."
+          },
+          {
+            "title": "Availability and risk",
+            "body": "BeeGame aims to help create runnable game projects, but generated content can contain errors, omissions, or material unsuitable for commercial release. Review, test, and validate compliance before publishing."
+          },
+          {
+            "title": "Prohibited use",
+            "body": "Do not use BeeGame to generate malware, bypass security controls, infringe rights, violate laws, or damage service stability."
+          },
+          {
+            "title": "Changes and termination",
+            "body": "BeeGame may adjust features, billing, and usage rules for product, security, or compliance reasons. You can delete your account from the profile page; cloud account data will be deleted according to system policy."
+          }
+        ]
+      },
+      "privacy": {
+        "title": "BeeGame Privacy Policy",
+        "updatedAt": "2026-06-27",
+        "intro": "This notice explains how BeeGame handles data involved in login, game generation, and project management.",
+        "sections": [
+          {
+            "title": "Data we process",
+            "body": "We process account information, email, display name, avatar URL, model settings, project metadata, generation records, tool logs, credit records, and assets you upload."
+          },
+          {
+            "title": "How data is used",
+            "body": "This data is used for authentication, project storage, configuration sync, generation tasks, history, credit accounting, troubleshooting, and product improvement."
+          },
+          {
+            "title": "Models and third-party services",
+            "body": "When third-party LLM, search, MCP, or hosting services are configured, related requests may be sent to the selected providers. Confirm their privacy and data handling rules fit your needs."
+          },
+          {
+            "title": "Assets and project files",
+            "body": "Uploaded assets and generated project files are used for the current project build, preview, and future modifications. Do not upload assets you cannot use, sensitive identity data, or secrets."
+          },
+          {
+            "title": "Retention and deletion",
+            "body": "You can delete your account from the profile page. Deletion triggers account cleanup according to database relationships. Some local workspaces, exports, or backups may need to be managed separately."
+          },
+          {
+            "title": "Security",
+            "body": "BeeGame reduces risk through authentication, permission controls, and isolated project workspaces. You should still avoid putting unprotected keys, credentials, or private data in projects or prompts."
+          }
+        ]
+      }
+    },
+    "credits": {
+      "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
+    }
+  }
+}

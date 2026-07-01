@@ -173,7 +173,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
         expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Subagents')).not.toBeInTheDocument();
-        expect(screen.queryByRole('switch', { name: 'Auto Memory' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('switch', { name: '自动记忆' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
@@ -317,8 +317,8 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('switch', { name: 'Subagents' })).toBeChecked();
-        expect(screen.getByRole('switch', { name: 'Auto Memory' })).toBeChecked();
-        expect(screen.getByRole('switch', { name: 'Auto Dream' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: '自动整理' })).toBeChecked();
         expect(screen.getByRole('switch', { name: 'Skill Search' })).not.toBeChecked();
         expect(screen.getByText('记住偏好、项目决策和常用上下文。')).toBeInTheDocument();
         expect(screen.queryByText('好处: 跨会话保留偏好、项目决策和常用上下文。')).not.toBeInTheDocument();

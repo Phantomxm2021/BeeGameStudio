@@ -14,7 +14,7 @@ import {
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
-import { getBeeGameText, type BeeGameText } from '../BeeGameI18n';
+import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTranslations';
 
 const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
 
@@ -196,7 +196,7 @@ export const BeeGameCollaborationFeed = memo(({
     lang = 'en',
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
-    const text = getBeeGameText(lang);
+    const text = useBeeGameText(lang);
 
     return (
         <div data-testid="beegame-collaboration-feed" className="relative min-h-full pl-12">
@@ -234,7 +234,7 @@ export const BeeGameConversationOverviewRuler = memo(({
     scrollContainerRef,
 }: BeeGameConversationOverviewRulerProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
-    const text = getBeeGameText(lang);
+    const text = useBeeGameText(lang);
     const axisEntries = useMemo(() => buildAxisEntries(entries, text), [entries, text]);
     const [activeAxisId, setActiveAxisId] = useState<string | null>(null);
 
@@ -508,8 +508,8 @@ function ConversationAxis({
                         className="pointer-events-none absolute left-10 z-30 w-72 -translate-y-1/2 rounded-2xl border border-zinc-700 bg-zinc-800/95 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur-xl"
                         style={{ top: previewTop }}
                     >
-                        <div className="truncate text-sm font-black text-zinc-100">{hoveredEntry.title}</div>
-                        <div className="mt-1 line-clamp-3 text-xs leading-5 text-zinc-400">{hoveredEntry.preview}</div>
+                        <div className="type-footnote truncate text-zinc-100">{hoveredEntry.title}</div>
+                        <div className="type-footnote mt-1 line-clamp-3 text-zinc-400">{hoveredEntry.preview}</div>
                     </div>
                 ) : null}
             </div>
@@ -560,7 +560,7 @@ function UserMessageCard({ message, text }: { message: ChatDisplayMessage; text:
             className="ml-auto max-w-[88%] rounded-xl border border-zinc-700/70 bg-zinc-800/45 px-4 py-3 text-zinc-100 shadow-sm"
         >
             <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">{text.you}</span>
+                <span className="type-caption-1 text-zinc-400">{text.you}</span>
                 <span className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">
                     <User className="h-4 w-4" />
                 </span>
@@ -622,7 +622,7 @@ function AgentSummaryCard({
         <section data-testid={`beegame-agent-message-${message.id}`} className="rounded-xl border border-orange-500/20 bg-orange-950/15 px-4 py-3 text-zinc-100 shadow-sm">
             <div className="min-w-0">
                 <div className="mb-2 flex items-center gap-2">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-orange-400/35 bg-[#2a1a12] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-orange-400/35 bg-orange-950/40 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
                         <img
                             src={BEEGAME_AVATAR_SRC}
                             alt="BeeGame"
@@ -637,7 +637,7 @@ function AgentSummaryCard({
                         onClick={onToggleCollapsed}
                         className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                     >
-                        <span className="min-w-0 truncate text-[11px] font-black uppercase tracking-widest text-orange-300">
+                        <span className="type-caption-1 min-w-0 truncate text-orange-300">
                             BeeGame
                         </span>
                         {isCollapsed ? (
@@ -659,7 +659,7 @@ function AgentSummaryCard({
                             <button
                                 type="button"
                                 onClick={() => setIsExpanded((value) => !value)}
-                                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-orange-300 hover:text-orange-200"
+                                className="type-footnote mt-2 inline-flex items-center gap-1 text-orange-300 hover:text-orange-200"
                             >
                                 {isExpanded ? text.hideSummaryDetails : text.viewSummaryDetails}
                                 {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -755,7 +755,7 @@ function ToolTimelineCard({
                         className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
                     >
                         <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-sm font-black text-zinc-100">{title}</span>
+                            <span className="type-footnote truncate text-zinc-100">{title}</span>
                         </span>
                         {isExpanded ? (
                             <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -766,12 +766,12 @@ function ToolTimelineCard({
                     {isExpanded ? (
                         <div>
                             {detail ? (
-                                <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+	                                <div className="type-code-sm mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-400 [overflow-wrap:anywhere]">
                                     {detail}
                                 </div>
                             ) : null}
                             {output ? (
-                                <div className="mt-2 line-clamp-3 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]">
+                                <div className="type-footnote mt-2 line-clamp-3 text-zinc-500 [overflow-wrap:anywhere]">
                                     {output}
                                 </div>
                             ) : null}
@@ -781,7 +781,7 @@ function ToolTimelineCard({
                                         type="button"
                                         aria-label={`${text.open} ${previewTitle}`}
                                         onClick={() => onPreviewArtifact?.(previewId, previewTitle, previewContent || undefined)}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
+                                        className="type-footnote inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
                                     >
                                         <FolderOpen className="h-3.5 w-3.5" />
                                         {text.open}
@@ -790,7 +790,7 @@ function ToolTimelineCard({
                                         type="button"
                                         aria-label={`${text.diff} ${previewTitle}`}
                                         onClick={() => onPreviewArtifact?.(`${previewId}:diff`, `${text.diff}: ${previewTitle}`, diffContent)}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
+                                        className="type-footnote inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
                                     >
                                         <GitCompare className="h-3.5 w-3.5" />
                                         {text.diff}

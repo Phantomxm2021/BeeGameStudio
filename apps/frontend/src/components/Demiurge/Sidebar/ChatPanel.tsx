@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, AlertCircle, Send } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed, BeeGameConversationOverviewRuler } from './BeeGameCollaborationFeed';
@@ -9,7 +8,7 @@ import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
-import { getBeeGameText } from '../BeeGameI18n';
+import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -80,7 +79,7 @@ export const ChatPanel = memo(({
     variant = 'legacy',
     lang = 'en',
 }: ChatPanelProps) => {
-    const text = getBeeGameText(lang);
+    const text = useBeeGameText(lang);
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
@@ -139,8 +138,8 @@ export const ChatPanel = memo(({
         ? 'border-t border-zinc-800 bg-zinc-950/70 px-4 pb-4 pt-4'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
     const textareaClassName = isBeeGameVariant
-        ? 'w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 pr-14 outline-none focus:border-orange-500/70 transition-all text-sm text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto'
-        : 'w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
+        ? 'type-input w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 pr-14 outline-none focus:border-orange-500/70 transition-all text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto'
+        : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
     const sendButtonClassName = isBeeGameVariant
         ? 'absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-700 text-zinc-100 shadow-lg transition-transform group-active:scale-95 disabled:bg-zinc-800 disabled:text-zinc-600'
         : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
@@ -151,8 +150,7 @@ export const ChatPanel = memo(({
                 ref={scrollContainerRef}
                 className={scrollClassName}
             >
-                <AnimatePresence initial={false}>
-                    {isBeeGameVariant ? (
+                {isBeeGameVariant ? (
                         <>
                             <BeeGameConversationOverviewRuler
                                 messages={messages}
@@ -168,13 +166,10 @@ export const ChatPanel = memo(({
                         </>
                     ) : messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20">
-                            <motion.div
-                                animate={{ scale: [1, 1.1, 1] }}
-                                transition={{ duration: 4, repeat: Infinity }}
-                            >
+                            <div className="animate-pulse">
                                 <MessageSquare className="w-16 h-16 text-zinc-400" />
-                            </motion.div>
-                            <p className="text-sm font-medium">{text.noMessages}</p>
+                            </div>
+                            <p className="type-callout">{text.noMessages}</p>
                         </div>
                     ) : (
                         messages.map((m) => (
@@ -194,24 +189,22 @@ export const ChatPanel = memo(({
                         if (!isManifestReview) return null;
 
                         return (
-                            <motion.div
+                            <div
                                 key={review.gate_id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="w-full p-6 rounded-3xl bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 space-y-4"
+	                                className="w-full space-y-4 rounded-3xl border border-amber-300/25 bg-amber-950/15 p-6"
                             >
                                 <div className="flex items-start space-x-3">
-                                    <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+	                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">{text.actionRequired}</div>
-                                        <div className="text-sm text-blue-900 dark:text-blue-100 opacity-80 mb-2">
+	                                        <div className="type-caption-1 mb-1 text-amber-200">{text.actionRequired}</div>
+	                                        <div className="type-callout mb-2 text-zinc-200 opacity-80">
                                             {text.resourceManifestDescription}
                                         </div>
                                         <div className="flex space-x-3 mt-4">
                                             <button
                                                 onClick={() => onApproveManifest && onApproveManifest(toApprovalPayload(review))}
                                                 disabled={isLoading}
-                                                className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50"
+	                                                className="type-button flex flex-1 items-center justify-center space-x-2 rounded-xl bg-white py-2 text-zinc-950 shadow-sm transition-colors hover:bg-zinc-200 disabled:opacity-50"
                                             >
                                                 <span>{text.skip}</span>
                                             </button>
@@ -236,7 +229,7 @@ export const ChatPanel = memo(({
                                                 />
                                                 <label
                                                     htmlFor={`upload-csv-${review.gate_id}`}
-                                                    className={`w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                                                    className={`type-button w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
                                                 >
                                                     <span>{text.upload}</span>
                                                 </label>
@@ -244,23 +237,20 @@ export const ChatPanel = memo(({
                                         </div>
                                     </div>
                                 </div>
-                            </motion.div>
+                            </div>
                         );
                     })}
-                </AnimatePresence>
             </div>
 
             <div className={composerShellClassName}>
                 {shouldShowWaitingBanner && (
-                    <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+                    <div className="type-footnote mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
                         {waitingApproval.message}
                     </div>
                 )}
                 {shouldShowApprovalBar && activeComposerReview ? (
-                    <motion.div
+                    <div
                         key={`approval-bar-${activeComposerReview.gate_id}`}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
                         className="pointer-events-auto"
                     >
                         <ApprovalActionCard
@@ -326,7 +316,7 @@ export const ChatPanel = memo(({
                             pendingMessage={approvalState.message}
                             failedMessage={approvalState.message}
                         />
-                    </motion.div>
+                    </div>
                 ) : (
                     <div className="relative group flex items-end" data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
                         <textarea

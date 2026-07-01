@@ -491,7 +491,7 @@ describe('ChatPanel approval bar', () => {
             variant: 'beegame',
             messages: [
                 {
-                    id: 'm_snake',
+                    id: 'm_sample',
                     sender: 'system',
                     content: 'Tool: Write\nStatus: completed\nTarget: docs/GDD.md',
                     timestamp: 1,
@@ -620,7 +620,7 @@ describe('ChatPanel approval bar', () => {
 
         const heading = screen.getByRole('heading', { name: '项目完成总结', level: 3 });
         expect(heading).toBeInTheDocument();
-        expect(screen.getByText('交付内容')).toHaveClass('font-bold');
+	        expect(screen.getByText('交付内容')).toBeInTheDocument();
         expect(screen.queryByText(/### 项目完成总结/)).not.toBeInTheDocument();
         expect(screen.queryByText(/\*\*交付内容\*\*/)).not.toBeInTheDocument();
     });

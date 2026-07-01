@@ -1,0 +1,591 @@
+{
+  "landing": {
+    "intake": {
+      "modal": {
+        "chooseOption": "選擇方案",
+        "productionSettings": "製作設定",
+        "confirmBuildBrief": "確認構建方案",
+        "startBuild": "啟動構建",
+        "close": "關閉方案視窗"
+      },
+      "optionCard": {
+        "mode": "遊戲模式",
+        "gameplay": "玩法"
+      },
+      "fields": {
+        "platform": "平台",
+        "engine": "引擎",
+        "dimension": "表現形式",
+        "genre": "遊戲類型",
+        "style": "風格",
+        "inputs": "輸入方式",
+        "notes": "補充說明",
+        "presentation": "表現",
+        "type": "類型"
+      },
+      "actions": {
+        "chooseAgain": "重新選擇",
+        "confirmBrief": "確認方案",
+        "edit": "返回修改",
+        "building": "正在啟動...",
+        "startBuild": "開始構建",
+        "continue": "繼續",
+        "backToLogin": "返回登入",
+        "cancel": "取消",
+        "confirmGenerate": "確認生成",
+        "confirmBuild": "確認構建"
+      },
+      "clarification": {
+        "title": "需求補充",
+        "freeformLabel": "補充說明",
+        "placeholder": "也可以直接補充你的理解",
+        "freeformOption": "我來補充"
+      },
+      "errors": {
+        "missingPlatformModel": "平台尚未配置預設模型。請聯絡管理員在系統設定的平台頁配置後再生成。",
+        "insufficientCredits": "Credit 不足。本次{{taskName}}需要預扣 {{reservedCredits}} credits，你目前有 {{balanceCredits}} credits。",
+        "quoteFailed": "無法取得 credit 預估，請檢查服務後重試。",
+        "projectStartFailed": "專案啟動失敗，請檢查服務後重試。",
+        "authNotConfigured": "Supabase Auth 尚未配置。",
+        "missingEmailPassword": "請輸入信箱和密碼。",
+        "missingDisplayName": "請設定暱稱。",
+        "termsRequired": "請先閱讀並同意使用者協議。",
+        "intakeFailed": "方案生成失敗，請重試。",
+        "loginFailed": "登入失敗，請重試。",
+        "resetEmailRequired": "請輸入信箱，我們會寄送密碼重置郵件。",
+        "resetEmailSent": "重置密碼郵件已寄出，請檢查信箱。",
+        "resetEmailFailed": "重置密碼郵件寄送失敗。",
+        "profileImageRequired": "請選擇圖片檔案。",
+        "profileImageTooLarge": "頭像圖片不能超過 2MB。",
+        "profileAvatarSelected": "頭像已選擇，點擊完成後保存。",
+        "profileAvatarUploadFailed": "頭像上傳失敗，請換一張圖片。",
+        "profileAvatarUpdateFailed": "頭像更新失敗。"
+      },
+      "placeholders": {
+        "notes": "可補充目標使用者、參考遊戲、特殊限制或你想優先驗證的體驗。"
+      },
+      "profile": {
+        "displayNameFallback": "未設定暱稱",
+        "emailFallback": "信箱未公開",
+        "balance": "餘額",
+        "consumed": "已用",
+        "reserved": "凍結",
+        "loadingCreditDetails": "正在載入記錄...",
+        "viewCreditDetails": "查看 Credit 明細",
+        "ledgerCount": "{{count}} 筆",
+        "noLedgerRecords": "暫無記錄",
+        "closeCreditDetails": "關閉 Credit 明細",
+        "deleteAccount": "註銷帳戶",
+        "deleteConfirm": "註銷帳戶會刪除你的 BeeGame 登入帳號和雲端資料。此操作無法復原，是否繼續？",
+        "deleteFailed": "註銷帳戶失敗，請稍後重試。",
+        "finish": "完成",
+        "saving": "儲存中...",
+        "title": "個人主頁",
+        "description": "管理你的 BeeGame 帳號資料和登入狀態。",
+        "close": "關閉個人主頁",
+        "uploadAvatar": "上傳頭像",
+        "creditUsage": "Credit 用量",
+        "creditDetailsTitle": "Credit 明細",
+        "creditDetailsDescription": "按任務環節記錄預扣、結算和退回。"
+      },
+      "credits": {
+        "task": {
+          "ideaIntake": "方案生成",
+          "fullBuild": "構建",
+          "idea_intake": "方案生成",
+          "full_build": "完整建構",
+          "edit_turn": "修改任務",
+          "continue_turn": "繼續任務",
+          "asset_integration": "資源整合",
+          "large_build": "大型建構",
+          "agent_turn": "Agent 任務"
+        },
+        "title": {
+          "ideaIntake": "確認生成方案",
+          "fullBuild": "確認構建"
+        },
+        "description": "本次{{taskName}}將預扣 {{reservedCredits}} credits。任務結束後會按實際 token 和工具消耗結算，未使用部分自動退回。",
+        "balance": "目前餘額",
+        "reserved": "本次預扣",
+        "kind": {
+          "estimate": "預估",
+          "reserve": "預扣",
+          "settle": "結算",
+          "refund": "退回",
+          "grant": "發放"
+        }
+      },
+      "auth": {
+        "oauthDivider": "或使用第三方帳號",
+        "signingIn": "處理中...",
+        "sendReset": "發送重設郵件",
+        "registerAndContinue": "註冊並繼續",
+        "signInAndContinue": "登入並繼續",
+        "oauthFailed": "第三方登入啟動失敗。",
+        "forgotPassword": "忘記密碼？",
+        "acceptTermsAria": "同意使用者協議",
+        "acceptTermsPrefix": "我已閱讀並同意 BeeGame",
+        "termsLabel": "使用者協議",
+        "privacyLabel": "隱私條款",
+        "acceptTermsConnector": "與",
+        "acceptTermsSuffix": "，理解生成內容會消耗 credit。",
+        "dialogLabel": "登入 / 註冊 BeeGame",
+        "close": "關閉登入彈窗",
+        "title": {
+          "resetPassword": "重置密碼",
+          "register": "建立 BeeGame 帳號",
+          "login": "歡迎回來"
+        },
+        "description": {
+          "resetPassword": "輸入註冊信箱，我們會寄送密碼重置郵件。",
+          "register": "設定暱稱後即可保存專案、同步設定，並繼續生成遊戲方案。",
+          "login": "登入後繼續你的專案、生成進度和帳號設定。"
+        },
+        "tabs": {
+          "login": "登入",
+          "register": "註冊帳號"
+        },
+        "fields": {
+          "displayName": "暱稱",
+          "displayNameAria": "註冊暱稱",
+          "displayNamePlaceholder": "例如：Bee Maker",
+          "email": "信箱",
+          "emailAria": "信箱",
+          "password": "密碼",
+          "passwordAria": "密碼",
+          "passwordNewPlaceholder": "至少 6 位密碼",
+          "passwordPlaceholder": "輸入密碼"
+        },
+        "legalClose": "關閉法律文件",
+        "legalUpdated": "更新於 {{date}}",
+        "legalUnderstand": "我已了解"
+      },
+      "options": {
+        "Mobile": "行動端",
+        "Desktop": "桌面端",
+        "Console": "主機",
+        "Mixed": "混合",
+        "Arcade": "街機",
+        "Puzzle": "解謎",
+        "Action": "動作",
+        "Adventure": "冒險",
+        "Casual": "休閒",
+        "Simulation": "模擬",
+        "Strategy": "策略",
+        "Pixel": "像素",
+        "Cartoon": "卡通",
+        "Minimal": "極簡",
+        "Painterly": "繪畫感",
+        "Sci-fi": "科幻",
+        "Fantasy": "奇幻",
+        "Realistic": "寫實",
+        "Keyboard/mouse": "鍵鼠",
+        "Gamepad": "手把",
+        "Touch": "觸控",
+        "Voice": "語音",
+        "Hand tracking XR": "手勢追蹤 XR"
+      }
+    },
+    "legal": {
+      "terms": {
+        "title": "BeeGame 使用者協議",
+        "updatedAt": "2026-06-27",
+        "intro": "歡迎使用 BeeGame。本協議說明你在使用 BeeGame 生成、管理和預覽遊戲專案時的基本權利與責任。",
+        "sections": [
+          {
+            "title": "帳號與安全",
+            "body": "你需要提供真實可用的信箱和暱稱來建立帳號。請妥善保管登入憑證，不要共享帳號或用於規避系統限制。"
+          },
+          {
+            "title": "生成服務與 Credit",
+            "body": "BeeGame 會根據你的輸入呼叫模型、工具和專案執行環境生成遊戲文件、程式碼、資源占位和預覽。生成行為會消耗 credit，實際消耗可能因專案複雜度、模型、工具呼叫和重試次數而變化。"
+          },
+          {
+            "title": "內容與專案歸屬",
+            "body": "你保留自己輸入的 idea、上傳資源和專案檔案的權利。你需要確認輸入、上傳和分發的內容不侵犯第三方權利，也不違反適用法律或平台規則。"
+          },
+          {
+            "title": "可用性與風險",
+            "body": "BeeGame 會盡力協助你建立可執行的遊戲專案，但生成內容可能包含錯誤、遺漏或不適合商業發布的部分。正式發布前，你應自行審查、測試並確認合規。"
+          },
+          {
+            "title": "禁止行為",
+            "body": "不得使用 BeeGame 生成惡意軟體、規避安全策略、侵犯他人權益、違反法律法規或破壞服務穩定性的內容。"
+          },
+          {
+            "title": "變更與終止",
+            "body": "BeeGame 可根據產品、安全或合規要求調整功能、計費和使用規則。你可以在個人主頁註銷帳號；註銷後雲端帳號和關聯資料將按系統策略刪除。"
+          }
+        ]
+      },
+      "privacy": {
+        "title": "BeeGame 隱私條款",
+        "updatedAt": "2026-06-27",
+        "intro": "本條款說明 BeeGame 如何處理登入、生成遊戲和管理專案過程中涉及的資料。",
+        "sections": [
+          {
+            "title": "我們收集的資料",
+            "body": "我們會處理你的帳號資訊、信箱、暱稱、頭像地址、模型配置、專案中繼資料、生成記錄、工具日誌、credit 記錄以及你主動上傳的資源。"
+          },
+          {
+            "title": "資料用途",
+            "body": "這些資料用於身分驗證、保存專案、同步配置、執行生成任務、展示歷史記錄、計算 credit、排查錯誤和改進產品體驗。"
+          },
+          {
+            "title": "模型與第三方服務",
+            "body": "當你配置第三方 LLM、搜尋、MCP 或託管服務時，相關請求可能會發送到你選擇的服務商。請確認這些服務商的隱私和資料處理規則符合你的需求。"
+          },
+          {
+            "title": "資源與專案檔案",
+            "body": "你上傳的素材和生成的專案檔案會用於當前專案構建、預覽和後續修改。請不要上傳你無權使用的素材、敏感身分資訊或密鑰。"
+          },
+          {
+            "title": "資料保留與刪除",
+            "body": "你可以在個人主頁註銷帳號。註銷會觸發帳號刪除流程，並按資料庫關聯規則清理雲端帳號資料。部分本地工作目錄、匯出包或備份需要你自行管理。"
+          },
+          {
+            "title": "安全",
+            "body": "BeeGame 會透過登入鑑權、權限控制和隔離的專案工作目錄降低風險。你仍應避免在專案或提示詞中寫入未加保護的密鑰、憑證和隱私資訊。"
+          }
+        ]
+      }
+    },
+    "credits": {
+      "refundRule": "任務結束後按實際 token 和工具消耗結算，未使用部分自動退回。"
+    }
+  },
+  "settings": {
+    "admin": {
+      "title": "系統設定",
+      "platform": "平台",
+      "deployment": "部署",
+      "workspaceManaged": "由伺服器部署配置管理",
+      "workspaceNote": "伺服器模式下工作根目錄是全域安全邊界。普通使用者不能單獨修改，專案路徑由平台按帳號自動生成。"
+    },
+    "runtime": {
+      "autoMemory": "自動記憶",
+      "autoDream": "自動整理"
+    },
+    "runtimeCapabilities": {
+      "title": "能力",
+      "subagents": {
+        "description": "允許 BeeGame 在需要時委派獨立子任務。",
+        "note": "適合較複雜的建置與驗證；簡單任務通常會維持單一代理。"
+      },
+      "items": {
+        "autoMemoryEnabled": {
+          "label": "自動記憶",
+          "description": "記住偏好、專案決策與常用上下文。",
+          "note": "會產生少量背景寫入與 token 消耗；敏感專案可關閉。",
+          "scope": "newSession"
+        },
+        "autoDreamEnabled": {
+          "label": "自動整理",
+          "description": "定期整理長期記憶，減少重複與過期資訊。",
+          "note": "達到時間與會話數條件後才會在背景執行。",
+          "scope": "newSession"
+        },
+        "skillSearchEnabled": {
+          "label": "Skill Search",
+          "description": "依照任務自動尋找相關技能。",
+          "note": "會增加輕量檢索開銷，偶爾可能匹配不夠相關的技能。",
+          "scope": "newSession"
+        },
+        "treeSitterBashEnabled": {
+          "label": "Bash AST 解析",
+          "description": "用 AST 理解 Bash 結構與注入風險。",
+          "note": "需要 runtime 帶 FEATURE_TREE_SITTER_BASH 啟動；複雜命令會更保守。",
+          "scope": "restart"
+        },
+        "webBrowserToolEnabled": {
+          "label": "網頁讀取工具",
+          "description": "讓 runtime 讀取網頁 HTML 文字。",
+          "note": "適合查文件與頁面標題；不是完整瀏覽器，不能點擊或執行 JS。",
+          "scope": "restart"
+        },
+        "bashClassifierEnabled": {
+          "label": "Bash 命令分類器",
+          "description": "用模型輔助判斷 Bash 命令風險。",
+          "note": "可減少重複確認，但會增加模型呼叫；分類錯誤會影響權限體驗。",
+          "scope": "restart"
+        },
+        "mcpSkillsEnabled": {
+          "label": "MCP 技能發現",
+          "description": "把 MCP 暴露的 skill:// 資源納入技能體系。",
+          "note": "效果取決於 MCP server 的資源品質，需要 feature 啟動。",
+          "scope": "restart"
+        }
+      }
+    },
+    "mcp": {
+      "title": "MCP",
+      "intro": "透過 MCP，BeeGame 可以連接本機正在執行的編輯器、遊戲引擎和工具服務。你可以在這裡尋找本機服務、新增 Server，並確認連線是否可用。",
+      "rows": [
+        {
+          "title": "Server 設定",
+          "description": "在 runtime 的 MCP 設定中管理 server。",
+          "note": "dashboard 目前沒有後端路由可以安全讀取、寫入或重啟 MCP server。"
+        },
+        {
+          "title": "專案資源整合",
+          "description": "Unity、Godot、Blender 等專案可在 asset manifest 中宣告 mcp 與 mcp_server。",
+          "note": "交付物面板會顯示這些資源整合資訊，但不會假裝 editor 已連線。"
+        },
+        {
+          "title": "技能發現",
+          "description": "在「能力」頁開啟 MCP 技能發現後，runtime 可把 skill:// 資源納入技能體系。",
+          "note": "這只影響新啟動的 BeeGame turn，並依賴實際可用的 MCP server。"
+        }
+      ],
+      "configured": "已設定",
+      "newServer": "新增 Server",
+      "noServers": "暫無 MCP server",
+      "form": {
+        "name": "名稱",
+        "enabled": "啟用",
+        "transport": "傳輸",
+        "scope": "作用域",
+        "command": "命令",
+        "args": "參數",
+        "url": "URL",
+        "cwd": "工作目錄",
+        "env": "環境變數",
+        "argsHint": "每行一個參數",
+        "envHint": "每行一個 KEY=value；已儲存的密鑰留空會繼續保留",
+        "stdio": "stdio",
+        "sse": "SSE",
+        "http": "HTTP",
+        "beegame": "BeeGame",
+        "global": "全域",
+        "project": "專案",
+        "edit": "編輯",
+        "delete": "刪除",
+        "cancel": "取消",
+        "save": "儲存 Server",
+        "saving": "儲存中",
+        "scanLocal": "匯入設定",
+        "scanActive": "尋找本機服務",
+        "scanning": "掃描中",
+        "discovered": "可匯入設定",
+        "activeDiscovered": "本機服務",
+        "noDiscovered": "沒有發現可匯入的 MCP server",
+        "noActiveDiscovered": "沒有發現執行中的 MCP server",
+        "importServer": "匯入",
+        "existing": "已存在",
+        "source": "來源",
+        "testConnection": "測試連線",
+        "testingConnection": "測試中",
+        "available": "可用",
+        "unavailable": "不可用",
+        "untested": "未測試",
+        "advanced": "進階",
+        "actions": "操作"
+      }
+    }
+  },
+  "common": {
+    "placeholder": "輸入專案願景開始...",
+    "newProject": "新增專案",
+    "stop": "停止專案",
+    "resume": "恢復專案",
+    "active": "執行中",
+    "idle": "閒置",
+    "stopped": "已停止",
+    "chat": "團隊協作",
+    "runtime": "執行階段",
+    "artifacts": "交付成果",
+    "tokens": "消耗",
+    "progress": "進度",
+    "phase": "階段",
+    "paused": "已暫停",
+    "settings": "系統設定",
+    "theme": "主題切換",
+    "darkMode": "深色模式",
+    "language": "語言選擇",
+    "systemSettings": "系統設定",
+    "offline": "無法連線伺服器",
+    "tasks": "任務看板",
+    "projectLibrary": "專案庫",
+    "historyProjects": "歷史專案",
+    "recentProjects": "最近專案",
+    "open": "開啟",
+    "landingTitle": "從一個想法開始",
+    "landingSubtitle": "短短幾句，就足以開始。",
+    "ideaPlaceholder": "想做什麼遊戲？例如：手機上玩的解謎闖關。",
+    "generate": "生成",
+    "assets": "資源",
+    "userMenu": "使用者選單",
+    "signOut": "登出",
+    "signInRegister": "登入 / 註冊",
+    "profile": "個人主頁",
+    "account": "帳號"
+  },
+  "beegame": {
+    "previewTitle": "預覽",
+    "collabFlow": "協作流",
+    "deliverables": "交付物",
+    "you": "你",
+    "expandMessage": "展開 BeeGame 訊息",
+    "collapseMessage": "摺疊 BeeGame 訊息",
+    "viewSummaryDetails": "查看詳情",
+    "hideSummaryDetails": "收起詳情",
+    "toolRunning": "進行中",
+    "toolCompleted": "已完成",
+    "toolFailed": "失敗",
+    "open": "開啟",
+    "diff": "對比",
+    "loadingArtifacts": "正在載入交付物...",
+    "noArtifacts": "尚無交付物",
+    "noMessages": "尚無訊息",
+    "generatedOnDownload": "下載時產生",
+    "byUnknown": "未知",
+    "review": "審查",
+    "pending": "待處理",
+    "locked": "已鎖定",
+    "preview": "預覽",
+    "download": "下載",
+    "artifactOnlinePreview": "交付物預覽",
+    "fetchingContent": "正在讀取內容...",
+    "actionRequired": "需要操作",
+    "resourceManifestDescription": "代理已產生預設資源清單。你可以上傳自訂 CSV 覆蓋，或略過並使用預設清單。",
+    "skip": "略過",
+    "upload": "上傳",
+    "approve": "核准",
+    "revise": "修訂",
+    "reject": "拒絕",
+    "allow": "允許",
+    "deny": "拒絕",
+    "continue": "繼續",
+    "submitting": "提交中",
+    "starting": "啟動中",
+    "refreshing": "重新整理中",
+    "permissionRequired": "需要權限",
+    "clarificationRequired": "需要澄清",
+    "approvalRequired": "需要核准",
+    "revisionRequired": "需要修訂",
+    "clarificationDescription": "回答澄清問題，或選擇如何繼續目前簡報。",
+    "aiProcessing": "AI 正在處理...",
+    "settingsGeneral": "通用",
+    "settingsModel": "模型",
+    "closeSettings": "關閉設定",
+    "workspacePath": "工作路徑",
+    "resetDefault": "恢復預設",
+    "webSearch": "網頁搜尋",
+    "searchBackend": "搜尋後端",
+    "provider": "Provider",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "models": "模型",
+    "fast": "Fast",
+    "balanced": "Balanced",
+    "strong": "Strong",
+    "fastModel": "Fast 模型",
+    "balancedModel": "Balanced 模型",
+    "strongModel": "Strong 模型",
+    "saveSettings": "儲存設定",
+    "saving": "儲存中",
+    "subagents": "Subagents",
+    "savedPrefix": "已儲存",
+    "modelSaveFailed": "模型設定儲存失敗",
+    "workspaceReadFailed": "工作路徑讀取失敗",
+    "workspaceSaveFailed": "工作路徑儲存失敗",
+    "workspaceResetFailed": "恢復預設工作路徑失敗",
+    "webToolsReadFailed": "網頁工具設定讀取失敗",
+    "webSearchSaveFailed": "網頁搜尋設定儲存失敗",
+    "close": "關閉",
+    "noProjectsFound": "尚無專案",
+    "untitledProject": "未命名專案",
+    "moreActionsFor": "更多操作",
+    "deleteProject": "刪除專案",
+    "confirmDelete": "確認刪除",
+    "artifactDownloadFailed": "下載失敗，請稍後再試。",
+    "artifactPreviewFailed": "無法讀取交付物內容，請嘗試下載。",
+    "paused": "已暫停",
+    "turnComplete": "本輪完成",
+    "approvalRequestShort": "需要核准",
+    "completed": "已完成",
+    "dashboard": {
+      "phase": {
+        "idea_intake": "需求理解",
+        "brief": "建構方案",
+        "gdd": "可玩規格",
+        "architecture": "技術架構",
+        "art_direction": "美術方向",
+        "ui": "互動介面",
+        "asset": "資源準備",
+        "implementation": "實作建構",
+        "qa": "可玩性檢查",
+        "polish": "打磨優化",
+        "build": "建構預覽"
+      },
+      "turn": {
+        "running": "建構中",
+        "waiting_approval": "等待確認",
+        "paused": "需要處理",
+        "offline": "離線",
+        "finished": "待複核",
+        "idle": "就緒"
+      },
+      "creditQuote": {
+        "settlementNote": "修改、繼續任務和資源整合也會計費；實際扣費以本輪 token 和工具使用為準，未使用部分自動退回。",
+        "title": "確認本次請求",
+        "description": "本次請求將預扣 {{reservedCredits}} credits。完成後按實際消耗結算，未使用部分會自動退回。",
+        "balance": "目前餘額",
+        "reserved": "預扣",
+        "cancel": "取消",
+        "confirm": "確認並送出"
+      },
+      "approvalWaiting": "目前專案正在等待核准，不能繼續執行一般訊息。"
+    },
+    "livePreview": {
+      "title": "即時遊戲畫面",
+      "starting": "正在準備預覽",
+      "waiting": "等待可執行畫面",
+      "noPreview": "建構完成後會在這裡顯示遊戲畫面",
+      "failed": "預覽不可用",
+      "stopped": "執行已停止",
+      "live": "Live",
+      "reload": "重新整理預覽",
+      "open": "在新視窗開啟",
+      "stop": "停止預覽",
+      "play": "播放預覽",
+      "build": "建構",
+      "health": "健康狀態",
+      "entrypoint": "入口",
+      "unavailable": "未提供",
+      "tokens": "消耗",
+      "credits": "Credits",
+      "reserved": "預扣",
+      "phase": "階段",
+      "model": "模型",
+      "syncing": "同步中",
+      "back": "返回專案列表",
+      "settings": "設定",
+      "language": "語言"
+    },
+    "assets": {
+      "title": "資源合約",
+      "empty": "還沒有資源合約。下一次建構時，BeeGame 會要求 agent 生成 assets/asset-manifest.json。",
+      "loading": "正在讀取資源合約...",
+      "upload": "上傳替換",
+      "uploading": "上傳中...",
+      "requestIntegration": "讓 BeeGame 整合",
+      "verifyIntegration": "重新整合 / 驗證",
+      "integrateAllPending": "整合所有待處理",
+      "required": "必需",
+      "optional": "可選",
+      "placeholder": "Placeholder",
+      "uploaded": "等待整合",
+      "integrated": "已整合",
+      "uploadedHint": "資源已上傳，但尚未確認接入執行時。",
+      "mcp": "MCP 整合",
+      "filesystem": "檔案整合",
+      "manual": "手動整合",
+      "target": "目標",
+      "formats": "格式",
+      "specs": "規格",
+      "noPurpose": "未提供用途說明"
+    },
+    "savedPrefixSeparator": "："
+  }
+}

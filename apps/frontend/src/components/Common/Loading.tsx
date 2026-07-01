@@ -15,7 +15,6 @@
  */
 
 import React from 'react';
-import { motion } from 'framer-motion';
 
 /**
  * Loading size variants
@@ -32,7 +31,7 @@ export interface LoadingProps {
   /** Optional text to display below spinner */
   text?: string;
   
-  /** Custom color class (default: text-blue-500) */
+	  /** Custom color class (default: text-emerald-300) */
   color?: string;
   
   /** Whether to show as fullscreen overlay */
@@ -47,17 +46,17 @@ const getSizeClasses = (size: LoadingSize): { spinner: string; text: string } =>
     case 'small':
       return {
         spinner: 'w-4 h-4 border-2',
-        text: 'text-xs'
+        text: 'type-footnote'
       };
     case 'medium':
       return {
         spinner: 'w-8 h-8 border-2',
-        text: 'text-sm'
+        text: 'type-callout'
       };
     case 'large':
       return {
         spinner: 'w-12 h-12 border-3',
-        text: 'text-base'
+        text: 'type-body'
       };
   }
 };
@@ -71,7 +70,7 @@ const getSizeClasses = (size: LoadingSize): { spinner: string; text: string } =>
 export const Loading: React.FC<LoadingProps> = ({
   size = 'medium',
   text,
-  color = 'text-blue-500',
+	  color = 'text-emerald-300',
   fullscreen = false
 }) => {
   const { spinner, text: textSize } = getSizeClasses(size);
@@ -79,35 +78,25 @@ export const Loading: React.FC<LoadingProps> = ({
   const spinnerElement = (
     <div className="flex flex-col items-center justify-center gap-3">
       {/* Spinning circle */}
-      <motion.div
+      <div
         className={`
           ${spinner}
+          animate-spin
           rounded-full
           border-solid
           border-current
           border-t-transparent
           ${color}
         `}
-        animate={{ rotate: 360 }}
-        transition={{
-          duration: 0.8,
-          repeat: Infinity,
-          ease: 'linear'
-        }}
         role="status"
         aria-label="加载中"
       />
       
       {/* Optional text with fade-in animation */}
       {text && (
-        <motion.p 
-          className={`${textSize} ${color} font-medium`}
-          initial={{ opacity: 0, y: 5 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.3 }}
-        >
+	        <p className={`${textSize} ${color}`}>
           {text}
-        </motion.p>
+        </p>
       )}
     </div>
   );
@@ -115,15 +104,11 @@ export const Loading: React.FC<LoadingProps> = ({
   // Fullscreen overlay mode
   if (fullscreen) {
     return (
-      <motion.div 
+      <div
         className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
       >
         {spinnerElement}
-      </motion.div>
+      </div>
     );
   }
   

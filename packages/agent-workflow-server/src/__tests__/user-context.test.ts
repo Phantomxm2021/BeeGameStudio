@@ -115,6 +115,32 @@ describe('BeeGame user context', () => {
     })
   })
 
+  test('keeps the canonical account id separate from the login user id', async () => {
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => Response.json({
+        id: 'oauth-user',
+        account_id: 'canonical-email-account',
+        role: 'developer',
+        email: 'player@example.com',
+      }),
+    })
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer valid-token' },
+        }),
+      ),
+    ).toEqual({
+      id: 'oauth-user',
+      accountId: 'canonical-email-account',
+      role: 'developer',
+      email: 'player@example.com',
+    })
+  })
+
   test('extracts OAuth profile metadata from identity data without granting owner by default', async () => {
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co',

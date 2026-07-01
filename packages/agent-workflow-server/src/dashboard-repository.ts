@@ -118,9 +118,10 @@ export class DashboardRepository {
     user: BeeGameUserContext,
   ): Promise<CreditBalance> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.getCreditBalance(user.id)
-      : getCreditBalance(user.id, {
+      ? supabase.getCreditBalance(creditOwnerId)
+      : getCreditBalance(creditOwnerId, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }
@@ -426,9 +427,10 @@ export class DashboardRepository {
     user: BeeGameUserContext,
   ): Promise<CreditLedgerEntry[]> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.listCreditLedger(user.id)
-      : listCreditLedger(user.id, {
+      ? supabase.listCreditLedger(creditOwnerId)
+      : listCreditLedger(creditOwnerId, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }
@@ -439,9 +441,10 @@ export class DashboardRepository {
     projectId?: string,
   ): Promise<CreditLedgerSummary> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.summarizeCreditLedger(user.id, projectId)
-      : summarizeCreditLedger(user.id, {
+      ? supabase.summarizeCreditLedger(creditOwnerId, projectId)
+      : summarizeCreditLedger(creditOwnerId, {
           dataDir: this.options.getUserDataRoot(request),
           ...(projectId ? { projectId } : {}),
         })
@@ -453,9 +456,10 @@ export class DashboardRepository {
     input: CreditReserveInput,
   ): Promise<CreditReservation> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.reserveCredits(user.id, input)
-      : reserveCredits(user.id, {
+      ? supabase.reserveCredits(creditOwnerId, input)
+      : reserveCredits(creditOwnerId, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -467,9 +471,10 @@ export class DashboardRepository {
     input: CreditSettleInput,
   ): Promise<ReturnType<typeof settleCreditReservation>> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.settleCreditReservation(user.id, input)
-      : settleCreditReservation(user.id, {
+      ? supabase.settleCreditReservation(creditOwnerId, input)
+      : settleCreditReservation(creditOwnerId, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -481,9 +486,10 @@ export class DashboardRepository {
     input: CreditRefundInput,
   ): Promise<ReturnType<typeof refundCreditReservation>> {
     const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
     return supabase
-      ? supabase.refundCreditReservation(user.id, input)
-      : refundCreditReservation(user.id, {
+      ? supabase.refundCreditReservation(creditOwnerId, input)
+      : refundCreditReservation(creditOwnerId, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
@@ -611,4 +617,8 @@ export class DashboardRepository {
   private getManageModelConfigOwnerId(user: BeeGameUserContext): string {
     return user.modelConfigOwnerId ?? user.id
   }
+}
+
+function getCreditOwnerId(user: BeeGameUserContext): string {
+  return user.accountId || user.id
 }

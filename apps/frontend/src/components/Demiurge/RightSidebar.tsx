@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, MessageSquare } from 'lucide-react';
-import { type Language, translations } from './AgentsConfig';
-import { getBeeGameText } from './BeeGameI18n';
+import type { Language } from './AgentsConfig';
+import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import type { BeeGameCreditTaskType } from '../../services/creditsApi';
@@ -93,9 +92,8 @@ export function RightSidebar({
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const lastMessageCountRef = useRef(messages.length);
 
-    const t = translations[lang];
-    const uiText = getBeeGameText(lang);
-    const springTransition = { type: "spring" as const, stiffness: 260, damping: 26 };
+    const t = useCommonText(lang);
+    const uiText = useBeeGameText(lang);
     const isComposerLocked = isLoading || isRuntimeBusy;
 
     useEffect(() => {
@@ -310,15 +308,15 @@ export function RightSidebar({
         ? 'flex h-14 items-center justify-between border-b border-zinc-800 px-4'
         : 'flex items-center justify-between px-8 pt-8 pb-4';
     const tabButtonClassName = (isActive: boolean) => variant === 'beegame'
-        ? `relative pb-3 text-sm font-bold transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`
-        : `text-xs font-black uppercase tracking-[0.2em] transition-all relative pb-2 ${isActive
+        ? `type-button relative pb-3 transition-all ${isActive ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`
+        : `type-caption-1 transition-all relative pb-2 ${isActive
             ? 'text-zinc-900 dark:text-zinc-100'
             : 'text-zinc-300 dark:text-zinc-600 hover:text-zinc-500'
         }`;
     const tabLabel = (tab: 'chat' | 'artifacts' | 'assets') => {
         if (variant !== 'beegame') return tab === 'chat' ? t.chat : t.artifacts;
         if (tab === 'chat') return uiText.collabFlow;
-        if (tab === 'assets') return lang === 'zh' || lang === 'zh-TW' ? '资源' : 'Assets';
+        if (tab === 'assets') return t.assets;
         return uiText.deliverables;
     };
     const sidebarTabs = variant === 'beegame'
@@ -327,14 +325,8 @@ export function RightSidebar({
 
     return (
         <>
-            <motion.div
-                animate={{
-                    y: isChatMinimized ? 840 : 0,
-                    opacity: isChatMinimized ? 0 : 1,
-                    pointerEvents: isChatMinimized ? 'none' : 'auto'
-                }}
-                transition={springTransition}
-                className={dockClassName}
+            <div
+                className={`${dockClassName} transition-[opacity,transform] duration-200 ${isChatMinimized ? 'translate-y-[840px] opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}
             >
                 <div className={panelClassName}>
                     
@@ -342,20 +334,20 @@ export function RightSidebar({
                     <div className={headerClassName}>
                         <div className={variant === 'beegame' ? 'flex items-center gap-6' : 'flex space-x-6'}>
                             {sidebarTabs.map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab)}
-                                    className={tabButtonClassName(activeTab === tab)}
-                                >
-                                    {tabLabel(tab)}
-                                    {variant === 'beegame' && tab === 'artifacts' ? (
-                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{artifacts.length}</span>
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={tabButtonClassName(activeTab === tab)}
+                            >
+                                {tabLabel(tab)}
+                                {variant === 'beegame' && tab === 'artifacts' ? (
+                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{artifacts.length}</span>
                                     ) : null}
                                     {variant === 'beegame' && tab === 'assets' && assetManifest?.slots.length ? (
-                                        <span className="ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{assetManifest.slots.length}</span>
+                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.slots.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
-                                        <motion.div layoutId="tabUnderline" className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
+                                        <div className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
                                     )}
                                 </button>
                             ))}
@@ -365,7 +357,7 @@ export function RightSidebar({
 	                                type="button"
 	                                aria-label="最小化聊天"
 	                                onClick={() => setIsChatMinimized(true)}
-	                                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-900 dark:text-zinc-100"
+	                                className="glass-icon-button h-10 w-10 text-zinc-900 dark:text-zinc-100"
 	                            >
 	                                <Minus className="w-5 h-5" />
 	                            </button>
@@ -425,31 +417,17 @@ export function RightSidebar({
                         )}
                     </div>
                 </div>
-            </motion.div>
+            </div>
 
-	            <AnimatePresence>
-	                {variant !== 'beegame' && isChatMinimized && (
-                    <motion.button
-                        initial={{ y: 40, opacity: 0, scale: 0.8 }}
-                        animate={{ y: 0, opacity: 1, scale: 1 }}
-                        exit={{ y: 40, opacity: 0, scale: 0.8 }}
-                        whileHover={{ 
-                            scale: 1.05,
-                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
-                        }}
-                        whileTap={{ scale: 0.95 }}
+            {variant !== 'beegame' && isChatMinimized && (
+                    <button
                         onClick={() => setIsChatMinimized(false)}
-                        className="absolute bottom-12 right-12 w-20 h-20 bg-zinc-900/95 dark:bg-zinc-100/95 backdrop-blur-2xl text-white dark:text-zinc-900 rounded-[2.2rem] shadow-[0_20px_40px_-10px_rgba(0,0,0,0.4)] flex items-center justify-center z-50 transition-all group overflow-hidden"
+                        className="glass-panel absolute bottom-12 right-12 z-50 flex h-20 w-20 items-center justify-center overflow-hidden rounded-[2.2rem] text-white transition-all hover:scale-105 active:scale-95 dark:text-zinc-100"
                     >
                         {/* Dynamic Background Glow when streaming */}
                         {isLoading && (
-                            <motion.div 
-                                animate={{ 
-                                    opacity: [0.3, 0.6, 0.3],
-                                    scale: [1, 1.2, 1]
-                                }}
-                                transition={{ duration: 3, repeat: Infinity }}
-                                className="absolute inset-0 bg-gradient-to-tr from-blue-500/20 via-purple-500/20 to-pink-500/20 blur-xl"
+                            <div
+                                className="absolute inset-0 bg-gradient-to-tr from-blue-500/20 via-purple-500/20 to-pink-500/20 blur-xl animate-pulse"
                             />
                         )}
 
@@ -458,19 +436,16 @@ export function RightSidebar({
                             
                             {/* Activity Indicator Pulse */}
                             {isLoading && (
-                                <motion.div 
-                                    className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-zinc-100 shadow-[0_0_10px_rgba(59,130,246,0.8)]"
-                                    animate={{ scale: [1, 1.4, 1] }}
-                                    transition={{ duration: 2, repeat: Infinity }}
+                                <div
+	                                    className="absolute -top-1 -right-1 w-3 h-3 animate-ping rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.65)] dark:border-zinc-100"
                                 />
                             )}
                         </div>
 
                         {/* Subtle Border Light Leak */}
                         <div className="absolute inset-0 rounded-[2.2rem] border border-white/10 dark:border-black/5 pointer-events-none" />
-                    </motion.button>
+                    </button>
                 )}
-            </AnimatePresence>
 
             <ArtifactPreviewModal 
                 isOpen={isPreviewOpen}

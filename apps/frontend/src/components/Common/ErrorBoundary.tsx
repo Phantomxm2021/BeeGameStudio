@@ -78,29 +78,29 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </svg>
             </div>
 
-            <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">
+	            <h2 className="type-title-3 mb-2 text-center text-zinc-100">
               出错了
             </h2>
 
-            <p className="text-gray-600 text-center mb-6">
+	            <p className="type-callout mb-6 text-center text-zinc-400">
               应用遇到了一个错误，请刷新页面重试。
             </p>
 
             {/* 错误详情（仅在开发环境显示） */}
             {import.meta.env.DEV && this.state.error && (
-              <div className="mb-6 p-4 bg-gray-100 rounded-lg overflow-auto max-h-48">
-                <p className="text-sm font-semibold text-gray-700 mb-2">
+	              <div className="mb-6 max-h-48 overflow-auto rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+	                <p className="type-footnote mb-2 text-zinc-300">
                   错误详情：
                 </p>
-                <p className="text-xs text-red-600 font-mono break-all">
+	                <p className="type-code-sm break-all text-red-300">
                   {this.state.error.toString()}
                 </p>
                 {this.state.errorInfo && (
                   <details className="mt-2">
-                    <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+	                    <summary className="type-footnote cursor-pointer text-zinc-400 hover:text-zinc-200">
                       组件堆栈
                     </summary>
-                    <pre className="text-xs text-gray-600 mt-2 whitespace-pre-wrap">
+	                    <pre className="type-code-sm mt-2 whitespace-pre-wrap text-zinc-400">
                       {this.state.errorInfo.componentStack}
                     </pre>
                   </details>
@@ -110,7 +110,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
             <button
               onClick={this.handleRefresh}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+	              className="type-button w-full rounded-full bg-white px-4 py-3 text-zinc-950 transition-colors duration-200 hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-white/35"
             >
               刷新页面
             </button>

@@ -107,11 +107,11 @@ describe('projectStore pending review normalization', () => {
                                 clarification_questions: ['What should the first playable prototype prove?'],
                                 clarification_suggestions: [
                                     {
-                                        id: 'classic_survival_snake',
+                                        id: 'sample_survival_game',
                                         label: 'Classic Survival Snake',
                                         description: 'Grow longer, avoid collisions, and chase a higher score.',
                                         clarification_patch: {
-                                            gameplay_direction: 'Classic survival snake',
+                                            gameplay_direction: 'Sample survival game',
                                             mvp_focus: 'Movement, collision, and score display',
                                         },
                                     },
@@ -166,7 +166,7 @@ describe('projectStore pending review normalization', () => {
         getProjectStatus.mockResolvedValue({ project_id: 'proj_1', next_action: 'running' });
         getPendingUserReviews.mockResolvedValue({ items: [] });
 
-        const promise = useProjectStore.getState().bootstrapProject({ idea: '贪吃蛇 Web 像素风' });
+        const promise = useProjectStore.getState().bootstrapProject({ idea: '样例游戏构建想法' });
         await vi.waitFor(() => expect(useProjectStore.getState().activeProjectId).toBe('proj_1'));
 
         expect(useProjectStore.getState().projects).toEqual([
@@ -185,8 +185,8 @@ describe('projectStore pending review normalization', () => {
     it('passes selected clarification answers through bootstrap', async () => {
         const clarification = {
             platform: 'Web (Desktop)',
-            visual_style: '复古像素风格',
-            gameplay_direction: '经典贪吃蛇玩法',
+            visual_style: '样例视觉风格',
+            gameplay_direction: '样例核心玩法',
             input_mode: '键盘方向键',
             mvp_focus: '基础移动、吃豆变长、碰撞检测',
         };
@@ -197,7 +197,7 @@ describe('projectStore pending review normalization', () => {
             project: {
                 id: 'proj_1',
                 project_id: 'proj_1',
-                name: '贪吃蛇',
+                name: '样例游戏',
                 status: 'created',
                 created_at: Date.now(),
             },
@@ -209,13 +209,13 @@ describe('projectStore pending review normalization', () => {
             task_id: 'pipe_1',
             status: 'running',
         });
-        getProjects.mockResolvedValue([{ id: 'proj_1', name: '贪吃蛇', created_at: Date.now() }]);
+        getProjects.mockResolvedValue([{ id: 'proj_1', name: '样例游戏', created_at: Date.now() }]);
         getProjectStatus.mockResolvedValue({ project_id: 'proj_1', next_action: 'running' });
         getPendingUserReviews.mockResolvedValue({ items: [] });
 
-        await expect(useProjectStore.getState().bootstrapProject({ idea: '贪吃蛇', clarification })).resolves.toEqual({ status: 'started', projectId: 'proj_1' });
+        await expect(useProjectStore.getState().bootstrapProject({ idea: '样例游戏', clarification })).resolves.toEqual({ status: 'started', projectId: 'proj_1' });
 
-        expect(bootstrapProjectFromIdea).toHaveBeenCalledWith({ idea: '贪吃蛇', clarification });
+        expect(bootstrapProjectFromIdea).toHaveBeenCalledWith({ idea: '样例游戏', clarification });
         expect(useProjectStore.getState().activeProjectId).toBe('proj_1');
     });
 

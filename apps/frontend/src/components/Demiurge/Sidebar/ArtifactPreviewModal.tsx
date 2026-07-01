@@ -1,8 +1,7 @@
-import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, X } from 'lucide-react';
 import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
-import { getBeeGameText } from '../BeeGameI18n';
+import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
 interface ArtifactPreviewModalProps {
     isOpen: boolean;
@@ -14,21 +13,15 @@ interface ArtifactPreviewModalProps {
 }
 
 export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoading, lang = 'en' }: ArtifactPreviewModalProps) {
-    const text = getBeeGameText(lang);
+    const text = useBeeGameText(lang);
+    if (!isOpen) return null;
+
     return (
-        <AnimatePresence>
-            {isOpen && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-8 bg-zinc-950/80 backdrop-blur-md"
-                    onClick={onClose}
-                >
-                    <motion.div
-                        initial={{ scale: 0.95, opacity: 0, y: 20 }}
-                        animate={{ scale: 1, opacity: 1, y: 0 }}
-                        exit={{ scale: 0.95, opacity: 0, y: 20 }}
+        <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-8 bg-zinc-950/80 backdrop-blur-md"
+            onClick={onClose}
+        >
+                    <div
                         className="bg-white dark:bg-zinc-900 w-full max-w-5xl h-[85vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
                         onClick={(e) => e.stopPropagation()}
                     >
@@ -39,8 +32,8 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                                     <FileText className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{title}</h2>
-                                    <p className="text-xs text-zinc-500 uppercase font-black tracking-widest mt-0.5 opacity-60">{text.artifactOnlinePreview}</p>
+                                    <h2 className="type-headline text-zinc-900 dark:text-zinc-100">{title}</h2>
+                                    <p className="type-caption-1 text-zinc-500 mt-0.5 opacity-60">{text.artifactOnlinePreview}</p>
                                 </div>
                             </div>
                             <button
@@ -64,9 +57,7 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                                 </div>
                             )}
                         </div>
-                    </motion.div>
-                </motion.div>
-            )}
-        </AnimatePresence>
+                    </div>
+        </div>
     );
 }

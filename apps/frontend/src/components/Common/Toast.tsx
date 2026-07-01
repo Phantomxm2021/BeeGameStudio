@@ -94,7 +94,7 @@ export const Toast: React.FC<ToastProps> = ({
       </motion.div>
 
       {/* Message */}
-      <div className="flex-1 text-[13px] font-bold tracking-wide">
+      <div className="type-footnote flex-1">
         {message}
       </div>
       <button

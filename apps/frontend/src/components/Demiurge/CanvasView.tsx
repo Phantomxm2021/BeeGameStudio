@@ -1,5 +1,4 @@
 import React, { useRef, useState, useMemo } from 'react';
-import { motion, useMotionValue } from 'framer-motion';
 import { CheckCircle, FileText, MessageSquare, ShieldAlert, Wrench } from 'lucide-react';
 import { AGENT_UI_MAP, BeeIcon, CONNECTIONS, LAYER_CONFIG } from './AgentsConfig';
 import type { AgentLayer } from './AgentsConfig';
@@ -58,12 +57,6 @@ function computeEdgePath(
 
 const ACTIVE_EDGE_PROPS = {
     strokeWidth: "3",
-    initial: { strokeDashoffset: 100, opacity: 0 },
-    animate: { strokeDashoffset: 0, opacity: 0.9 },
-    transition: {
-        strokeDashoffset: { repeat: Infinity, ease: "linear" as const, duration: 1.2 },
-        opacity: { duration: 0.5 }
-    }
 };
 
 export function CanvasView({
@@ -75,9 +68,7 @@ export function CanvasView({
     status = 'idle',
     hasPendingPermission = false,
 }: CanvasViewProps) {
-    const x = useMotionValue(0);
-    const y = useMotionValue(20);
-    const scale = useMotionValue(0.7);
+    const [viewport, setViewport] = useState({ x: 0, y: 20, scale: 0.7 });
     const [isDragging, setIsDragging] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -87,24 +78,31 @@ export function CanvasView({
             const { width, height } = containerRef.current.getBoundingClientRect();
             // Fit 1000px wide content towards the left (to avoid sidebar on right)
             const targetScale = Math.min((width - 400) / 1000, height / 1000, 0.7);
-            scale.set(targetScale);
+            setViewport({
             // x position with a 60px left margin
-            x.set(60);
-            y.set(40);
+                x: 60,
+                y: 40,
+                scale: targetScale,
+            });
         }
-    }, [scale, x, y]);
+    }, []);
 
     const handleDrag = (e: React.MouseEvent) => {
         if (isDragging) {
-            x.set(x.get() + e.movementX);
-            y.set(y.get() + e.movementY);
+            setViewport((current) => ({
+                ...current,
+                x: current.x + e.movementX,
+                y: current.y + e.movementY,
+            }));
         }
     };
 
     const handleWheel = (e: React.WheelEvent) => {
         const delta = e.deltaY * -0.001;
-        const newScale = Math.min(Math.max(scale.get() + delta, 0.1), 2);
-        scale.set(newScale);
+        setViewport((current) => ({
+            ...current,
+            scale: Math.min(Math.max(current.scale + delta, 0.1), 2),
+        }));
     };
 
     // Pre-compute layer separator Y positions (midpoints between layers)
@@ -189,52 +187,50 @@ export function CanvasView({
                     {nodes.map((node) => {
                         const Icon = node.icon;
                         return (
-                            <motion.div
+                            <div
                                 key={node.id}
-                                initial={{ opacity: 0, y: 12 }}
-                                animate={{
-                                    opacity: 1,
-                                    y: 0,
-                                    scale: node.active ? 1.04 : 1,
-                                    boxShadow: node.active
-                                        ? (isDark ? '0 0 42px rgba(255,255,255,0.06)' : '0 24px 48px -18px rgba(0,0,0,0.24)')
-                                        : 'none'
-                                }}
                                 className={`absolute w-56 p-5 rounded-[2.5rem] border-2 backdrop-blur-2xl transition-all duration-700 ${node.active
                                     ? node.id === 'permissions'
                                         ? 'border-amber-400 bg-white dark:bg-zinc-900'
-                                        : 'border-blue-500 dark:border-blue-400 bg-white dark:bg-zinc-900'
+	                                        : 'border-emerald-400 bg-white dark:bg-zinc-900'
                                     : 'border-zinc-200 dark:border-zinc-800 bg-white/45 dark:bg-zinc-950/45'
                                     }`}
-                                style={{ left: node.x, top: node.y }}
+                                style={{
+                                    left: node.x,
+                                    top: node.y,
+                                    transform: node.active ? 'scale(1.04)' : 'scale(1)',
+                                    boxShadow: node.active
+                                        ? (isDark ? '0 0 42px rgba(255,255,255,0.06)' : '0 24px 48px -18px rgba(0,0,0,0.24)')
+                                        : 'none',
+                                }}
                             >
                                 <div className="flex items-center space-x-4">
                                     <div className={`p-3 rounded-2xl shadow-inner ${node.active
                                         ? node.id === 'permissions'
                                             ? 'bg-amber-500 text-white'
-                                            : 'bg-blue-500 text-white dark:bg-blue-400 dark:text-zinc-900'
+	                                            : 'bg-emerald-400 text-zinc-950'
                                         : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
                                         }`}>
                                         <Icon className="w-6 h-6" />
                                     </div>
                                     <div className="min-w-0">
-                                        <div className="text-[10px] font-black uppercase opacity-40 tracking-widest text-zinc-900 dark:text-zinc-100">
+                                        <div className="type-caption-1 opacity-40 text-zinc-900 dark:text-zinc-100">
                                             {node.primary ? 'runtime' : node.id}
                                         </div>
-                                        <div className="font-bold text-sm text-zinc-900 dark:text-zinc-100">
+                                        <div className="type-footnote text-zinc-900 dark:text-zinc-100">
                                             {node.label}
                                         </div>
                                     </div>
                                 </div>
-                                <div className={`mt-3 text-[10px] font-bold uppercase tracking-[0.16em] ${node.active
+                                <div className={`type-caption-1 mt-3 ${node.active
                                     ? node.id === 'permissions'
                                         ? 'text-amber-500'
-                                        : 'text-blue-500 dark:text-blue-400'
+	                                        : 'text-emerald-300'
                                     : 'text-zinc-400 dark:text-zinc-600'
                                     }`}>
                                     {node.detail}
                                 </div>
-                            </motion.div>
+                            </div>
                         );
                     })}
                 </div>
@@ -252,8 +248,11 @@ export function CanvasView({
             onMouseLeave={() => setIsDragging(false)}
             onWheel={handleWheel}
         >
-            <motion.div
-                style={{ x, y, scale }}
+            <div
+                style={{
+                    transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.scale})`,
+                    transformOrigin: 'top left',
+                }}
                 className="absolute inset-0"
             >
                 {/* Background Grid Pattern */}
@@ -267,15 +266,13 @@ export function CanvasView({
 
                 {/* Entrance Arrow */}
                 <div className="absolute flex flex-col items-center pointer-events-none" style={{ left: 500 - 64, top: 60, width: 128 }}>
-                    <motion.div
-                        animate={activeAgentId ? { y: [0, 8, 0] } : false}
-                        transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                        className="flex flex-col items-center text-zinc-400 dark:text-zinc-500"
+                    <div
+                        className={`flex flex-col items-center text-zinc-400 dark:text-zinc-500 ${activeAgentId ? 'animate-bounce' : ''}`}
                     >
-                        <div className="text-[9px] font-black tracking-[0.25em] uppercase mb-1 drop-shadow-md">User Request</div>
+                        <div className="type-caption-1 mb-1 drop-shadow-md">User Request</div>
                         <div className="w-0.5 h-10 bg-gradient-to-b from-transparent to-zinc-400 dark:to-zinc-500 rounded-full" />
                         <div className="w-3 h-3 border-b-[3px] border-r-[3px] border-zinc-400 dark:border-zinc-500 transform rotate-45 -mt-1.5" />
-                    </motion.div>
+                    </div>
                 </div>
 
                 {/* SVG Connection Layer */}
@@ -324,16 +321,16 @@ export function CanvasView({
                         return (
                             <g key={`flow-${flow.id}-${idx}`}>
                                 {/* Glow layer */}
-                                <motion.path
+                                <path
                                     d={pathD}
                                     stroke="currentColor"
                                     fill="none"
                                     strokeLinecap="round"
-                                    filter="drop-shadow(0 0 6px rgba(59, 130, 246, 0.4))"
+	                                    filter="drop-shadow(0 0 6px rgba(52, 211, 153, 0.35))"
                                     strokeDasharray={flow.isP2P ? "8 8" : "none"}
-                                    className="text-blue-500 dark:text-blue-400"
+	                                    className="text-emerald-300"
                                     {...ACTIVE_EDGE_PROPS}
-                                    animate={idx === commFlow.length - 1 ? ACTIVE_EDGE_PROPS.animate : false}
+                                    strokeOpacity={idx === commFlow.length - 1 ? 0.9 : 0.5}
                                 />
                             </g>
                         );
@@ -348,7 +345,7 @@ export function CanvasView({
                         style={{ left: -4, top: config.y + CARD_H / 2 - 10 }}
                     >
                         <div
-                            className="text-[8px] font-black tracking-[0.3em] uppercase text-zinc-300 dark:text-zinc-700 origin-center"
+                            className="type-caption-1 text-zinc-300 dark:text-zinc-700 origin-center"
                             style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
                         >
                             {config.labelEn}
@@ -366,27 +363,27 @@ export function CanvasView({
                     const isGovernor = agent.layer === 'governor';
 
                     return (
-                        <motion.div
+                        <div
                             key={agentId}
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{
-                                scale: isWorking ? 1.06 : 1,
-                                opacity: 1,
-                                boxShadow: isWorking
-                                    ? (isDark ? '0 0 40px rgba(255,255,255,0.05)' : '0 25px 50px -12px rgba(0,0,0,0.15)')
-                                    : 'none'
-                            }}
                             className={`absolute w-56 p-5 rounded-[2.5rem] border-2 transition-all duration-700 backdrop-blur-2xl ${isWorking
-                                ? 'border-blue-500 dark:border-blue-400 bg-white dark:bg-zinc-900 z-20 shadow-[0_0_50px_rgba(59,130,246,0.2)]'
+	                                ? 'border-emerald-400 bg-white dark:bg-zinc-900 z-20 shadow-[0_0_50px_rgba(52,211,153,0.18)]'
                                 : isGovernor
                                     ? 'border-zinc-300 dark:border-zinc-700 bg-white/60 dark:bg-zinc-900/60'
                                     : 'border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-950/40'
                                 }`}
-                            style={{ left: agent.x, top: agent.y }}
+                            style={{
+                                left: agent.x,
+                                top: agent.y,
+                                transform: isWorking ? 'scale(1.06)' : 'scale(1)',
+                                opacity: 1,
+                                boxShadow: isWorking
+                                    ? (isDark ? '0 0 40px rgba(255,255,255,0.05)' : '0 25px 50px -12px rgba(0,0,0,0.15)')
+                                    : 'none',
+                            }}
                         >
                             <div className="flex items-center space-x-4">
                                 <div className={`p-3 rounded-2xl shadow-inner transition-colors ${isWorking
-                                    ? 'bg-blue-500 text-white dark:bg-blue-400 dark:text-zinc-900'
+	                                    ? 'bg-emerald-400 text-zinc-950'
                                     : isGovernor
                                         ? `${agent.color} text-white opacity-80`
                                         : 'bg-zinc-100 dark:bg-zinc-800 opacity-50 text-zinc-500'
@@ -394,10 +391,10 @@ export function CanvasView({
                                     <agent.icon className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <div className="text-[10px] font-black uppercase opacity-40 tracking-widest text-zinc-900 dark:text-zinc-100">
+                                    <div className="type-caption-1 opacity-40 text-zinc-900 dark:text-zinc-100">
                                         {agent.role}
                                     </div>
-                                    <div className="font-bold text-sm text-zinc-900 dark:text-zinc-100">
+                                    <div className="type-footnote text-zinc-900 dark:text-zinc-100">
                                         {agent.name}
                                     </div>
                                 </div>
@@ -405,7 +402,7 @@ export function CanvasView({
 
                             {isWorking && (
                                 <div className="mt-3 text-center">
-                                    <div className="text-[10px] font-black text-blue-500 dark:text-blue-400 animate-pulse uppercase tracking-[0.2em]">
+	                                    <div className="type-caption-1 animate-pulse text-emerald-300">
                                         PROCEEDING...
                                     </div>
                                 </div>
@@ -420,15 +417,15 @@ export function CanvasView({
                             {/* Phase badge */}
                             {!isWorking && !isDone && (
                                 <div className="mt-2 flex justify-end">
-                                    <span className="text-[8px] font-bold tracking-wider text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-800/50 px-2 py-0.5 rounded-full">
+                                    <span className="type-caption-1 text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-800/50 px-2 py-0.5 rounded-full">
                                         {agent.phase}
                                     </span>
                                 </div>
                             )}
-                        </motion.div>
+                        </div>
                     );
                 })}
-            </motion.div>
+            </div>
 
         </div>
     );

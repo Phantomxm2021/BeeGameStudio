@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
@@ -24,6 +25,7 @@ import {
     type BeeGameCreditSummary,
     type BeeGameCreditTaskType,
 } from '../../services/creditsApi';
+import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 
 interface DashboardViewProps {
     projectId: string;
@@ -33,139 +35,6 @@ interface DashboardViewProps {
     onBack?: () => void;
     initialPrompt?: string;
 }
-
-const BEEGAME_PHASE_LABELS: Record<Language, Record<string, string>> = {
-    zh: {
-        idea_intake: '需求理解',
-        brief: '构建方案',
-        gdd: '可玩规格',
-        architecture: '技术架构',
-        art_direction: '美术方向',
-        ui: '交互界面',
-        asset: '资源准备',
-        implementation: '实现构建',
-        qa: '可玩性检查',
-        polish: '打磨优化',
-        build: '构建预览',
-    },
-    'zh-TW': {
-        idea_intake: '需求理解',
-        brief: '建構方案',
-        gdd: '可玩規格',
-        architecture: '技術架構',
-        art_direction: '美術方向',
-        ui: '互動介面',
-        asset: '資源準備',
-        implementation: '實作建構',
-        qa: '可玩性檢查',
-        polish: '打磨優化',
-        build: '建構預覽',
-    },
-    en: {
-        idea_intake: 'Idea Intake',
-        brief: 'Build Brief',
-        gdd: 'Playable Spec',
-        architecture: 'Architecture',
-        art_direction: 'Art Direction',
-        ui: 'UI',
-        asset: 'Assets',
-        implementation: 'Implementation',
-        qa: 'Playability Review',
-        polish: 'Polish',
-        build: 'Build Preview',
-    },
-    ja: {
-        idea_intake: '要件整理',
-        brief: '制作概要',
-        gdd: 'プレイ仕様',
-        architecture: '技術設計',
-        art_direction: 'アート方針',
-        ui: 'UI',
-        asset: 'アセット準備',
-        implementation: '実装',
-        qa: 'プレイ確認',
-        polish: '仕上げ',
-        build: 'ビルド確認',
-    },
-    ko: {
-        idea_intake: '요구 이해',
-        brief: '제작 개요',
-        gdd: '플레이 사양',
-        architecture: '기술 설계',
-        art_direction: '아트 방향',
-        ui: 'UI',
-        asset: '에셋 준비',
-        implementation: '구현',
-        qa: '플레이 검수',
-        polish: '마무리',
-        build: '빌드 미리보기',
-    },
-    fr: {
-        idea_intake: 'Cadrage',
-        brief: 'Brief de création',
-        gdd: 'Spécification jouable',
-        architecture: 'Architecture',
-        art_direction: 'Direction artistique',
-        ui: 'Interface',
-        asset: 'Ressources',
-        implementation: 'Implémentation',
-        qa: 'Revue jouable',
-        polish: 'Finition',
-        build: 'Build aperçu',
-    },
-    de: {
-        idea_intake: 'Ideenklärung',
-        brief: 'Build-Brief',
-        gdd: 'Spielbare Spezifikation',
-        architecture: 'Architektur',
-        art_direction: 'Art Direction',
-        ui: 'UI',
-        asset: 'Assets',
-        implementation: 'Implementierung',
-        qa: 'Spielbarkeitsprüfung',
-        polish: 'Feinschliff',
-        build: 'Build-Vorschau',
-    },
-    es: {
-        idea_intake: 'Definición',
-        brief: 'Brief de construcción',
-        gdd: 'Especificación jugable',
-        architecture: 'Arquitectura',
-        art_direction: 'Dirección artística',
-        ui: 'Interfaz',
-        asset: 'Recursos',
-        implementation: 'Implementación',
-        qa: 'Revisión jugable',
-        polish: 'Pulido',
-        build: 'Vista previa',
-    },
-    it: {
-        idea_intake: 'Definizione',
-        brief: 'Brief di costruzione',
-        gdd: 'Specifica giocabile',
-        architecture: 'Architettura',
-        art_direction: 'Direzione artistica',
-        ui: 'Interfaccia',
-        asset: 'Asset',
-        implementation: 'Implementazione',
-        qa: 'Revisione giocabilità',
-        polish: 'Rifinitura',
-        build: 'Anteprima build',
-    },
-    pt: {
-        idea_intake: 'Entendimento',
-        brief: 'Brief de construção',
-        gdd: 'Especificação jogável',
-        architecture: 'Arquitetura',
-        art_direction: 'Direção de arte',
-        ui: 'Interface',
-        asset: 'Recursos',
-        implementation: 'Implementação',
-        qa: 'Revisão jogável',
-        polish: 'Polimento',
-        build: 'Prévia da build',
-    },
-};
 
 const getWorkspaceFolderName = (rootPath?: string): string => {
     const normalized = String(rootPath || '').replaceAll('\\', '/');
@@ -179,94 +48,6 @@ const fallbackPhaseLabel = (phaseName: string): string => {
         .filter(Boolean)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
-};
-
-const BEEGAME_TURN_LABELS: Record<Language, Record<string, string>> = {
-    zh: {
-        running: '构建中',
-        waiting_approval: '等待确认',
-        paused: '需要处理',
-        offline: '离线',
-        finished: '待复核',
-        idle: '就绪',
-    },
-    'zh-TW': {
-        running: '建構中',
-        waiting_approval: '等待確認',
-        paused: '需要處理',
-        offline: '離線',
-        finished: '待複核',
-        idle: '就緒',
-    },
-    en: {
-        running: 'Working',
-        waiting_approval: 'Waiting for approval',
-        paused: 'Needs attention',
-        offline: 'Offline',
-        finished: 'Ready for review',
-        idle: 'Ready',
-    },
-    ja: {
-        running: '作業中',
-        waiting_approval: '確認待ち',
-        paused: '対応が必要',
-        offline: 'オフライン',
-        finished: 'レビュー待ち',
-        idle: '準備完了',
-    },
-    ko: {
-        running: '작업 중',
-        waiting_approval: '확인 대기',
-        paused: '확인 필요',
-        offline: '오프라인',
-        finished: '검토 대기',
-        idle: '준비됨',
-    },
-    fr: {
-        running: 'En cours',
-        waiting_approval: 'En attente',
-        paused: 'Action requise',
-        offline: 'Hors ligne',
-        finished: 'A relire',
-        idle: 'Pret',
-    },
-    de: {
-        running: 'In Arbeit',
-        waiting_approval: 'Wartet',
-        paused: 'Aktion nötig',
-        offline: 'Offline',
-        finished: 'Zur Prüfung',
-        idle: 'Bereit',
-    },
-    es: {
-        running: 'Trabajando',
-        waiting_approval: 'Esperando',
-        paused: 'Requiere atención',
-        offline: 'Sin conexión',
-        finished: 'Listo para revisar',
-        idle: 'Listo',
-    },
-    it: {
-        running: 'In corso',
-        waiting_approval: 'In attesa',
-        paused: 'Richiede attenzione',
-        offline: 'Offline',
-        finished: 'Da rivedere',
-        idle: 'Pronto',
-    },
-    pt: {
-        running: 'Trabalhando',
-        waiting_approval: 'Aguardando',
-        paused: 'Requer atenção',
-        offline: 'Offline',
-        finished: 'Pronto para revisar',
-        idle: 'Pronto',
-    },
-};
-
-const getBeeGameTurnLabel = (status: string, lang: Language): string => {
-    const labels = BEEGAME_TURN_LABELS[lang] || BEEGAME_TURN_LABELS.en;
-    return labels[status] || BEEGAME_TURN_LABELS.en[status] || BEEGAME_TURN_LABELS.en.idle;
 };
 
 const getModelDisplayName = (config?: ModelConfig): string => {
@@ -285,6 +66,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const runtimeSnapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastPersistedRuntimeSnapshotRef = useRef('');
     const isBeeGameMode = isBeeGameAdapterEnabled();
+    const { i18n } = useTranslation('beegame');
+    const translateBeeGame = useMemo(
+        () => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'),
+        [i18n, lang],
+    );
 
     // Zustand State
     const {
@@ -581,13 +367,16 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
 
     const phaseLabel = useMemo(() => {
         if (isBeeGameMode) {
-            return getBeeGameTurnLabel(currentStatus, lang);
+            return translateBeeGame(`dashboard.turn.${currentStatus}`, {
+                defaultValue: translateBeeGame('dashboard.turn.idle'),
+            });
         }
         const phaseName = String(phaseInfo?.phase_name || savedRuntimeSnapshot?.phase_name || '').trim();
-        const labels = BEEGAME_PHASE_LABELS[lang] || BEEGAME_PHASE_LABELS.en;
-        if (!phaseName) return labels.idea_intake;
-        return labels[phaseName] || BEEGAME_PHASE_LABELS.en[phaseName] || fallbackPhaseLabel(phaseName);
-    }, [currentStatus, isBeeGameMode, phaseInfo?.phase_name, savedRuntimeSnapshot?.phase_name, lang]);
+        if (!phaseName) return translateBeeGame('dashboard.phase.idea_intake');
+        return translateBeeGame(`dashboard.phase.${phaseName}`, {
+            defaultValue: fallbackPhaseLabel(phaseName),
+        });
+    }, [currentStatus, isBeeGameMode, phaseInfo?.phase_name, savedRuntimeSnapshot?.phase_name, translateBeeGame]);
 
     const displayProjectName = useMemo(() => {
         return getWorkspaceFolderName(activeProject?.root_path) || projectName;
@@ -696,7 +485,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         ) {
             await continueTask();
         } else if (currentStatus === 'waiting_approval') {
-            showError(waitingApproval.message || '当前项目正在等待审批，不能继续执行普通消息。');
+            showError(waitingApproval.message || translateBeeGame('dashboard.approvalWaiting'));
             return;
         } else {
             await sendMessage("Please continue analyzing the project.");
@@ -803,10 +592,8 @@ function CreditQuoteDialog({
     onCancel: () => void;
     onConfirm: () => void;
 }) {
-    const isZh = lang === 'zh' || lang === 'zh-TW';
-    const settlementNote = isZh
-        ? '修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。'
-        : 'Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.';
+    const { i18n } = useTranslation('beegame');
+    const t = i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame', 'dashboard.creditQuote');
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
             <div
@@ -814,61 +601,59 @@ function CreditQuoteDialog({
                 aria-modal="true"
                 aria-labelledby="beegame-credit-quote-title"
                 data-surface="frosted-glass"
-                className="input-surface w-full max-w-2xl rounded-[30px] border border-white/20 p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
+                className="glass-panel w-full max-w-2xl p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
             >
-                <h2 id="beegame-credit-quote-title" className="text-3xl font-black leading-tight text-white sm:text-4xl">
-                    {isZh ? '确认本次请求' : 'Confirm request'}
+                <h2 id="beegame-credit-quote-title" className="type-title-2 text-white">
+                    {t('title')}
                 </h2>
-                <p className="mt-5 text-base font-medium leading-8 text-zinc-300 sm:text-lg">
-                    {isZh
-                        ? `本次请求将预扣 ${quote.reservedCredits} credits。完成后按实际消耗结算，未使用部分会自动退回。`
-                        : `This request will reserve ${quote.reservedCredits} credits. It will settle against actual usage, and unused credits will be refunded.`}
+                <p className="type-body mt-5 text-zinc-300">
+                    {t('description', { reservedCredits: quote.reservedCredits })}
                 </p>
                 <div className="mt-7 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-6">
-                    <div className="text-xs font-black uppercase tracking-[0.28em] text-zinc-500">
+                    <div className="type-caption-1 text-zinc-500">
                         {quote.displayName}
                     </div>
                     {quote.description ? (
-                        <div className="mt-2 text-sm leading-relaxed text-zinc-400">
+                        <div className="type-callout mt-2 text-zinc-400">
                             {quote.description}
                         </div>
                     ) : null}
                     <div className="mt-5 grid gap-4 sm:grid-cols-2">
                         <div className="min-w-0">
-                            <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
-                                {isZh ? '当前余额' : 'Balance'}
+                            <div className="type-caption-1 text-zinc-500">
+                                {t('balance')}
                             </div>
-                            <div className="mt-3 text-3xl font-black leading-none text-emerald-200">
+                            <div className="type-title-3 mt-3 text-emerald-200">
                                 {quote.balanceCredits} credits
                             </div>
                         </div>
                         <div className="min-w-0 sm:text-right">
-                            <div className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">
-                                {isZh ? '预扣' : 'Reserved'}
+                            <div className="type-caption-1 text-zinc-500">
+                                {t('reserved')}
                             </div>
-                            <div className="mt-3 text-3xl font-black leading-none text-white">
+                            <div className="type-title-3 mt-3 text-white">
                                 {quote.reservedCredits} credits
                             </div>
                         </div>
                     </div>
                 </div>
-                <p className="mt-4 rounded-[22px] border border-amber-300/15 bg-amber-300/[0.05] px-5 py-4 text-sm font-semibold leading-relaxed text-amber-100">
-                    {settlementNote}
+                <p className="type-callout mt-4 rounded-[22px] border border-amber-300/15 bg-amber-300/[0.05] px-5 py-4 text-amber-100">
+                    {t('settlementNote')}
                 </p>
                 <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="rounded-full border border-white/15 bg-black/10 px-6 py-3 text-sm font-black text-zinc-200 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+                        className="secondary-pill px-6 py-3 text-zinc-200 hover:text-white"
                     >
-                        {isZh ? '取消' : 'Cancel'}
+                        {t('cancel')}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="rounded-full bg-white px-7 py-3 text-sm font-black text-zinc-950 shadow-[0_16px_42px_rgba(255,255,255,0.12)] transition hover:bg-amber-100"
+                        className="primary-pill px-7 py-3"
                     >
-                        {isZh ? '确认并发送' : 'Confirm and send'}
+                        {t('confirm')}
                     </button>
                 </div>
             </div>

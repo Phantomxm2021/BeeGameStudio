@@ -1,8 +1,10 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square, User } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
-import { getBeeGameText } from './BeeGameI18n';
+import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { UserAccountMenu, type UserAccountMenuItem } from './Landing/UserAccountMenu';
 import type { BuildReportPayload } from '../../services/api';
 import { useSystemStore } from '../../store/systemStore';
 
@@ -30,294 +32,6 @@ interface BeeGameLivePreviewPageProps {
     onBack?: () => void;
     onSetLang: (lang: Language) => void;
 }
-
-const LABELS: Record<Language, {
-    title: string;
-    starting: string;
-    waiting: string;
-    noPreview: string;
-    failed: string;
-    stopped: string;
-    live: string;
-    reload: string;
-    open: string;
-    stop: string;
-    play: string;
-    build: string;
-    health: string;
-    entrypoint: string;
-    unavailable: string;
-    tokens: string;
-    credits: string;
-    reserved: string;
-    phase: string;
-    model: string;
-    syncing: string;
-    back: string;
-    settings: string;
-    language: string;
-}> = {
-    zh: {
-        title: '实时游戏画面',
-        starting: '正在准备预览',
-        waiting: '等待可运行画面',
-        noPreview: '构建完成后会在这里显示游戏画面',
-        failed: '预览不可用',
-        stopped: '运行已停止',
-        live: 'Live',
-        reload: '刷新预览',
-        open: '在新窗口打开',
-        stop: '停止预览',
-        play: '播放预览',
-        build: '构建',
-        health: '健康状态',
-        entrypoint: '入口',
-        unavailable: '未提供',
-        tokens: '消耗',
-        credits: 'Credits',
-        reserved: '预扣',
-        phase: '阶段',
-        model: '模型',
-        syncing: '同步中',
-        back: '返回项目列表',
-        settings: '设置',
-        language: '语言',
-    },
-    'zh-TW': {
-        title: '即時遊戲畫面',
-        starting: '正在準備預覽',
-        waiting: '等待可執行畫面',
-        noPreview: '建構完成後會在這裡顯示遊戲畫面',
-        failed: '預覽不可用',
-        stopped: '執行已停止',
-        live: 'Live',
-        reload: '重新整理預覽',
-        open: '在新視窗開啟',
-        stop: '停止預覽',
-        play: '播放預覽',
-        build: '建構',
-        health: '健康狀態',
-        entrypoint: '入口',
-        unavailable: '未提供',
-        tokens: '消耗',
-        credits: 'Credits',
-        reserved: '預扣',
-        phase: '階段',
-        model: '模型',
-        syncing: '同步中',
-        back: '返回專案列表',
-        settings: '設定',
-        language: '語言',
-    },
-    en: {
-        title: 'Live Game Preview',
-        starting: 'Preparing preview',
-        waiting: 'Waiting for a playable surface',
-        noPreview: 'The game preview appears here after a build is available',
-        failed: 'Preview unavailable',
-        stopped: 'Runtime stopped',
-        live: 'Live',
-        reload: 'Reload preview',
-        open: 'Open in new window',
-        stop: 'Stop preview',
-        play: 'Start preview',
-        build: 'Build',
-        health: 'Health',
-        entrypoint: 'Entrypoint',
-        unavailable: 'Unavailable',
-        tokens: 'Tokens',
-        credits: 'Credits',
-        reserved: 'Reserved',
-        phase: 'Phase',
-        model: 'Model',
-        syncing: 'Syncing',
-        back: 'Back to projects',
-        settings: 'Settings',
-        language: 'Language',
-    },
-    ja: {
-        title: 'ライブゲームプレビュー',
-        starting: 'プレビューを準備中',
-        waiting: '実行画面を待機中',
-        noPreview: 'ビルド後にゲーム画面がここに表示されます',
-        failed: 'プレビュー不可',
-        stopped: '実行停止',
-        live: 'Live',
-        reload: 'プレビューを更新',
-        open: '新しいウィンドウで開く',
-        stop: 'プレビューを停止',
-        play: 'プレビューを開始',
-        build: 'ビルド',
-        health: '状態',
-        entrypoint: '入口',
-        unavailable: '未提供',
-        tokens: '消費',
-        credits: 'Credits',
-        reserved: '予約',
-        phase: 'フェーズ',
-        model: 'モデル',
-        syncing: '同期中',
-        back: 'プロジェクト一覧に戻る',
-        settings: '設定',
-        language: '言語',
-    },
-    ko: {
-        title: '실시간 게임 화면',
-        starting: '미리보기 준비 중',
-        waiting: '실행 가능한 화면 대기 중',
-        noPreview: '빌드가 준비되면 게임 화면이 여기에 표시됩니다',
-        failed: '미리보기 사용 불가',
-        stopped: '실행 중지',
-        live: 'Live',
-        reload: '미리보기 새로고침',
-        open: '새 창에서 열기',
-        stop: '미리보기 중지',
-        play: '미리보기 시작',
-        build: '빌드',
-        health: '상태',
-        entrypoint: '진입점',
-        unavailable: '없음',
-        tokens: '토큰',
-        credits: 'Credits',
-        reserved: '예약',
-        phase: '단계',
-        model: '모델',
-        syncing: '동기화 중',
-        back: '프로젝트 목록으로 돌아가기',
-        settings: '설정',
-        language: '언어',
-    },
-    fr: {
-        title: 'Aperçu du jeu en direct',
-        starting: 'Préparation de l’aperçu',
-        waiting: 'En attente d’une surface jouable',
-        noPreview: 'L’aperçu du jeu apparaîtra ici après le build',
-        failed: 'Aperçu indisponible',
-        stopped: 'Runtime arrêté',
-        live: 'Live',
-        reload: 'Recharger l’aperçu',
-        open: 'Ouvrir dans une nouvelle fenêtre',
-        stop: 'Arrêter l’aperçu',
-        play: 'Démarrer l’aperçu',
-        build: 'Build',
-        health: 'Santé',
-        entrypoint: 'Entrée',
-        unavailable: 'Indisponible',
-        tokens: 'Tokens',
-        credits: 'Credits',
-        reserved: 'Réservé',
-        phase: 'Phase',
-        model: 'Modèle',
-        syncing: 'Synchronisation',
-        back: 'Retour aux projets',
-        settings: 'Réglages',
-        language: 'Langue',
-    },
-    de: {
-        title: 'Live-Spielvorschau',
-        starting: 'Vorschau wird vorbereitet',
-        waiting: 'Warte auf spielbare Oberfläche',
-        noPreview: 'Die Spielvorschau erscheint hier nach einem Build',
-        failed: 'Vorschau nicht verfügbar',
-        stopped: 'Runtime gestoppt',
-        live: 'Live',
-        reload: 'Vorschau neu laden',
-        open: 'In neuem Fenster öffnen',
-        stop: 'Vorschau stoppen',
-        play: 'Vorschau starten',
-        build: 'Build',
-        health: 'Status',
-        entrypoint: 'Einstieg',
-        unavailable: 'Nicht verfügbar',
-        tokens: 'Tokens',
-        credits: 'Credits',
-        reserved: 'Reserviert',
-        phase: 'Phase',
-        model: 'Modell',
-        syncing: 'Synchronisierung',
-        back: 'Zurück zu Projekten',
-        settings: 'Einstellungen',
-        language: 'Sprache',
-    },
-    es: {
-        title: 'Vista previa del juego',
-        starting: 'Preparando vista previa',
-        waiting: 'Esperando una superficie jugable',
-        noPreview: 'La vista previa aparecerá aquí cuando exista una build',
-        failed: 'Vista previa no disponible',
-        stopped: 'Runtime detenido',
-        live: 'Live',
-        reload: 'Recargar vista previa',
-        open: 'Abrir en una ventana nueva',
-        stop: 'Detener vista previa',
-        play: 'Iniciar vista previa',
-        build: 'Build',
-        health: 'Estado',
-        entrypoint: 'Entrada',
-        unavailable: 'No disponible',
-        tokens: 'Tokens',
-        credits: 'Credits',
-        reserved: 'Reservado',
-        phase: 'Fase',
-        model: 'Modelo',
-        syncing: 'Sincronizando',
-        back: 'Volver a proyectos',
-        settings: 'Configuración',
-        language: 'Idioma',
-    },
-    it: {
-        title: 'Anteprima gioco live',
-        starting: 'Preparazione anteprima',
-        waiting: 'In attesa di una superficie giocabile',
-        noPreview: 'L’anteprima del gioco apparirà qui dopo la build',
-        failed: 'Anteprima non disponibile',
-        stopped: 'Runtime fermato',
-        live: 'Live',
-        reload: 'Ricarica anteprima',
-        open: 'Apri in una nuova finestra',
-        stop: 'Ferma anteprima',
-        play: 'Avvia anteprima',
-        build: 'Build',
-        health: 'Stato',
-        entrypoint: 'Entrypoint',
-        unavailable: 'Non disponibile',
-        tokens: 'Token',
-        credits: 'Credits',
-        reserved: 'Riservato',
-        phase: 'Fase',
-        model: 'Modello',
-        syncing: 'Sincronizzazione',
-        back: 'Torna ai progetti',
-        settings: 'Impostazioni',
-        language: 'Lingua',
-    },
-    pt: {
-        title: 'Prévia do jogo ao vivo',
-        starting: 'Preparando prévia',
-        waiting: 'Aguardando uma superfície jogável',
-        noPreview: 'A prévia do jogo aparece aqui quando houver uma build',
-        failed: 'Prévia indisponível',
-        stopped: 'Runtime parado',
-        live: 'Live',
-        reload: 'Recarregar prévia',
-        open: 'Abrir em nova janela',
-        stop: 'Parar prévia',
-        play: 'Iniciar prévia',
-        build: 'Build',
-        health: 'Saúde',
-        entrypoint: 'Entrada',
-        unavailable: 'Indisponível',
-        tokens: 'Tokens',
-        credits: 'Credits',
-        reserved: 'Reservado',
-        phase: 'Fase',
-        model: 'Modelo',
-        syncing: 'Sincronizando',
-        back: 'Voltar aos projetos',
-        settings: 'Configurações',
-        language: 'Idioma',
-    },
-};
 
 const normalizeUrl = (url?: string): string => {
     const value = String(url || '').trim();
@@ -354,13 +68,13 @@ export function BeeGameLivePreviewPage({
     onSetLang,
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
-    const [isUserMenuOpen, setUserMenuOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
     const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
-    const labels = LABELS[lang] || LABELS.en;
-    const uiText = getBeeGameText(lang);
+    const { i18n } = useTranslation('beegame');
+    const labels = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame').livePreview as Record<string, string>;
+    const uiText = useBeeGameText(lang);
     const currentUser = useSystemStore(state => state.currentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
@@ -395,10 +109,14 @@ export function BeeGameLivePreviewPage({
         setStoppedPreviewUrl('');
         await onRestartPreview?.();
     };
-    const userLabel = currentUser?.displayName || currentUser?.email || '';
-    const userEmail = currentUser?.email || '';
-    const userInitial = getUserInitial(userLabel);
-    const userAvatarUrl = currentUser?.avatarUrl || '';
+    const userMenuItems: UserAccountMenuItem[] = [
+        {
+            key: 'settings',
+            label: labels.settings,
+            icon: <Settings className="h-4 w-4" />,
+            onClick: () => setSettingsOpen(true),
+        },
+    ];
     useEffect(() => {
         setStoppedPreviewUrl('');
     }, [previewUrl]);
@@ -406,11 +124,11 @@ export function BeeGameLivePreviewPage({
     return (
         <main
             data-testid="beegame-live-preview-page"
-            className="relative h-full flex-1 overflow-hidden bg-[#07090c] text-zinc-50"
+	            className="relative h-full flex-1 overflow-hidden bg-zinc-950 text-zinc-50"
         >
             <header
                 data-testid="beegame-shell-top-nav"
-                className="absolute left-0 right-0 top-0 z-[90] flex h-20 items-center border-b border-zinc-800/80 bg-[#080c10]/95 px-7 backdrop-blur-xl"
+	                className="absolute left-0 right-0 top-0 z-[90] flex h-20 items-center border-b border-zinc-800/80 bg-zinc-950/95 px-7 backdrop-blur-xl"
             >
                 <div className="relative flex min-w-0 items-center gap-4">
                     <button
@@ -429,25 +147,25 @@ export function BeeGameLivePreviewPage({
                         onMouseLeave={() => setProjectHintOpen(false)}
                         onFocus={() => setProjectHintOpen(true)}
                         onBlur={() => setProjectHintOpen(false)}
-                        className="min-w-0 max-w-[34rem] truncate bg-transparent p-0 text-left text-lg font-black text-zinc-100 outline-none transition hover:text-white focus-visible:text-white"
+                        className="type-title-3 min-w-0 max-w-[34rem] truncate bg-transparent p-0 text-left text-zinc-100 outline-none transition hover:text-white focus-visible:text-white"
                     >
                         {projectName}
                     </button>
-                    <div className="flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-xs font-bold text-zinc-300">
+                    <div className="type-footnote flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-300">
                         <Globe2 className="h-3.5 w-3.5" />
                         Web
                     </div>
-                    <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
+                    <div className="type-footnote flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1 text-emerald-300">
                         <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
                         {statusText}
                     </div>
                     {credits ? (
-                        <div className="flex items-center gap-2 rounded-xl bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200">
+                        <div className="type-footnote flex items-center gap-2 rounded-xl bg-amber-400/10 px-3 py-1 text-amber-200">
                             {labels.credits}: {credits.settledCredits.toLocaleString()}
                         </div>
                     ) : null}
                     {isSyncing ? (
-                        <div className="rounded-xl bg-zinc-800/80 px-3 py-1 text-xs font-bold text-zinc-400">
+                        <div className="type-footnote rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-400">
                             {labels.syncing}
                         </div>
                     ) : null}
@@ -471,86 +189,19 @@ export function BeeGameLivePreviewPage({
                     ) : null}
                 </div>
 
-                <div
+                <UserAccountMenu
+                    ariaLabel={labels.settings}
                     className="relative ml-auto"
-                    onBlur={(event) => {
-                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                            setUserMenuOpen(false);
-                        }
-                    }}
-                >
-                    <button
-                        type="button"
-                        aria-label={labels.settings}
-                        aria-expanded={isUserMenuOpen}
-                        onClick={() => setUserMenuOpen(open => !open)}
-                        className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-full border border-white/25 bg-white/[0.06] text-zinc-100 shadow-[0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition hover:border-emerald-300/45 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-                    >
-                        {userAvatarUrl ? (
-                            <img
-                                src={userAvatarUrl}
-                                alt=""
-                                className="absolute inset-0 h-full w-full rounded-full object-cover"
-                            />
-                        ) : (
-                            <span className="grid h-8 w-8 place-items-center rounded-full border border-white/15 bg-white/[0.08] text-sm font-black text-white">
-                                {currentUser ? userInitial : (
-                                <User className="h-5 w-5" />
-                                )}
-                            </span>
-                        )}
-                    </button>
-                    {isUserMenuOpen ? (
-                        <div
-                            role="menu"
-                            data-testid="beegame-user-settings-menu"
-                            data-surface="frosted-glass"
-                            className="input-surface absolute right-0 top-14 z-[140] w-72 overflow-hidden rounded-[28px] border border-white/25 bg-zinc-950/75 p-3 text-zinc-100 shadow-[0_28px_90px_rgba(0,0,0,0.62)] backdrop-blur-2xl"
-                        >
-                            <div className="flex items-center gap-3 px-2 pb-3">
-                                <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/[0.08] text-sm font-black">
-                                    {userAvatarUrl ? (
-                                        <img
-                                            src={userAvatarUrl}
-                                            alt=""
-                                            className="h-full w-full rounded-full object-cover"
-                                        />
-                                    ) : currentUser ? userInitial : (
-                                        <User className="h-5 w-5" />
-                                    )}
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="truncate text-sm font-black">{userLabel || labels.settings}</div>
-                                    {userEmail ? (
-                                        <div className="truncate text-xs font-bold text-zinc-500">{userEmail}</div>
-                                    ) : null}
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                role="menuitem"
-                                aria-label={labels.settings}
-                                onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    setUserMenuOpen(false);
-                                    setSettingsOpen(true);
-                                }}
-                                onClick={() => {
-                                    setUserMenuOpen(false);
-                                    setSettingsOpen(true);
-                                }}
-                                className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left transition hover:border-white/20 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
-                            >
-                                <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/[0.08] text-zinc-300">
-                                    <Settings className="h-4 w-4" />
-                                </span>
-                                <div className="min-w-0">
-                                    <div className="text-sm font-black">{labels.settings}</div>
-                                </div>
-                            </button>
-                        </div>
-                    ) : null}
-                </div>
+                    isActive={isSettingsOpen}
+                    currentUserId={currentUser?.id}
+                    currentUserDisplayName={currentUser?.displayName}
+                    currentUserEmail={currentUser?.email}
+                    currentUserAvatarUrl={currentUser?.avatarUrl}
+                    fallbackUserLabel={labels.settings}
+                    signOutLabel=""
+                    items={userMenuItems}
+                    onOpenLogin={() => setSettingsOpen(true)}
+                />
             </header>
 
             <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
@@ -558,7 +209,7 @@ export function BeeGameLivePreviewPage({
                     <div className="flex h-20 items-center justify-between px-9">
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
-                                <h1 className="text-2xl font-black text-zinc-100">
+                                <h1 className="type-title-3 text-zinc-100">
                                     {uiText.previewTitle}
                                 </h1>
                             </div>
@@ -628,10 +279,10 @@ export function BeeGameLivePreviewPage({
                                     <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-zinc-900 text-zinc-300 ring-1 ring-zinc-800">
                                         {previewState === 'failed' ? <AlertTriangle className="h-8 w-8 text-red-300" /> : <MonitorPlay className="h-8 w-8" />}
                                     </div>
-                                    <div className="mt-6 text-sm font-black uppercase tracking-[0.22em] text-zinc-200">
+                                    <div className="type-caption-1 mt-6 text-zinc-400">
                                         {statusText}
                                     </div>
-                                    <p className="mt-3 text-sm leading-6 text-zinc-500">
+                                    <p className="type-callout mt-3 text-zinc-500">
                                         {buildReport?.failure_reason || buildReport?.summary || labels.noPreview}
                                     </p>
                                 </div>
@@ -656,19 +307,14 @@ export function BeeGameLivePreviewPage({
 function ProjectHintRow({ label, value }: { label: string; value: string }) {
     return (
         <div className="flex items-start justify-between gap-4 border-b border-zinc-800/70 py-2 last:border-b-0">
-            <div className="shrink-0 text-xs font-bold text-zinc-500">
+            <div className="type-caption-1 shrink-0 text-zinc-500">
                 {label}
             </div>
-            <div className="min-w-0 truncate text-right text-sm font-bold text-zinc-100">
+            <div className="type-callout min-w-0 truncate text-right text-zinc-100">
                 {value}
             </div>
         </div>
     );
-}
-
-function getUserInitial(value: string): string {
-    const first = Array.from(value.trim() || 'U')[0] || 'U';
-    return first.toLocaleUpperCase();
 }
 
 function PreviewControlButton({
@@ -704,7 +350,7 @@ function PreviewControlButton({
                 onBlur={() => setHoveredControl(null)}
                 onClick={onClick}
                 disabled={disabled}
-                className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                className="glass-icon-button h-11 w-11 rounded-xl text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
             >
                 {children}
             </button>
@@ -712,7 +358,7 @@ function PreviewControlButton({
                 <div
                     id={`beegame-preview-control-${control}`}
                     role="tooltip"
-                    className="pointer-events-none absolute -top-10 left-1/2 z-[100] -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-200 shadow-xl shadow-black/40"
+                    className="type-footnote pointer-events-none absolute -top-10 left-1/2 z-[100] -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-zinc-200 shadow-xl shadow-black/40"
                 >
                     {label}
                 </div>

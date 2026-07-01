@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   API_BASE_URL,
@@ -8,10 +8,14 @@ import {
 } from './apiClient';
 
 describe('apiClient defaults', () => {
+  beforeEach(() => {
+    stubLocalStorage();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
     localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   it('uses same-origin requests by default', () => {
@@ -54,7 +58,7 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBe('Bearer runtime-token');
   });
 
-  it('falls back to the Supabase session token when no deployment token is configured', async () => {
+  it('uses the Supabase session token when no deployment token is configured', async () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', '');
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'supabase-session-token',
@@ -65,6 +69,22 @@ describe('apiClient defaults', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await authenticatedFetch('/api/current-user');
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer supabase-session-token');
+  });
+
+  it('uses the Supabase session token before the dev/offline bearer token', async () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'supabase-session-token',
+      expiresAt: Date.now() + 3600_000,
+      user: { id: 'user-1' },
+    }));
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/credits/ledger');
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer supabase-session-token');
@@ -99,6 +119,38 @@ describe('apiClient defaults', () => {
     expect(apiHeaders.get('Authorization')).toBe('Bearer fresh-token');
   });
 
+  it('refreshes a Supabase session after a 401 even when the dev/offline token exists', async () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'stale-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      user: { id: 'user-1' },
+    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/credits/ledger') && fetchMock.mock.calls.length === 1) {
+        return new Response(JSON.stringify({ message: 'expired' }), { status: 401 });
+      }
+      if (String(input).includes('/auth/v1/token')) {
+        return Response.json({
+          access_token: 'fresh-token',
+          refresh_token: 'fresh-refresh-token',
+          expires_in: 3600,
+          user: { id: 'user-1' },
+        });
+      }
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/credits/ledger');
+
+    const replayHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
+    expect(replayHeaders.get('Authorization')).toBe('Bearer fresh-token');
+  });
+
   it('does not overwrite an explicit authorization header', () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
 
@@ -115,3 +167,19 @@ describe('apiClient defaults', () => {
     expect(buildUnauthorizedMessage()).toBe('请先登录 BeeGame');
   });
 });
+
+function stubLocalStorage(): void {
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      values.delete(key);
+    }),
+    clear: vi.fn(() => {
+      values.clear();
+    }),
+  });
+}

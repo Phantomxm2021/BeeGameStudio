@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     buildUnauthorizedMessage,
@@ -12,8 +12,14 @@ import {
 } from './api';
 
 describe('resolveAuthToken', () => {
+    beforeEach(() => {
+        stubLocalStorage();
+    });
+
     afterEach(() => {
         vi.unstubAllEnvs();
+        localStorage.clear();
+        vi.unstubAllGlobals();
     });
 
     it('uses the dev/offline auth token outside production', () => {
@@ -27,11 +33,28 @@ describe('resolveAuthToken', () => {
 
         expect(resolveAuthToken()).toBe('');
     });
+
+    it('uses the Supabase session token before the dev/offline token', () => {
+        vi.stubEnv('VITE_API_AUTH_TOKEN', 'env-token');
+        localStorage.setItem('beegame_supabase_session', JSON.stringify({
+            accessToken: 'supabase-session-token',
+            expiresAt: Date.now() + 3600_000,
+            user: { id: 'user-1' },
+        }));
+
+        expect(resolveAuthToken()).toBe('supabase-session-token');
+    });
 });
 
 describe('buildUnauthorizedMessage', () => {
+    beforeEach(() => {
+        stubLocalStorage();
+    });
+
     afterEach(() => {
         vi.unstubAllEnvs();
+        localStorage.clear();
+        vi.unstubAllGlobals();
     });
 
     it('uses the backend message when provided', () => {
@@ -52,6 +75,22 @@ describe('buildUnauthorizedMessage', () => {
         expect(buildUnauthorizedMessage()).toBe('未授权，token 无效或已失效');
     });
 });
+
+function stubLocalStorage(): void {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+        getItem: vi.fn((key: string) => values.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => {
+            values.set(key, value);
+        }),
+        removeItem: vi.fn((key: string) => {
+            values.delete(key);
+        }),
+        clear: vi.fn(() => {
+            values.clear();
+        }),
+    });
+}
 
 describe('normalizeReviewBindingPayload', () => {
     it('normalizes workspace fields into the compact binding shape', () => {

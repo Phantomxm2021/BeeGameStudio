@@ -32,10 +32,10 @@ const getEnvAuthToken = (): string => {
 
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
-export const resolveAuthToken = (): string => getEnvAuthToken() || getSupabaseAccessToken();
+export const resolveAuthToken = (): string => getSupabaseAccessToken() || getEnvAuthToken();
 
 export const resolveAuthTokenAsync = async (): Promise<string> => (
-  getEnvAuthToken() || await getValidSupabaseAccessToken()
+  await getValidSupabaseAccessToken() || getEnvAuthToken()
 );
 
 export const buildApiUrl = (path: string): string => {
@@ -65,7 +65,7 @@ export const authenticatedFetch = (
     ...init,
     headers: await buildAuthHeadersAsync(init.headers),
   });
-  if (response.status !== 401 || getEnvAuthToken()) return response;
+  if (response.status !== 401 || (!getSupabaseAccessToken() && getEnvAuthToken())) return response;
   const refreshed = await refreshSupabaseSession();
   if (!refreshed) return response;
   return fetch(nextInput, {
@@ -111,7 +111,12 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error: AxiosError) => {
-    if (error.response?.status === 401 && !getEnvAuthToken() && error.config && !isRetriedRequest(error.config)) {
+    if (
+      error.response?.status === 401 &&
+      (getSupabaseAccessToken() || !getEnvAuthToken()) &&
+      error.config &&
+      !isRetriedRequest(error.config)
+    ) {
       const refreshed = await refreshSupabaseSession();
       if (refreshed) {
         markRetriedRequest(error.config);

@@ -24,6 +24,7 @@ export type BeeGamePermission =
 
 export type BeeGameCurrentUser = {
   id: string;
+  accountId?: string;
   role: BeeGameRole;
   email?: string;
   displayName?: string;
