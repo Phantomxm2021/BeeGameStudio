@@ -23,6 +23,9 @@ type BeeGameCollaborationFeedProps = {
     projectStatus?: ProjectRuntimeDisplayModel | null;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     lang?: Language;
+    currentUserDisplayName?: string;
+    currentUserEmail?: string;
+    currentUserAvatarUrl?: string;
 };
 
 type BeeGameConversationOverviewRulerProps = {
@@ -126,6 +129,9 @@ const getToolStatusLabel = (status: NormalizedTool['status'], text: BeeGameText)
 };
 
 const getToolTitle = (tool: NormalizedTool, text: BeeGameText): string => {
+    if (isWriteTool(tool.name) && tool.detail) {
+        return `Write ${getPathFileName(tool.detail)}`;
+    }
     return `${tool.name} ${getToolStatusLabel(tool.status, text)}`;
 };
 
@@ -133,6 +139,19 @@ const getToolIcon = (toolName?: string) => {
     const normalized = String(toolName || '').toLowerCase();
     if (normalized === 'bash') return Terminal;
     return FileText;
+};
+
+const isWriteTool = (toolName?: string): boolean => String(toolName || '').trim().toLowerCase() === 'write';
+
+const getPathFileName = (value: string): string => {
+    const normalized = value.replaceAll('\\', '/');
+    const parts = normalized.split('/').filter(Boolean);
+    return parts[parts.length - 1] || value;
+};
+
+const getUserInitial = (value?: string): string => {
+    const trimmed = String(value || '').trim();
+    return trimmed ? trimmed.slice(0, 1).toUpperCase() : '';
 };
 
 const getAgentPreview = (content: string): { preview: string; isTruncated: boolean } => {
@@ -194,6 +213,9 @@ export const BeeGameCollaborationFeed = memo(({
     messages,
     onPreviewArtifact,
     lang = 'en',
+    currentUserDisplayName,
+    currentUserEmail,
+    currentUserAvatarUrl,
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
@@ -204,7 +226,14 @@ export const BeeGameCollaborationFeed = memo(({
                 {entries.map((entry) => (
                     entry.kind === 'user' ? (
                         <div key={entry.message.id} data-beegame-message-anchor={entry.message.id}>
-                            <UserMessageCard message={entry.message} text={text} />
+                            <UserMessageCard
+                                message={entry.message}
+                                text={text}
+                                lang={lang}
+                                currentUserDisplayName={currentUserDisplayName}
+                                currentUserEmail={currentUserEmail}
+                                currentUserAvatarUrl={currentUserAvatarUrl}
+                            />
                         </div>
                     ) : entry.kind === 'agent' ? (
                         <div key={entry.message.id} data-beegame-message-anchor={entry.message.id}>
@@ -213,6 +242,7 @@ export const BeeGameCollaborationFeed = memo(({
                                 tools={entry.tools}
                                 onPreviewArtifact={onPreviewArtifact}
                                 text={text}
+                                lang={lang}
                             />
                         </div>
                     ) : (
@@ -338,7 +368,7 @@ const buildAxisEntries = (entries: FeedEntry[], text: BeeGameText): AxisEntry[] 
         if (entry.kind === 'agent') {
             return {
                 id: entry.message.id,
-                title: 'BeeGame',
+                title: text.assistantName,
                 preview: toAxisPreview(entry.message.content),
                 tone: 'agent',
             };
@@ -487,7 +517,7 @@ function ConversationAxis({
                                     onFocus={(event) => updateHoveredEntry(entry.id, event.currentTarget)}
                                     onBlur={() => setHoveredId(null)}
                                     onClick={() => scrollToEntry(entry.id)}
-                                    className="group flex h-2.5 w-10 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-orange-400/70"
+                                    className="group flex h-2.5 w-10 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
                                 >
                                     <span
                                         data-testid="beegame-conversation-axis-line"
@@ -505,7 +535,7 @@ function ConversationAxis({
                         role="tooltip"
                         data-testid="beegame-conversation-axis-preview"
                         data-anchor-index={String(hoveredIndex)}
-                        className="pointer-events-none absolute left-10 z-30 w-72 -translate-y-1/2 rounded-2xl border border-zinc-700 bg-zinc-800/95 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur-xl"
+                        className="pointer-events-none absolute left-10 z-30 w-72 -translate-y-1/2 rounded-3xl border border-white/15 bg-black/50 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur-2xl"
                         style={{ top: previewTop }}
                     >
                         <div className="type-footnote truncate text-zinc-100">{hoveredEntry.title}</div>
@@ -538,7 +568,7 @@ const getAxisLinePresentation = (
                 widthClassName: widthByDistance[distance],
                 colorClassName: distance === 0
                     ? 'bg-zinc-100 shadow-[0_0_14px_rgba(255,255,255,0.35)]'
-                    : 'bg-orange-300/80 shadow-[0_0_10px_rgba(251,146,60,0.18)]',
+                    : 'bg-emerald-300/70 shadow-[0_0_10px_rgba(110,231,183,0.16)]',
             };
         }
     }
@@ -548,21 +578,48 @@ const getAxisLinePresentation = (
         length: 'short',
         widthClassName: 'w-3',
         colorClassName: isActive
-            ? 'bg-orange-400/90 shadow-[0_0_12px_rgba(251,146,60,0.28)]'
+            ? 'bg-emerald-300/90 shadow-[0_0_12px_rgba(110,231,183,0.24)]'
             : 'bg-zinc-600/70',
     };
 };
 
-function UserMessageCard({ message, text }: { message: ChatDisplayMessage; text: BeeGameText }) {
+function UserMessageCard({
+    message,
+    text,
+    lang,
+    currentUserDisplayName,
+    currentUserEmail,
+    currentUserAvatarUrl,
+}: {
+    message: ChatDisplayMessage;
+    text: BeeGameText;
+    lang: Language;
+    currentUserDisplayName?: string;
+    currentUserEmail?: string;
+    currentUserAvatarUrl?: string;
+}) {
+    const userLabel = currentUserDisplayName || currentUserEmail || text.you;
+    const initial = getUserInitial(userLabel);
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
-            className="ml-auto max-w-[88%] rounded-xl border border-zinc-700/70 bg-zinc-800/45 px-4 py-3 text-zinc-100 shadow-sm"
+            className="w-full rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
         >
             <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="type-caption-1 text-zinc-400">{text.you}</span>
-                <span className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">
-                    <User className="h-4 w-4" />
+                <span className="type-caption-1 max-w-[14rem] truncate text-emerald-100/85">{userLabel}</span>
+                <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full border border-emerald-200/20 bg-emerald-200/[0.08] text-emerald-100">
+                    {currentUserAvatarUrl ? (
+                        <img
+                            src={currentUserAvatarUrl}
+                            alt={userLabel}
+                            className="h-full w-full object-cover"
+                            draggable={false}
+                        />
+                    ) : initial ? (
+                        <span className="type-caption-1 text-emerald-50">{initial}</span>
+                    ) : (
+                        <User className="h-4 w-4" />
+                    )}
                 </span>
             </div>
             <MarkdownRenderer
@@ -570,6 +627,7 @@ function UserMessageCard({ message, text }: { message: ChatDisplayMessage; text:
                 isUser
                 messageId={message.id}
                 variant="beegame"
+                lang={lang}
             />
         </section>
     );
@@ -580,11 +638,13 @@ function AgentFeedGroup({
     tools,
     onPreviewArtifact,
     text,
+    lang,
 }: {
     message: ChatDisplayMessage;
     tools: NormalizedTool[];
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     text: BeeGameText;
+    lang: Language;
 }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -595,6 +655,7 @@ function AgentFeedGroup({
                 isCollapsed={isCollapsed}
                 onToggleCollapsed={() => setIsCollapsed((value) => !value)}
                 text={text}
+                lang={lang}
             />
             {!isCollapsed && tools.length > 0 ? (
                 <ToolGroup tools={tools} onPreviewArtifact={onPreviewArtifact} text={text} />
@@ -608,24 +669,26 @@ function AgentSummaryCard({
     isCollapsed,
     onToggleCollapsed,
     text,
+    lang,
 }: {
     message: ChatDisplayMessage;
     isCollapsed: boolean;
     onToggleCollapsed: () => void;
     text: BeeGameText;
+    lang: Language;
 }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const preview = getAgentPreview(message.content);
     const content = isExpanded ? message.content : preview.preview;
 
     return (
-        <section data-testid={`beegame-agent-message-${message.id}`} className="rounded-xl border border-orange-500/20 bg-orange-950/15 px-4 py-3 text-zinc-100 shadow-sm">
+        <section data-testid={`beegame-agent-message-${message.id}`} className="glass-control rounded-3xl px-4 py-3 text-zinc-100 shadow-sm backdrop-blur-2xl">
             <div className="min-w-0">
                 <div className="mb-2 flex items-center gap-2">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-orange-400/35 bg-orange-950/40 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black/25 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
                         <img
                             src={BEEGAME_AVATAR_SRC}
-                            alt="BeeGame"
+                            alt={text.assistantName}
                             className="h-5 w-5 object-contain"
                             draggable={false}
                         />
@@ -637,8 +700,8 @@ function AgentSummaryCard({
                         onClick={onToggleCollapsed}
                         className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                     >
-                        <span className="type-caption-1 min-w-0 truncate text-orange-300">
-                            BeeGame
+                        <span className="type-caption-1 min-w-0 truncate text-zinc-300">
+                            {text.assistantName}
                         </span>
                         {isCollapsed ? (
                             <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -654,12 +717,13 @@ function AgentSummaryCard({
                             isUser={false}
                             messageId={message.id}
                             variant="beegame"
+                            lang={lang}
                         />
                         {preview.isTruncated ? (
                             <button
                                 type="button"
                                 onClick={() => setIsExpanded((value) => !value)}
-                                className="type-footnote mt-2 inline-flex items-center gap-1 text-orange-300 hover:text-orange-200"
+                                className="type-footnote mt-2 inline-flex items-center gap-1 text-zinc-300 hover:text-white"
                             >
                                 {isExpanded ? text.hideSummaryDetails : text.viewSummaryDetails}
                                 {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -682,7 +746,7 @@ function ToolGroup({
     text: BeeGameText;
 }) {
     return (
-        <div className="relative pl-8">
+        <div className="relative ml-8 pl-8">
             <div className="space-y-3">
                 {tools.map((message, index) => (
                     <ToolTimelineCard
@@ -715,13 +779,14 @@ function ToolTimelineCard({
     const isFailed = message.status === 'failed';
     const isRunning = !isCompleted && !isFailed;
     const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : LoaderCircle;
-    const statusClassName = isCompleted ? 'text-emerald-400' : isFailed ? 'text-red-400' : 'text-orange-400';
+    const statusClassName = isCompleted ? 'text-emerald-300' : isFailed ? 'text-red-300' : 'text-zinc-300';
     const detail = message.detail;
     const output = message.output;
     const title = getToolTitle(message, text);
     const previewId = message.artifactId || message.id;
     const previewTitle = detail || title;
     const previewContent = message.artifactId ? undefined : [detail, output].filter(Boolean).join('\n\n');
+    const canPreviewTool = isWriteTool(message.name) && Boolean(detail || output);
     const diffContent = [
         `Tool: ${message.name}`,
         `Status: ${message.status}`,
@@ -730,11 +795,11 @@ function ToolTimelineCard({
     ].filter(Boolean).join('\n');
 
     return (
-        <div data-testid="beegame-tool-timeline-card" data-tool-id={message.id} className="relative rounded-xl border border-zinc-800 bg-zinc-900/55 p-3">
+        <div data-testid="beegame-tool-timeline-card" data-tool-id={message.id} className="glass-control relative rounded-2xl p-3 backdrop-blur-2xl">
             {!isLast ? (
                 <div
                     data-testid="beegame-tool-connector"
-                    className="absolute -left-[1.1rem] top-10 h-[calc(100%+0.75rem)] w-px bg-zinc-800"
+                    className="absolute -left-[1.1rem] top-10 h-[calc(100%+0.75rem)] w-px bg-white/10"
                 />
             ) : null}
             <div
@@ -744,7 +809,7 @@ function ToolTimelineCard({
                 <StatusIcon className={`h-4 w-4 ${isRunning ? 'animate-spin' : ''}`} />
             </div>
             <div className="flex items-start gap-3">
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-950 text-zinc-300 ring-1 ring-zinc-800">
+                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-300">
                     <Icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -766,7 +831,7 @@ function ToolTimelineCard({
                     {isExpanded ? (
                         <div>
                             {detail ? (
-	                                <div className="type-code-sm mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-400 [overflow-wrap:anywhere]">
+	                                <div className="type-code-sm mt-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-zinc-400 [overflow-wrap:anywhere]">
                                     {detail}
                                 </div>
                             ) : null}
@@ -775,13 +840,13 @@ function ToolTimelineCard({
                                     {output}
                                 </div>
                             ) : null}
-                            {(detail || output) ? (
+                            {canPreviewTool ? (
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <button
                                         type="button"
                                         aria-label={`${text.open} ${previewTitle}`}
                                         onClick={() => onPreviewArtifact?.(previewId, previewTitle, previewContent || undefined)}
-                                        className="type-footnote inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
+                                        className="type-footnote inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-zinc-300 hover:border-white/20 hover:bg-white/[0.06]"
                                     >
                                         <FolderOpen className="h-3.5 w-3.5" />
                                         {text.open}
@@ -790,7 +855,7 @@ function ToolTimelineCard({
                                         type="button"
                                         aria-label={`${text.diff} ${previewTitle}`}
                                         onClick={() => onPreviewArtifact?.(`${previewId}:diff`, `${text.diff}: ${previewTitle}`, diffContent)}
-                                        className="type-footnote inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-1.5 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/70"
+                                        className="type-footnote inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-zinc-300 hover:border-white/20 hover:bg-white/[0.06]"
                                     >
                                         <GitCompare className="h-3.5 w-3.5" />
                                         {text.diff}

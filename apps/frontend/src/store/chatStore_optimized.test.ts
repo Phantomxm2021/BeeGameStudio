@@ -102,6 +102,93 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messages[0].clientMessageId).toBe('client-msg-1');
   });
 
+  it('should reconcile optimistic user message with a backend event id when content matches', () => {
+    const { addMessage } = useChatStore.getState();
+
+    addMessage({
+      id: 'client-msg-2',
+      clientMessageId: 'client-msg-2',
+      sender: 'user',
+      content: 'make a snake game',
+      timestamp: 1000,
+    });
+
+    addMessage({
+      id: 'beegame-event-42',
+      messageId: 'beegame-event-42',
+      sender: 'user',
+      content: 'make a snake game',
+      timestamp: 1001,
+    });
+
+    const state = useChatStore.getState();
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].id).toBe('beegame-event-42');
+    expect(state.messages[0].content).toBe('make a snake game');
+  });
+
+  it('should reconcile duplicate user messages even when client message ids differ', () => {
+    const { addMessage } = useChatStore.getState();
+
+    addMessage({
+      id: 'client-msg-a',
+      clientMessageId: 'client-msg-a',
+      sender: 'user',
+      content: 'same user request',
+      timestamp: 1000,
+    });
+
+    addMessage({
+      id: 'client-msg-b',
+      clientMessageId: 'client-msg-b',
+      sender: 'user',
+      content: 'same user request',
+      timestamp: 1001,
+    });
+
+    const state = useChatStore.getState();
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].clientMessageId).toBe('client-msg-b');
+  });
+
+  it('should not discard existing history when a reconnect returns only a short session slice', () => {
+    const { loadHistory } = useChatStore.getState();
+
+    loadHistory([
+      {
+        id: 'history-1',
+        messageId: 'history-1',
+        sender: 'user',
+        content: 'Original request',
+        timestamp: 1000,
+      },
+      {
+        id: 'history-2',
+        messageId: 'history-2',
+        sender: 'beegame',
+        content: 'Original answer',
+        timestamp: 1001,
+      },
+    ]);
+
+    loadHistory([
+      {
+        id: 'history-3',
+        messageId: 'history-3',
+        sender: 'beegame',
+        content: 'Short restored slice',
+        timestamp: 1002,
+      },
+    ]);
+
+    const state = useChatStore.getState();
+    expect(state.messages.map(message => message.content)).toEqual([
+      'Original request',
+      'Original answer',
+      'Short restored slice',
+    ]);
+  });
+
   it('should append repeated tool messages when backend ids differ', () => {
     const { addMessage } = useChatStore.getState();
 

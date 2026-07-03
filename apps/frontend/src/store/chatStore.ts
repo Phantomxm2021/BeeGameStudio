@@ -116,12 +116,12 @@ function findMessageIndex(messages: Message[], candidate: Message): number {
   if (candidate.messageId) {
     const index = messages.findIndex((msg) => msg.messageId === candidate.messageId || msg.id === candidate.messageId);
     if (index !== -1) return index;
-    return -1;
+    if (!candidate.clientMessageId && candidate.sender !== 'user') return -1;
   }
   if (candidate.clientMessageId) {
     const index = messages.findIndex((msg) => msg.clientMessageId === candidate.clientMessageId || msg.id === candidate.clientMessageId);
     if (index !== -1) return index;
-    return -1;
+    if (candidate.sender !== 'user') return -1;
   }
   if (candidate.dedupeKey) {
     const index = messages.findIndex((msg) => msg.dedupeKey === candidate.dedupeKey);
@@ -172,7 +172,7 @@ function upsertMessage(messages: Message[], candidate: Message): Message[] {
 }
 
 function reconcileHistory(current: Message[], incoming: Message[]): Message[] {
-  let merged = [...current.filter((msg) => !!msg.clientMessageId && !msg.messageId)];
+  let merged = [...current];
   for (const message of incoming) {
     merged = upsertMessage(merged, message);
   }

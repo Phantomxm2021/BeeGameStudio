@@ -12,8 +12,9 @@ import { SideMenu } from './SideMenu';
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
-import type { PendingUserReviewItem } from '../../services/api';
+import type { BeeGameDeploymentPayload, BuildReportPayload, PendingUserReviewItem } from '../../services/api';
 import { api } from '../../services/api';
+import { buildApiUrl } from '../../services/apiClient';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
@@ -55,11 +56,33 @@ const getModelDisplayName = (config?: ModelConfig): string => {
     return config.models.balanced || config.models.strong || config.models.fast || config.name || '';
 };
 
+const deploymentToBuildReport = (deployment: BeeGameDeploymentPayload): BuildReportPayload => {
+    const isSucceeded = deployment.status === 'succeeded' && Boolean(deployment.url);
+    const failureDetail = deployment.buildLog || deployment.message || 'Deployment failed';
+    return {
+        status: isSucceeded ? 'passed' : 'failed',
+        entrypoint: deployment.entrypoint || '',
+        build_url: isSucceeded ? buildApiUrl(deployment.url) : '',
+        agents: ['beegame-deployment'],
+        checks: [{
+            name: deployment.buildCommand || 'deploy',
+            status: isSucceeded ? 'passed' : 'failed',
+            detail: deployment.message || deployment.buildLog || '',
+            path: deployment.outputDir,
+        }],
+        summary: deployment.message || '',
+        failure_reason: isSucceeded ? undefined : failureDetail,
+        created_at: deployment.deployedAt || deployment.updatedAt,
+    };
+};
+
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
     const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
     const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
+    const [deploymentBuildReport, setDeploymentBuildReport] = useState<BuildReportPayload | null>(null);
+    const [isDeployingProject, setDeployingProject] = useState(false);
     const hasSentInitialPrompt = useRef(false);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,6 +109,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         isDark,
         toggleTheme,
         hasPermission,
+        currentUser,
     } = useSystemStore();
     const { projects, pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
     const { messages } = useChatStore();
@@ -213,6 +237,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const canSendMessage = hasPermission('agent.send_message');
     const canApproveTool = hasPermission('agent.approve_tool');
     const canManagePreview = hasPermission('preview.manage');
+    const canManageDeployment = hasPermission('deployment.manage');
     const canUploadAssets = hasPermission('assets.upload');
     const canIntegrateAssets = hasPermission('assets.integrate');
     const canExportProject = hasPermission('project.export');
@@ -291,6 +316,22 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             await refreshPreviewStatus();
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const handleDeployProject = async () => {
+        if (!canManageDeployment || isDeployingProject) return;
+        setDeployingProject(true);
+        try {
+            const deployment = await api.deployProject(projectId);
+            setDeploymentBuildReport(deploymentToBuildReport(deployment));
+            if (deployment.status !== 'succeeded' || !deployment.url) {
+                throw new Error(deployment.message || 'Deployment failed');
+            }
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setDeployingProject(false);
         }
     };
 
@@ -535,10 +576,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 credits={creditSummary}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
-                buildReport={projectStatus?.build_report || null}
+                buildReport={deploymentBuildReport || projectStatus?.build_report || null}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
                 onStopPreview={canManagePreview ? handleStopPreview : undefined}
+                onDeployProject={canManageDeployment ? handleDeployProject : undefined}
+                isDeploying={isDeployingProject}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onBack={onBack}
                 onSetLang={onSetLang}
@@ -568,6 +611,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 canIntegrateAssets={canIntegrateAssets}
                 canExportProject={canExportProject}
                 variant={isBeeGameMode ? 'beegame' : 'legacy'}
+                currentUserDisplayName={currentUser?.displayName}
+                currentUserEmail={currentUser?.email}
+                currentUserAvatarUrl={currentUser?.avatarUrl}
             />
             {creditQuote ? (
                 <CreditQuoteDialog
@@ -601,57 +647,51 @@ function CreditQuoteDialog({
                 aria-modal="true"
                 aria-labelledby="beegame-credit-quote-title"
                 data-surface="frosted-glass"
-                className="glass-panel w-full max-w-2xl p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-8"
+                className="input-surface glass-panel w-full max-w-[520px] rounded-[30px] p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:p-7"
             >
                 <h2 id="beegame-credit-quote-title" className="type-title-2 text-white">
                     {t('title')}
                 </h2>
-                <p className="type-body mt-5 text-zinc-300">
-                    {t('description', { reservedCredits: quote.reservedCredits })}
-                </p>
-                <div className="mt-7 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-6">
-                    <div className="type-caption-1 text-zinc-500">
-                        {quote.displayName}
-                    </div>
-                    {quote.description ? (
-                        <div className="type-callout mt-2 text-zinc-400">
-                            {quote.description}
+                <div className="credit-ticket-shell mt-6">
+                    <div className="credit-ticket">
+                        <div className="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-stretch px-10 py-5">
+                            <div className="min-w-0 pr-5">
+                                <div className="type-caption-1 text-zinc-500">
+                                    {t('balance')}
+                                </div>
+                                <div className="type-title-3 mt-2 text-emerald-200">
+                                    {quote.balanceCredits} credits
+                                </div>
+                            </div>
+                            <div className="credit-ticket-divider" aria-hidden="true" />
+                            <div className="min-w-0 pl-5 text-right">
+                                <div className="type-caption-1 text-zinc-500">
+                                    {t('reserved')}
+                                </div>
+                                <div className="type-title-3 mt-2 text-white">
+                                    {quote.reservedCredits} credits
+                                </div>
+                            </div>
                         </div>
-                    ) : null}
-                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                        <div className="min-w-0">
-                            <div className="type-caption-1 text-zinc-500">
-                                {t('balance')}
-                            </div>
-                            <div className="type-title-3 mt-3 text-emerald-200">
-                                {quote.balanceCredits} credits
-                            </div>
-                        </div>
-                        <div className="min-w-0 sm:text-right">
-                            <div className="type-caption-1 text-zinc-500">
-                                {t('reserved')}
-                            </div>
-                            <div className="type-title-3 mt-3 text-white">
-                                {quote.reservedCredits} credits
-                            </div>
+                        <div className="border-t border-white/10 px-7 py-3">
+                            <p className="type-caption-2 truncate text-zinc-400">
+                                {t('settlementNote')}
+                            </p>
                         </div>
                     </div>
                 </div>
-                <p className="type-callout mt-4 rounded-[22px] border border-amber-300/15 bg-amber-300/[0.05] px-5 py-4 text-amber-100">
-                    {t('settlementNote')}
-                </p>
-                <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="secondary-pill px-6 py-3 text-zinc-200 hover:text-white"
+                        className="secondary-pill type-button px-6 py-3 text-zinc-200 hover:text-white"
                     >
                         {t('cancel')}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className="primary-pill px-7 py-3"
+                        className="primary-pill type-button px-7 py-3"
                     >
                         {t('confirm')}
                     </button>

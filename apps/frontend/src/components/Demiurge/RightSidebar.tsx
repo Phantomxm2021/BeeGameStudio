@@ -48,6 +48,9 @@ interface RightSidebarProps {
     canIntegrateAssets?: boolean;
     canExportProject?: boolean;
     variant?: 'legacy' | 'beegame';
+    currentUserDisplayName?: string;
+    currentUserEmail?: string;
+    currentUserAvatarUrl?: string;
 }
 
 export function RightSidebar({
@@ -70,6 +73,9 @@ export function RightSidebar({
     canIntegrateAssets = true,
     canExportProject = true,
     variant = 'legacy',
+    currentUserDisplayName,
+    currentUserEmail,
+    currentUserAvatarUrl,
 }: RightSidebarProps) {
 
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
@@ -287,7 +293,6 @@ export function RightSidebar({
                     setAssetManifest(await api.getProjectAssets(projectId));
                 } catch (err) {
                     console.error('Failed to load project assets:', err);
-                    setAssetManifest({ version: 1, slots: [] });
                 } finally {
                     setIsAssetsLoading(false);
                 }
@@ -347,7 +352,7 @@ export function RightSidebar({
                                         <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.slots.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
-                                        <div className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
+                                        <div className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
                                     )}
                                 </button>
                             ))}
@@ -393,6 +398,9 @@ export function RightSidebar({
                                 canSendMessage={canSendMessage}
                                 variant={variant}
                                 lang={lang}
+                                currentUserDisplayName={currentUserDisplayName}
+                                currentUserEmail={currentUserEmail}
+                                currentUserAvatarUrl={currentUserAvatarUrl}
                             />
                         ) : activeTab === 'artifacts' ? (
                             <ArtifactsPanel 

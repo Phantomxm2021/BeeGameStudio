@@ -45,6 +45,9 @@ interface ChatPanelProps {
     canSendMessage?: boolean;
     variant?: 'legacy' | 'beegame';
     lang?: Language;
+    currentUserDisplayName?: string;
+    currentUserEmail?: string;
+    currentUserAvatarUrl?: string;
 }
 
 const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
@@ -78,6 +81,9 @@ export const ChatPanel = memo(({
     canSendMessage = true,
     variant = 'legacy',
     lang = 'en',
+    currentUserDisplayName,
+    currentUserEmail,
+    currentUserAvatarUrl,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
     const reviewActionLabel = (
@@ -135,13 +141,13 @@ export const ChatPanel = memo(({
         ? 'flex-1 overflow-y-auto px-4 pt-4 relative pb-4'
         : 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
     const composerShellClassName = isBeeGameVariant
-        ? 'border-t border-zinc-800 bg-zinc-950/70 px-4 pb-4 pt-4'
+        ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
     const textareaClassName = isBeeGameVariant
-        ? 'type-input w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 pr-14 outline-none focus:border-orange-500/70 transition-all text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto'
+        ? 'type-input glass-control w-full rounded-3xl px-4 py-3 pr-14 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto backdrop-blur-2xl'
         : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
     const sendButtonClassName = isBeeGameVariant
-        ? 'absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-700 text-zinc-100 shadow-lg transition-transform group-active:scale-95 disabled:bg-zinc-800 disabled:text-zinc-600'
+        ? 'primary-pill absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
         : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
 
     return (
@@ -162,6 +168,9 @@ export const ChatPanel = memo(({
                                 projectStatus={projectStatus}
                                 onPreviewArtifact={onPreviewArtifact}
                                 lang={lang}
+                                currentUserDisplayName={currentUserDisplayName}
+                                currentUserEmail={currentUserEmail}
+                                currentUserAvatarUrl={currentUserAvatarUrl}
                             />
                         </>
                     ) : messages.length === 0 ? (
@@ -189,14 +198,14 @@ export const ChatPanel = memo(({
                         if (!isManifestReview) return null;
 
                         return (
-                            <div
-                                key={review.gate_id}
-	                                className="w-full space-y-4 rounded-3xl border border-amber-300/25 bg-amber-950/15 p-6"
+	                            <div
+	                                key={review.gate_id}
+	                                className="glass-control w-full space-y-4 rounded-3xl border border-white/15 bg-black/25 p-6 backdrop-blur-2xl"
                             >
                                 <div className="flex items-start space-x-3">
-	                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
+	                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-zinc-300" />
                                     <div className="flex-1 min-w-0">
-	                                        <div className="type-caption-1 mb-1 text-amber-200">{text.actionRequired}</div>
+	                                        <div className="type-caption-1 mb-1 text-zinc-100">{text.actionRequired}</div>
 	                                        <div className="type-callout mb-2 text-zinc-200 opacity-80">
                                             {text.resourceManifestDescription}
                                         </div>
@@ -244,7 +253,7 @@ export const ChatPanel = memo(({
 
             <div className={composerShellClassName}>
                 {shouldShowWaitingBanner && (
-                    <div className="type-footnote mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+                    <div className="glass-control type-footnote mb-3 rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-zinc-300 backdrop-blur-2xl">
                         {waitingApproval.message}
                     </div>
                 )}
@@ -280,7 +289,8 @@ export const ChatPanel = memo(({
                             }
                             approvalState={approvalState}
                             layout="bottom-bar"
-                            className={isBeeGameVariant ? 'rounded-xl border-zinc-800 bg-zinc-900/80 px-3 py-3 text-zinc-100' : undefined}
+                            variant={isBeeGameVariant ? 'beegame' : 'legacy'}
+                            className={isBeeGameVariant ? 'glass-control rounded-3xl px-3 py-3 text-zinc-100 backdrop-blur-2xl' : undefined}
                             actions={[
                                 ...(activeComposerReview.type === 'INTENT_CLARIFICATION'
                                     ? [{
