@@ -339,7 +339,9 @@ export class BeeGameSessionManager {
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
-      pendingCreditOperation: null,
+      pendingCreditOperation: recoverPendingCreditOperation(
+        recoveredTranscript?.events ?? [],
+      ),
     }
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
@@ -1149,6 +1151,7 @@ export class BeeGameSessionManager {
         type: 'credit.settle_pending',
         reservationId: reservation.id,
         error: toErrorMessage(err),
+        pendingCreditOperation: record.pendingCreditOperation,
         weightedTokens: tokenDelta,
       })
       return true
@@ -1195,6 +1198,7 @@ export class BeeGameSessionManager {
         type: 'credit.refund_pending',
         reservationId: reservation.id,
         error: toErrorMessage(err),
+        pendingCreditOperation: record.pendingCreditOperation,
       })
     }
   }
@@ -1694,6 +1698,104 @@ function recoverSessionLanguage(
     if (isBeeGameSessionLanguage(language)) return { language }
   }
   return {}
+}
+
+function recoverPendingCreditOperation(
+  events: BeeGameEvent[],
+): PendingCreditOperation | null {
+  const completedReservationIds = new Set<string>()
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index]?.payload
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue
+    const type = payload.type
+    const reservationId = typeof payload.reservationId === 'string'
+      ? payload.reservationId
+      : ''
+    if (
+      (type === 'credit.settled' || type === 'credit.refunded') &&
+      reservationId
+    ) {
+      completedReservationIds.add(reservationId)
+      continue
+    }
+    if (type !== 'credit.settle_pending' && type !== 'credit.refund_pending') {
+      continue
+    }
+    const operation = parsePendingCreditOperation(payload.pendingCreditOperation)
+    if (!operation || completedReservationIds.has(operation.reservation.id)) {
+      continue
+    }
+    return operation
+  }
+  return null
+}
+
+function parsePendingCreditOperation(
+  value: unknown,
+): PendingCreditOperation | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const reservation = parseCreditReservation(record.reservation)
+  if (!reservation) return null
+  if (record.kind === 'refund') {
+    return { kind: 'refund', reservation }
+  }
+  if (record.kind !== 'settle') return null
+  const policy = parseCreditTaskPolicy(record.policy)
+  const weightedTokens = normalizeNonNegativeInteger(record.weightedTokens)
+  const settleToTotalTokens = normalizeNonNegativeInteger(record.settleToTotalTokens)
+  if (!policy || weightedTokens <= 0 || settleToTotalTokens <= 0) return null
+  return {
+    kind: 'settle',
+    reservation,
+    policy,
+    weightedTokens,
+    settleToTotalTokens,
+  }
+}
+
+function parseCreditReservation(value: unknown): CreditReservation | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (typeof record.id !== 'string' || !record.id) return null
+  const reservedCredits = normalizeNonNegativeInteger(record.reservedCredits)
+  const balance = record.balance
+  if (!balance || typeof balance !== 'object' || Array.isArray(balance)) return null
+  return {
+    id: record.id,
+    reservedCredits,
+    balance: balance as CreditReservation['balance'],
+  }
+}
+
+function parseCreditTaskPolicy(value: unknown): BeeGameCreditTaskPolicy | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const taskType = record.taskType
+  if (taskType !== 'idea_intake' &&
+    taskType !== 'full_build' &&
+    taskType !== 'edit_turn' &&
+    taskType !== 'continue_turn' &&
+    taskType !== 'asset_integration' &&
+    taskType !== 'large_build' &&
+    taskType !== 'agent_turn') {
+    return null
+  }
+  return {
+    taskType,
+    reservedCredits: normalizeNonNegativeInteger(record.reservedCredits),
+    displayName: typeof record.displayName === 'string'
+      ? record.displayName
+      : taskType,
+    description: typeof record.description === 'string'
+      ? record.description
+      : '',
+  }
+}
+
+function normalizeNonNegativeInteger(value: unknown): number {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
 }
 
 function isBeeGameSessionLanguage(
