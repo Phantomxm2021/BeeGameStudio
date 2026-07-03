@@ -140,4 +140,24 @@ describe('systemStore token usage', () => {
     expect(useSystemStore.getState().hasPermission('project.delete')).toBe(false);
   });
 
+  it('treats current-user 401 as a signed-out state without logging an error', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    useSystemStore.setState({
+      currentUser: {
+        id: 'old-user',
+        role: 'owner',
+        permissions: ['project.delete'],
+      },
+    });
+    const unauthorized = new Error('authentication required') as Error & { status?: number };
+    unauthorized.status = 401;
+    vi.mocked(api.getCurrentUser).mockRejectedValue(unauthorized);
+
+    await useSystemStore.getState().loadCurrentUser();
+
+    expect(useSystemStore.getState().currentUser).toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
 });

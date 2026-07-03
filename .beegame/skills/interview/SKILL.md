@@ -1,6 +1,6 @@
 ---
 name: interview
-description: "Interview me about my requirements"
+description: Use when the user asks to be interviewed about requirements, clarify a brief through questions, or refine ambiguous technical, UX, product, or game-design constraints.
 ---
 
 Analyze these requirements "$ARGUMENTS" and interview me in detail using the AskUserQuestionTool about literally anything: technical implementation, UI & UX, concerns, tradeoffs, etc. but make sure the questions are not obvious.

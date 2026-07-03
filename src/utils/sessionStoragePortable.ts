@@ -316,6 +316,17 @@ export function sanitizePath(name: string): string {
   return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${hash}`
 }
 
+export function getProjectStorageKey(projectDir: string): string {
+  if (process.env.BEEGAME_CONFIG_DIR) {
+    const hash =
+      typeof Bun !== 'undefined'
+        ? Bun.hash(projectDir).toString(36)
+        : simpleHash(projectDir)
+    return `project-${hash}`
+  }
+  return sanitizePath(projectDir)
+}
+
 // ---------------------------------------------------------------------------
 // Project directory discovery (shared by listSessions & getSessionMessages)
 // ---------------------------------------------------------------------------
@@ -325,7 +336,7 @@ export function getProjectsDir(): string {
 }
 
 export function getProjectDir(projectDir: string): string {
-  return join(getProjectsDir(), sanitizePath(projectDir))
+  return join(getProjectsDir(), getProjectStorageKey(projectDir))
 }
 
 /**
@@ -359,6 +370,10 @@ export async function findProjectDir(
   } catch {
     // Exact match failed — for short paths this means no sessions exist.
     // For long paths, try prefix matching to handle hash mismatches.
+    if (process.env.BEEGAME_CONFIG_DIR) {
+      return undefined
+    }
+
     const sanitized = sanitizePath(projectPath)
     if (sanitized.length <= MAX_SANITIZED_LENGTH) {
       return undefined

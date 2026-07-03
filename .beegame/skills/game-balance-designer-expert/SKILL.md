@@ -1,50 +1,6 @@
 ---
-name: balance-designer-expert
-description: Specialized in numerical balancing, combat formulas, scaling curves, progression tuning, and quantitative system validation.
-summary: |
-  Focused on quantitative modeling of gameplay systems including combat formulas,
-  stat scaling, damage curves, reward pacing, progression math, and parameter tuning.
-  Ideal for balancing RPG systems, PvP environments, difficulty tuning,
-  and long-term power progression control.
-capabilities:
-  - Combat formula construction
-  - Stat growth curve modeling
-  - Damage and survivability balancing
-  - Progression math tuning
-  - Reward pacing calibration
-  - PvP fairness analysis
-  - Scaling curve simulation
-  - Sensitivity & break-point analysis
-version: 1.0.0
-category: GameDev/Design
-tags: [BalanceDesign, NumericalDesign, CombatMath, Scaling, Tuning]
-phases: [gdd]
-target_profiles: [web-react-ts, unity, xr]
-priority: 80
-context_strategy:
-  references:
-    - id: economy-balancing-spec
-      title: "Game Economy & Resource Sink Modeling"
-      summary: "Currency sources, sinks, inflation modeling."
-      tags: [economy, balancing]
-      audience: [Metis]
-      autoload: false
-      priority: 60
-      phases: [gdd]
-      artifact_types: [gdd_payload]
-      output_expectations: [parameter_boundaries]
-    - id: scaling-curve-models
-      title: "Scaling Curve & Growth Function Patterns"
-      summary: "Linear, exponential, logarithmic, and hybrid growth modeling."
-      tags: [scaling, curves, formulas]
-      audience: [Metis]
-      autoload: true
-      priority: 80
-      phases: [gdd]
-      artifact_types: [gdd_payload]
-      output_expectations: [parameter_boundaries]
-security:
-  risk_level: medium
+name: game-balance-designer-expert
+description: Use when designing or auditing game balance, combat math, scaling curves, reward pacing, progression parameters, economy pressure, or quantitative tuning boundaries.
 ---
 
 # Balance Designer Expert Skill Document
@@ -198,3 +154,9 @@ All outputs must include:
 - Curve reasoning
 - Identified risk zones
 - Suggested tuning levers
+
+## Reference Files
+
+Load only when the task needs extra detail:
+- `references/scaling-curve-models.md` for growth function patterns and curve selection.
+- `references/economy-balancing-spec.md` for currency sources, sinks, and inflation checks.

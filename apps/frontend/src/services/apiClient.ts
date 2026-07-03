@@ -125,7 +125,11 @@ apiClient.interceptors.response.use(
         return apiClient.request(error.config);
       }
     }
-    console.error('API Error:', error);
+    const hideToast = getHeaderValue(error.config?.headers, 'Hide-Error-Toast') === 'true';
+    const hideErrorLog = getHeaderValue(error.config?.headers, 'Hide-Error-Log') === 'true';
+    if (!hideErrorLog) {
+      console.error('API Error:', error);
+    }
 
     let errorMessage = '请求失败，请稍后重试';
     if (error.response) {
@@ -160,7 +164,6 @@ apiClient.interceptors.response.use(
       errorMessage = error.message || '请求配置错误';
     }
 
-    const hideToast = error.config?.headers?.['Hide-Error-Toast'] === 'true';
     if (showToastError && !hideToast) {
       showToastError(errorMessage);
     }
@@ -190,6 +193,23 @@ const isRetriedRequest = (config: InternalAxiosRequestConfig): boolean => (
 const markRetriedRequest = (config: InternalAxiosRequestConfig): void => {
   config.headers = config.headers ?? {};
   config.headers[BEEGAME_AUTH_RETRY_HEADER] = '1';
+};
+
+const getHeaderValue = (
+  headers: InternalAxiosRequestConfig['headers'] | undefined,
+  name: string,
+): string => {
+  const directValue = headers?.[name];
+  if (directValue !== undefined) return String(directValue);
+  const lowerName = name.toLowerCase();
+  const lowerValue = headers?.[lowerName];
+  if (lowerValue !== undefined) return String(lowerValue);
+  const get = (headers as { get?: (headerName: string) => unknown } | undefined)?.get;
+  if (typeof get === 'function') {
+    const value = get.call(headers, name);
+    return value === undefined || value === null ? '' : String(value);
+  }
+  return '';
 };
 
 export default apiClient;

@@ -180,7 +180,7 @@ describe('MessageItem semantic rendering', () => {
             />
         );
 
-        expect(screen.getByText('Revision Request')).not.toBeNull();
+        expect(screen.getByText('Revision request')).not.toBeNull();
         expect(screen.getByText('revise')).not.toBeNull();
         expect(screen.getByText('请先修订后继续。')).not.toBeNull();
     });
@@ -230,7 +230,7 @@ describe('MessageItem semantic rendering', () => {
             />
         );
 
-        await userEvent.setup().click(screen.getByRole('button', { name: /continue fixing/i }));
+        await userEvent.setup().click(screen.getByRole('button', { name: '继续修复' }));
 
         expect(onContinueFixing).toHaveBeenCalledWith(
             '继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。',

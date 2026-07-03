@@ -743,8 +743,8 @@ describe('agent workflow server routes', () => {
       '/api/projects/project_developer_allowed',
       { method: 'DELETE' },
     )
-    expect(developerDeleteRes.status).toBe(403)
-    expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
+    expect(developerDeleteRes.status).toBe(200)
+    expect(await developerDeleteRes.json()).toEqual({ deleted: true })
 
     const viewerDirectoriesRes = await viewerApp.request(
       '/api/filesystem/directories',

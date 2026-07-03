@@ -62,7 +62,7 @@ export async function readBeeGameAssetManifest(
     return { version: 1, slots: [] }
   }
   const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  return normalizeAssetManifest(parsed)
+  return normalizeBeeGameAssetManifest(parsed)
 }
 
 export async function uploadBeeGameAsset(
@@ -102,25 +102,25 @@ export async function uploadBeeGameAsset(
   }
 }
 
-function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
+export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid asset manifest')
   }
   const record = value as Record<string, unknown>
   const slots = Array.isArray(record.slots)
-    ? record.slots.map(normalizeAssetSlot).filter(Boolean) as BeeGameAssetSlot[]
-    : normalizeNestedAssetSlots(record.assets)
+    ? record.slots.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
+    : normalizeNestedAssetSlots(record.assets ?? record.resources)
   return {
-    version: Number(record.version || 1),
-    project_target: normalizeProjectTarget(record.project_target),
+    version: normalizeManifestVersion(record.version),
+    project_target: normalizeProjectTarget(record.project_target ?? record),
     slots,
   }
 }
 
-function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
+function normalizeAssetSlot(value: unknown, fallbackId = ''): BeeGameAssetSlot | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
-  const id = normalizeSlotId(String(record.id || ''))
+  const id = normalizeSlotId(String(record.id || fallbackId))
   if (!id) return undefined
   const target = record.target && typeof record.target === 'object' && !Array.isArray(record.target)
     ? record.target as Record<string, unknown>
@@ -130,11 +130,7 @@ function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
     !Array.isArray(record.integration_provider)
     ? record.integration_provider as Record<string, unknown>
     : {}
-  const specs = record.recommended_specs &&
-    typeof record.recommended_specs === 'object' &&
-    !Array.isArray(record.recommended_specs)
-    ? record.recommended_specs as Record<string, unknown>
-    : undefined
+  const specs = objectValue(record.recommended_specs) || objectValue(record.specs)
   const legacySpecs = collectLegacySpecs(record)
   const formats = stringArray(record.accepted_formats)
   const legacyFormats = normalizeLegacyFormats(record.format)
@@ -144,7 +140,9 @@ function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
     type: trimString(record.type),
     purpose: trimString(record.purpose) || trimString(record.description),
     required: Boolean(record.required),
-    placeholder: record.placeholder !== false && record.status !== 'implemented',
+    placeholder: record.placeholder !== false &&
+      record.status !== 'implemented' &&
+      record.placeholder_status !== 'implemented',
     accepted_formats: formats.length ? formats : legacyFormats,
     recommended_specs: specs || legacySpecs,
     target: {
@@ -156,7 +154,7 @@ function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
       server: trimString(provider.server),
       capabilities: stringArray(provider.capabilities),
     },
-    status: normalizeSlotStatus(record.status),
+    status: normalizeSlotStatus(record.status ?? record.placeholder_status),
     uploaded_files: stringArray(record.uploaded_files),
     uploaded_urls: stringArray(record.uploaded_urls),
     updated_at: trimString(record.updated_at),
@@ -165,22 +163,32 @@ function normalizeAssetSlot(value: unknown): BeeGameAssetSlot | undefined {
 
 function normalizeNestedAssetSlots(value: unknown): BeeGameAssetSlot[] {
   const slots: BeeGameAssetSlot[] = []
-  const visit = (item: unknown) => {
+  const visit = (item: unknown, keyHint = '') => {
     if (Array.isArray(item)) {
       for (const child of item) visit(child)
       return
     }
     if (!item || typeof item !== 'object') return
     const record = item as Record<string, unknown>
-    if (typeof record.id === 'string' && record.id.trim()) {
-      const slot = normalizeAssetSlot(record)
+    if ((typeof record.id === 'string' && record.id.trim()) || isAssetLikeRecord(record)) {
+      const slot = normalizeAssetSlot(record, keyHint)
       if (slot) slots.push(slot)
       return
     }
-    for (const child of Object.values(record)) visit(child)
+    for (const [key, child] of Object.entries(record)) visit(child, key)
   }
   visit(value)
   return slots
+}
+
+function isAssetLikeRecord(record: Record<string, unknown>): boolean {
+  return typeof record.path === 'string' ||
+    typeof record.type === 'string' ||
+    typeof record.purpose === 'string' ||
+    typeof record.description === 'string' ||
+    typeof record.placeholder_status === 'string' ||
+    record.specs !== undefined ||
+    record.format !== undefined
 }
 
 function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | undefined {
@@ -196,6 +204,13 @@ function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | und
 
 function normalizeIntegrationMode(value: unknown): BeeGameAssetIntegrationMode | undefined {
   return value === 'filesystem' || value === 'mcp' || value === 'manual' ? value : undefined
+}
+
+function normalizeManifestVersion(value: unknown): number {
+  const parsed = typeof value === 'string'
+    ? Number.parseInt(value, 10)
+    : Number(value || 1)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 }
 
 function normalizeSlotStatus(value: unknown): BeeGameAssetSlot['status'] {
@@ -219,6 +234,12 @@ function collectLegacySpecs(record: Record<string, unknown>): Record<string, unk
     if (record[key] !== undefined) specs[key] = record[key]
   }
   return Object.keys(specs).length ? specs : undefined
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
 }
 
 function resolveUploadTarget(root: string, slot: BeeGameAssetSlot, filename: string): string {

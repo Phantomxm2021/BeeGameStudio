@@ -1,17 +1,6 @@
 ---
 name: unity-csharp-fundamentals
-description: Unity C# fundamental patterns including TryGetComponent, SerializeField, RequireComponent, and safe coding practices. Use as a reference for core C# questions or when specifically requested. For specific architectures (UI, XRMOD), prefer their dedicated skills.
-version: 1.0.0
-category: Programming/C#
-tags: [Scripting, Patterns, Safety, Lifecycle]
-phases: [implementation]
-target_profiles: [unity]
-priority: 85
-context_strategy:
-  references: [component-access, attributes-patterns, language-limitations]
-  audience: [tecton, implementation]
-security:
-  risk_level: low
+description: Use when working in an explicitly Unity C# context involving MonoBehaviour patterns, component access, serialization attributes, lifecycle methods, or common C# scripting pitfalls.
 ---
 
 # Unity C# Fundamentals - Essential Coding Patterns

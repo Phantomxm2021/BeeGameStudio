@@ -1,5 +1,4 @@
 import { useState, useMemo, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { User, MessageSquare, ChevronDown, ChevronUp, AlertCircle, Bot, CheckCircle2, FileText, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,21 +9,9 @@ import { artifactProcessor } from '../../../utils/artifactProcessor';
 import { ArtifactCard } from './ArtifactCard';
 import { getSystemStatusLabel, normalizeCanonicalMessageType } from '../../../utils/messageSemantics';
 import type { ChatDisplayMessage } from '../../../viewModels/displayModels';
+import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 
 const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
-
-const getContinueFromLastFailedCheckPrompt = (lang: Language = 'en'): string => {
-    if (lang === 'zh' || lang === 'zh-TW') {
-        return '继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。';
-    }
-    if (lang === 'ja') {
-        return '前回失敗したチェックから続けてください。報告された問題を修正し、関連するチェックを再実行し、プロジェクトが動作するまで続けてください。';
-    }
-    if (lang === 'ko') {
-        return '마지막으로 실패한 검사 지점부터 계속하세요. 보고된 문제를 수정하고 관련 검사를 다시 실행한 뒤 프로젝트가 실행될 때까지 계속 진행하세요.';
-    }
-    return 'Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.';
-};
 
 const normalizeEscapedNewlines = (input: string): string => {
     if (!input) return '';
@@ -219,10 +206,11 @@ const structuredJsonToMarkdown = (value: unknown): string | null => {
 
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
-export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', variant = 'legacy' }: { content: string, isUser: boolean, messageId?: string; variant?: 'legacy' | 'beegame' }) => {
+export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', variant = 'legacy', lang = 'en' }: { content: string, isUser: boolean, messageId?: string; variant?: 'legacy' | 'beegame'; lang?: Language }) => {
     const isBeeGameVariant = variant === 'beegame';
     const textColor = isBeeGameVariant ? 'text-zinc-200' : isUser ? 'text-white dark:text-zinc-900' : 'text-zinc-800 dark:text-zinc-100';
     const [isThoughtExpanded, setIsThoughtExpanded] = useState(false);
+    const text = useBeeGameText(lang);
 
     const { thoughtContent, formattedMainContent, renderAsCsv } = useMemo(() => {
         const normalized = normalizeEscapedNewlines(content);
@@ -254,35 +242,28 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                         >
                             <span className="flex items-center space-x-2">
                                 <MessageSquare className="w-3 h-3" />
-                                <span>Inner Thought</span>
+                                <span>{text.innerThought}</span>
                             </span>
                             {isThoughtExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                         </button>
-                        <AnimatePresence>
-                            {isThoughtExpanded && (
-                                <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    className="type-footnote px-4 pb-4 italic opacity-70 border-t border-zinc-200 dark:border-zinc-700 mt-2 pt-4"
-                                >
-                                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                                        {thoughtContent}
-                                    </ReactMarkdown>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                        {isThoughtExpanded && (
+                            <div className="type-footnote px-4 pb-4 italic opacity-70 border-t border-zinc-200 dark:border-zinc-700 mt-2 pt-4">
+                                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                                    {thoughtContent}
+                                </ReactMarkdown>
+                            </div>
+                        )}
                     </div>
                 )}
 
                 <div className={`mt-1`}>
                     {renderAsCsv && csvData ? (
                         <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-	                            <table className="type-callout w-full border-collapse">
+	                            <table className="type-table w-full border-collapse">
                                 <thead className="bg-zinc-100/50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800">
                                     <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors">
                                         {csvData.header.map((cell, idx) => (
-	                                            <th key={`${cell}-${idx}`} className="type-caption-1 px-4 py-3 text-left text-zinc-500 dark:text-zinc-400">
+	                                            <th key={`${cell}-${idx}`} className="type-table-head px-4 py-3 text-left text-zinc-500 dark:text-zinc-400">
                                                 {cell}
                                             </th>
                                         ))}
@@ -294,7 +275,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                             {row.map((cell, cIdx) => {
                                                 const color = detectColor(cell);
                                                 return (
-	                                                    <td key={`cell-${rIdx}-${cIdx}`} className="type-code-sm px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words">
+	                                                    <td key={`cell-${rIdx}-${cIdx}`} className="type-table-cell px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words">
                                                         {color && <ColorSwatch color={color} />}
                                                         {cell}
                                                     </td>
@@ -309,36 +290,37 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBreaks]}
                             components={{
-                                p: (props) => <p className="mb-2 last:mb-0 leading-relaxed opacity-90 break-words [overflow-wrap:anywhere]" {...props} />,
-                                ul: (props) => <ul className="list-disc ml-4 mb-3 opacity-90" {...props} />,
-                                ol: (props) => <ol className="list-decimal ml-4 mb-3 opacity-90" {...props} />,
-                                li: (props) => <li className="mb-1 break-words [overflow-wrap:anywhere]" {...props} />,
-                                h1: (props) => <h1 className="type-title-3 border-b border-zinc-200 dark:border-zinc-700 pb-1 mb-2" {...props} />,
-                                h2: (props) => <h2 className="type-headline mt-3 mb-2" {...props} />,
-                                h3: (props) => <h3 className="type-subheadline mt-2 mb-1" {...props} />,
+                                p: (props) => <p className="type-p mb-3 last:mb-0 opacity-90 break-words [overflow-wrap:anywhere]" {...props} />,
+                                ul: (props) => <ul className="type-list list-disc opacity-90" {...props} />,
+                                ol: (props) => <ol className="type-list list-decimal opacity-90" {...props} />,
+                                li: (props) => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
+                                blockquote: (props) => <blockquote className="type-blockquote my-4" {...props} />,
+                                h1: (props) => <h1 className="type-title-2 border-b border-zinc-200 pb-2 mb-4 dark:border-zinc-700" {...props} />,
+                                h2: (props) => <h2 className="type-title-3 mt-6 mb-3" {...props} />,
+                                h3: (props) => <h3 className="type-headline mt-4 mb-2" {...props} />,
 	                                a: (props) => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-4 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
 	                                strong: (props) => <strong className="opacity-100" {...props} />,
                                 table: (props) => (
                                     <div className="my-6 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-	                                        <table className="type-callout w-full border-collapse" {...props} />
+	                                        <table className="type-table w-full border-collapse" {...props} />
                                     </div>
                                 ),
                                 thead: (props) => <thead className="bg-zinc-100/50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800" {...props} />,
                                 tbody: (props) => <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800" {...props} />,
                                 tr: (props) => <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors" {...props} />,
-	                                th: (props) => <th className="type-caption-1 px-4 py-3 text-left text-zinc-500 dark:text-zinc-400" {...props} />,
+	                                th: (props) => <th className="type-table-head px-4 py-3 text-left text-zinc-500 dark:text-zinc-400" {...props} />,
                                 td: ({ children, ...props }) => {
                                     const cellContent = Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : String(children);
                                     const color = detectColor(cellContent);
                                     return (
-	                                        <td className="type-code-sm px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words" {...props}>
+	                                        <td className="type-table-cell px-4 py-3 border-zinc-200 dark:border-zinc-800 whitespace-pre-wrap break-words" {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </td>
                                     );
                                 },
                                 pre: (props) => (
-	                                    <pre className={`type-code ${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} text-zinc-100 rounded-lg p-4 overflow-x-auto my-4 border`}>
+	                                    <pre className={`type-code ${isBeeGameVariant ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-800 border-zinc-700/50'} my-4 overflow-x-auto rounded-lg border p-4 text-zinc-100`}>
                                         {props.children}
                                     </pre>
                                 ),
@@ -350,7 +332,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                     if (isInline) {
                                       const color = typeof children === 'string' ? detectColor(children) : null;
                                       return (
-	                                        <code className={`type-code-sm ${isBeeGameVariant ? 'bg-zinc-950 text-zinc-300' : 'bg-zinc-200 dark:bg-zinc-700'} rounded px-1.5 py-0.5 break-words`} {...props}>
+	                                        <code className={`type-inline-code ${isBeeGameVariant ? 'bg-zinc-950 text-zinc-300' : 'bg-zinc-200 dark:bg-zinc-700'} break-words`} {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </code>
@@ -436,18 +418,15 @@ const ToolMessageCard = memo(({ message, variant = 'legacy' }: { message: ChatDi
             : 'text-emerald-300';
 
     return (
-        <motion.div
-            key={message.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
+        <div
             data-testid={isBeeGameVariant ? 'beegame-tool-card' : undefined}
             className={isBeeGameVariant
-                ? 'flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-3 text-zinc-200 shadow-sm'
+                ? 'glass-control flex items-start gap-3 rounded-2xl px-3 py-3 text-zinc-200 shadow-sm backdrop-blur-2xl'
                 : 'flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200'
             }
         >
             <div className={isBeeGameVariant
-                ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-950 text-cyan-300'
+                ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-zinc-200'
                 : 'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-zinc-700 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
             }>
                 <Icon className="h-4 w-4" />
@@ -473,7 +452,7 @@ const ToolMessageCard = memo(({ message, variant = 'legacy' }: { message: ChatDi
                     </div>
                 ) : null}
             </div>
-        </motion.div>
+        </div>
     );
 });
 ToolMessageCard.displayName = 'ToolMessageCard';
@@ -482,12 +461,7 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
     const [isExpanded, setIsExpanded] = useState(false);
 
     return (
-        <motion.div
-            key={messageId}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full"
-        >
+        <div className="w-full">
             <button
                 type="button"
                 onClick={() => setIsExpanded((value) => !value)}
@@ -501,44 +475,37 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
                 </span>
                 <span className="h-px flex-1 bg-zinc-200 transition-colors group-hover:bg-zinc-300 dark:bg-zinc-800 dark:group-hover:bg-zinc-700" />
             </button>
-            <AnimatePresence initial={false}>
-                {isExpanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
-                    >
-                        <div className="mx-6 mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-                            <MarkdownRenderer content={content} isUser={false} messageId={messageId} />
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.div>
+            {isExpanded && (
+                <div className="overflow-hidden">
+                    <div className="mx-6 mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+                        <MarkdownRenderer content={content} isUser={false} messageId={messageId} />
+                    </div>
+                </div>
+            )}
+        </div>
     );
 });
 EvidenceDivider.displayName = 'EvidenceDivider';
 
-const DeliveryReviewAlert = memo(({ message, variant = 'legacy' }: { message: ChatDisplayMessage; variant?: 'legacy' | 'beegame' }) => (
-    <motion.div
-        key={message.id}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
+const DeliveryReviewAlert = memo(({ message, variant = 'legacy', lang = 'en' }: { message: ChatDisplayMessage; variant?: 'legacy' | 'beegame'; lang?: Language }) => {
+    const text = useBeeGameText(lang);
+    return (
+    <div
         className={variant === 'beegame'
-            ? 'w-full rounded-xl border border-sky-900/60 bg-sky-950/20 p-3 text-sky-100'
+            ? 'glass-control w-full rounded-2xl p-3 text-zinc-100 backdrop-blur-2xl'
             : 'w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100'
         }
     >
-        <div className="type-caption-1 mb-2 flex items-center gap-2 text-sky-600 dark:text-sky-300">
+        <div className={variant === 'beegame' ? 'type-caption-1 mb-2 flex items-center gap-2 text-zinc-300' : 'type-caption-1 mb-2 flex items-center gap-2 text-sky-600 dark:text-sky-300'}>
             <CheckCircle2 className="h-4 w-4" />
-            Evidence for review
+            {text.evidenceForReview}
         </div>
         <div className="type-callout opacity-85 [overflow-wrap:anywhere]">
-            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} variant={variant} />
+            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} variant={variant} lang={lang} />
         </div>
-    </motion.div>
-));
+    </div>
+    );
+});
 DeliveryReviewAlert.displayName = 'DeliveryReviewAlert';
 
 export const MessageItem = memo(({
@@ -568,32 +535,33 @@ export const MessageItem = memo(({
     const isError = semanticType === 'error';
     const [isHovered, setIsHovered] = useState(false);
     const isBeeGameVariant = variant === 'beegame';
+    const text = useBeeGameText(lang);
 
     if (semanticType === 'tool') return <ToolMessageCard message={m} variant={variant} />;
 
     if (!isUser && m.taskKind === 'context_update') {
-        return <EvidenceDivider label="Context update" content={m.content} messageId={m.id} />;
+        return <EvidenceDivider label={text.contextUpdate} content={m.content} messageId={m.id} />;
     }
 
     if (!isUser && isContextUseMessage(m)) {
-        return <EvidenceDivider label="Use Context" content={m.content} messageId={m.id} />;
+        return <EvidenceDivider label={text.useContext} content={m.content} messageId={m.id} />;
     }
 
     if (!isUser && m.taskKind === 'last_check_failed') {
-        const continueMessage = getContinueFromLastFailedCheckPrompt(lang);
+        const continueMessage = text.continueFromLastFailedCheckPrompt;
         return (
-            <motion.div
-                key={m.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="w-full p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-start space-x-3"
+            <div
+                className={isBeeGameVariant
+                    ? 'glass-control flex w-full items-start space-x-3 rounded-2xl p-4 text-zinc-100 backdrop-blur-2xl'
+                    : 'w-full p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-start space-x-3'
+                }
             >
-                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <AlertCircle className={isBeeGameVariant ? 'mt-0.5 h-5 w-5 flex-shrink-0 text-amber-200' : 'w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5'} />
                 <div className="flex-1 min-w-0">
-                    <div className="type-caption-1 text-amber-600 dark:text-amber-400 mb-1">
-                        Last check failed
+                    <div className={isBeeGameVariant ? 'type-caption-1 mb-1 text-zinc-300' : 'type-caption-1 text-amber-600 dark:text-amber-400 mb-1'}>
+                        {text.lastCheckFailed}
                     </div>
-                    <div className="type-callout text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+                    <div className={isBeeGameVariant ? 'type-callout text-zinc-200 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap' : 'type-callout text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap'}>
                         {m.content}
                     </div>
                     <button
@@ -602,48 +570,44 @@ export const MessageItem = memo(({
                         onClick={() => onContinueFixing?.(continueMessage)}
                         className="primary-pill mt-3 inline-flex items-center justify-center px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        Continue fixing
+                        {text.continueFixing}
                     </button>
                 </div>
-            </motion.div>
+            </div>
         );
     }
 
     if (!isUser && m.taskKind === 'delivery_review') {
-        return <DeliveryReviewAlert message={m} variant={variant} />;
+        return <DeliveryReviewAlert message={m} variant={variant} lang={lang} />;
     }
 
     if (isError) {
         return (
-            <motion.div
-                key={m.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="w-full p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/50 flex items-start space-x-3"
+            <div
+                className={isBeeGameVariant
+                    ? 'glass-control flex w-full items-start space-x-3 rounded-2xl p-4 text-zinc-100 backdrop-blur-2xl'
+                    : 'w-full p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/50 flex items-start space-x-3'
+                }
             >
-                <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                    <div className="type-caption-1 text-rose-500 mb-1">System Error</div>
-                    <div className="type-callout text-rose-900 dark:text-rose-100 opacity-80 break-words [overflow-wrap:anywhere]">{m.content}</div>
+                    <div className={isBeeGameVariant ? 'type-caption-1 mb-1 text-zinc-300' : 'type-caption-1 text-rose-500 mb-1'}>{text.systemError}</div>
+                    <div className={isBeeGameVariant ? 'type-callout text-zinc-200 opacity-85 break-words [overflow-wrap:anywhere]' : 'type-callout text-rose-900 dark:text-rose-100 opacity-80 break-words [overflow-wrap:anywhere]'}>{m.content}</div>
                 </div>
-            </motion.div>
+            </div>
         );
     }
 
     return (
-        <motion.div
-            key={m.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+        <div
             className={isBeeGameVariant ? 'flex items-start gap-3' : `flex items-start space-x-4 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
         >
             <div className="relative">
-                <motion.div
+                <div
                     onMouseEnter={() => !isUser && setIsHovered(true)}
                     onMouseLeave={() => !isUser && setIsHovered(false)}
-                    whileHover={{ scale: 1.1 }}
                     className={isBeeGameVariant
-                        ? `flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition-all ${isUser ? 'border border-zinc-800 bg-zinc-950 text-zinc-300' : 'overflow-hidden border border-orange-400/35 bg-orange-950/40 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]'}`
+                        ? `flex h-8 w-8 items-center justify-center rounded-2xl shadow-sm transition-all hover:scale-[1.03] ${isUser ? 'border border-white/10 bg-white/[0.04] text-zinc-200' : 'overflow-hidden border border-white/10 bg-black/25'}`
                         : `w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg transition-all ${isUser
                             ? 'bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white'
                             : (agent?.color || 'bg-zinc-500') + ' text-white'
@@ -655,35 +619,30 @@ export const MessageItem = memo(({
                     ) : isBeeGameVariant ? (
                         <img
                             src={BEEGAME_AVATAR_SRC}
-                            alt="BeeGame"
-                            className="h-5 w-5 object-contain"
+                            alt={text.assistantName}
+                            className="h-6 w-6 object-contain"
                             draggable={false}
                         />
                     ) : (
                         agent && <agent.icon className="w-6 h-6" />
                     )}
-                </motion.div>
+                </div>
 
-                <AnimatePresence>
-                    {isHovered && agent && (
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0 }}
-                            className={`absolute ${isUser ? 'right-full' : 'left-full'} top-0 w-56 p-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl z-50 shadow-2xl border border-white/10 mx-3 pointer-events-none`}
-                        >
-                            <div className="type-caption-1 opacity-50 mb-1">{agent.role}</div>
-                            <div className="type-footnote mb-2">{agent.name}</div>
-                            <p className="type-footnote opacity-70 italic">{agent.bio}</p>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                {isHovered && agent && (
+                    <div
+                        className={`absolute ${isUser ? 'right-full' : 'left-full'} top-0 z-50 mx-3 w-56 rounded-3xl border border-white/15 bg-black/50 p-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl pointer-events-none`}
+                    >
+                        <div className="type-caption-1 opacity-50 mb-1">{agent.role}</div>
+                        <div className="type-footnote mb-2">{agent.name}</div>
+                        <p className="type-footnote opacity-70 italic">{agent.bio}</p>
+                    </div>
+                )}
             </div>
 
             <div
                 data-testid={isBeeGameVariant ? 'beegame-message-card' : undefined}
                 className={isBeeGameVariant
-                    ? 'min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-zinc-200 shadow-sm break-words [overflow-wrap:anywhere]'
+                    ? 'glass-control min-w-0 flex-1 rounded-3xl px-4 py-3 text-zinc-200 shadow-sm backdrop-blur-2xl break-words [overflow-wrap:anywhere]'
                     : `max-w-[82%] p-5 rounded-[1.8rem] shadow-sm border break-words [overflow-wrap:anywhere] ${isUser
                         ? 'bg-zinc-900 text-white border-transparent dark:bg-zinc-100 dark:text-zinc-900'
                         : `bg-white dark:bg-zinc-800/40 dark:border-zinc-700/50 ${agent?.border || ''}`
@@ -691,7 +650,7 @@ export const MessageItem = memo(({
                 }
             >
                 {m.sender !== 'user' && agent && (
-                    <div className={`type-caption-1 mb-2 flex items-center space-x-2 ${isBeeGameVariant ? 'text-orange-300' : agent.text}`}>
+                    <div className={`type-caption-1 mb-2 flex items-center space-x-2 ${isBeeGameVariant ? 'text-zinc-300' : agent.text}`}>
                         <span>{agent.role}</span>
                         <span className="opacity-30">•</span>
                         <span>{agent.name}</span>
@@ -724,13 +683,13 @@ export const MessageItem = memo(({
                                 <div className="type-caption-1 text-zinc-500 dark:text-zinc-400 mb-1">
                                     {getSystemStatusLabel(m)}
                                 </div>
-                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />
+                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} lang={lang} />
                             </div>
                         );
                     }
                     if (!isUser && (semanticType === 'approval_request' || semanticType === 'revision_request')) {
                         const isApproval = semanticType === 'approval_request';
-                        const title = isApproval ? 'Approval Request' : 'Revision Request';
+                        const title = isApproval ? text.approvalRequest : text.revisionRequest;
                         const accentColor = isApproval ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400';
                         const borderColor = isApproval ? 'border-emerald-500/20' : 'border-amber-500/20';
                         
@@ -746,21 +705,21 @@ export const MessageItem = memo(({
                                         </div>
                                     ) : null}
                                 </div>
-                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />
+                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} lang={lang} />
                             </div>
                         );
                     }
-                    return <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} />;
+                    return <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} lang={lang} />;
                 })()}
 
                 {m.thought && !isUser && (
                     <div className="type-footnote mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-700/50 text-zinc-500 dark:text-zinc-400 italic bg-zinc-50 dark:bg-zinc-900/50 p-3 rounded-xl">
-	                        <span className="mr-2 text-zinc-100">🤔 Thinking:</span>
+	                        <span className="mr-2 text-zinc-100">{text.thinking}:</span>
                         <span>{m.thought}</span>
                     </div>
                 )}
             </div>
-        </motion.div>
+        </div>
     );
 });
 MessageItem.displayName = 'MessageItem';

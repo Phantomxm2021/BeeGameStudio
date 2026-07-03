@@ -1,70 +1,6 @@
 ---
 name: unity-mcp
-description: .Orchestrate Unity Editor via MCP (Model Context Protocol) tools and resources. Use when working with Unity projects through MCP for Unity - creating/modifying GameObjects, editing scripts, managing scenes, running tests, or any Unity Editor automation. Provides best practices, tool schemas, and workflow patterns for effective Unity-MCP integration.
-version: 1.1.0
-category: Tooling/MCP
-tags: [Automation, UnityEditor, Scripts, Assets]
-security:
-  risk_level: high
-  require_confirmation: false # Set to false by default as it's a core tool, but risk is high
-context_strategy:
-  references: 
-  - id: best-practices-summary
-    title: Best Practices Summary
-    description: Summary of best practices for using Unity MCP
-    audience: [implementation]
-  - id: complete-script-modification-workflow
-    title: Complete Script Modification Workflow
-    description: Example workflow for modifying scripts using Unity MCP
-    audience: [implementation]
-  - id: multiple-unity-instances
-    title: Multiple Unity Instances
-    description: Information about handling multiple Unity instances
-    audience: [implementation]
-  - id: custom-tools
-    title: Custom Tools
-    description: Information about custom tools
-    audience: [implementation]
-  - id: before-making-changes 
-    title: Before Making Changes
-    description: Information about before making changes
-    audience: [implementation]
-  - id: after-script-changes
-    title: After Script Changes
-    description: Information about after script changes
-    audience: [implementation]
-  - id: best-practices-summary
-    title: Best Practices Summary
-    description: Summary of best practices for using Unity MCP
-    audience: [implementation]
-  - id: common-patterns
-    title: Common Patterns
-    description: Information about common patterns
-    audience: [implementation]
-  - id: component-workflow
-    title: Component Workflow
-    description: Information about component workflow
-    audience: [implementation]
-  - id: gameobject-targeting
-    title: GameObject Targeting
-    description: Information about GameObject targeting
-    audience: [implementation]
-  - id: scene-management
-    title: Scene Management
-    description: Information about scene management
-    audience: [implementation]
-  - id: error-handling
-    title: Error Handling
-    description: Information about error handling
-    audience: [implementation]
-  - id: resource-vs-tool-usage
-    title: Resource vs Tool Usage
-    description: Information about resource vs tool usage
-    audience: [implementation]
-  - id: script-management-workflow
-    title: Script Management Workflow
-    description: Example workflow for managing scripts using Unity MCP
-    audience: [implementation]
+description: Use when an explicitly Unity project is being controlled through MCP tools for editor automation, GameObject changes, script edits, scenes, tests, screenshots, or Unity Editor state management.
 ---
 
 # Unity MCP Skill
@@ -201,7 +137,7 @@ uri="file:///full/path/to/file.cs"
 | **Editor** | `manage_editor`, `execute_menu_item`, `read_console` | Editor control |
 | **Testing** | `run_tests`, `get_test_job` | Unity Test Framework |
 | **Batch** | `batch_execute` | Parallel/bulk operations |
-| **UI** | `batch_execute` with `manage_gameobject` + `manage_components` | Canvas, Panel, Button, Text, Slider, Toggle, Input Field (see [UI workflows](references/workflows.md#ui-creation-workflows)) |
+| **UI** | `batch_execute` with `manage_gameobject` + `manage_components` | Canvas, Panel, Button, Text, Slider, Toggle, Input Field |
 
 ## Common Workflows
 

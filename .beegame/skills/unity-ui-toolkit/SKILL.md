@@ -1,7 +1,6 @@
 ---
-name: Unity UI Toolkit
-description: Assists with Unity UI Toolkit development - UXML structure, USS styling, C# VisualElement manipulation, data binding, and custom controls. Use when implementing UI Toolkit interfaces.
-allowed-tools: Read, Write, Glob
+name: unity-ui-toolkit
+description: Use when implementing or auditing explicitly Unity UI Toolkit interfaces, UXML, USS, VisualElement code, data binding, custom controls, or editor/runtime UI Toolkit patterns.
 ---
 
 # Unity UI Toolkit
@@ -67,20 +66,17 @@ rootVisualElement.Bind(so);
 - **Unity 2021.2+** for runtime UI Toolkit
 - **Unity 2019.4+** for editor-only UI Toolkit (limited features)
 
-See [ui-toolkit-reference.md](ui-toolkit-reference.md) for complete API documentation.
+See `references/ui-toolkit-reference.md` for complete API documentation.
 
 ## When to Use vs Other Components
 
 **Use this Skill when**: Building UI Toolkit interfaces, writing UXML/USS, or manipulating VisualElements in C#
 
-**Use unity-ui-selector skill when**: Choosing between UGUI and UI Toolkit for a project
-
-**Use @unity-scripter agent when**: Implementing complex UI logic or custom VisualElement controls
+**Use unity-ugui-expert skill when**: The project uses UGUI instead of UI Toolkit
 
 **Use EditorScriptUIToolkit templates when**: Generating new UI Toolkit editor windows with UXML/USS files
 
 ## Related Skills
 
-- **unity-ui-selector**: Helps choose between UGUI and UI Toolkit
 - **unity-template-generator**: Generates UI Toolkit editor script templates
 - **unity-script-validator**: Validates UI Toolkit code patterns

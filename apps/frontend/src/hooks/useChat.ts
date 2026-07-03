@@ -202,7 +202,7 @@ export const useChat = ({
   const projectStatus = useProjectStore((state) => state.projectStatus);
   const removePendingReview = useProjectStore((state) => state.removePendingReview);
   const upsertPendingReview = useProjectStore((state) => state.upsertPendingReview);
-  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadPhases, loadAgents, loadTokenUsage, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
+  const { updateTokenUsage, updateLastP2PRoute, loadTasks, loadActivities, loadPhases, loadAgents, loadTokenUsage, loadCurrentUser, setAgentStatus, refreshAgents, setIsSyncing } = useSystemStore();
   const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews);
 
   useEffect(() => {
@@ -258,6 +258,7 @@ export const useChat = ({
     loadTasks,
     loadActivities,
     loadTokenUsage,
+    loadCurrentUser,
     refreshProjectVisibility,
   });
 
@@ -274,6 +275,7 @@ export const useChat = ({
     loadTasks,
     loadActivities,
     loadTokenUsage,
+    loadCurrentUser,
     refreshProjectVisibility,
   };
 
@@ -588,6 +590,21 @@ export const useChat = ({
 
         break;
 
+      case 'credit_update':
+        refs.loadCurrentUser().catch(err => console.error('[useChat] Credit balance refresh failed:', err));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('beegame:credits-updated', {
+            detail: {
+              projectId: message.project_id,
+              event: message.credit_event,
+              balanceCredits: message.balance_credits,
+              credits: message.credits,
+            },
+          }));
+        }
+        refs.onTaskEvent?.('credit_update', message);
+        break;
+
 
       case 'p2p_route':
         // Peer-to-peer routing event
@@ -664,7 +681,10 @@ export const useChat = ({
       if (!isStreaming) {
         const history = await api.getChatHistory(projectId) as unknown;
         const messages = normalizeChatHistory(history);
-        loadHistory(messages);
+        const currentMessages = useChatStore.getState().messages;
+        if (messages.length > 0 || currentMessages.length === 0) {
+          loadHistory(messages);
+        }
       }
 
       if (pendingActionRef.current) {
@@ -794,7 +814,7 @@ export const useChat = ({
 
       setCurrentTaskId(response.task_id);
       console.log('[useChat] Message sent, task ID:', response.task_id);
-      await syncAfterReconnect();
+      void syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to send message:', error);
       setIsLoading(false);
@@ -847,7 +867,7 @@ export const useChat = ({
 
       setCurrentTaskId(response.resume_task_id);
       console.log('[useChat] Task continued, task ID:', response.resume_task_id);
-      await syncAfterReconnect();
+      void syncAfterReconnect();
     } catch (error) {
       console.error('[useChat] Failed to continue task:', error);
       setIsLoading(false);

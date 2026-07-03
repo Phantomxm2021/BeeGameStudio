@@ -439,6 +439,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
+        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {

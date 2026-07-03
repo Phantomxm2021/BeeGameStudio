@@ -523,7 +523,12 @@ export const useWebSocket = ({
         } catch (error) {
           if (cancelled) return;
           console.warn('[WebSocket] BeeGame adapter poll failed:', error);
+          if (adapterPollTimerRef.current) {
+            clearInterval(adapterPollTimerRef.current);
+            adapterPollTimerRef.current = null;
+          }
           setState('failed');
+          callbacksRef.current.onClose?.();
           callbacksRef.current.showToastError?.('BeeGame 事件同步失败，请检查 dashboard 后端服务');
         }
       };

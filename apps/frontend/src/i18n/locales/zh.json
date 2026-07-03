@@ -105,6 +105,7 @@
           "fullBuild": "确认构建"
         },
         "description": "本次{{taskName}}将预扣 {{reservedCredits}} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。",
+        "refundRule": "任务结束后按实际 token 和工具消耗结算，未使用部分自动退回。",
         "balance": "当前余额",
         "reserved": "本次预扣",
         "kind": {
@@ -421,6 +422,7 @@
     "account": "账号"
   },
   "beegame": {
+    "assistantName": "BeeGame",
     "previewTitle": "预览",
     "collabFlow": "协作流",
     "deliverables": "交付物",
@@ -465,6 +467,17 @@
     "revisionRequired": "需要修订",
     "clarificationDescription": "回答澄清问题，或选择如何继续当前简报。",
     "aiProcessing": "AI 正在处理...",
+    "innerThought": "内部思考",
+    "contextUpdate": "上下文更新",
+    "useContext": "使用上下文",
+    "lastCheckFailed": "上次检查失败",
+    "continueFixing": "继续修复",
+    "continueFromLastFailedCheckPrompt": "继续从上一次失败的检查处修复。请修复报告的问题，重新运行相关检查，并持续处理直到项目可以运行。",
+    "evidenceForReview": "验收证据",
+    "systemError": "系统错误",
+    "approvalRequest": "审批请求",
+    "revisionRequest": "修订请求",
+    "thinking": "思考",
     "settingsGeneral": "通用",
     "settingsModel": "模型",
     "closeSettings": "关闭设置",
@@ -494,6 +507,8 @@
     "webSearchSaveFailed": "网页搜索配置保存失败",
     "close": "关闭",
     "noProjectsFound": "暂无项目",
+    "noProjectsForAccount": "当前账户还没有项目",
+    "localProjectsNeedMigration": "如果旧项目仍在本地 Projects 目录，需要由管理员迁移到当前账户后才会显示。",
     "untitledProject": "未命名项目",
     "moreActionsFor": "更多操作",
     "deleteProject": "删除项目",
@@ -533,7 +548,37 @@
         "balance": "当前余额",
         "reserved": "预扣",
         "cancel": "取消",
-        "confirm": "确认并发送"
+        "confirm": "确认并发送",
+        "taskTypes": {
+          "idea_intake": {
+            "title": "方案生成",
+            "description": "根据你的游戏想法生成可选择的游戏模式。"
+          },
+          "full_build": {
+            "title": "完整构建",
+            "description": "开始一个已确认的游戏项目构建。"
+          },
+          "edit_turn": {
+            "title": "修改 / 调试",
+            "description": "修改、调试或继续完善已有游戏项目。"
+          },
+          "continue_turn": {
+            "title": "继续任务",
+            "description": "从上一次进度继续分析、修复或实现。"
+          },
+          "asset_integration": {
+            "title": "资源集成",
+            "description": "让 BeeGame 将已上传资源集成到当前项目。"
+          },
+          "large_build": {
+            "title": "大型构建",
+            "description": "处理更复杂、更长周期的游戏构建请求。"
+          },
+          "agent_turn": {
+            "title": "Agent 请求",
+            "description": "执行一次通用的 BeeGame agent 请求。"
+          }
+        }
       },
       "approvalWaiting": "当前项目正在等待审批，不能继续执行普通消息。"
     },
@@ -549,6 +594,9 @@
       "open": "在新窗口打开",
       "stop": "停止预览",
       "play": "播放预览",
+      "deploy": "发布游戏",
+      "deploying": "正在发布",
+      "openLive": "打开线上版本",
       "build": "构建",
       "health": "健康状态",
       "entrypoint": "入口",

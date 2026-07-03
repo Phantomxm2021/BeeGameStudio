@@ -1,21 +1,6 @@
 ---
 name: unity-performance
-description: Use when optimizing Unity performance, reducing GC, improving FPS, profiling bottlenecks, or applying pooling/caching strategies.
-version: 1.1.0
-category: Architecture/Unity
-tags: [Optimization, GC, CPU, Memory, Pooling]
-phases: [architecture, implementation, qa]
-target_profiles: [unity]
-priority: 75
-context_strategy:
-  references:
-    - memory-optimization
-    - rendering-optimization
-    - physics-optimization
-    - profiling-guide
-  audience: [tecton, implementation]
-security:
-  risk_level: low
+description: Use when optimizing or auditing explicitly Unity performance, profiling bottlenecks, reducing garbage collection, improving frame rate, pooling objects, or tuning rendering, physics, memory, or script cost.
 ---
 
 # Unity Performance Optimization

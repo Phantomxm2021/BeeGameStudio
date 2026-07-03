@@ -5,6 +5,8 @@ import {
   updateModelConfig,
   type ModelProviderKind,
 } from '@claude-code-best/agent-workflow'
+import { realpath } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import {
   appendAuditEvent,
   listAuditEvents,
@@ -151,6 +153,22 @@ export class DashboardRepository {
     return supabase
       ? supabase.listProjects(user.id)
       : this.getProjectStore(request).listProjects()
+  }
+
+  async ownsProjectWorkspacePath(
+    request: Request,
+    user: BeeGameUserContext,
+    workspacePath: string,
+  ): Promise<boolean> {
+    const normalizedWorkspace = await normalizeWorkspaceIdentity(workspacePath)
+    const projects = await this.listProjects(request, user)
+    for (const project of projects) {
+      if (!project.root_path) continue
+      if (await normalizeWorkspaceIdentity(project.root_path) === normalizedWorkspace) {
+        return true
+      }
+    }
+    return false
   }
 
   async upsertProject(
@@ -621,4 +639,13 @@ export class DashboardRepository {
 
 function getCreditOwnerId(user: BeeGameUserContext): string {
   return user.accountId || user.id
+}
+
+async function normalizeWorkspaceIdentity(workspacePath: string): Promise<string> {
+  const resolved = resolve(workspacePath)
+  try {
+    return await realpath(resolved)
+  } catch {
+    return resolved
+  }
 }

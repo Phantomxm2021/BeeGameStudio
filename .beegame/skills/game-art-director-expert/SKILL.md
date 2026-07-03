@@ -1,37 +1,6 @@
 ---
 name: game-art-director-expert
-description: Defines the visual identity, art style system, and aesthetic constraints of a game project. Converts product positioning into a cohesive visual direction.
-version: 1.0.0
-category: GameDev/Creative
-tags: [ArtDirection, VisualIdentity, StyleSystem]
-phases: [art_direction, ui]
-target_profiles: [web-react-ts, unity, xr]
-priority: 90
-context_strategy:
-  references:
-    - id: color-language-system
-      title: "Color Language System"
-      summary: "Defines how color communicates emotion, gameplay state, and hierarchy."
-      tags: [color, ui, gameplay]
-      audience: [Metis]
-    - id: shape-language-framework
-      title: "Shape Language Framework"
-      summary: "Defines geometric philosophy across characters, props, UI, and environment."
-      tags: [shape, ui, environment]
-      audience: [Metis]
-    - id: ui-visual-hierarchy
-      title: "UI Visual Hierarchy System"
-      summary: "Defines UI structure clarity and visual priority."
-      tags: [ui, hierarchy, visual]
-      audience: [Metis]
-    - id: lighting-mood-framework
-      title: "Lighting & Mood Framework"
-      summary: "Defines lighting philosophy and atmosphere logic."
-      tags: [lighting, mood, atmosphere]
-      audience: [Metis]
-      
-security:
-  risk_level: low
+description: Use when defining or auditing a game visual identity, art style system, color language, shape language, lighting mood, UI visual hierarchy, or asset consistency rules.
 ---
 
 # Art Director Skill
@@ -157,3 +126,11 @@ Must define:
 
 Never output loose inspiration boards.
 Always output rule-based visual system.
+
+## Reference Files
+
+Load only when the task needs extra detail:
+- `references/color-language-system.md` for color emotion, state, and hierarchy rules.
+- `references/shape-language-framework.md` for geometry across characters, props, UI, and environments.
+- `references/ui-visual-hierarchy.md` for UI priority and readability rules.
+- `references/lighting-mood-framework.md` for lighting philosophy and atmosphere logic.

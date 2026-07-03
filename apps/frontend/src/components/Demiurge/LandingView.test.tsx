@@ -576,8 +576,8 @@ describe('LandingView bootstrap submission', () => {
         unmount();
         renderLanding();
 
-        expect(await screen.findByRole('dialog', { name: '确认构建方案' })).toBeInTheDocument();
-        expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('LLM Mode A');
+        expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+        expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('确认构建方案');
         expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Godot');
         expect(runIdeaIntake).toHaveBeenCalledTimes(1);
     });
@@ -992,10 +992,10 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).not.toHaveTextContent('为什么适合');
         expect(dialog).not.toHaveTextContent('首版原型');
         const cards = within(dialog).getAllByTestId('intake-option-card');
-        expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)_2.75rem]');
+        expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)]');
         expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
         expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('min-h-0', 'overflow-y-auto');
-        expect(within(cards[0]).getByTestId('intake-option-tags')).toHaveClass('items-end');
+        expect(within(cards[0]).queryByTestId('intake-option-tags')).not.toBeInTheDocument();
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
         expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
         expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();

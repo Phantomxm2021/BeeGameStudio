@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when creating new skills, editing existing skills, or verifying skills work before deployment
+description: Use when creating, editing, auditing, or verifying skills, skill metadata, skill discovery behavior, or reusable agent workflow documentation.
 ---
 
 # Writing Skills

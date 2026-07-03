@@ -19,11 +19,14 @@ import {
   type BeeGameCreditTaskPolicy,
   type BeeGameCreditTaskType,
 } from '../credit-policy'
+import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameSessionStatus = 'running' | 'stopped' | 'failed'
 
 export type BeeGameTurnStatus = 'idle' | 'running'
+
+export type BeeGameSessionLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko'
 
 export type BeeGameEventType =
   | 'session.started'
@@ -142,6 +145,19 @@ type PendingPermission = DashboardPermissionRequest & {
   resolve(decision: DashboardPermissionDecision): void
 }
 
+type PendingCreditOperation =
+  | {
+      kind: 'settle'
+      reservation: CreditReservation
+      policy: BeeGameCreditTaskPolicy
+      weightedTokens: number
+      settleToTotalTokens: number
+    }
+  | {
+      kind: 'refund'
+      reservation: CreditReservation
+    }
+
 type SessionRecord = {
   session: BeeGameSession
   runtime: RuntimeModelConfig | undefined
@@ -149,6 +165,7 @@ type SessionRecord = {
   authToken?: string
   projectId?: string
   userDataRoot?: string
+  language?: BeeGameSessionLanguage
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
   abortController: AbortController | null
@@ -164,6 +181,7 @@ type SessionRecord = {
   nextTurnIndex: number
   currentTurnId: string | null
   lastSettledTotalTokens: number
+  pendingCreditOperation: PendingCreditOperation | null
 }
 
 export type StartBeeGameSessionInput = {
@@ -174,6 +192,7 @@ export type StartBeeGameSessionInput = {
   userId: string
   authToken?: string
   userDataRoot?: string
+  language?: BeeGameSessionLanguage
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -292,6 +311,9 @@ export class BeeGameSessionManager {
       ...(input.authToken ? { authToken: input.authToken } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
+      ...(input.language
+        ? { language: input.language }
+        : recoverSessionLanguage(recoveredTranscript?.events ?? [])),
       transcriptPath: recoveredTranscript?.path ??
         getSessionTranscriptPath(
           session.id,
@@ -317,11 +339,15 @@ export class BeeGameSessionManager {
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
+      pendingCreditOperation: null,
     }
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
     this.persistRuntimeSnapshot(record)
-    this.append(record, 'session.started', `Created BeeGame session in ${cwd}`)
+    this.append(record, 'session.started', `Created BeeGame session in ${cwd}`, {
+      type: 'session.started',
+      ...(record.language ? { language: record.language } : {}),
+    })
     this.appendRuntimeObservation(record, 'initialized')
 
     return cloneSession(record.session)
@@ -338,6 +364,82 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
+  }
+
+  updateAuthToken(sessionId: string, authToken?: string): void {
+    const record = this.sessions.get(sessionId)
+    if (!record || !authToken) return
+    record.authToken = authToken
+  }
+
+  async retryPendingCreditOperation(sessionId: string): Promise<boolean> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.pendingCreditOperation) return false
+    const operation = record.pendingCreditOperation
+    try {
+      if (operation.kind === 'settle') {
+        const settlement = await this.creditBackend.settleCreditReservation(record.userId, {
+          dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+          reservationId: operation.reservation.id,
+          weightedTokens: operation.weightedTokens,
+          projectId: record.session.id,
+          metadata: {
+            taskType: operation.policy.taskType,
+            displayName: operation.policy.displayName,
+            sessionId: record.session.id,
+            workspacePath: record.session.cwd,
+            totalTokens: operation.settleToTotalTokens,
+            previousSettledTotalTokens: record.lastSettledTotalTokens,
+            retry: true,
+          },
+          ...(record.authToken ? { authToken: record.authToken } : {}),
+        })
+        record.lastSettledTotalTokens = Math.max(
+          record.lastSettledTotalTokens,
+          operation.settleToTotalTokens,
+        )
+        record.pendingCreditOperation = null
+        this.append(record, 'system.status', 'Credit settled', {
+          type: 'credit.settled',
+          reservationId: operation.reservation.id,
+          credits: settlement.settledCredits,
+          refundedCredits: settlement.refundedCredits,
+          weightedTokens: operation.weightedTokens,
+          balanceCredits: settlement.balance.balanceCredits,
+          retry: true,
+        })
+        return true
+      }
+      const refund = await this.creditBackend.refundCreditReservation(record.userId, {
+        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+        reservationId: operation.reservation.id,
+        projectId: record.session.id,
+        metadata: {
+          sessionId: record.session.id,
+          reason: 'turn_finished_without_billable_usage',
+          retry: true,
+        },
+        ...(record.authToken ? { authToken: record.authToken } : {}),
+      })
+      record.pendingCreditOperation = null
+      this.append(record, 'system.status', 'Credit reservation refunded', {
+        type: 'credit.refunded',
+        reservationId: operation.reservation.id,
+        credits: refund.refundedCredits,
+        balanceCredits: refund.balance.balanceCredits,
+        retry: true,
+      })
+      return true
+    } catch (err) {
+      this.append(record, 'system.status', toErrorMessage(err), {
+        type: operation.kind === 'settle'
+          ? 'credit.settle_retry_failed'
+          : 'credit.refund_retry_failed',
+        reservationId: operation.reservation.id,
+        error: toErrorMessage(err),
+      })
+      return false
+    }
   }
 
   metadata(sessionId: string): BeeGameSessionInternalMetadata | undefined {
@@ -446,6 +548,8 @@ export class BeeGameSessionManager {
       displayKind?: string
       taskType?: BeeGameCreditTaskType
       authToken?: string
+      clientMessageId?: string
+      language?: BeeGameSessionLanguage
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -457,6 +561,7 @@ export class BeeGameSessionManager {
       throw new Error('Session is already processing a prompt')
     }
     if (display?.authToken) record.authToken = display.authToken
+    if (display?.language) record.language = display.language
 
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
@@ -473,10 +578,16 @@ export class BeeGameSessionManager {
         type: 'user.message',
         ...(display?.displayText ? { displayText: display.displayText } : {}),
         ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
+        ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
       },
     )
 
-    void this.runDirectTurn(record, text, creditReservation, creditPolicy)
+    void this.runDirectTurn(
+      record,
+      withSessionLanguageContract(text, record.language),
+      creditReservation,
+      creditPolicy,
+    )
     return cloneSession(record.session)
   }
 
@@ -652,6 +763,9 @@ export class BeeGameSessionManager {
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
+      cleanupRuntimeLayout({
+        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+      })
       record.currentTurnId = null
       record.abortController = null
       record.session.updatedAt = new Date()
@@ -1006,21 +1120,39 @@ export class BeeGameSessionManager {
       usage.total_tokens - record.lastSettledTotalTokens,
     )
     if (tokenDelta <= 0) return false
-    const settlement = await this.creditBackend.settleCreditReservation(record.userId, {
-      dataDir: record.userDataRoot ?? this.dashboardDataRoot,
-      reservationId: reservation.id,
-      weightedTokens: tokenDelta,
-      projectId: record.session.id,
-      metadata: {
-        taskType: policy.taskType,
-        displayName: policy.displayName,
-        sessionId: record.session.id,
-        workspacePath: record.session.cwd,
-        totalTokens: usage.total_tokens,
-        previousSettledTotalTokens: record.lastSettledTotalTokens,
-      },
-      ...(record.authToken ? { authToken: record.authToken } : {}),
-    })
+    let settlement: CreditSettlement
+    try {
+      settlement = await this.creditBackend.settleCreditReservation(record.userId, {
+        dataDir: record.userDataRoot ?? this.dashboardDataRoot,
+        reservationId: reservation.id,
+        weightedTokens: tokenDelta,
+        projectId: record.session.id,
+        metadata: {
+          taskType: policy.taskType,
+          displayName: policy.displayName,
+          sessionId: record.session.id,
+          workspacePath: record.session.cwd,
+          totalTokens: usage.total_tokens,
+          previousSettledTotalTokens: record.lastSettledTotalTokens,
+        },
+        ...(record.authToken ? { authToken: record.authToken } : {}),
+      })
+    } catch (err) {
+      record.pendingCreditOperation = {
+        kind: 'settle',
+        reservation,
+        policy,
+        weightedTokens: tokenDelta,
+        settleToTotalTokens: usage.total_tokens,
+      }
+      this.append(record, 'system.status', toErrorMessage(err), {
+        type: 'credit.settle_pending',
+        reservationId: reservation.id,
+        error: toErrorMessage(err),
+        weightedTokens: tokenDelta,
+      })
+      return true
+    }
     record.lastSettledTotalTokens = usage.total_tokens
     this.append(record, 'system.status', 'Credit settled', {
       type: 'credit.settled',
@@ -1055,8 +1187,12 @@ export class BeeGameSessionManager {
         balanceCredits: refund.balance.balanceCredits,
       })
     } catch (err) {
+      record.pendingCreditOperation = {
+        kind: 'refund',
+        reservation,
+      }
       this.append(record, 'system.status', toErrorMessage(err), {
-        type: 'credit.refund_failed',
+        type: 'credit.refund_pending',
         reservationId: reservation.id,
         error: toErrorMessage(err),
       })
@@ -1550,6 +1686,53 @@ function getNextTurnIndex(sessionId: string, events: BeeGameEvent[]): number {
   return maxTurnIndex + 1
 }
 
+function recoverSessionLanguage(
+  events: BeeGameEvent[],
+): { language: BeeGameSessionLanguage } | Record<string, never> {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const language = events[index]?.payload?.language
+    if (isBeeGameSessionLanguage(language)) return { language }
+  }
+  return {}
+}
+
+function isBeeGameSessionLanguage(
+  value: unknown,
+): value is BeeGameSessionLanguage {
+  return value === 'en' ||
+    value === 'zh' ||
+    value === 'zh-TW' ||
+    value === 'ja' ||
+    value === 'ko'
+}
+
+function withSessionLanguageContract(
+  prompt: string,
+  language?: BeeGameSessionLanguage,
+): string {
+  if (!language) return prompt
+  const instruction = getSessionLanguageInstruction(language)
+  if (!instruction) return prompt
+  return `${instruction}\n\n${prompt}`
+}
+
+function getSessionLanguageInstruction(
+  language: BeeGameSessionLanguage,
+): string {
+  switch (language) {
+    case 'zh':
+      return 'Respond to the user in Simplified Chinese. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.'
+    case 'zh-TW':
+      return 'Respond to the user in Traditional Chinese. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.'
+    case 'ja':
+      return 'Respond to the user in Japanese. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.'
+    case 'ko':
+      return 'Respond to the user in Korean. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.'
+    case 'en':
+      return 'Respond to the user in English. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.'
+  }
+}
+
 function getSessionTranscriptPath(
   sessionId: string,
   cwd: string,
@@ -1635,25 +1818,90 @@ function hasTurnEnded(events: BeeGameEvent[], turnId?: string): boolean {
 }
 
 function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+  const assistantUsage = sumAssistantMessageUsage(events)
+  if (assistantUsage.total_tokens > 0) return assistantUsage
+
   for (const event of [...events].reverse()) {
     if (event.type !== 'result') continue
-    const usage = event.payload?.usage
-    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue
-    const record = usage as Record<string, unknown>
-    const promptTokens = Number(record.input_tokens ?? record.prompt_tokens ?? 0)
-    const completionTokens = Number(record.output_tokens ?? record.completion_tokens ?? 0)
-    const totalTokens = Number(record.total_tokens ?? promptTokens + completionTokens)
-    return {
-      prompt_tokens: Number.isFinite(promptTokens) ? promptTokens : 0,
-      completion_tokens: Number.isFinite(completionTokens) ? completionTokens : 0,
-      total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0,
-    }
+    const usage = getUsageFromEventPayload(event.payload)
+    if (usage.total_tokens > 0) return usage
   }
   return {
     prompt_tokens: 0,
     completion_tokens: 0,
     total_tokens: 0,
   }
+}
+
+function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+  const total = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
+  for (const event of events) {
+    if (event.type !== 'assistant.message') continue
+    const usage = getUsageFromEventPayload(event.payload)
+    total.prompt_tokens += usage.prompt_tokens
+    total.completion_tokens += usage.completion_tokens
+    total.total_tokens += usage.total_tokens
+  }
+  return total
+}
+
+function getUsageFromEventPayload(
+  payload: DashboardSDKMessage | undefined,
+): BeeGameRuntimeSnapshot['usage'] {
+  const usage = getUsageRecord(payload)
+  if (!usage) {
+    return {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    }
+  }
+  const promptTokens = normalizeFiniteNumber(
+    usage.input_tokens ?? usage.prompt_tokens,
+  )
+  const completionTokens = normalizeFiniteNumber(
+    usage.output_tokens ?? usage.completion_tokens,
+  )
+  const totalTokens = normalizeFiniteNumber(
+    usage.total_tokens,
+    promptTokens + completionTokens,
+  )
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+  }
+}
+
+function getUsageRecord(
+  payload: DashboardSDKMessage | undefined,
+): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+  const directUsage = payload.usage
+  if (directUsage && typeof directUsage === 'object' && !Array.isArray(directUsage)) {
+    return directUsage as Record<string, unknown>
+  }
+  const message = payload.message
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return null
+  }
+  const messageUsage = (message as Record<string, unknown>).usage
+  if (messageUsage && typeof messageUsage === 'object' && !Array.isArray(messageUsage)) {
+    return messageUsage as Record<string, unknown>
+  }
+  return null
+}
+
+function normalizeFiniteNumber(value: unknown, fallback = 0): number {
+  const number = Number(value)
+  if (Number.isFinite(number) && number > 0) return number
+  return Math.max(0, fallback)
 }
 
 function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {

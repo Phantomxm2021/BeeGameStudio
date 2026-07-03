@@ -59,6 +59,10 @@ first start if the volume does not already contain a `skills` directory.
 
 ## Current Scope
 
-This deploys the BeeGame SaaS application and runtime host. It does not yet
-publish finished games to static hosting. Generated game deployment should be
-added as a separate deployment service after project acceptance.
+This deploys the BeeGame SaaS application and runtime host.
+
+The runtime host can publish generated static Web builds under `/deployments/*`.
+Deployment artifacts and deployment metadata are stored in the same
+`beegame-projects` Docker volume as generated projects. This is the first local
+publisher implementation; production object storage/CDN publishing should be
+added before relying on deployments as long-term public hosting.

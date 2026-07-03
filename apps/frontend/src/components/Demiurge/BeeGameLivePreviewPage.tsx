@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Settings, Square } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square } from 'lucide-react';
 import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -10,7 +10,7 @@ import { useSystemStore } from '../../store/systemStore';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
-type PreviewControl = 'reload' | 'stop' | 'play' | 'open';
+type PreviewControl = 'reload' | 'stop' | 'play' | 'open' | 'deploy';
 
 interface BeeGameLivePreviewPageProps {
     lang: Language;
@@ -28,7 +28,9 @@ interface BeeGameLivePreviewPageProps {
     onStartPreview?: () => void | Promise<void>;
     onRestartPreview?: () => void | Promise<void>;
     onStopPreview?: () => void | Promise<void>;
+    onDeployProject?: () => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
+    isDeploying?: boolean;
     onBack?: () => void;
     onSetLang: (lang: Language) => void;
 }
@@ -63,7 +65,9 @@ export function BeeGameLivePreviewPage({
     onStartPreview,
     onRestartPreview,
     onStopPreview,
+    onDeployProject,
     onOpenExternal,
+    isDeploying = false,
     onBack,
     onSetLang,
 }: BeeGameLivePreviewPageProps) {
@@ -82,6 +86,7 @@ export function BeeGameLivePreviewPage({
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
     const canStartPreview = !canShowPreview && !isStoppingPreview;
     const canStopPreview = canShowPreview && !isStoppingPreview;
+    const canDeploy = Boolean(onDeployProject) && !isDeploying;
     const statusText = previewState === 'live'
         ? labels.live
         : previewState === 'failed'
@@ -108,6 +113,9 @@ export function BeeGameLivePreviewPage({
     const handleRestart = async () => {
         setStoppedPreviewUrl('');
         await onRestartPreview?.();
+    };
+    const handleDeploy = async () => {
+        await onDeployProject?.();
     };
     const userMenuItems: UserAccountMenuItem[] = [
         {
@@ -249,8 +257,18 @@ export function BeeGameLivePreviewPage({
                                 </PreviewControlButton>
                             )}
                             <PreviewControlButton
+                                control="deploy"
+                                label={isDeploying ? labels.deploying : labels.deploy}
+                                disabled={!canDeploy}
+                                hoveredControl={hoveredControl}
+                                setHoveredControl={setHoveredControl}
+                                onClick={handleDeploy}
+                            >
+                                <Rocket className="h-4 w-4" />
+                            </PreviewControlButton>
+                            <PreviewControlButton
                                 control="open"
-                                label={labels.open}
+                                label={labels.openLive || labels.open}
                                 disabled={!canShowPreview}
                                 hoveredControl={hoveredControl}
                                 setHoveredControl={setHoveredControl}

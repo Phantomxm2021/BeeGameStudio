@@ -200,7 +200,9 @@ export const useSystemStore = create<SystemState>()(
           set({ currentUser });
           return currentUser;
         } catch (error) {
-          console.error('Failed to load current user:', error);
+          if (getErrorStatus(error) !== 401) {
+            console.error('Failed to load current user:', error);
+          }
           set({ currentUser: null });
           return null;
         }
@@ -348,6 +350,12 @@ export const useSystemStore = create<SystemState>()(
     }
   )
 );
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
 
 function mergeSupabaseSessionProfile(user: BeeGameCurrentUser): BeeGameCurrentUser {
   const sessionUser = getSupabaseSessionUser();

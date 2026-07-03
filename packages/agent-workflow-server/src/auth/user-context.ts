@@ -12,6 +12,7 @@ export type BeeGamePermission =
   | 'agent.cancel'
   | 'agent.approve_tool'
   | 'preview.manage'
+  | 'deployment.manage'
   | 'assets.upload'
   | 'assets.integrate'
   | 'model_config.manage'
@@ -362,6 +363,7 @@ const DEVELOPER_PERMISSIONS = new Set<BeeGamePermission>([
   'agent.cancel',
   'agent.approve_tool',
   'preview.manage',
+  'deployment.manage',
   'assets.upload',
   'assets.integrate',
 ])

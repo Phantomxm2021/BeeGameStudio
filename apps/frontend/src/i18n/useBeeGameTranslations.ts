@@ -26,5 +26,7 @@ export function useCommonText(lang: Language): CommonText {
 
 export function useBeeGameText(lang: Language): BeeGameText {
   const { i18n } = useTranslation('beegame')
-  return i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame') as BeeGameText
+  const fallback = i18n.getResourceBundle('en', 'beegame') as BeeGameText
+  const current = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame') as BeeGameText
+  return { ...fallback, ...current }
 }

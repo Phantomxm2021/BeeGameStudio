@@ -1,7 +1,6 @@
 ---
-name: unity-shaders
-description: Unity shader patterns - ShaderLab, HLSL, Shader Graph
-user-invocable: false
+name: unity-shaders-assistant
+description: Use when working in an explicitly Unity shader context involving ShaderLab, HLSL, Shader Graph, materials, render pipeline compatibility, stereo rendering, or shader debugging.
 ---
 
 # Unity Shaders Skill

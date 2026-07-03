@@ -456,6 +456,7 @@ as $$
       'agent.cancel',
       'agent.approve_tool',
       'preview.manage',
+      'deployment.manage',
       'assets.upload',
       'assets.integrate',
       'model_config.manage',
@@ -473,6 +474,7 @@ as $$
       'agent.cancel',
       'agent.approve_tool',
       'preview.manage',
+      'deployment.manage',
       'assets.upload',
       'assets.integrate'
     ]
@@ -862,6 +864,7 @@ declare
   settings_env jsonb := '{}'::jsonb;
   runtime_env jsonb := '{}'::jsonb;
   base_config_dir text;
+  runtime_root_dir text;
   config_owner_id uuid;
 begin
   if p_user_id is null then
@@ -874,8 +877,9 @@ begin
 
   base_config_dir := trim(trailing '/' from coalesce(p_data_dir, ''));
   if base_config_dir <> '' then
+    runtime_root_dir := base_config_dir || '/.runtime';
     runtime_env := runtime_env || jsonb_build_object(
-      'BEEGAME_CONFIG_DIR', base_config_dir || '/beegame-config',
+      'BEEGAME_CONFIG_DIR', runtime_root_dir || '/app',
       'BEEGAME_PROJECT_CONFIG_DIR_NAME', '.beegame'
     );
   else
@@ -973,7 +977,7 @@ begin
       if base_config_dir <> '' then
         settings_env := settings_env || jsonb_build_object(
           'CLAUDE_CONFIG_DIR',
-          base_config_dir || '/claude-config'
+          runtime_root_dir || '/core'
         );
       end if;
     end if;
@@ -1529,6 +1533,10 @@ create policy "credit ledger owner access" on public.beegame_credit_ledger
 drop policy if exists "audit owner access" on public.beegame_audit_events;
 create policy "audit owner access" on public.beegame_audit_events
   for select using (actor_id = auth.uid());
+
+drop policy if exists "audit actor insert" on public.beegame_audit_events;
+create policy "audit actor insert" on public.beegame_audit_events
+  for insert with check (actor_id = auth.uid());
 
 revoke execute on function public.beegame_current_user_context() from public;
 grant execute on function public.beegame_current_user_context() to authenticated;

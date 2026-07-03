@@ -1,28 +1,6 @@
 ---
 name: spatial-computing-ux-designer-expert
-description: Designs interaction models and spatial computing interface systems ONLY for XR, AR, and spatial computing platforms. Focused on depth ergonomics, 3D gesture interaction, and spatial cognitive load. Not for standard 2D mobile/PC touch interfaces.
-version: 1.0.1
-category: GameDev/UX/XR
-tags: [Spatial_Computing, XR, AR, MR, Spatial_Design]
-phases: [ui, art_direction]
-target_profiles: [xr]
-priority: 95
-context_strategy:
-  references:
-    - id: spatial-interaction-principles
-      title: Spatial Interaction Principles
-      audience: [Morphe]
-    - id: depth-layering-framework
-      title: Depth Layering Framework
-      audience: [Morphe]
-    - id: gesture-ergonomics-model
-      title: Gesture Ergonomics Model
-      audience: [Morphe]
-    - id: spatial-cognitive-load-system
-      title: Spatial Cognitive Load System
-      audience: [Morphe]
-security:
-  risk_level: low
+description: Use when designing or auditing XR, AR, MR, or spatial-computing interfaces involving depth layering, spatial gestures, cognitive load, comfort, or 3D interaction ergonomics.
 ---
 
 # Spatial UX Designer Skill
@@ -168,3 +146,11 @@ If MR:
 
 Never design flat UI in 3D space.
 Always design interaction around body comfort.
+
+## Reference Files
+
+Load only when the task needs extra detail:
+- `references/spatial-interaction-principles.md` for spatial input and interaction rules.
+- `references/depth-layering-framework.md` for depth hierarchy and layout zones.
+- `references/gesture-ergonomics-model.md` for gesture comfort and fatigue limits.
+- `references/spatial-cognitive-load-system.md` for focus, attention, and load constraints.

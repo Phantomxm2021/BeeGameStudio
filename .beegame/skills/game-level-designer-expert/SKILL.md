@@ -1,29 +1,6 @@
 ---
 name: game-level-designer-expert
-description: Specialized in encounter design, spatial flow, difficulty pacing, and environmental storytelling.
-summary: |
-  Focused on gameplay space design, player movement flow, encounter pacing,
-  tutorial embedding, and moment-to-moment experience tuning.
-  Ideal for designing levels, mission structures, and combat scenarios.
-capabilities:
-  - Encounter pacing design
-  - Spatial flow planning
-  - Difficulty ramp structuring
-  - Tutorial embedding strategy
-  - Environmental storytelling
-  - Skill ceiling mapping
-version: 1.0.0
-category: GameDev/Design
-tags: [LevelDesign, Encounter, Flow, Pacing]
-context_strategy:
-  references:
-    - id: encounter-design-patterns
-      title: "Encounter Pacing Framework"
-      summary: "Combat rhythm, safe zones, tension spikes."
-      tags: [encounter, pacing]
-      audience: [Metis]
-security:
-  risk_level: low
+description: Use when designing or auditing gameplay spaces, encounters, level flow, teaching sequences, difficulty pacing, navigation readability, or environmental storytelling.
 ---
 
 # Level Designer Expert Skill Document
@@ -86,3 +63,7 @@ Challenge must be telegraphed.
 4. Validate teaching clarity
 
 All outputs must prioritize **player flow over systemic complexity**.
+
+## Reference Files
+
+Load `references/encounter-design-patterns.md` when designing combat rhythm, safe zones, escalation, or tension spikes.

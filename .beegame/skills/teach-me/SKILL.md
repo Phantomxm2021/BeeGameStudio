@@ -1,6 +1,6 @@
 ---
 name: teach-me
-description: "Personalized 1-on-1 AI tutor. Diagnoses level, builds learning path, teaches via guided questions, tracks misconceptions. Use when user wants to learn/study/understand a topic, says 'teach me', 'help me understand', or invokes /teach-me."
+description: Use when the user wants to learn, study, understand, or be tutored on a topic, including requests like teach me, explain this deeply, help me understand, or build a learning path.
 ---
 
 # Teach Me

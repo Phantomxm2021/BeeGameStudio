@@ -597,6 +597,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [authMode, setAuthMode] = useState<'login' | 'register' | 'resetPassword'>('login');
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [avatarDraft, setAvatarDraft] = useState('');
+    const [avatarDraftFailed, setAvatarDraftFailed] = useState(false);
     const [profileError, setProfileError] = useState('');
     const [profileNotice, setProfileNotice] = useState('');
     const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -639,7 +640,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         : intakePhase === 'configuring_details'
             ? selectedOption?.title || intakeText.modal.productionSettings
             : intakePhase === 'confirming_brief'
-                ? intakeText.modal.confirmBuildBrief
+                ? selectedOption?.title || intakeText.modal.confirmBuildBrief
                 : intakeText.modal.startBuild;
     const intakeModalWidthClass = intakePhase === 'options_ready'
         ? 'max-w-5xl'
@@ -686,6 +687,26 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             cancelled = true;
         };
     }, [currentUser?.id]);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        const refreshCredits = () => {
+            void getCreditBalance()
+                .then(balance => setCreditBalance(balance))
+                .catch(() => setCreditBalance(null));
+            if (isProfileOpen) {
+                setIsCreditLedgerLoading(true);
+                void getCreditLedger()
+                    .then(entries => setCreditLedger(entries))
+                    .catch(() => setCreditLedger([]))
+                    .finally(() => setIsCreditLedgerLoading(false));
+            }
+        };
+        window.addEventListener('beegame:credits-updated', refreshCredits);
+        return () => {
+            window.removeEventListener('beegame:credits-updated', refreshCredits);
+        };
+    }, [currentUser?.id, isProfileOpen]);
 
     const handleSignOut = async () => {
         clearIntakeRecoveryState();
@@ -970,6 +991,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProfileError('');
         setProfileNotice('');
         setAvatarDraft(currentUser?.avatarUrl || '');
+        setAvatarDraftFailed(false);
         setIsCreditLedgerExpanded(false);
         setIsProfileOpen(true);
         setIsCreditLedgerLoading(true);
@@ -983,6 +1005,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file) return;
+        setAvatarDraftFailed(false);
         setProfileError('');
         setProfileNotice('');
         if (!file.type.startsWith('image/')) {
@@ -1323,8 +1346,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                             <div className="mt-8 flex flex-col items-center text-center">
                                 <label className="type-title-3 group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition hover:border-amber-200/70">
-                                    {avatarDraft ? (
-                                        <img src={avatarDraft} alt="" className="h-full w-full object-cover" />
+                                    {avatarDraft && !avatarDraftFailed ? (
+                                        <img
+                                            src={avatarDraft}
+                                            alt=""
+                                            referrerPolicy="no-referrer"
+                                            className="h-full w-full object-cover"
+                                            onLoad={() => setAvatarDraftFailed(false)}
+                                            onError={() => setAvatarDraftFailed(true)}
+                                        />
                                     ) : (
                                         getDisplayInitial(currentUser.displayName || currentUser.email || currentUser.id)
                                     )}
@@ -1742,10 +1772,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         type="button"
                                         onClick={() => handleSelectOption(option)}
                                         data-testid="intake-option-card"
-                                        className="group grid h-[25rem] grid-rows-[5.25rem_1.75rem_minmax(0,1fr)_2.75rem] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
+                                        className="group grid h-[25rem] grid-rows-[5.25rem_1.75rem_minmax(0,1fr)] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
                                     >
                                         <div className="min-h-0">
-                                            <div className="type-caption-1 text-amber-300">{intakeText.optionCard.mode}</div>
+                                            <div className="type-caption-1 text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.mode}</div>
                                             <div
                                                 data-testid="intake-option-title"
                                                 className="type-title-3 mt-2 line-clamp-2 overflow-hidden text-white"
@@ -1753,23 +1783,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                                 {option.title}
                                             </div>
                                         </div>
-                                        <div className="type-caption-1 self-start text-amber-300">{intakeText.optionCard.gameplay}</div>
+                                        <div className="type-caption-1 self-start text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.gameplay}</div>
                                         <div
                                             data-testid="intake-option-gameplay"
                                             className="type-body min-h-0 overflow-y-auto pr-1 text-zinc-300 [scrollbar-width:thin]"
                                         >
                                             {option.gameplay}
                                         </div>
-                                        {optionTags(option).length > 0 ? (
-                                            <div
-                                                data-testid="intake-option-tags"
-                                                className="type-caption-2 flex min-h-0 items-end gap-2 overflow-hidden text-zinc-300"
-                                            >
-                                                {optionTags(option).map(tag => (
-                                                    <span key={tag} className="shrink-0 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5">{localizedOptionLabel(tag)}</span>
-                                                ))}
-                                            </div>
-                                        ) : null}
                                     </button>
                                 ))}
                             </div>
@@ -1849,7 +1869,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                     {intakePhase === 'confirming_brief' && selectedOption && settings ? (
                         <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
-                            <h3 className="type-title-3 text-white">{selectedOption.title}</h3>
                             <p className="type-body mt-3 text-zinc-300">{selectedOption.pitch}</p>
                             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
 	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.platform}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd></div>
@@ -2013,38 +2032,40 @@ function CreditConfirmDialog({
                 aria-modal="true"
                 aria-labelledby={titleId}
                 data-surface="frosted-glass"
-                className="input-surface glass-panel w-full max-w-2xl rounded-[30px] p-6 text-left text-zinc-100 sm:p-8"
+                className="input-surface glass-panel w-full max-w-[520px] rounded-[30px] p-6 text-left text-zinc-100 sm:p-7"
             >
                 <h2 id={titleId} className="type-title-2 text-white">
                     {copy.credits.title(taskName)}
                 </h2>
-                <p className="type-body mt-5 max-w-[58rem] text-zinc-300">
-                    {copy.credits.description(taskName, quote.reservedCredits)}
-                </p>
-                <div className="type-callout mt-5 rounded-[24px] border border-emerald-200/20 bg-emerald-300/[0.07] px-5 py-4 text-emerald-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <span className="border-b border-emerald-100/55 pb-0.5">
-                        {copy.credits.refundRule}
-                    </span>
-                </div>
-                <div className="mt-7 grid gap-4 rounded-[26px] border border-white/15 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:grid-cols-2 sm:p-6">
-                    <div className="min-w-0">
-                        <div className="type-caption-1 text-zinc-500">
-                            {copy.credits.balance}
+                <div className="credit-ticket-shell mt-6">
+                    <div className="credit-ticket">
+                        <div className="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-stretch px-10 py-5">
+                            <div className="min-w-0 pr-5">
+                                <div className="type-caption-1 text-zinc-500">
+                                    {copy.credits.balance}
+                                </div>
+                                <div className="type-title-3 mt-2 text-emerald-200">
+                                    {quote.balanceCredits} credits
+                                </div>
+                            </div>
+                            <div className="credit-ticket-divider" aria-hidden="true" />
+                            <div className="min-w-0 pl-5 text-right">
+                                <div className="type-caption-1 text-zinc-500">
+                                    {copy.credits.reserved}
+                                </div>
+                                <div className="type-title-3 mt-2 text-white">
+                                    {quote.reservedCredits} credits
+                                </div>
+                            </div>
                         </div>
-                        <div className="type-title-3 mt-3 text-emerald-200">
-                            {quote.balanceCredits} credits
+                        <div className="border-t border-white/10 px-7 py-3">
+                            <p className="type-caption-2 truncate text-zinc-400">
+                                {copy.credits.refundRule}
+                            </p>
                         </div>
                     </div>
-                    <div className="min-w-0">
-                        <div className="type-caption-1 text-zinc-500">
-                            {copy.credits.reserved}
-                        </div>
-                        <div className="type-title-3 mt-3 text-white">
-                            {quote.reservedCredits} credits
-                        </div>
-                    </div>
                 </div>
-                <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <button
                         type="button"
                         onClick={onCancel}

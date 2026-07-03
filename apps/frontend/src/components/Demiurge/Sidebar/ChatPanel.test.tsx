@@ -224,7 +224,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
-        expect(userMessage).toHaveClass('bg-zinc-800/45');
+        expect(userMessage).toHaveClass('glass-control');
         expect(userMessage).not.toHaveClass('bg-zinc-100');
         expect(userMessage).not.toHaveClass('bg-sky-950/20');
         expect(screen.getByText('请构建首个可玩版本')).toBeInTheDocument();
@@ -236,7 +236,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
 
         const agentCard = screen.getByTestId('beegame-agent-message-m_agent');
-        expect(agentCard).toHaveClass('bg-orange-950/15');
+        expect(agentCard).toHaveClass('glass-control');
+        expect(agentCard).not.toHaveClass('bg-orange-950/15');
         expect(agentCard).not.toHaveClass('bg-sky-950/20');
         const writeCard = document.querySelector('[data-tool-id="m_write"]')!;
         const bashCard = document.querySelector('[data-tool-id="m_bash"]')!;
@@ -746,8 +747,8 @@ describe('ChatPanel approval bar', () => {
             expect(statusIcon).not.toHaveClass('border');
         });
         expect(statusIcons[0].querySelector('svg')).toHaveClass('animate-spin');
-        expect(statusIcons[1]).toHaveClass('text-emerald-400');
-        expect(statusIcons[2]).toHaveClass('text-red-400');
+        expect(statusIcons[1]).toHaveClass('text-emerald-300');
+        expect(statusIcons[2]).toHaveClass('text-red-300');
     });
 
     it('keeps the legacy message rendering path outside BeeGame mode', () => {

@@ -1,31 +1,6 @@
 ---
 name: unity-game-architect-expert
-description: Specialized in Unity-based multiplayer game architecture design, system layering, scalability planning, and performance-oriented engineering decisions.
-summary: |
-  Focused on transforming game design documents into scalable Unity architecture.
-  Covers runtime system layering, scene organization, networking integration,
-  ECS vs OOP decisions, UI system structure, asset pipeline strategy,
-  and performance constraints for multiplayer games.
-  Ideal for architecting production-grade Unity projects.
-capabilities:
-  - Layered runtime architecture design
-  - Multiplayer synchronization structure
-  - Scene & module partitioning
-  - Script architecture (OOP)
-  - UI system structure planning
-  - Asset pipeline strategy
-  - Performance budgeting
-  - Build target strategy (PC/Mobile/WebGL)
-version: 1.0.0
-category: GameDev/Architecture
-tags: [Unity, Multiplayer, RuntimeArchitecture, ECS, Networking]
-phases: [architecture]
-target_profiles: [unity]
-priority: 95
-context_strategy:
-  references: []
-security:
-  risk_level: medium
+description: Use when designing or auditing explicitly Unity-based game architecture, scene/system layering, multiplayer architecture, scalability, performance boundaries, or maintainable runtime structure.
 ---
 
 # Unity Game Architect Skill Document

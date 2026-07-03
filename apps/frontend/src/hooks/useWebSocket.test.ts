@@ -9,9 +9,15 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { buildWebSocketUrl, useWebSocket } from './useWebSocket';
 import type { WebSocketMessage } from '../types/message';
 
-const { post, resolveAuthToken } = vi.hoisted(() => ({
+const { post, resolveAuthToken, beeGameAdapterMock, beeGameAdapterState } = vi.hoisted(() => ({
   post: vi.fn().mockResolvedValue({}),
   resolveAuthToken: vi.fn(() => ''),
+  beeGameAdapterMock: {
+    pollMessages: vi.fn(),
+  },
+  beeGameAdapterState: {
+    enabled: false,
+  },
 }));
 
 vi.mock('../services/apiClient', () => ({
@@ -26,8 +32,8 @@ vi.mock('../services/api', () => ({
 }));
 
 vi.mock('../services/beeGameAdapter', () => ({
-  beeGameAdapter: {},
-  isBeeGameAdapterEnabled: () => false,
+  beeGameAdapter: beeGameAdapterMock,
+  isBeeGameAdapterEnabled: () => beeGameAdapterState.enabled,
 }));
 
 // Mock WebSocket
@@ -87,6 +93,8 @@ describe('useWebSocket with MessageValidator integration', () => {
   let mockWebSocket: MockWebSocket;
 
   beforeEach(() => {
+    beeGameAdapterState.enabled = false;
+    beeGameAdapterMock.pollMessages.mockResolvedValue({ lastEventId: 0, messages: [] });
     resolveAuthToken.mockReturnValue('');
     // Mock global WebSocket with a proper constructor function
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,6 +116,30 @@ describe('useWebSocket with MessageValidator integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  });
+
+  describe('BeeGame adapter polling', () => {
+    it('closes the chat transport when adapter polling fails', async () => {
+      beeGameAdapterState.enabled = true;
+      beeGameAdapterMock.pollMessages.mockRejectedValue(new Error('Session not found'));
+      const onClose = vi.fn();
+      const showToastError = vi.fn();
+
+      const { result } = renderHook(() =>
+        useWebSocket({
+          projectId: 'project-1',
+          onMessage: vi.fn(),
+          onClose,
+          showToastError,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.state).toBe('failed');
+        expect(onClose).toHaveBeenCalled();
+        expect(showToastError).toHaveBeenCalledWith('BeeGame 事件同步失败，请检查 dashboard 后端服务');
+      });
+    });
   });
 
   describe('Message Validation', () => {

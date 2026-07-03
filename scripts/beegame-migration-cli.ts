@@ -9,6 +9,7 @@ export type MigrationCliOptions = {
   ownerId: string
   dataDir: string
   apply: boolean
+  includePlatformSettings: boolean
 }
 
 export type MigrationAuthContext = {
@@ -34,6 +35,7 @@ export function parseMigrationArgs(
   input: {
     env?: Env
     homeDir?: string
+    cwd?: string
   } = {},
 ): MigrationCliOptions {
   const env = input.env ?? process.env
@@ -43,17 +45,18 @@ export function parseMigrationArgs(
       env.BEEGAME_MIGRATION_AUTH_USER_ID ??
       ''
     ).trim(),
-    dataDir: resolve(
-      env.BEEGAME_MIGRATION_DATA_DIR?.trim() ||
-        env.AGENT_WORKFLOW_DATA_DIR?.trim() ||
-        join(input.homeDir ?? homedir(), '.beegame', 'dashboard'),
-    ),
+    dataDir: resolveDefaultMigrationDataDir(env, input),
     apply: false,
+    includePlatformSettings: false,
   }
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (arg === '--apply') {
       options.apply = true
+      continue
+    }
+    if (arg === '--include-platform-settings') {
+      options.includePlatformSettings = true
       continue
     }
     if (arg === '--owner-id') {
@@ -71,6 +74,27 @@ export function parseMigrationArgs(
   return options
 }
 
+function resolveDefaultMigrationDataDir(
+  env: Env,
+  input: {
+    homeDir?: string
+    cwd?: string
+  },
+): string {
+  const explicitDataDir = (
+    env.BEEGAME_MIGRATION_DATA_DIR?.trim() ||
+    env.AGENT_WORKFLOW_DATA_DIR?.trim()
+  )
+  if (explicitDataDir) return resolve(explicitDataDir)
+
+  const currentProjectsDir = join(input.cwd ?? process.cwd(), 'Projects')
+  if (existsSync(join(currentProjectsDir, 'beegame.sqlite'))) {
+    return resolve(currentProjectsDir)
+  }
+
+  return resolve(join(input.homeDir ?? homedir(), '.beegame', 'dashboard'))
+}
+
 export async function resolveMigrationAuthContext(input: {
   url: string
   anonKey: string
@@ -84,8 +108,9 @@ export async function resolveMigrationAuthContext(input: {
     ''
   ).trim()
   if (authToken) {
+    const accessToken = extractSupabaseAccessToken(authToken)
     return {
-      authToken,
+      authToken: accessToken,
       ...(env.BEEGAME_SUPABASE_USER_ID?.trim()
         ? { userId: env.BEEGAME_SUPABASE_USER_ID.trim() }
         : {}),
@@ -125,6 +150,7 @@ export async function resolveMigrationAuthContext(input: {
   if (!token || !userId) {
     throw new Error('Supabase migration sign-in did not return access_token and user.id')
   }
+  assertSupabaseJwt(token)
   process.env.BEEGAME_MIGRATION_AUTH_USER_ID = userId
   return {
     authToken: token,
@@ -140,6 +166,45 @@ function unquoteEnvValue(value: string): string {
     return value.slice(1, -1)
   }
   return value
+}
+
+function extractSupabaseAccessToken(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('{')) {
+    const payload = JSON.parse(trimmed) as unknown
+    const token = readNestedString(payload, ['access_token']) ??
+      readNestedString(payload, ['currentSession', 'access_token']) ??
+      readNestedString(payload, ['session', 'access_token'])
+    if (!token) {
+      throw new Error(
+        'BEEGAME_SUPABASE_ACCESS_TOKEN JSON does not contain access_token. Copy the Supabase session access_token, not the refresh_token or OAuth code.',
+      )
+    }
+    assertSupabaseJwt(token)
+    return token
+  }
+  assertSupabaseJwt(trimmed)
+  return trimmed
+}
+
+function assertSupabaseJwt(token: string): void {
+  if (token.split('.').length === 3) return
+  throw new Error(
+    'BEEGAME_SUPABASE_ACCESS_TOKEN must be a Supabase access_token JWT with 3 dot-separated parts. If copying from browser localStorage, use access_token or currentSession.access_token, not refresh_token, provider token, OAuth code, or the full object string.',
+  )
+}
+
+function readNestedString(
+  value: unknown,
+  path: string[],
+): string | undefined {
+  let current = value
+  for (const key of path) {
+    if (!isRecord(current)) return undefined
+    current = current[key]
+  }
+  return stringField(current)
 }
 
 function stringField(value: unknown): string | undefined {

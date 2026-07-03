@@ -39,7 +39,10 @@ describe('currentUserApi', () => {
 
     await expect(getCurrentUser()).resolves.toEqual(user);
     expect(apiClient.get).toHaveBeenCalledWith('/api/current-user', {
-      headers: { 'Hide-Error-Toast': 'true' },
+      headers: {
+        'Hide-Error-Log': 'true',
+        'Hide-Error-Toast': 'true',
+      },
     });
   });
 

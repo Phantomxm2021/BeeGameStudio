@@ -185,6 +185,25 @@ export interface BeeGamePreviewPayload {
   updatedAt: string;
 }
 
+export interface BeeGameDeploymentPayload {
+  id: string;
+  sessionId: string;
+  projectId?: string;
+  workspacePath: string;
+  status: 'queued' | 'building' | 'publishing' | 'succeeded' | 'failed';
+  url: string;
+  buildCommand?: string;
+  buildLog?: string;
+  entrypoint?: string;
+  outputDir?: string;
+  artifactPath?: string;
+  artifactHash?: string;
+  message?: string;
+  createdAt: string;
+  updatedAt: string;
+  deployedAt?: string;
+}
+
 export type BeeGameAssetIntegrationMode = 'filesystem' | 'mcp' | 'manual';
 
 export interface BeeGameAssetSlotPayload {
@@ -1016,6 +1035,13 @@ export const api = {
       return beeGameAdapter.stopProjectPreview(projectId);
     }
     throw new Error('Project preview is only available for BeeGame projects');
+  },
+
+  deployProject: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.deployProject(projectId);
+    }
+    throw new Error('Project deployment is only available for BeeGame projects');
   },
 
   getProjectAssets: (projectId: string) => {

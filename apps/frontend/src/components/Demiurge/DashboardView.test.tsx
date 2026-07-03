@@ -20,6 +20,17 @@ const apiMocks = vi.hoisted(() => ({
     startProjectPreview: vi.fn().mockResolvedValue({}),
     restartProjectPreview: vi.fn().mockResolvedValue({}),
     stopProjectPreview: vi.fn().mockResolvedValue({}),
+    deployProject: vi.fn().mockResolvedValue({
+        id: 'deploy_1',
+        sessionId: 'beegame_proj_1',
+        workspacePath: '/tmp/Projects/project-one',
+        status: 'succeeded',
+        url: 'https://games.example.com/project-one/',
+        buildCommand: 'deploy',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        updatedAt: '2026-06-21T00:00:00.000Z',
+        deployedAt: '2026-06-21T00:00:00.000Z',
+    }),
 }));
 const status = {
     uptime: '1m',
@@ -151,6 +162,7 @@ vi.mock('../../services/api', () => ({
         startProjectPreview: apiMocks.startProjectPreview,
         restartProjectPreview: apiMocks.restartProjectPreview,
         stopProjectPreview: apiMocks.stopProjectPreview,
+        deployProject: apiMocks.deployProject,
     },
 }));
 
@@ -521,12 +533,14 @@ describe('DashboardView runtime loading', () => {
         await screen.findByTestId('beegame-live-preview-frame');
         const refreshButton = screen.getByRole('button', { name: '刷新预览' });
         const stopButton = screen.getByRole('button', { name: '停止预览' });
-        const openButton = screen.getByRole('button', { name: '在新窗口打开' });
+        const deployButton = screen.getByRole('button', { name: '发布游戏' });
+        const openButton = screen.getByRole('button', { name: '打开线上版本' });
         const controls = refreshButton.parentElement?.parentElement;
 
         expect(controls?.children[0]).toContainElement(refreshButton);
         expect(controls?.children[1]).toContainElement(stopButton);
-        expect(controls?.children[2]).toContainElement(openButton);
+        expect(controls?.children[2]).toContainElement(deployButton);
+        expect(controls?.children[3]).toContainElement(openButton);
 
         await user.hover(stopButton);
         expect(await screen.findByRole('tooltip')).toHaveTextContent('停止预览');
@@ -553,6 +567,50 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(apiMocks.startProjectPreview).toHaveBeenCalledWith('proj_1'));
         expect(stopTask).not.toHaveBeenCalled();
+    });
+
+    it('publishes the project and switches the preview to the deployed URL', async () => {
+        const user = userEvent.setup();
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await user.click(screen.getByRole('button', { name: '发布游戏' }));
+
+        await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
+        const frame = await screen.findByTestId('beegame-live-preview-frame');
+        expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/');
+    });
+
+    it('keeps deployment failures visible in the preview surface', async () => {
+        const user = userEvent.setup();
+        apiMocks.deployProject.mockResolvedValueOnce({
+            id: 'deploy_failed',
+            sessionId: 'beegame_proj_1',
+            workspacePath: '/tmp/Projects/project-one',
+            status: 'failed',
+            message: 'Build command failed with exit code 1',
+            buildLog: "src/components/Canvas.tsx(149,14): error TS18048: 'lastPoint' is possibly 'undefined'.",
+            buildCommand: 'deploy',
+            createdAt: '2026-06-21T00:00:00.000Z',
+            updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await user.click(screen.getByRole('button', { name: '发布游戏' }));
+
+        await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
+        await waitFor(() => expect(screen.getAllByText('预览不可用').length).toBeGreaterThan(0));
+        expect(screen.getByText(/lastPoint/)).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });
 
     it('shows the workspace folder name as the dashboard project title without renaming the project', async () => {
@@ -597,7 +655,14 @@ describe('DashboardView runtime loading', () => {
             });
         });
 
-        expect(await screen.findByRole('dialog')).toHaveTextContent('修改 / 继续任务');
+        const dialog = await screen.findByRole('dialog');
+        expect(dialog).toHaveTextContent('确认本次请求');
+        expect(dialog).not.toHaveTextContent('修改 / 调试');
+        expect(dialog).not.toHaveTextContent('修改、调试或继续完善已有游戏项目。');
+        expect(dialog).not.toHaveTextContent('修改 / 继续任务');
+        expect(dialog).not.toHaveTextContent('User follow-up turn');
+        expect(dialog).toHaveClass('input-surface');
+        expect(dialog).toHaveClass('rounded-[30px]');
         expect(screen.getByText('当前余额')).toBeInTheDocument();
         expect(screen.getByText('300 credits')).toBeInTheDocument();
         expect(screen.getByText('预扣')).toBeInTheDocument();

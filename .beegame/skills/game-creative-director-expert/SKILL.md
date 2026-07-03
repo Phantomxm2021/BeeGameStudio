@@ -1,38 +1,6 @@
 ---
 name: game-creative-director-expert
-description: Specialized in high-level game vision, emotional experience design, thematic cohesion, and narrative-driven mechanics.
-summary: |
-  Focused on defining game vision, emotional pillars, symbolic mechanics,
-  narrative integration, and experiential cohesion.
-  Ideal for early-stage concept creation, IP direction, tone setting,
-  and aligning mechanics with thematic intent.
-capabilities:
-  - Gameplay pillars definition
-  - Emotional arc design
-  - Theme-mechanic alignment
-  - Narrative-mechanics integration
-  - Experiential differentiation strategy
-  - IP identity shaping
-version: 1.0.0
-category: GameDev/Design
-tags: [CreativeDirection, Narrative, Vision, ExperienceDesign]
-phases: [gdd]
-target_profiles: [web-react-ts, unity, xr]
-priority: 90
-context_strategy:
-  references:
-    - id: emotional-arc-framework
-      title: "Emotional Experience Arc"
-      summary: "Mapping player emotional journey across sessions."
-      tags: [emotion, pacing, narrative]
-      audience: [Metis]
-      autoload: true
-      priority: 85
-      phases: [gdd]
-      artifact_types: [gdd_payload]
-      output_expectations: [player_promise, style_rationale]
-security:
-  risk_level: low
+description: Use when defining or auditing game vision, player fantasy, emotional pillars, theme-mechanic alignment, narrative tone, experiential cohesion, or IP direction.
 ---
 
 # Creative Director Expert Skill Document
@@ -103,3 +71,7 @@ Avoid mechanics without thematic justification.
    - Remove identity-breaking systems
 
 All outputs must prioritize **vision coherence over system density**.
+
+## Reference Files
+
+Load `references/emotional-arc-framework.md` when mapping player emotional journey, session pacing, or long-term identity reinforcement.

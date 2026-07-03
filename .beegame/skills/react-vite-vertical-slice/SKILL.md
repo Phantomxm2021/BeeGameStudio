@@ -1,9 +1,6 @@
 ---
 name: react-vite-vertical-slice
-description: Use when implementing a web React TypeScript game or interactive app with Vite, especially when token use grows from scaffolding generators, many TSX files, or repeated build-fix loops.
-audience: [deepagents-code]
-allowed_contexts: [coding_agent, implementation]
-target_profiles: [web-react-ts]
+description: Use when implementing a React TypeScript interactive app with Vite, especially when scaffolding, TSX growth, dependency setup, or repeated build-fix loops risk losing a working vertical slice.
 ---
 
 # React Vite Vertical Slice

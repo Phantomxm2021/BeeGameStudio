@@ -85,6 +85,7 @@ import { sanitizePath } from './path.js'
 import {
   extractJsonStringField,
   extractLastJsonStringField,
+  getProjectStorageKey,
   LITE_READ_BUF_SIZE,
   readHeadAndTail,
   readTranscriptForLoad,
@@ -435,7 +436,7 @@ export function isCustomTitleEnabled(): boolean {
 // stable for a given input. Worktree switches just change the key — no
 // cache clear needed.
 export const getProjectDir = memoize((projectDir: string): string => {
-  return join(getProjectsDir(), sanitizePath(projectDir))
+  return join(getProjectsDir(), getProjectStorageKey(projectDir))
 })
 
 let project: Project | null = null

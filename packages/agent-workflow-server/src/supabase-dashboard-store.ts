@@ -32,7 +32,10 @@ import type {
   AppendAuditEventInput,
   BeeGameAuditEvent,
 } from './audit-events-store'
-import type { BeeGameAssetManifest } from './beegame/asset-contracts'
+import {
+  normalizeBeeGameAssetManifest,
+  type BeeGameAssetManifest,
+} from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import type {
   WebFetchAdapter,
@@ -1345,16 +1348,10 @@ function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {
 }
 
 function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
-  if (!isObject(value)) return { version: 1, slots: [] }
-  const rawSlots = Array.isArray(value.slots) ? value.slots : []
-  return {
-    version: Number.isInteger(value.version) ? Number(value.version) : 1,
-    ...(isObject(value.project_target)
-      ? { project_target: value.project_target as BeeGameAssetManifest['project_target'] }
-      : {}),
-    slots: rawSlots
-      .filter(isObject)
-      .map(slot => slot as BeeGameAssetManifest['slots'][number]),
+  try {
+    return normalizeBeeGameAssetManifest(value)
+  } catch {
+    return { version: 1, slots: [] }
   }
 }
 

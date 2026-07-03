@@ -42,9 +42,18 @@ export function UserAccountMenu({
     onSignOut,
 }: UserAccountMenuProps) {
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [avatarFailed, setAvatarFailed] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const userLabel = currentUserDisplayName || currentUserEmail || (currentUserId ? fallbackUserLabel : undefined);
     const userInitial = getUserInitial(userLabel);
+
+    useEffect(() => {
+        setAvatarFailed(false);
+    }, [currentUserAvatarUrl]);
+
+    useEffect(() => {
+        if (isUserMenuOpen) setAvatarFailed(false);
+    }, [isUserMenuOpen]);
 
     useEffect(() => {
         if (!isUserMenuOpen) return undefined;
@@ -90,11 +99,14 @@ export function UserAccountMenu({
                 className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/25 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-[border-color,background-color,transform] duration-150 hover:scale-105 hover:border-amber-300/50 hover:bg-white/5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${isActive || isUserMenuOpen ? 'border-amber-300/50 bg-white/5' : ''}`}
             >
                 {currentUserId ? (
-                    currentUserAvatarUrl ? (
+                    currentUserAvatarUrl && !avatarFailed ? (
                         <img
                             src={currentUserAvatarUrl}
                             alt=""
+                            referrerPolicy="no-referrer"
                             className="absolute inset-0 h-full w-full rounded-full object-cover"
+                            onLoad={() => setAvatarFailed(false)}
+                            onError={() => setAvatarFailed(true)}
                         />
                     ) : (
                         <span className="type-footnote flex h-8 w-8 items-center justify-center rounded-full text-white">

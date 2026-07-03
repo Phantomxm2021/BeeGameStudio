@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: Use when executing implementation plans with independent tasks in the current session
+description: Use when executing an implementation plan with independent tasks that can be assigned, reviewed, and integrated within the current session.
 ---
 
 # Subagent-Driven Development

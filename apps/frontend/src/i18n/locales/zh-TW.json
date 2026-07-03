@@ -105,6 +105,7 @@
           "fullBuild": "確認構建"
         },
         "description": "本次{{taskName}}將預扣 {{reservedCredits}} credits。任務結束後會按實際 token 和工具消耗結算，未使用部分自動退回。",
+        "refundRule": "任務結束後按實際 token 和工具消耗結算，未使用部分自動退回。",
         "balance": "目前餘額",
         "reserved": "本次預扣",
         "kind": {
@@ -421,6 +422,7 @@
     "account": "帳號"
   },
   "beegame": {
+    "assistantName": "BeeGame",
     "previewTitle": "預覽",
     "collabFlow": "協作流",
     "deliverables": "交付物",
@@ -465,6 +467,17 @@
     "revisionRequired": "需要修訂",
     "clarificationDescription": "回答澄清問題，或選擇如何繼續目前簡報。",
     "aiProcessing": "AI 正在處理...",
+    "innerThought": "內部思考",
+    "contextUpdate": "上下文更新",
+    "useContext": "使用上下文",
+    "lastCheckFailed": "上次檢查失敗",
+    "continueFixing": "繼續修復",
+    "continueFromLastFailedCheckPrompt": "繼續從上一次失敗的檢查處修復。請修復回報的問題，重新執行相關檢查，並持續處理直到專案可以執行。",
+    "evidenceForReview": "驗收證據",
+    "systemError": "系統錯誤",
+    "approvalRequest": "核准請求",
+    "revisionRequest": "修訂請求",
+    "thinking": "思考",
     "settingsGeneral": "通用",
     "settingsModel": "模型",
     "closeSettings": "關閉設定",

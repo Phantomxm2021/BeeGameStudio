@@ -4,7 +4,6 @@ import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
-import { useSystemStore } from '../../../store/systemStore';
 import { getCreditSummary, type BeeGameCreditSummary } from '../../../services/creditsApi';
 
 interface ProjectHistoryModalProps {
@@ -26,7 +25,6 @@ const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
     const { projects, deleteProject } = useProjectStore();
-    const canDeleteProject = useSystemStore(state => state.hasPermission('project.delete'));
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -137,9 +135,10 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
 
                         <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-premium">
                             {projects.length === 0 ? (
-                                <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] text-zinc-400">
+                                <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-8 text-center text-zinc-400">
                                     <Clock className="h-8 w-8 stroke-1" />
-                                    <span className="type-caption-1">{text.noProjectsFound}</span>
+                                    <span className="type-callout text-zinc-200">{text.noProjectsForAccount}</span>
+                                    <span className="type-footnote max-w-sm text-zinc-500">{text.localProjectsNeedMigration}</span>
                                 </div>
                             ) : (
                                 projects.map((project) => (
@@ -196,19 +195,17 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                     data-surface="frosted-glass"
                                     className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
                                 >
-                                    {canDeleteProject ? (
-                                        <button
-                                            type="button"
-                                            onClick={(event) => handleDelete(event, activeProject.id)}
-                                            className={`type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-colors ${confirmingDeleteId === activeProject.id
-                                                ? 'bg-rose-500 text-white'
-                                                : 'text-zinc-300 hover:bg-rose-500/10 hover:text-rose-200'
-                                                }`}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                            {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
-                                        </button>
-                                    ) : null}
+                                    <button
+                                        type="button"
+                                        onClick={(event) => handleDelete(event, activeProject.id)}
+                                        className={`type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-colors ${confirmingDeleteId === activeProject.id
+                                            ? 'bg-rose-500 text-white'
+                                            : 'text-zinc-300 hover:bg-rose-500/10 hover:text-rose-200'
+                                            }`}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        {confirmingDeleteId === activeProject.id ? text.confirmDelete : text.deleteProject}
+                                    </button>
                                 </div>,
                             document.body,
                         )

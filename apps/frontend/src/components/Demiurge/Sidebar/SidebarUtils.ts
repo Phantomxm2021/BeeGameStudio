@@ -9,17 +9,17 @@ import type {
 } from '../../../viewModels/displayModels';
 
 export const TASK_STATUS_COLORS: Record<string, string> = {
-    'released': 'bg-emerald-500 text-white font-black',
-    'in_progress': 'bg-blue-600 text-white font-black shadow-[0_4px_12px_rgba(37,99,235,0.3)] animate-pulse',
-    'in_review': 'bg-amber-500 text-white font-black',
-    'verified': 'bg-emerald-600 text-white font-black',
-    'failed': 'bg-rose-600 text-white font-black',
-    'pending': 'bg-zinc-400 text-white font-black dark:bg-zinc-600',
-    'to_do': 'bg-zinc-400 text-white font-black dark:bg-zinc-600',
-    'blocked': 'bg-red-600 text-white font-black',
-    'invalidated': 'bg-orange-600 text-white font-black',
-    'changes_requested': 'bg-fuchsia-600 text-white font-black',
-    'paused': 'bg-violet-600 text-white font-black',
+    'released': 'bg-emerald-500 text-white',
+    'in_progress': 'bg-blue-600 text-white shadow-[0_4px_12px_rgba(37,99,235,0.3)] animate-pulse',
+    'in_review': 'bg-amber-500 text-white',
+    'verified': 'bg-emerald-600 text-white',
+    'failed': 'bg-rose-600 text-white',
+    'pending': 'bg-zinc-400 text-white dark:bg-zinc-600',
+    'to_do': 'bg-zinc-400 text-white dark:bg-zinc-600',
+    'blocked': 'bg-red-600 text-white',
+    'invalidated': 'bg-orange-600 text-white',
+    'changes_requested': 'bg-fuchsia-600 text-white',
+    'paused': 'bg-violet-600 text-white',
 };
 
 export const getCanonicalTaskStatus = (task: Pick<ProjectTask, 'task_status' | 'lifecycle_status'>): string => {

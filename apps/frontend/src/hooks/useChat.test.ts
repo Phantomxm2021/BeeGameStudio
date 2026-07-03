@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let latestWebSocketOptions: { onMessage?: (message: any) => void } = {};
@@ -29,6 +29,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     loadPhases: vi.fn().mockResolvedValue(undefined),
     loadAgents: vi.fn().mockResolvedValue(undefined),
     loadTokenUsage: vi.fn().mockResolvedValue(undefined),
+    loadCurrentUser: vi.fn().mockResolvedValue(null),
     setAgentStatus: vi.fn(),
     refreshAgents: vi.fn().mockResolvedValue(undefined),
     setIsSyncing: vi.fn(),
@@ -86,6 +87,19 @@ vi.mock('../services/api', () => ({
   },
   normalizeApprovePlanPayload: (payload: unknown) => payload,
   normalizeReviewBindingPayload: (payload: unknown) => payload,
+}));
+
+vi.mock('../services/beeGameAdapter', () => ({
+  isBeeGameAdapterEnabled: () => true,
+}));
+
+vi.mock('../services/creditsApi', () => ({
+  getCreditQuote: vi.fn().mockResolvedValue({
+    taskType: 'edit_turn',
+    reservedCredits: 1,
+    balanceCredits: 300,
+    canStart: true,
+  }),
 }));
 
 import { api } from '../services/api';
@@ -185,6 +199,27 @@ describe('useChat clarification gate handling', () => {
       documentTitle: 'GDD.md',
       taskKind: 'artifact_created',
     }));
+  });
+
+  it('refreshes current user credits when credit events arrive', async () => {
+    const onTaskEvent = vi.fn();
+    renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'credit_update',
+        task_id: 'task_1',
+        project_id: 'proj_1',
+        credit_event: 'credit.refunded',
+        balance_credits: 294,
+        credits: 50,
+      });
+    });
+
+    await waitFor(() => {
+      expect(systemStoreState.loadCurrentUser).toHaveBeenCalled();
+    });
+    expect(onTaskEvent).toHaveBeenCalledWith('credit_update', expect.any(Object));
   });
 
   it('updates local token usage and refreshes project usage after usage messages', async () => {
@@ -345,9 +380,11 @@ describe('useChat clarification gate handling', () => {
       content: 'continue from paused state',
       project_id: 'proj_1',
     }));
-    expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
-    expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
-    expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+    await waitFor(() => {
+      expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
+      expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+      expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+    });
   });
 
   it('refreshes REST state after continueTask even when WebSocket is already connected', async () => {
@@ -367,9 +404,11 @@ describe('useChat clarification gate handling', () => {
     expect(api.continueTask).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'proj_1',
     }));
-    expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
-    expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
-    expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+    await waitFor(() => {
+      expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
+      expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+      expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
+    });
   });
 
   it('removes the pending review immediately after a successful approve submission', async () => {

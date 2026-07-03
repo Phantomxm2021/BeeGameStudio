@@ -131,9 +131,37 @@ BEEGAME_MIGRATION_PASSWORD=... \
 bun scripts/migrate-beegame-local-to-supabase.ts
 ```
 
-When the dry-run summary shows the expected model config count, apply it:
+For OAuth-only accounts without a password, use the signed-in browser session
+token instead:
 
 ```bash
+BEEGAME_MIGRATION_DATA_DIR="$PWD/Projects" \
+BEEGAME_SUPABASE_ACCESS_TOKEN="eyJ...eyJ...signature" \
+BEEGAME_MIGRATION_OWNER_ID="<supabase-user-id>" \
+bun scripts/migrate-beegame-local-to-supabase.ts
+```
+
+`BEEGAME_SUPABASE_ACCESS_TOKEN` must be the Supabase `access_token` JWT, not the
+refresh token, provider token, or OAuth code. The migration CLI also accepts the
+copied Supabase localStorage JSON and will extract `access_token` or
+`currentSession.access_token`.
+
+If existing projects are still visible on disk under this worktree's `Projects`
+directory but the History modal is empty after signing in, migrate the local
+project index from that exact directory:
+
+```bash
+BEEGAME_MIGRATION_DATA_DIR="$PWD/Projects" \
+BEEGAME_MIGRATION_EMAIL=owner@example.com \
+BEEGAME_MIGRATION_PASSWORD=... \
+bun scripts/migrate-beegame-local-to-supabase.ts
+```
+
+When the dry-run summary shows the expected project and configuration counts,
+apply it:
+
+```bash
+BEEGAME_MIGRATION_DATA_DIR="$PWD/Projects" \
 BEEGAME_MIGRATION_EMAIL=owner@example.com \
 BEEGAME_MIGRATION_PASSWORD=... \
 bun scripts/migrate-beegame-local-to-supabase.ts --apply
@@ -141,6 +169,15 @@ bun scripts/migrate-beegame-local-to-supabase.ts --apply
 
 The migration uses the signed-in owner user by default. Use a platform owner
 account, not a regular smoke/developer account.
+
+By default, the migration applies project metadata and user-owned MCP server
+records only. It does not write platform-level model, runtime, or web search
+settings, because Supabase RLS allows only platform owners to manage those
+tables. To migrate platform settings, sign in as a platform owner and add:
+
+```bash
+--include-platform-settings
+```
 
 ## Smoke Check
 

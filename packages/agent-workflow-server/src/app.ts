@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
@@ -10,6 +11,7 @@ import {
   BeeGameSessionManager,
   deleteSessionArtifactsFromTranscript,
   readSessionTranscriptFromDisk,
+  type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
 import {
@@ -19,6 +21,10 @@ import {
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
+import {
+  BeeGameDeploymentManager,
+  type BeeGameDeploymentRunner,
+} from './beegame/deployment-manager'
 import {
   readBeeGameAssetManifest,
   uploadBeeGameAsset,
@@ -85,6 +91,13 @@ import {
 
 type JsonObject = Record<string, unknown>
 
+type BeeGameArtifactIndexItem = {
+  path: string
+  name: string
+  artifact_type: string
+  created_at: string
+}
+
 type BeeGameIntakeOption = {
   id: string
   title: string
@@ -141,6 +154,7 @@ export type AgentWorkflowAppOptions = {
   previewRunner?: BeeGamePreviewRunner
   previewPortAllocator?: BeeGamePreviewPortAllocator
   previewReadinessProbe?: BeeGamePreviewReadinessProbe
+  deploymentRunner?: BeeGameDeploymentRunner
   modelConfigStore?: ModelConfigStoreOptions | false
   dashboardDataRoot?: string
   defaultWorkspacePath?: string
@@ -198,6 +212,20 @@ export function createAgentWorkflowApp(
     options.previewPortAllocator,
     options.previewReadinessProbe,
   )
+  const beeGameDeployments = new BeeGameDeploymentManager({
+    dataRoot: dashboardDataRoot,
+    runner: options.deploymentRunner,
+    publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
+  })
+  app.get('/deployments/*', async c => {
+    const deployedFile = await beeGameDeployments.readPublicFile(c.req.path)
+    if (!deployedFile) {
+      return c.text('Not found', 404)
+    }
+    return new Response(deployedFile.body, {
+      headers: { 'content-type': deployedFile.contentType },
+    })
+  })
   app.use('/api/*', cors())
   app.use('/api/*', async (c, next) => {
     if (options.currentUser) {
@@ -697,7 +725,7 @@ export function createAgentWorkflowApp(
 
   app.delete('/api/projects/:id', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.delete')
+    const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const deleted = await dashboardRepository.deleteProject(
       c.req.raw,
@@ -705,12 +733,14 @@ export function createAgentWorkflowApp(
       c.req.param('id'),
     )
     if (deleted) {
-      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: 'project.deleted',
-        targetType: 'project',
-        targetId: c.req.param('id'),
-      })
+      await appendAuditEventBestEffort('project.deleted', () =>
+        dashboardRepository.appendAuditEvent(c.req.raw, user, {
+          actorId: user.id,
+          action: 'project.deleted',
+          targetType: 'project',
+          targetId: c.req.param('id'),
+        }),
+      )
     }
     return c.json({ deleted })
   })
@@ -795,6 +825,7 @@ export function createAgentWorkflowApp(
     '/api/beegame-sessions',
     beeGameSessions,
     beeGamePreviews,
+    beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
       getCurrentUser,
@@ -843,6 +874,16 @@ export function createAgentWorkflowApp(
         ),
       modelConfigExists: (request, user, id) =>
         dashboardRepository.modelConfigExists(request, user, id),
+      getProjectWorkspacePath: async (request, user, projectId) => {
+        try {
+          const projects = await dashboardRepository.listProjects(request, user)
+          return projects.find(project => project.id === projectId)?.root_path
+        } catch {
+          return undefined
+        }
+      },
+      ownsProjectWorkspacePath: (request, user, workspacePath) =>
+        dashboardRepository.ownsProjectWorkspacePath(request, user, workspacePath),
     },
   )
   registerBeeGameSessionRoutes(
@@ -850,6 +891,7 @@ export function createAgentWorkflowApp(
     '/api/console/sessions',
     beeGameSessions,
     beeGamePreviews,
+    undefined,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
       getCurrentUser,
@@ -898,10 +940,118 @@ export function createAgentWorkflowApp(
         ),
       modelConfigExists: (request, user, id) =>
         dashboardRepository.modelConfigExists(request, user, id),
+      getProjectWorkspacePath: async (request, user, projectId) => {
+        try {
+          const projects = await dashboardRepository.listProjects(request, user)
+          return projects.find(project => project.id === projectId)?.root_path
+        } catch {
+          return undefined
+        }
+      },
+      ownsProjectWorkspacePath: (request, user, workspacePath) =>
+        dashboardRepository.ownsProjectWorkspacePath(request, user, workspacePath),
     },
   )
 
   return app
+}
+
+async function discoverBeeGameProjectArtifacts(
+  workspacePath: string,
+): Promise<BeeGameArtifactIndexItem[]> {
+  const root = resolve(workspacePath)
+  const artifacts: BeeGameArtifactIndexItem[] = []
+  await collectArtifactsFromDirectory(root, 'docs', 'Document', artifacts)
+  await collectArtifactsFromDirectory(root, 'transcripts', 'Transcript', artifacts)
+  await collectArtifactFile(
+    root,
+    'assets/asset-manifest.json',
+    'Asset Manifest',
+    artifacts,
+  )
+  return artifacts.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+async function collectArtifactsFromDirectory(
+  workspaceRoot: string,
+  relativeDirectory: string,
+  artifactType: string,
+  artifacts: BeeGameArtifactIndexItem[],
+): Promise<void> {
+  const directory = resolve(workspaceRoot, relativeDirectory)
+  if (!isPathInsideWorkspace(workspaceRoot, directory)) return
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const relativePath = `${relativeDirectory}/${entry.name}`
+    if (entry.isDirectory()) {
+      await collectArtifactsFromDirectory(
+        workspaceRoot,
+        relativePath,
+        artifactType,
+        artifacts,
+      )
+      continue
+    }
+    if (!entry.isFile() || !isDiscoverableArtifactPath(relativePath)) continue
+    await collectArtifactFile(workspaceRoot, relativePath, artifactType, artifacts)
+  }
+}
+
+async function collectArtifactFile(
+  workspaceRoot: string,
+  relativePath: string,
+  artifactType: string,
+  artifacts: BeeGameArtifactIndexItem[],
+): Promise<void> {
+  const targetPath = resolve(workspaceRoot, relativePath)
+  if (!isPathInsideWorkspace(workspaceRoot, targetPath)) return
+  try {
+    const fileStats = await stat(targetPath)
+    if (!fileStats.isFile()) return
+    artifacts.push({
+      path: relativePath,
+      name: relativePath.split('/').filter(Boolean).at(-1) || relativePath,
+      artifact_type: artifactType,
+      created_at: fileStats.mtime.toISOString(),
+    })
+  } catch {
+    return
+  }
+}
+
+function isDiscoverableArtifactPath(relativePath: string): boolean {
+  const normalized = relativePath.split('\\').join('/')
+  if (normalized.startsWith('docs/')) return /\.md$/i.test(normalized)
+  if (normalized.startsWith('transcripts/')) return /\.jsonl$/i.test(normalized)
+  return normalized === 'assets/asset-manifest.json'
+}
+
+async function readBeeGameProjectArtifact(
+  workspacePath: string,
+  path: string,
+): Promise<{ path: string; content: string }> {
+  const workspaceRoot = resolve(workspacePath)
+  const targetPath = isAbsolute(path)
+    ? resolve(path)
+    : resolve(workspaceRoot, path)
+  if (!isPathInsideWorkspace(workspaceRoot, targetPath)) {
+    throw new Error('Artifact path must stay inside the session workspace')
+  }
+  return {
+    path: relative(workspaceRoot, targetPath).split('\\').join('/'),
+    content: await readFile(targetPath, 'utf8'),
+  }
+}
+
+function isPathInsideWorkspace(workspaceRoot: string, targetPath: string): boolean {
+  const relativePath = relative(resolve(workspaceRoot), resolve(targetPath))
+  return relativePath === '' ||
+    (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
 function requirePermission(
@@ -929,16 +1079,29 @@ function requireBeeGameSessionOwner(
 async function resolveNewBeeGameSessionWorkspacePath(
   body: JsonObject,
   user: BeeGameUserContext,
-  defaultWorkspacePath?: string,
+  request: Request,
+  options: {
+    defaultWorkspacePath?: string
+    getProjectWorkspacePath?: (
+      request: Request,
+      user: BeeGameUserContext,
+      projectId: string,
+    ) => Promise<string | undefined>
+    ownsProjectWorkspacePath?: (
+      request: Request,
+      user: BeeGameUserContext,
+      workspacePath: string,
+    ) => Promise<boolean>
+  },
 ): Promise<string> {
   if (canUseClientWorkspacePath(user) && typeof body.workspacePath === 'string') {
     const workspacePath = await resolveSessionWorkspacePath(
       body.workspacePath,
-      defaultWorkspacePath,
+      options.defaultWorkspacePath,
     )
     await assertSessionWorkspaceIsProjectDirectory(
       workspacePath,
-      defaultWorkspacePath,
+      options.defaultWorkspacePath,
     )
     return workspacePath
   }
@@ -948,8 +1111,32 @@ async function resolveNewBeeGameSessionWorkspacePath(
   const projectId = typeof body.projectId === 'string'
     ? body.projectId
     : undefined
+  if (projectId && options.getProjectWorkspacePath) {
+    const projectWorkspacePath = await options.getProjectWorkspacePath(
+      request,
+      user,
+      projectId,
+    )
+    if (projectWorkspacePath) {
+      const workspacePath = await resolveSessionWorkspacePath(
+        projectWorkspacePath,
+        options.defaultWorkspacePath,
+      )
+      await assertSessionWorkspaceIsProjectDirectory(
+        workspacePath,
+        options.defaultWorkspacePath,
+      )
+      if (
+        options.ownsProjectWorkspacePath &&
+        !(await options.ownsProjectWorkspacePath(request, user, workspacePath))
+      ) {
+        throw new Error('Project workspace does not belong to the current user')
+      }
+      return workspacePath
+    }
+  }
   return createManagedProjectWorkspacePath({
-    defaultWorkspacePath,
+    defaultWorkspacePath: options.defaultWorkspacePath,
     userId: user.id,
     ...(projectName ? { projectName } : {}),
     ...(projectId ? { projectId } : {}),
@@ -1448,6 +1635,7 @@ function registerBeeGameSessionRoutes(
   basePath: string,
   beeGameSessions: BeeGameSessionManager,
   beeGamePreviews: BeeGamePreviewManager,
+  beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
     getCurrentUser: (request?: Request) => BeeGameUserContext
@@ -1489,6 +1677,16 @@ function registerBeeGameSessionRoutes(
       user: BeeGameUserContext,
       id: string,
     ) => Promise<boolean>
+    getProjectWorkspacePath?: (
+      request: Request,
+      user: BeeGameUserContext,
+      projectId: string,
+    ) => Promise<string | undefined>
+    ownsProjectWorkspacePath: (
+      request: Request,
+      user: BeeGameUserContext,
+      workspacePath: string,
+    ) => Promise<boolean>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -1515,6 +1713,9 @@ function registerBeeGameSessionRoutes(
     )
     const user = options.getCurrentUser(request)
     if (user.id === DEFAULT_LOCAL_USER_ID) return resolvedWorkspace
+    if (await options.ownsProjectWorkspacePath(request, user, resolvedWorkspace)) {
+      return resolvedWorkspace
+    }
     const userDataRoot = resolve(options.getUserDataRoot(request))
     const relativeToUserRoot = relative(userDataRoot, resolvedWorkspace)
     if (relativeToUserRoot.startsWith('..') || isAbsolute(relativeToUserRoot)) {
@@ -1538,7 +1739,12 @@ function registerBeeGameSessionRoutes(
       const workspacePath = await resolveNewBeeGameSessionWorkspacePath(
         body,
         currentUser,
-        defaultWorkspacePath,
+        c.req.raw,
+        {
+          defaultWorkspacePath,
+          getProjectWorkspacePath: options.getProjectWorkspacePath,
+          ownsProjectWorkspacePath: options.ownsProjectWorkspacePath,
+        },
       )
       const modelConfigId = await optionalOwnedModelConfigId(
         c.req.raw,
@@ -1557,6 +1763,9 @@ function registerBeeGameSessionRoutes(
           ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
             ? { transcriptSessionId: body.transcriptSessionId }
             : {}),
+          ...(isBeeGameSessionLanguage(body.language)
+            ? { language: body.language }
+            : {}),
           userId: currentUser.id,
           ...(getBearerToken(c.req.raw)
             ? { authToken: getBearerToken(c.req.raw) }
@@ -1573,35 +1782,53 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.get(`${basePath}/:id`, c => {
+  app.get(`${basePath}/:id`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     const session = beeGameSessions.get(c.req.param('id'))
     return session
       ? c.json(session)
       : c.json({ error: 'Session not found' }, 404)
   })
 
-  app.get(`${basePath}/:id/events`, c => {
+  app.get(`${basePath}/:id/events`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       return c.json(beeGameSessions.events(c.req.param('id'), after))
     } catch (err) {
+      const workspacePath = getWorkspacePathHint(
+        c.req.query('workspacePath'),
+        {
+          workspacePath: c.req.header('x-beegame-workspace-path'),
+        },
+      )
+      if (toErrorMessage(err) === 'Session not found' && workspacePath) {
+        return readTranscriptFromWorkspace(
+          c.req.param('id'),
+          workspacePath,
+          defaultWorkspacePath,
+          getDashboardDataRoot(defaultWorkspacePath),
+          Number.parseInt(c.req.query('after') || '0', 10),
+        )
+      }
       return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
 
-  app.get(`${basePath}/:id/runtime-snapshot`, c => {
+  app.get(`${basePath}/:id/runtime-snapshot`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       return c.json(
         beeGameSessions.runtimeSnapshot(
@@ -1613,11 +1840,12 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.get(`${basePath}/:id/transcript`, c => {
+  app.get(`${basePath}/:id/transcript`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
     } catch (err) {
@@ -1678,12 +1906,47 @@ function registerBeeGameSessionRoutes(
       return c.json(await beeGameSessions.readArtifact(c.req.param('id'), path))
     } catch (err) {
       const message = toErrorMessage(err)
+      if (message === 'Session not found' && c.req.query('workspacePath')) {
+        try {
+          const workspacePath = await getSessionWorkspacePath(
+            c.req.raw,
+            c.req.param('id'),
+            c.req.query('workspacePath'),
+          )
+          return c.json(await readBeeGameProjectArtifact(workspacePath, path))
+        } catch (fallbackErr) {
+          const fallbackMessage = toErrorMessage(fallbackErr)
+          return c.json(
+            { error: fallbackMessage },
+            fallbackMessage === 'Artifact path must stay inside the session workspace'
+              ? 400
+              : 404,
+          )
+        }
+      }
       return c.json(
         { error: message },
         message === 'Artifact path must stay inside the session workspace'
           ? 400
           : 404,
       )
+    }
+  })
+
+  app.get(`${basePath}/:id/artifact-index`, async c => {
+    const forbidden = check(c.req.raw, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
+      return c.json(await discoverBeeGameProjectArtifacts(workspacePath))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
 
@@ -1699,11 +1962,19 @@ function registerBeeGameSessionRoutes(
         c.req.query('workspacePath'),
       )
       const manifest = await readBeeGameAssetManifest(workspacePath)
-      await options.persistAssetManifest(
-        c.req.raw,
-        beeGameSessions.metadata(c.req.param('id')),
-        manifest,
-      )
+      if (manifest.slots.length) {
+        await options.persistAssetManifest(
+          c.req.raw,
+          beeGameSessions.metadata(c.req.param('id')),
+          manifest,
+        )
+      } else {
+        const storedManifest = await options.loadAssetManifest(
+          c.req.raw,
+          beeGameSessions.metadata(c.req.param('id')),
+        )
+        if (storedManifest?.slots.length) return c.json(storedManifest)
+      }
       return c.json(manifest)
     } catch (err) {
       const manifest = await options.loadAssetManifest(
@@ -1879,6 +2150,40 @@ function registerBeeGameSessionRoutes(
     }
   })
 
+  if (beeGameDeployments) {
+    app.get(`${basePath}/:id/deployments`, async c => {
+      const forbidden = check(c.req.raw, 'project.read')
+      if (forbidden) return c.json(forbidden, 403)
+      const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+      if (sessionForbidden) return c.json(sessionForbidden, 404)
+      return c.json(await beeGameDeployments.list(c.req.param('id')))
+    })
+
+    app.post(`${basePath}/:id/deployments`, async c => {
+      const forbidden = check(c.req.raw, 'deployment.manage')
+      if (forbidden) return c.json(forbidden, 403)
+      const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+      if (sessionForbidden) return c.json(sessionForbidden, 404)
+      const body = await readOptionalJson(c.req.raw)
+      try {
+        const workspacePath = await getSessionWorkspacePath(
+          c.req.raw,
+          c.req.param('id'),
+          getWorkspacePathHint(c.req.query('workspacePath'), body),
+        )
+        const metadata = beeGameSessions.metadata(c.req.param('id'))
+        const deployment = await beeGameDeployments.deploy({
+          sessionId: c.req.param('id'),
+          ...(metadata?.projectId ? { projectId: metadata.projectId } : {}),
+          workspacePath,
+        })
+        return c.json(deployment)
+      } catch (err) {
+        return c.json({ error: toErrorMessage(err) }, 400)
+      }
+    })
+  }
+
   app.post(`${basePath}/:id/input`, async c => {
     const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
@@ -1897,11 +2202,20 @@ function registerBeeGameSessionRoutes(
       const taskType = typeof body.taskType === 'string'
         ? getCreditTaskPolicy(body.taskType).taskType
         : undefined
+      const clientMessageId = typeof body.clientMessageId === 'string'
+        ? body.clientMessageId
+        : typeof body.client_message_id === 'string'
+          ? body.client_message_id
+          : undefined
       return c.json(
         await beeGameSessions.sendWithDisplay(c.req.param('id'), String(body.text), {
           displayText,
           displayKind,
           taskType,
+          clientMessageId,
+          ...(isBeeGameSessionLanguage(body.language)
+            ? { language: body.language }
+            : {}),
           ...(getBearerToken(c.req.raw)
             ? { authToken: getBearerToken(c.req.raw) }
             : {}),
@@ -1934,17 +2248,21 @@ function registerBeeGameSessionRoutes(
             : {}),
         },
       )
-      await options.appendAuditEvent(c.req.raw, {
-        actorId: options.getCurrentUser(c.req.raw).id,
-        action: 'agent_permission.resolved',
-        targetType: 'beegame_session',
-        targetId: c.req.param('id'),
-        metadata: {
-          toolUseID: c.req.param('toolUseID'),
-          decision,
-          remember: body.remember === true,
-        },
-      })
+      try {
+        await options.appendAuditEvent(c.req.raw, {
+          actorId: options.getCurrentUser(c.req.raw).id,
+          action: 'agent_permission.resolved',
+          targetType: 'beegame_session',
+          targetId: c.req.param('id'),
+          metadata: {
+            toolUseID: c.req.param('toolUseID'),
+            decision,
+            remember: body.remember === true,
+          },
+        })
+      } catch (auditErr) {
+        console.warn('[BeeGame] Failed to append permission audit event:', toErrorMessage(auditErr))
+      }
       return c.json(resolved)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 404)
@@ -1969,8 +2287,6 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id`, async c => {
-    const forbidden = check(c.req.raw, 'project.delete')
-    if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
@@ -1985,16 +2301,18 @@ function registerBeeGameSessionRoutes(
         sessionMetadata,
         c.req.param('id'),
       )
-      await options.appendAuditEvent(c.req.raw, {
-        actorId: options.getCurrentUser(c.req.raw).id,
-        action: 'beegame_session.deleted',
-        targetType: 'beegame_session',
-        targetId: c.req.param('id'),
-        metadata: {
-          deleteArtifacts,
-          deletedArtifactCount: result.deletedArtifactPaths.length,
-        },
-      })
+      await appendAuditEventBestEffort('beegame_session.deleted', () =>
+        options.appendAuditEvent(c.req.raw, {
+          actorId: options.getCurrentUser(c.req.raw).id,
+          action: 'beegame_session.deleted',
+          targetType: 'beegame_session',
+          targetId: c.req.param('id'),
+          metadata: {
+            deleteArtifacts,
+            deletedArtifactCount: result.deletedArtifactPaths.length,
+          },
+        }),
+      )
       return c.json(result)
     } catch (err) {
       if (deleteArtifacts && toErrorMessage(err) === 'Session not found') {
@@ -2020,17 +2338,19 @@ function registerBeeGameSessionRoutes(
             deleted: true,
             deletedArtifactPaths,
           }
-          await options.appendAuditEvent(c.req.raw, {
-            actorId: options.getCurrentUser(c.req.raw).id,
-            action: 'beegame_session.deleted',
-            targetType: 'beegame_session',
-            targetId: c.req.param('id'),
-            metadata: {
-              deleteArtifacts,
-              recoveredFromTranscript: true,
-              deletedArtifactCount: deletedArtifactPaths.length,
-            },
-          })
+          await appendAuditEventBestEffort('beegame_session.deleted', () =>
+            options.appendAuditEvent(c.req.raw, {
+              actorId: options.getCurrentUser(c.req.raw).id,
+              action: 'beegame_session.deleted',
+              targetType: 'beegame_session',
+              targetId: c.req.param('id'),
+              metadata: {
+                deleteArtifacts,
+                recoveredFromTranscript: true,
+                deletedArtifactCount: deletedArtifactPaths.length,
+              },
+            }),
+          )
           return c.json(result)
         } catch (fallbackErr) {
           return c.json({ error: toErrorMessage(fallbackErr) }, 404)
@@ -2046,18 +2366,20 @@ async function readTranscriptFromWorkspace(
   workspacePath: string,
   defaultWorkspacePath?: string,
   dashboardDataRoot?: string,
+  after = 0,
 ): Promise<Response> {
   try {
     const resolvedWorkspace = await resolveSessionWorkspacePath(
       workspacePath,
       defaultWorkspacePath,
     )
+    const events = await readSessionTranscriptFromDisk(
+      sessionId,
+      resolvedWorkspace,
+      dashboardDataRoot,
+    )
     return Response.json(
-      await readSessionTranscriptFromDisk(
-        sessionId,
-        resolvedWorkspace,
-        dashboardDataRoot,
-      ),
+      after > 0 ? events.filter(event => event.id > after) : events,
     )
   } catch (err) {
     return Response.json({ error: toErrorMessage(err) }, { status: 404 })
@@ -2209,6 +2531,37 @@ function isMcpServerTransportValue(
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isBeeGameSessionLanguage(
+  value: unknown,
+): value is BeeGameSessionLanguage {
+  return value === 'en' ||
+    value === 'zh' ||
+    value === 'zh-TW' ||
+    value === 'ja' ||
+    value === 'ko'
+}
+
+async function refreshSessionAuthTokenFromRequest(
+  request: Request,
+  sessions: BeeGameSessionManager,
+  sessionId: string,
+): Promise<void> {
+  const token = getBearerToken(request)
+  if (token) sessions.updateAuthToken(sessionId, token)
+  await sessions.retryPendingCreditOperation(sessionId)
+}
+
+async function appendAuditEventBestEffort(
+  action: string,
+  append: () => Promise<void>,
+): Promise<void> {
+  try {
+    await append()
+  } catch (err) {
+    console.warn(`[BeeGame] Failed to append ${action} audit event:`, toErrorMessage(err))
+  }
 }
 
 function toErrorMessage(err: unknown): string {

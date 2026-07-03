@@ -1,6 +1,6 @@
 ---
 name: beegame-game-acceptance
-description: Use before reporting a generated game project as ready for user review, when continuing after a failed check, or when auditing whether implementation matches the confirmed brief, docs, player loop, UI/UX, art/audio direction, placeholder assets, and target-appropriate validation. This skill is platform-agnostic and applies to Web, Unity, Godot, native, mobile, XR, or other engines.
+description: Use when verifying a generated game project before user review, continuing after failed acceptance checks, or auditing implementation against the confirmed brief, player loop, UI/UX, art/audio direction, placeholder assets, and target-appropriate validation.
 ---
 
 # BeeGame Game Acceptance

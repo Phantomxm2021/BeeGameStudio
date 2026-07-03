@@ -24,6 +24,12 @@ describe('local data migration', () => {
         name: 'Project One',
       }),
     ])
+    expect(data.sessions).toEqual([
+      expect.objectContaining({
+        id: 'beegame_session_1',
+        projectId: 'project_1',
+      }),
+    ])
     expect(data.modelConfigs).toEqual([
       expect.objectContaining({
         ownerId: 'dashboard-local',
@@ -38,7 +44,7 @@ describe('local data migration', () => {
     ])
   })
 
-  test('dry-runs by default and applies owner-scoped records when requested', async () => {
+  test('dry-runs by default and applies project records when requested', async () => {
     const dataDir = await createLocalDashboardData()
     const calls: Array<{ method: string; ownerId: string; payload: unknown }> = []
     const store = {
@@ -52,6 +58,10 @@ describe('local data migration', () => {
           ownerId: payload.ownerId,
           payload,
         })
+      },
+      upsertSession: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'upsertSession', ownerId, payload })
+        return payload
       },
       saveRuntimeSettings: async (ownerId: string, payload: unknown) => {
         calls.push({ method: 'saveRuntimeSettings', ownerId, payload })
@@ -77,6 +87,7 @@ describe('local data migration', () => {
       dataDir,
       dryRun: true,
       projects: 1,
+      sessions: 1,
       modelConfigs: 1,
       runtimeSettings: true,
       webTools: true,
@@ -93,6 +104,58 @@ describe('local data migration', () => {
 
     expect(calls.map(call => call.method)).toEqual([
       'upsertProject',
+      'upsertSession',
+      'upsertMcpServer',
+    ])
+    expect(calls.every(call =>
+      call.ownerId === '00000000-0000-0000-0000-000000000001'
+    )).toBe(true)
+  })
+
+  test('migrates platform settings only when explicitly requested', async () => {
+    const dataDir = await createLocalDashboardData()
+    const calls: Array<{ method: string; ownerId: string; payload: unknown }> = []
+    const store = {
+      upsertProject: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'upsertProject', ownerId, payload })
+        return payload
+      },
+      upsertModelConfig: async (payload: { ownerId: string }) => {
+        calls.push({
+          method: 'upsertModelConfig',
+          ownerId: payload.ownerId,
+          payload,
+        })
+      },
+      upsertSession: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'upsertSession', ownerId, payload })
+        return payload
+      },
+      saveRuntimeSettings: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'saveRuntimeSettings', ownerId, payload })
+        return payload
+      },
+      saveWebTools: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'saveWebTools', ownerId, payload })
+        return payload
+      },
+      upsertMcpServer: async (ownerId: string, payload: unknown) => {
+        calls.push({ method: 'upsertMcpServer', ownerId, payload })
+        return payload
+      },
+    }
+
+    await migrateBeeGameLocalDashboardData({
+      ownerId: '00000000-0000-0000-0000-000000000001',
+      dataDir,
+      store,
+      dryRun: false,
+      includePlatformSettings: true,
+    })
+
+    expect(calls.map(call => call.method)).toEqual([
+      'upsertProject',
+      'upsertSession',
       'upsertModelConfig',
       'saveRuntimeSettings',
       'saveWebTools',
@@ -112,11 +175,33 @@ describe('local data migration', () => {
 
 async function createLocalDashboardData(): Promise<string> {
   const dataDir = await mkdtemp(join(tmpdir(), 'beegame-migration-'))
+  const projectDir = join(dataDir, 'Project One')
+  const transcriptDir = join(projectDir, 'transcripts')
+  mkdirSync(transcriptDir, { recursive: true })
+  writeFileSync(
+    join(transcriptDir, 'project-one__abcdef12.jsonl'),
+    [
+      JSON.stringify({
+        id: 1,
+        sessionId: 'beegame_session_1',
+        type: 'session.started',
+        createdAt: '2026-06-27T01:00:00.000Z',
+      }),
+      JSON.stringify({
+        id: 2,
+        sessionId: 'beegame_session_1',
+        type: 'assistant.message',
+        text: 'Ready',
+        createdAt: '2026-06-27T01:05:00.000Z',
+      }),
+    ].join('\n') + '\n',
+    'utf8',
+  )
   new BeeGameProjectMetadataStore(getBeeGameProjectDatabasePath(dataDir))
     .upsertProject({
       id: 'project_1',
       name: 'Project One',
-      root_path: '/tmp/project-one',
+      root_path: projectDir,
       created_at: 1780000000000,
     })
   writeFileSync(

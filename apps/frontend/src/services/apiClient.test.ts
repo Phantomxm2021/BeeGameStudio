@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AxiosError } from 'axios';
 
 import {
   API_BASE_URL,
@@ -6,6 +7,7 @@ import {
   buildAuthHeaders,
   buildUnauthorizedMessage,
 } from './apiClient';
+import apiClient from './apiClient';
 
 describe('apiClient defaults', () => {
   beforeEach(() => {
@@ -165,6 +167,33 @@ describe('apiClient defaults', () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', '');
 
     expect(buildUnauthorizedMessage()).toBe('请先登录 BeeGame');
+  });
+
+  it('does not log expected hidden auth errors', async () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', '');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(apiClient.get('/api/current-user', {
+      headers: { 'Hide-Error-Log': 'true' },
+      adapter: async config => {
+        throw new AxiosError(
+          'Request failed with status code 401',
+          AxiosError.ERR_BAD_REQUEST,
+          config,
+          {},
+          {
+            config,
+            data: { message: 'authentication required' },
+            headers: {},
+            status: 401,
+            statusText: 'Unauthorized',
+          },
+        );
+      },
+    })).rejects.toMatchObject({ status: 401 });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });
 

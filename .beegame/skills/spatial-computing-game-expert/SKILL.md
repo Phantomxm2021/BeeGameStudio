@@ -1,28 +1,6 @@
 ---
 name: spatial-computing-game-expert
-description: Designs gameplay systems specifically for spatial computing platforms (XR, AR, MR). Focused on embodied interaction, physical space constraints, ergonomic pacing, and spatial rule systems.
-version: 1.0.0
-category: GameDev/Design
-tags: [SpatialComputing, XR, EmbodiedInteraction, GameDesign]
-phases: [gdd]
-target_profiles: [xr]
-priority: 95
-context_strategy:
-  references:
-    - id: spatial-interaction-principles
-      title: Spatial Interaction Principles
-      audience: [Metis]
-    - id: spatial-rule-architecture
-      title: Spatial Rule Architecture
-      audience: [Metis]
-    - id: physical-safety-framework
-      title: Physical Safety Framework
-      audience: [Metis]
-    - id: spatial-session-pacing
-      title: Spatial Session Pacing
-      audience: [Metis]
-security:
-  risk_level: medium
+description: Use when designing or auditing XR, AR, MR, or spatial-computing gameplay involving embodied interaction, room-scale constraints, physical safety, ergonomic pacing, or spatial rules.
 ---
 
 # Spatial Game Designer Skill
@@ -184,3 +162,11 @@ If MR:
 
 Never port flat mechanics directly.
 Always redesign around body and space.
+
+## Reference Files
+
+Load only when the task needs extra detail:
+- `references/spatial-interaction-principles.md` for embodied interaction rules.
+- `references/spatial-rule-architecture.md` for spatial gameplay rule systems.
+- `references/spatial-session-pacing.md` for fatigue-aware session pacing.
+- `references/physical-safety-framework.md` for collision, comfort, and safety checks.

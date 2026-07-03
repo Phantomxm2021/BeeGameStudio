@@ -14,6 +14,7 @@ export type BeeGamePermission =
   | 'agent.cancel'
   | 'agent.approve_tool'
   | 'preview.manage'
+  | 'deployment.manage'
   | 'assets.upload'
   | 'assets.integrate'
   | 'model_config.manage'
@@ -34,7 +35,10 @@ export type BeeGameCurrentUser = {
 
 export const getCurrentUser = (): Promise<BeeGameCurrentUser> => (
   apiClient.get('/api/current-user', {
-    headers: { 'Hide-Error-Toast': 'true' },
+    headers: {
+      'Hide-Error-Log': 'true',
+      'Hide-Error-Toast': 'true',
+    },
   })
 );
 

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
@@ -32,6 +32,10 @@ vi.mock('../../services/beeGameAdapter', () => ({
 describe('RightSidebar tabs', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('shows only collaboration and artifacts tabs', () => {
@@ -172,6 +176,84 @@ describe('RightSidebar tabs', () => {
 
         await user.click(screen.getByRole('button', { name: '让 BeeGame 集成' }));
         expect(onSendMessage).toHaveBeenCalledWith('Integrate uploaded asset', 'asset_integration');
+    });
+
+    it('shows an empty asset contract message when a restored project has no manifest', async () => {
+        const user = userEvent.setup();
+        vi.mocked(api.getProjectAssets).mockResolvedValue({ version: 1, slots: [] });
+
+        render(
+            <RightSidebar
+                projectId="proj_empty_assets"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        await user.click(screen.getByRole('button', { name: '资源' }));
+
+        expect(await screen.findByText(/还没有资源合同/)).toBeInTheDocument();
+    });
+
+    it('keeps the existing asset contract visible when a refresh request fails', async () => {
+        vi.useFakeTimers();
+        vi.mocked(api.getProjectAssets)
+            .mockResolvedValueOnce({
+                version: 1,
+                slots: [{
+                    id: 'bgm_game',
+                    name: 'Game BGM',
+                    type: 'audio',
+                    purpose: 'Game background music',
+                    status: 'uploaded',
+                }],
+            })
+            .mockRejectedValueOnce(new Error('Session not found'));
+
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: '资源' }));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(screen.getByText('Game BGM')).toBeInTheDocument();
+
+        await act(async () => {
+            vi.advanceTimersByTime(5000);
+            await Promise.resolve();
+        });
+
+        expect(screen.getByText('Game BGM')).toBeInTheDocument();
+        expect(screen.queryByText(/还没有资源合同/)).not.toBeInTheDocument();
+        vi.useRealTimers();
     });
 
     it('clears the previous project asset manifest when switching projects', async () => {

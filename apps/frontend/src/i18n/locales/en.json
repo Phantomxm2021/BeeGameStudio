@@ -105,6 +105,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
+        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {
@@ -421,6 +422,7 @@
     "account": "Account"
   },
   "beegame": {
+    "assistantName": "BeeGame",
     "previewTitle": "Preview",
     "collabFlow": "Collaboration",
     "deliverables": "Deliverables",
@@ -465,6 +467,17 @@
     "revisionRequired": "Revision Required",
     "clarificationDescription": "Answer the clarification or choose how to proceed with the current brief.",
     "aiProcessing": "AI is processing...",
+    "innerThought": "Inner thought",
+    "contextUpdate": "Context update",
+    "useContext": "Use context",
+    "lastCheckFailed": "Last check failed",
+    "continueFixing": "Continue fixing",
+    "continueFromLastFailedCheckPrompt": "Continue from the last failed check. Fix the reported issue, rerun the relevant check, and keep going until the project runs.",
+    "evidenceForReview": "Evidence for review",
+    "systemError": "System error",
+    "approvalRequest": "Approval request",
+    "revisionRequest": "Revision request",
+    "thinking": "Thinking",
     "settingsGeneral": "General",
     "settingsModel": "Model",
     "closeSettings": "Close settings",
@@ -494,6 +507,8 @@
     "webSearchSaveFailed": "Failed to save web search configuration",
     "close": "Close",
     "noProjectsFound": "No projects found",
+    "noProjectsForAccount": "No projects for this account yet",
+    "localProjectsNeedMigration": "If older projects still exist in the local Projects folder, an owner needs to migrate them to this account before they appear here.",
     "untitledProject": "Untitled Project",
     "moreActionsFor": "More actions",
     "deleteProject": "Delete Project",
@@ -533,7 +548,37 @@
         "balance": "Balance",
         "reserved": "Reserved",
         "cancel": "Cancel",
-        "confirm": "Confirm and send"
+        "confirm": "Confirm and send",
+        "taskTypes": {
+          "idea_intake": {
+            "title": "Game Directions",
+            "description": "Generate selectable game modes from your initial idea."
+          },
+          "full_build": {
+            "title": "Full Build",
+            "description": "Start a confirmed game project build."
+          },
+          "edit_turn": {
+            "title": "Edit / Debug",
+            "description": "Modify, debug, or continue improving an existing game project."
+          },
+          "continue_turn": {
+            "title": "Continue Task",
+            "description": "Continue analysis, fixes, or implementation from the previous progress."
+          },
+          "asset_integration": {
+            "title": "Asset Integration",
+            "description": "Ask BeeGame to integrate uploaded assets into the current project."
+          },
+          "large_build": {
+            "title": "Large Build",
+            "description": "Handle a more complex, longer-running game build request."
+          },
+          "agent_turn": {
+            "title": "Agent Request",
+            "description": "Run a general BeeGame agent request."
+          }
+        }
       },
       "approvalWaiting": "This project is waiting for approval. Resolve the approval request before sending a normal message."
     },
@@ -549,6 +594,9 @@
       "open": "Open in new window",
       "stop": "Stop preview",
       "play": "Start preview",
+      "deploy": "Deploy game",
+      "deploying": "Deploying",
+      "openLive": "Open live site",
       "build": "Build",
       "health": "Health",
       "entrypoint": "Entrypoint",

@@ -1,15 +1,6 @@
 ---
-name: Unity Scene Optimizer
-description: Analyzes scenes for performance bottlenecks (draw calls, batching, textures, GameObjects). Use when optimizing scenes or investigating performance issues.
-version: 1.0.0
-category: Performance/Scene
-tags: [Scene, Rendering, Lighting, Physics]
-allowed_contexts: [logos, implementation]
-target_profiles: [unity]
-context_strategy:
-  references: [mobile-checklist, optimization-workflow, tools-reference]
-security:
-  risk_level: low
+name: unity-scene-optimizer
+description: Use when analyzing or optimizing an explicitly Unity scene for draw calls, batching, textures, GameObjects, lighting, physics, memory, or platform-specific performance budgets.
 ---
 
 # Unity Scene Optimizer
@@ -34,7 +25,7 @@ Recommends baked lighting over realtime (1-2 lights mobile, 3-4 desktop), minima
 Analyzes Rigidbody count, collider complexity, collision matrix configuration. Recommends simple colliders over Mesh colliders.
 
 ### 6. Mobile-Specific
-Platform targets: 60 FPS iOS (iPhone 12+), 30-60 FPS Android. See [mobile-checklist.md](mobile-checklist.md) for complete requirements.
+Platform targets: 60 FPS iOS (iPhone 12+), 30-60 FPS Android.
 
 ## Optimization Workflow
 
@@ -42,8 +33,6 @@ Platform targets: 60 FPS iOS (iPhone 12+), 30-60 FPS Android. See [mobile-checkl
 2. **Identify**: GPU/CPU/Memory/Physics bottlenecks
 3. **Apply**: Quick wins (static batching, compression) → Medium (atlases, pooling, LOD) → Major (hierarchy refactor, culling)
 4. **Validate**: Compare before/after metrics
-
-See [optimization-workflow.md](optimization-workflow.md) for detailed steps and timelines.
 
 ## Platform-Specific Targets
 
@@ -59,7 +48,7 @@ See [optimization-workflow.md](optimization-workflow.md) for detailed steps and 
 
 ## Tools Reference
 
-Frame Debugger, Profiler, Stats Window, Memory Profiler. See [tools-reference.md](tools-reference.md) for usage and commands.
+Frame Debugger, Profiler, Stats Window, Memory Profiler.
 
 ## Output Format
 
@@ -69,9 +58,9 @@ Provides: Current metrics, bottleneck identification, prioritized recommendation
 
 **Use this Skill when**: Analyzing scene performance, identifying bottlenecks, or getting optimization recommendations
 
-**Use @unity-performance agent when**: Implementing complex optimizations, profiling at runtime, or troubleshooting specific performance issues
+**Use unity-performance skill when**: Implementing complex optimizations, profiling at runtime, or troubleshooting specific performance issues
 
-**Use @unity-architect agent when**: Redesigning scene architecture, implementing object pooling systems, or planning large-scale optimizations
+**Use unity-game-architect-expert skill when**: Redesigning scene architecture, implementing object pooling systems, or planning large-scale optimizations
 
 **Use /unity:optimize-scene command when**: Running comprehensive scene analysis with detailed reports
 

@@ -1,14 +1,22 @@
 import {
+  cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  rmdirSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 const STORE_FILE = 'runtime-settings.json'
+const RUNTIME_DIR = '.runtime'
+const APP_RUNTIME_DIR = 'app'
+const CORE_RUNTIME_DIR = 'core'
 
 export type RuntimeSettingsConfig = {
   autoMemoryEnabled?: boolean
@@ -49,6 +57,7 @@ export function getDefaultRuntimeSettingsStoreDir(): string {
 export function loadRuntimeSettingsConfig(
   options: RuntimeSettingsStoreOptions = {},
 ): RuntimeSettingsConfig {
+  migrateLegacyRuntimeLayout(options)
   const filePath = getStoreFilePath(options)
   if (!existsSync(filePath)) return {}
 
@@ -88,7 +97,11 @@ export function mapRuntimeSettingsToEnv(
   config: RuntimeSettingsConfig,
   options: RuntimeSettingsStoreOptions = {},
 ): Record<string, string> {
-  const env: Record<string, string> = {}
+  migrateLegacyRuntimeLayout(options)
+  const env: Record<string, string> = {
+    BEEGAME_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
+    BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
+  }
   if (config.skillSearchEnabled !== undefined) {
     env.SKILL_SEARCH_ENABLED = config.skillSearchEnabled ? '1' : '0'
   }
@@ -96,7 +109,7 @@ export function mapRuntimeSettingsToEnv(
     config.autoMemoryEnabled !== undefined ||
     config.autoDreamEnabled !== undefined
   ) {
-    env.CLAUDE_CONFIG_DIR = getClaudeConfigDir(options)
+    env.CLAUDE_CONFIG_DIR = getCoreRuntimeConfigDir(options)
   }
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
@@ -120,13 +133,14 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   config: RuntimeSettingsConfig,
   options: RuntimeSettingsStoreOptions = {},
 ): void {
+  migrateLegacyRuntimeLayout(options)
   if (
     config.autoMemoryEnabled === undefined &&
     config.autoDreamEnabled === undefined
   ) {
     return
   }
-  const filePath = join(getClaudeConfigDir(options), 'settings.json')
+  const filePath = join(getCoreRuntimeConfigDir(options), 'settings.json')
   mkdirSync(dirname(filePath), { recursive: true })
   const previous = readJsonObject(filePath)
   const next = {
@@ -159,8 +173,131 @@ function getStoreFilePath(options: RuntimeSettingsStoreOptions): string {
   return join(options.dataDir ?? getDefaultRuntimeSettingsStoreDir(), STORE_FILE)
 }
 
-function getClaudeConfigDir(options: RuntimeSettingsStoreOptions): string {
-  return join(options.dataDir ?? getDefaultRuntimeSettingsStoreDir(), 'claude-config')
+function migrateLegacyRuntimeLayout(
+  options: RuntimeSettingsStoreOptions,
+): void {
+  const dataDir = options.dataDir ?? getDefaultRuntimeSettingsStoreDir()
+  moveLegacyDirectory(
+    join(dataDir, 'beegame-config'),
+    getBeeGameRuntimeConfigDir(options),
+  )
+  moveLegacyDirectory(
+    join(dataDir, 'claude-config'),
+    getCoreRuntimeConfigDir(options),
+  )
+  moveLegacyFile(
+    join(getCoreRuntimeConfigDir(options), '.claude.json'),
+    join(getCoreRuntimeConfigDir(options), '.config.json'),
+  )
+  migrateLegacyCoreProjectDirs(getCoreRuntimeConfigDir(options))
+  cleanupRuntimeLayout(options)
+}
+
+export function cleanupRuntimeLayout(
+  options: RuntimeSettingsStoreOptions = {},
+): void {
+  const appDir = getBeeGameRuntimeConfigDir(options)
+  const coreDir = getCoreRuntimeConfigDir(options)
+
+  removeRuntimeProbePath(join(appDir, '.dashboard-write-test'))
+  removeEmptyDirectory(appDir)
+  removeEmptyDirectory(join(coreDir, 'modes'))
+  removeEmptyDirectory(join(coreDir, 'plans'))
+  removeEmptyDescendantDirectories(join(coreDir, 'session-env'), {
+    removeRoot: true,
+  })
+  removeEmptyDescendantDirectories(join(coreDir, 'projects'), {
+    removeRoot: false,
+  })
+}
+
+function moveLegacyDirectory(from: string, to: string): void {
+  if (!existsSync(from)) return
+  mkdirSync(dirname(to), { recursive: true })
+  if (!existsSync(to)) {
+    renameSync(from, to)
+    return
+  }
+  cpSync(from, to, { recursive: true, force: false, errorOnExist: false })
+  rmSync(from, { recursive: true, force: true })
+}
+
+function moveLegacyFile(from: string, to: string): void {
+  if (!existsSync(from)) return
+  mkdirSync(dirname(to), { recursive: true })
+  if (!existsSync(to)) {
+    renameSync(from, to)
+    return
+  }
+  rmSync(from, { force: true })
+}
+
+function migrateLegacyCoreProjectDirs(coreDir: string): void {
+  const projectsDir = join(coreDir, 'projects')
+  if (!existsSync(projectsDir)) return
+  for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('project-')) continue
+
+    moveLegacyDirectory(
+      join(projectsDir, entry.name),
+      join(projectsDir, getNeutralProjectStorageKey(entry.name)),
+    )
+  }
+}
+
+function getNeutralProjectStorageKey(value: string): string {
+  return `project-${createHash('sha256').update(value).digest('hex').slice(0, 12)}`
+}
+
+function removeEmptyDescendantDirectories(
+  dir: string,
+  options: { removeRoot: boolean },
+): void {
+  if (!existsSync(dir)) return
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    removeEmptyDescendantDirectories(join(dir, entry.name), {
+      removeRoot: true,
+    })
+  }
+  if (options.removeRoot) {
+    removeEmptyDirectory(dir)
+  }
+}
+
+function removeEmptyDirectory(dir: string): void {
+  if (!existsSync(dir)) return
+  try {
+    if (readdirSync(dir).length === 0) {
+      rmdirSync(dir)
+    }
+  } catch {
+    // Runtime cleanup is best-effort; active sessions may recreate these dirs.
+  }
+}
+
+function removeRuntimeProbePath(path: string): void {
+  if (!existsSync(path)) return
+  try {
+    rmSync(path, { recursive: true, force: true })
+  } catch {
+    // Runtime cleanup is best-effort; active sessions may recreate this probe.
+  }
+}
+
+function getRuntimeDir(options: RuntimeSettingsStoreOptions): string {
+  return join(options.dataDir ?? getDefaultRuntimeSettingsStoreDir(), RUNTIME_DIR)
+}
+
+function getBeeGameRuntimeConfigDir(
+  options: RuntimeSettingsStoreOptions,
+): string {
+  return join(getRuntimeDir(options), APP_RUNTIME_DIR)
+}
+
+function getCoreRuntimeConfigDir(options: RuntimeSettingsStoreOptions): string {
+  return join(getRuntimeDir(options), CORE_RUNTIME_DIR)
 }
 
 function readJsonObject(filePath: string): Record<string, unknown> {
