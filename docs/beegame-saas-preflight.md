@@ -31,8 +31,10 @@ Use this checklist before promoting a BeeGame deployment to production.
 
 - Create the `avatars` bucket and apply user-scoped policies.
 - Create the `beegame-assets` bucket and apply project/member-scoped policies.
+- Create the `beegame-deployments` bucket and apply public-read/user-write policies.
 - Verify avatar upload, preview, update, and delete.
 - Verify project asset upload, manifest persistence, and delete.
+- Verify static Web deployment upload and public URL access.
 - Keep generated local workspace files out of Supabase unless they are durable product metadata or user assets.
 
 ## Frontend Environment
@@ -63,6 +65,8 @@ BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
 BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
+BEEGAME_DEPLOYMENT_STORAGE_BUCKET=beegame-deployments
+BEEGAME_DEPLOYMENT_STORAGE_PREFIX=deployments
 BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 ```
 

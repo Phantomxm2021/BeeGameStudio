@@ -19,7 +19,10 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from '../beegame/session-manager'
-import type { BeeGameDeploymentRunner } from '../beegame/deployment-manager'
+import type {
+  BeeGameDeploymentPublisher,
+  BeeGameDeploymentRunner,
+} from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
 
 const testDashboardRoots: string[] = []
@@ -4972,6 +4975,90 @@ describe('beegame session routes', () => {
       expect(deployment.url).toMatch(/^\/deployments\/deploy_/)
       expect(liveRes.status).toBe(200)
       expect(await liveRes.text()).toBe('<main>Live game</main>')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('passes the request bearer token to remote deployment publishers', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-remote-deploy-route-'))
+    const workspace = join(projectsRoot, 'users', 'user-route', 'remote-deployable-game')
+    const publishInputs: Array<{
+      authToken?: string
+      userId?: string
+      files: string[]
+    }> = []
+    const deploymentRunner: BeeGameDeploymentRunner = async (_command, options) => {
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Remote route game</main>')
+      return { exitCode: 0, stdout: 'built', stderr: '' }
+    }
+    const deploymentPublisher: BeeGameDeploymentPublisher = {
+      publishStaticDirectory: async input => {
+        publishInputs.push({
+          authToken: input.authToken,
+          userId: input.userId,
+          files: input.files.map(file => file.path),
+        })
+        return {
+          url: `https://games.example.com/${input.deploymentId}/`,
+          artifactPath: `remote://${input.deploymentId}`,
+          message: 'Remote route deployment published',
+        }
+      },
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      deploymentRunner,
+      deploymentPublisher,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: {
+        id: 'user-route',
+        role: 'owner',
+        permissions: [
+          'workspace.read',
+          'project.create',
+          'project.read',
+          'agent.send_message',
+          'deployment.manage',
+        ],
+      },
+    })
+    try {
+      await mkdir(workspace, { recursive: true })
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer user-route-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectId: 'project_remote_deployable',
+          projectName: 'Remote Deployable Game',
+          workspacePath: workspace,
+        }),
+      })
+      const session = await sessionRes.json()
+      const deployRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { method: 'POST', headers: { authorization: 'Bearer user-route-token' } },
+      )
+      const deployment = await deployRes.json()
+
+      expect(deployRes.status).toBe(200)
+      expect(deployment).toEqual(expect.objectContaining({
+        status: 'succeeded',
+        url: expect.stringMatching(/^https:\/\/games\.example\.com\/deploy_/),
+      }))
+      expect(publishInputs).toEqual([{
+        authToken: 'user-route-token',
+        userId: 'user-route',
+        files: ['index.html'],
+      }])
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

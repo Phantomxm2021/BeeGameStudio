@@ -23,6 +23,8 @@ import {
 } from './beegame/preview-manager'
 import {
   BeeGameDeploymentManager,
+  createSupabaseStorageDeploymentPublisherFromEnv,
+  type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
 import {
@@ -155,6 +157,7 @@ export type AgentWorkflowAppOptions = {
   previewPortAllocator?: BeeGamePreviewPortAllocator
   previewReadinessProbe?: BeeGamePreviewReadinessProbe
   deploymentRunner?: BeeGameDeploymentRunner
+  deploymentPublisher?: BeeGameDeploymentPublisher
   modelConfigStore?: ModelConfigStoreOptions | false
   dashboardDataRoot?: string
   defaultWorkspacePath?: string
@@ -215,6 +218,8 @@ export function createAgentWorkflowApp(
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
+    publisher: options.deploymentPublisher ??
+      createSupabaseStorageDeploymentPublisherFromEnv(),
     publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
   })
   app.get('/deployments/*', async c => {
@@ -2179,10 +2184,15 @@ function registerBeeGameSessionRoutes(
           getWorkspacePathHint(c.req.query('workspacePath'), body),
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
+        const currentUser = options.getCurrentUser(c.req.raw)
         const deployment = await beeGameDeployments.deploy({
           sessionId: c.req.param('id'),
+          userId: currentUser.id,
           ...(metadata?.projectId ? { projectId: metadata.projectId } : {}),
           workspacePath,
+          ...(getBearerToken(c.req.raw)
+            ? { authToken: getBearerToken(c.req.raw) }
+            : {}),
         })
         return c.json(deployment)
       } catch (err) {

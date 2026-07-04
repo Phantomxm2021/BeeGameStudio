@@ -7,7 +7,8 @@ create extension if not exists pgcrypto;
 insert into storage.buckets (id, name, public)
 values
   ('avatars', 'avatars', true),
-  ('beegame-assets', 'beegame-assets', false)
+  ('beegame-assets', 'beegame-assets', false),
+  ('beegame-deployments', 'beegame-deployments', true)
 on conflict (id) do update
 set public = excluded.public;
 
@@ -90,6 +91,47 @@ create policy "beegame asset owner delete" on storage.objects
   using (
     bucket_id = 'beegame-assets' and
     (storage.foldername(name))[1] = 'projects' and
+    (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+drop policy if exists "beegame deployment public read" on storage.objects;
+create policy "beegame deployment public read" on storage.objects
+  for select
+  to anon, authenticated
+  using (bucket_id = 'beegame-deployments');
+
+drop policy if exists "beegame deployment owner insert" on storage.objects;
+create policy "beegame deployment owner insert" on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'beegame-deployments' and
+    (storage.foldername(name))[1] = 'deployments' and
+    (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+drop policy if exists "beegame deployment owner update" on storage.objects;
+create policy "beegame deployment owner update" on storage.objects
+  for update
+  to authenticated
+  using (
+    bucket_id = 'beegame-deployments' and
+    (storage.foldername(name))[1] = 'deployments' and
+    (storage.foldername(name))[2] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'beegame-deployments' and
+    (storage.foldername(name))[1] = 'deployments' and
+    (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+drop policy if exists "beegame deployment owner delete" on storage.objects;
+create policy "beegame deployment owner delete" on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'beegame-deployments' and
+    (storage.foldername(name))[1] = 'deployments' and
     (storage.foldername(name))[2] = auth.uid()::text
   );
 

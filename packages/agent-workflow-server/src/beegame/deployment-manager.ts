@@ -49,11 +49,36 @@ export type BeeGameDeploymentRunner = (
   stderr: string
 }>
 
+export type BeeGameDeploymentFile = {
+  path: string
+  bytes(): Promise<Uint8Array>
+  text(): Promise<string>
+}
+
+export type BeeGameDeploymentPublisher = {
+  publishStaticDirectory(input: {
+    deploymentId: string
+    sessionId: string
+    userId?: string
+    projectId?: string
+    workspacePath: string
+    outputDir: string
+    artifactHash: string
+    authToken?: string
+    files: BeeGameDeploymentFile[]
+  }): Promise<{
+    url: string
+    artifactPath?: string
+    message?: string
+  }>
+}
+
 export type BeeGameDeploymentManagerOptions = {
   dataRoot: string
   publicBaseUrl?: string
   runner?: BeeGameDeploymentRunner
   outputCandidates?: string[]
+  publisher?: BeeGameDeploymentPublisher
 }
 
 type PackageManifest = {
@@ -81,6 +106,7 @@ export class BeeGameDeploymentManager {
   private readonly publicBaseUrl: string
   private readonly runner: BeeGameDeploymentRunner
   private readonly outputCandidates: string[]
+  private readonly publisher?: BeeGameDeploymentPublisher
 
   constructor(options: BeeGameDeploymentManagerOptions) {
     this.deploymentsRoot = join(options.dataRoot, 'deployments')
@@ -88,6 +114,7 @@ export class BeeGameDeploymentManager {
     this.publicBaseUrl = (options.publicBaseUrl || '').replace(/\/+$/, '')
     this.runner = options.runner ?? runDeploymentCommand
     this.outputCandidates = options.outputCandidates ?? DEFAULT_OUTPUT_CANDIDATES
+    this.publisher = options.publisher
   }
 
   async list(sessionId?: string): Promise<BeeGameDeploymentRecord[]> {
@@ -99,8 +126,10 @@ export class BeeGameDeploymentManager {
 
   async deploy(input: {
     sessionId: string
+    userId?: string
     projectId?: string
     workspacePath: string
+    authToken?: string
   }): Promise<BeeGameDeploymentRecord> {
     const now = new Date().toISOString()
     const workspacePath = resolve(input.workspacePath)
@@ -167,13 +196,27 @@ export class BeeGameDeploymentManager {
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
       const artifactHash = await hashDirectory(artifactPath)
+      const published = this.publisher
+        ? await this.publisher.publishStaticDirectory({
+            deploymentId: id,
+            sessionId: input.sessionId,
+            ...(input.userId ? { userId: input.userId } : {}),
+            ...(input.projectId ? { projectId: input.projectId } : {}),
+            workspacePath,
+            outputDir,
+            artifactHash,
+            ...(input.authToken ? { authToken: input.authToken } : {}),
+            files: await createDeploymentFiles(outputDir),
+          })
+        : undefined
       const deployedAt = new Date().toISOString()
       record = {
         ...record,
         status: 'succeeded',
         artifactHash,
-        url: this.publicUrl(id),
-        message: 'Static deployment published',
+        url: published?.url ?? this.publicUrl(id),
+        artifactPath: published?.artifactPath ?? artifactPath,
+        message: published?.message ?? 'Static deployment published',
         updatedAt: deployedAt,
         deployedAt,
       }
@@ -280,6 +323,79 @@ export class BeeGameDeploymentManager {
   }
 }
 
+export function createSupabaseStorageDeploymentPublisher(options: {
+  supabaseUrl: string
+  anonKey: string
+  bucket: string
+  publicBaseUrl?: string
+  keyPrefix?: string
+  fetch?: typeof fetch
+}): BeeGameDeploymentPublisher {
+  const supabaseUrl = options.supabaseUrl.replace(/\/+$/, '')
+  const publicBaseUrl = options.publicBaseUrl?.replace(/\/+$/, '')
+  const keyPrefix = trimSlashes(options.keyPrefix ?? 'deployments')
+  const fetchImpl = options.fetch ?? fetch
+  return {
+    async publishStaticDirectory(input) {
+      if (!input.authToken) {
+        throw new Error('Deployment storage publishing requires a user auth token')
+      }
+      if (!input.userId) {
+        throw new Error('Deployment storage publishing requires a user id')
+      }
+      const objectRoot = [keyPrefix, input.userId, input.deploymentId]
+        .filter(Boolean)
+        .join('/')
+      for (const file of input.files) {
+        const objectPath = `${objectRoot}/${file.path}`
+        const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodeObjectPath(
+          options.bucket,
+        )}/${encodeObjectPath(objectPath)}`
+        const response = await fetchImpl(uploadUrl, {
+          method: 'POST',
+          headers: {
+            apikey: options.anonKey,
+            authorization: `Bearer ${input.authToken}`,
+            'content-type': contentTypeForPath(file.path),
+            'x-upsert': 'true',
+          },
+          body: await file.bytes(),
+        })
+        if (!response.ok) {
+          throw new Error(
+            `Deployment storage upload failed: ${response.status} ${await response.text()}`,
+          )
+        }
+      }
+      const url = publicBaseUrl
+        ? `${publicBaseUrl}/${objectRoot}/index.html`
+        : `${supabaseUrl}/storage/v1/object/public/${encodeObjectPath(
+            options.bucket,
+          )}/${encodeObjectPath(`${objectRoot}/index.html`)}`
+      return {
+        url,
+        artifactPath: `supabase://${options.bucket}/${objectRoot}`,
+        message: 'Static deployment published to storage',
+      }
+    },
+  }
+}
+
+export function createSupabaseStorageDeploymentPublisherFromEnv(): BeeGameDeploymentPublisher | undefined {
+  const supabaseUrl = process.env.BEEGAME_SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const anonKey = process.env.BEEGAME_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
+  const bucket = process.env.BEEGAME_DEPLOYMENT_STORAGE_BUCKET
+  if (!supabaseUrl || !anonKey || !bucket) return undefined
+  return createSupabaseStorageDeploymentPublisher({
+    supabaseUrl,
+    anonKey,
+    bucket,
+    publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_STORAGE_PUBLIC_BASE_URL ??
+      process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
+    keyPrefix: process.env.BEEGAME_DEPLOYMENT_STORAGE_PREFIX,
+  })
+}
+
 function createDeploymentPlan(workspacePath: string): DeploymentPlan {
   const rootManifestPath = join(workspacePath, 'package.json')
   if (existsSync(rootManifestPath)) {
@@ -384,6 +500,18 @@ async function hashDirectory(path: string): Promise<string> {
   return hash.digest('hex')
 }
 
+async function createDeploymentFiles(outputDir: string): Promise<BeeGameDeploymentFile[]> {
+  const files = await listFiles(outputDir)
+  return files.map(file => {
+    const relativePath = relative(outputDir, file).split('\\').join('/')
+    return {
+      path: relativePath,
+      bytes: async () => await readFile(file),
+      text: async () => await readFile(file, 'utf8'),
+    }
+  })
+}
+
 async function listFiles(path: string): Promise<string[]> {
   const entries = await readdir(path, { withFileTypes: true })
   const files: string[] = []
@@ -432,6 +560,21 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 
 function safeSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '')
+}
+
+function trimSlashes(value: string): string {
+  return value
+    .split('/')
+    .filter(Boolean)
+    .join('/')
+}
+
+function encodeObjectPath(path: string): string {
+  return path
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
 }
 
 function isDeploymentRecord(value: unknown): value is BeeGameDeploymentRecord {

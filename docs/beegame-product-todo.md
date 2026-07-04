@@ -13,17 +13,16 @@ on system-level work, not individual generated game fixes.
 - The Docker stack deploys the BeeGame application and local runtime host.
 - Generated game projects are stored in the runtime workspace volume.
 - Static Web deployments can be published by the runtime host under
-  `/deployments/*`; this is a local Docker-volume publisher, not yet a
-  production CDN/object-storage publisher.
+  `/deployments/*` for local/dev use, or to Supabase Storage when
+  `BEEGAME_DEPLOYMENT_STORAGE_BUCKET` is configured.
 
 ## P0
 
-- [ ] Production Web game deployment publisher
+- [ ] Production Web game deployment lifecycle
   - Problem: generated Web games can now be published by the runtime host, but
-    the publisher stores files in the local Docker volume instead of a durable
-    public object store/CDN.
+    deployment metadata and lifecycle controls are still minimal.
   - Scope:
-    - Replace or extend the local publisher with object storage/CDN support.
+    - Verify Supabase Storage deployment in a production-like environment.
     - Persist deployment records in Supabase, including project id, version,
       artifact hash, URL, logs, status, and created user.
     - Add deployment logs/history UI.
