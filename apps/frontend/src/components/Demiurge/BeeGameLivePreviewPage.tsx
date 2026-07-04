@@ -30,6 +30,7 @@ interface BeeGameLivePreviewPageProps {
     onRestartPreview?: () => void | Promise<void>;
     onStopPreview?: () => void | Promise<void>;
     onDeployProject?: () => void | Promise<void>;
+    onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
     isDeploying?: boolean;
     onBack?: () => void;
@@ -68,6 +69,7 @@ export function BeeGameLivePreviewPage({
     onRestartPreview,
     onStopPreview,
     onDeployProject,
+    onRollbackDeployment,
     onOpenExternal,
     isDeploying = false,
     onBack,
@@ -289,6 +291,7 @@ export function BeeGameLivePreviewPage({
                             labels={labels}
                             onOpenExternal={onOpenExternal}
                             onRedeploy={handleDeploy}
+                            onRollback={onRollbackDeployment}
                             isDeploying={isDeploying}
                         />
                     ) : null}
@@ -339,12 +342,14 @@ function DeploymentHistoryPanel({
     labels,
     onOpenExternal,
     onRedeploy,
+    onRollback,
     isDeploying,
 }: {
     deployments: BeeGameDeploymentPayload[];
     labels: Record<string, string>;
     onOpenExternal?: (url: string) => void;
     onRedeploy: () => void | Promise<void>;
+    onRollback?: (deploymentId: string) => void | Promise<void>;
     isDeploying: boolean;
 }) {
     const latest = deployments[0];
@@ -413,22 +418,37 @@ function DeploymentHistoryPanel({
             ) : null}
             {recent.length > 1 ? (
                 <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-                    {recent.map((deployment, index) => (
-                        <div
-                            key={deployment.id}
-                            className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2"
-                        >
-                            <div className="flex items-center gap-2">
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                                <span className="type-caption-2 truncate text-zinc-300">
-                                    {labels.version} {recent.length - index}
-                                </span>
+                    {recent.map((deployment, index) => {
+                        const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
+                        return (
+                            <div
+                                key={deployment.id}
+                                className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                        <span className="type-caption-2 truncate text-zinc-300">
+                                            {labels.version} {recent.length - index}
+                                        </span>
+                                    </div>
+                                    {canRollback ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onRollback?.(deployment.id)}
+                                            disabled={isDeploying}
+                                            className="type-caption-2 shrink-0 text-emerald-200/80 transition-colors hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {labels.rollback || 'Rollback'}
+                                        </button>
+                                    ) : null}
+                                </div>
+                                <div className="type-caption-2 mt-1 truncate text-zinc-500">
+                                    {deploymentStatusLabel(deployment.status, labels)}
+                                </div>
                             </div>
-                            <div className="type-caption-2 mt-1 truncate text-zinc-500">
-                                {deploymentStatusLabel(deployment.status, labels)}
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             ) : null}
         </div>

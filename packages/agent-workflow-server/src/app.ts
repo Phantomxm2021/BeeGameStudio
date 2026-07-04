@@ -2229,6 +2229,34 @@ function registerBeeGameSessionRoutes(
         return c.json({ error: toErrorMessage(err) }, 400)
       }
     })
+
+    app.post(`${basePath}/:id/deployments/:deploymentId/rollback`, async c => {
+      const forbidden = check(c.req.raw, 'deployment.manage')
+      if (forbidden) return c.json(forbidden, 403)
+      const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+      if (sessionForbidden) return c.json(sessionForbidden, 404)
+      try {
+        const sessionId = c.req.param('id')
+        const deploymentId = c.req.param('deploymentId')
+        const persisted = await options.listDeploymentRecords?.(
+          c.req.raw,
+          sessionId,
+        )
+        const records = persisted ?? await beeGameDeployments.list(sessionId)
+        const source = records.find(record => record.id === deploymentId)
+        if (!source) {
+          return c.json({ error: 'Deployment not found' }, 404)
+        }
+        const rollback = await beeGameDeployments.rollbackTo(source)
+        const saved = await options.persistDeploymentRecord?.(
+          c.req.raw,
+          rollback,
+        )
+        return c.json(saved ?? rollback)
+      } catch (err) {
+        return c.json({ error: toErrorMessage(err) }, 400)
+      }
+    })
   }
 
   app.post(`${basePath}/:id/input`, async c => {

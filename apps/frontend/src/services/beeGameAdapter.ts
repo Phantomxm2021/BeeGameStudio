@@ -751,6 +751,24 @@ export const beeGameAdapter = {
     }
   },
 
+  async rollbackProjectDeployment(projectId: string, deploymentId: string): Promise<BeeGameDeploymentPayload> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) throw new Error('BeeGame session not found for project');
+    try {
+      return await postJson<BeeGameDeploymentPayload>(
+        `/api/beegame-sessions/${binding.sessionId}/deployments/${encodeURIComponent(deploymentId)}/rollback`,
+        {},
+      );
+    } catch (error) {
+      if (!isSessionNotFoundError(error)) throw error;
+      await restoreBeeGameSessionForBinding(binding);
+      return postJson<BeeGameDeploymentPayload>(
+        `/api/beegame-sessions/${binding.sessionId}/deployments/${encodeURIComponent(deploymentId)}/rollback`,
+        {},
+      );
+    }
+  },
+
   async getProjectAssets(projectId: string): Promise<BeeGameAssetManifestPayload> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return { version: 1, slots: [] };

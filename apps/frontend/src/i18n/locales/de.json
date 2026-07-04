@@ -599,7 +599,11 @@
       "deploymentSucceeded": "Published",
       "deploymentFailed": "Deployment failed",
       "deploymentFailureLog": "Failure log",
-      "version": "Version"
+      "version": "Version",
+      "rollback": "Rollback"
     }
+  },
+  "livePreview": {
+    "rollback": "Rollback"
   }
 }

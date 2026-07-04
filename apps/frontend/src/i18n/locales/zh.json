@@ -644,5 +644,13 @@
       "noPurpose": "未提供用途说明"
     },
     "savedPrefixSeparator": "："
+  },
+  "dashboard": {
+    "livePreview": {
+      "rollback": "回滚"
+    }
+  },
+  "livePreview": {
+    "rollback": "回滚"
   }
 }

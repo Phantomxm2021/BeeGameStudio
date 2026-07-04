@@ -229,6 +229,33 @@ export class BeeGameDeploymentManager {
     }
   }
 
+  async rollbackTo(source: BeeGameDeploymentRecord): Promise<BeeGameDeploymentRecord> {
+    if (source.status !== 'succeeded' || !source.url) {
+      throw new Error('Only successful deployments can be restored')
+    }
+    const now = new Date().toISOString()
+    const id = `deploy_${createHash('sha1')
+      .update(`${source.sessionId}-${source.id}-rollback-${now}`)
+      .digest('hex')
+      .slice(0, 12)}`
+    const {
+      buildCommand: _buildCommand,
+      buildLog: _buildLog,
+      ...restoredSource
+    } = source
+    const record: BeeGameDeploymentRecord = {
+      ...restoredSource,
+      id,
+      status: 'succeeded',
+      message: `Restored from deployment ${source.id}`,
+      createdAt: now,
+      updatedAt: now,
+      deployedAt: now,
+    }
+    await this.saveRecord(record)
+    return record
+  }
+
   async readPublicFile(publicPath: string): Promise<
     | {
         body: Blob

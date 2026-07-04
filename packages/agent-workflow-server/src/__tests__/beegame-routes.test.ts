@@ -4981,6 +4981,78 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('rolls back to a previous successful deployment record', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-rollback-route-'))
+    const workspace = join(projectsRoot, 'rollback-game')
+    let buildCount = 0
+    const deploymentRunner: BeeGameDeploymentRunner = async (_command, options) => {
+      buildCount += 1
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(
+        join(options.cwd, 'dist', 'index.html'),
+        `<main>Version ${buildCount}</main>`,
+      )
+      return { exitCode: 0, stdout: `built ${buildCount}`, stderr: '' }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      deploymentRunner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId: 'project_rollback',
+          projectName: 'Rollback Game',
+          workspacePath: workspace,
+        }),
+      })
+      const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(sessionWorkspace, { recursive: true })
+      await writeFile(
+        join(sessionWorkspace, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
+      const firstRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { method: 'POST' },
+      )
+      const firstDeployment = await firstRes.json()
+      const secondRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { method: 'POST' },
+      )
+      const secondDeployment = await secondRes.json()
+
+      const rollbackRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments/${firstDeployment.id}/rollback`,
+        { method: 'POST' },
+      )
+      const rollback = await rollbackRes.json()
+      const listRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+      )
+      const deployments = await listRes.json()
+
+      expect(secondDeployment.status).toBe('succeeded')
+      expect(rollbackRes.status).toBe(200)
+      expect(rollback).toEqual(expect.objectContaining({
+        status: 'succeeded',
+        url: firstDeployment.url,
+        message: `Restored from deployment ${firstDeployment.id}`,
+      }))
+      expect(deployments[0]).toEqual(expect.objectContaining({
+        id: rollback.id,
+        url: firstDeployment.url,
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('passes the request bearer token to remote deployment publishers', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-remote-deploy-route-'))
     const workspace = join(projectsRoot, 'users', 'user-route', 'remote-deployable-game')

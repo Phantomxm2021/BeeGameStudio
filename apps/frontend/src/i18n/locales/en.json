@@ -644,5 +644,13 @@
       "noPurpose": "No purpose provided"
     },
     "savedPrefixSeparator": ": "
+  },
+  "dashboard": {
+    "livePreview": {
+      "rollback": "Rollback"
+    }
+  },
+  "livePreview": {
+    "rollback": "Rollback"
   }
 }

@@ -32,6 +32,17 @@ const apiMocks = vi.hoisted(() => ({
         updatedAt: '2026-06-21T00:00:00.000Z',
         deployedAt: '2026-06-21T00:00:00.000Z',
     }),
+    rollbackProjectDeployment: vi.fn().mockResolvedValue({
+        id: 'deploy_rollback',
+        sessionId: 'beegame_proj_1',
+        workspacePath: '/tmp/Projects/project-one',
+        status: 'succeeded',
+        url: 'https://games.example.com/project-one/previous/',
+        message: 'Restored from deployment deploy_previous',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        updatedAt: '2026-06-21T00:00:00.000Z',
+        deployedAt: '2026-06-21T00:00:00.000Z',
+    }),
 }));
 const status = {
     uptime: '1m',
@@ -165,6 +176,7 @@ vi.mock('../../services/api', () => ({
         stopProjectPreview: apiMocks.stopProjectPreview,
         listProjectDeployments: apiMocks.listProjectDeployments,
         deployProject: apiMocks.deployProject,
+        rollbackProjectDeployment: apiMocks.rollbackProjectDeployment,
     },
 }));
 
@@ -618,6 +630,45 @@ describe('DashboardView runtime loading', () => {
         await user.click(screen.getByRole('button', { name: '重新发布' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
+    });
+
+    it('can roll back to a previous successful deployment from the preview surface', async () => {
+        const user = userEvent.setup();
+        apiMocks.listProjectDeployments.mockResolvedValueOnce([
+            {
+                id: 'deploy_latest',
+                sessionId: 'beegame_proj_1',
+                workspacePath: '/tmp/Projects/project-one',
+                status: 'succeeded',
+                url: 'https://games.example.com/project-one/latest/',
+                message: 'Published',
+                createdAt: '2026-06-22T00:00:00.000Z',
+                updatedAt: '2026-06-22T00:00:00.000Z',
+                deployedAt: '2026-06-22T00:00:00.000Z',
+            },
+            {
+                id: 'deploy_previous',
+                sessionId: 'beegame_proj_1',
+                workspacePath: '/tmp/Projects/project-one',
+                status: 'succeeded',
+                url: 'https://games.example.com/project-one/previous/',
+                message: 'Published',
+                createdAt: '2026-06-21T00:00:00.000Z',
+                updatedAt: '2026-06-21T00:00:00.000Z',
+                deployedAt: '2026-06-21T00:00:00.000Z',
+            },
+        ]);
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        expect(await screen.findByText('发布记录')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: /回滚|Rollback/ }));
+
+        await waitFor(() => expect(apiMocks.rollbackProjectDeployment).toHaveBeenCalledWith('proj_1', 'deploy_previous'));
     });
 
     it('keeps deployment failures visible in the preview surface', async () => {

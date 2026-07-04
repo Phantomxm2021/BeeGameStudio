@@ -1059,6 +1059,13 @@ export const api = {
     throw new Error('Project deployment is only available for BeeGame projects');
   },
 
+  rollbackProjectDeployment: (projectId: string, deploymentId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.rollbackProjectDeployment(projectId, deploymentId);
+    }
+    throw new Error('Project deployment rollback is only available for BeeGame projects');
+  },
+
   getProjectAssets: (projectId: string) => {
     if (isBeeGameAdapterEnabled()) {
       return beeGameAdapter.getProjectAssets(projectId);

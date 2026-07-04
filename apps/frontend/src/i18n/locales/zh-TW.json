@@ -611,7 +611,11 @@
       "deploymentSucceeded": "發布成功",
       "deploymentFailed": "發布失敗",
       "deploymentFailureLog": "失敗日誌",
-      "version": "版本"
+      "version": "版本",
+      "rollback": "回滾"
     }
+  },
+  "livePreview": {
+    "rollback": "回滾"
   }
 }

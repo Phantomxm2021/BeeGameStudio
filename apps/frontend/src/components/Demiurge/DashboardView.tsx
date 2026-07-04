@@ -352,6 +352,24 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     };
 
+    const handleRollbackDeployment = async (deploymentId: string) => {
+        if (!canManageDeployment || isDeployingProject) return;
+        setDeployingProject(true);
+        try {
+            const deployment = await api.rollbackProjectDeployment(projectId, deploymentId);
+            setDeploymentBuildReport(deploymentToBuildReport(deployment));
+            setDeploymentHistory((current) => [
+                deployment,
+                ...current.filter((item) => item.id !== deployment.id),
+            ]);
+            await refreshDeploymentHistory();
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setDeployingProject(false);
+        }
+    };
+
     // Poll live runtime state. BeeGame mode deliberately avoids legacy workflow phase/task telemetry.
     useEffect(() => {
         if (!projectId) return;
@@ -604,6 +622,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
                 onStopPreview={canManagePreview ? handleStopPreview : undefined}
                 onDeployProject={canManageDeployment ? handleDeployProject : undefined}
+                onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
                 isDeploying={isDeployingProject}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onBack={onBack}
