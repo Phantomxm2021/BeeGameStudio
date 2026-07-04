@@ -488,6 +488,19 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (record) return this.deriveRuntimeSnapshot(record)
     const persisted = this.readPersistedRuntimeSnapshot(sessionId)
+    if (workspacePath) {
+      const root = resolveExistingPath(workspacePath)
+      const recoveredTranscript = readExistingTranscriptForResume(sessionId, root)
+      if (recoveredTranscript) {
+        return deriveRuntimeSnapshotFromEvents(
+          sessionId,
+          root,
+          recoveredTranscript.events,
+          persisted?.modelConfigId,
+          { recoveredFromTranscript: true },
+        )
+      }
+    }
     if (persisted) {
       if (
         !workspacePath ||
@@ -497,12 +510,13 @@ export class BeeGameSessionManager {
       }
     }
     if (workspacePath) {
-      const root = resolve(workspacePath)
+      const root = resolveExistingPath(workspacePath)
       return deriveRuntimeSnapshotFromEvents(
         sessionId,
         root,
         readExistingTranscriptForResume(sessionId, root)?.events ?? [],
         undefined,
+        { recoveredFromTranscript: true },
       )
     }
     throw new Error('Session not found')
@@ -716,13 +730,6 @@ export class BeeGameSessionManager {
         const eventCountBeforeTurn = record.events.length
         const toolUseCountBeforeTurn = record.toolUses.size
         await this.submitToRunner(record, runner, prompt, signal)
-        if (creditReservation) {
-          shouldRefundReservation = !await this.settleTurnCredits(
-            record,
-            creditReservation,
-            creditPolicy ?? getCreditTaskPolicy('agent_turn'),
-          )
-        }
         const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
         const hadRuntimeActivity = hadToolUse || record.events
           .slice(eventCountBeforeTurn)
@@ -742,6 +749,13 @@ export class BeeGameSessionManager {
             this.appendRuntimeObservation(record, 'turn_completed')
             this.append(record, 'turn.completed', 'Turn ended')
           }
+        }
+        if (creditReservation) {
+          shouldRefundReservation = !await this.settleTurnCredits(
+            record,
+            creditReservation,
+            creditPolicy ?? getCreditTaskPolicy('agent_turn'),
+          )
         }
       } finally {
         runner.stop()
@@ -784,6 +798,7 @@ export class BeeGameSessionManager {
       prompt,
       signal,
       onMessage: message => {
+        appendProjectAgentRawLog(record, message)
         const mapped = mapSDKMessageToEvent(message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
@@ -1047,6 +1062,7 @@ export class BeeGameSessionManager {
     }
     record.events.push(event)
     appendTranscriptEvent(record.transcriptPath, event)
+    appendProjectRuntimeLog(record, event)
     record.nextEventId += 1
     record.session.updatedAt = new Date()
     this.persistRuntimeSnapshot(record)
@@ -1874,6 +1890,7 @@ function deriveRuntimeSnapshotFromEvents(
   workspacePath: string,
   events: BeeGameEvent[],
   modelConfigId: string | undefined,
+  options: { recoveredFromTranscript?: boolean } = {},
 ): BeeGameRuntimeSnapshot {
   const usage = getLatestRuntimeUsage(events)
   const latest = events.at(-1)
@@ -1881,26 +1898,34 @@ function deriveRuntimeSnapshotFromEvents(
     sessionId,
     workspacePath,
     ...(modelConfigId ? { modelConfigId } : {}),
-    phaseName: deriveSnapshotPhaseName(events),
-    phaseStatus: deriveSnapshotPhaseStatus(events),
+    phaseName: deriveSnapshotPhaseName(events, options),
+    phaseStatus: deriveSnapshotPhaseStatus(events, options),
     updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
     usage,
   }
 }
 
-function deriveSnapshotPhaseName(events: BeeGameEvent[]): string {
+function deriveSnapshotPhaseName(
+  events: BeeGameEvent[],
+  options: { recoveredFromTranscript?: boolean } = {},
+): string {
+  if (options.recoveredFromTranscript) return 'idle'
   if (events.some(event => event.type === 'turn.started' && !hasTurnEnded(events, event.turnId))) {
     return 'running'
   }
   return 'idle'
 }
 
-function deriveSnapshotPhaseStatus(events: BeeGameEvent[]): string {
+function deriveSnapshotPhaseStatus(
+  events: BeeGameEvent[],
+  options: { recoveredFromTranscript?: boolean } = {},
+): string {
   const latest = events.at(-1)
   if (!latest) return 'idle'
+  if (options.recoveredFromTranscript) return 'idle'
   if (latest.type === 'permission.requested') return 'waiting_approval'
   if (latest.type === 'turn.failed' || latest.type === 'session.failed') return 'failed'
-  if (deriveSnapshotPhaseName(events) === 'running') return 'running'
+  if (deriveSnapshotPhaseName(events, options) === 'running') return 'running'
   return 'idle'
 }
 
@@ -2612,6 +2637,156 @@ function appendTranscriptEvent(path: string, event: BeeGameEvent): void {
   } catch {
     // Transcript logging must not break the active BeeGame turn.
   }
+}
+
+type ProjectLogIndex = {
+  version: 1
+  project: string
+  updatedAt: string
+  sessions: Record<string, ProjectLogIndexSession>
+}
+
+type ProjectLogIndexSession = {
+  sessionId: string
+  transcript: string
+  agentRawLog: string
+  runtimeLog: string
+  previewLog: string
+  deployLog: string
+  updatedAt: string
+}
+
+function appendProjectRuntimeLog(record: SessionRecord, event: BeeGameEvent): void {
+  if (event.type === 'assistant.partial') return
+  try {
+    updateProjectLogIndex(record)
+    const path = getProjectRuntimeLogPath(record.session.cwd)
+    appendFileSync(
+      path,
+      [
+        event.createdAt.toISOString(),
+        event.type,
+        event.turnId ?? '-',
+        collapseLogLine(event.text),
+      ].join(' ') + '\n',
+      'utf8',
+    )
+  } catch {
+    // Project-local runtime logs are diagnostic only.
+  }
+}
+
+function appendProjectAgentRawLog(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): void {
+  try {
+    updateProjectLogIndex(record)
+    const path = getProjectAgentRawLogPath(record.session.cwd)
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        sessionId: record.session.id,
+        ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+        createdAt: new Date().toISOString(),
+        message: sanitizeBeeGameVisibleValue(message),
+      })}\n`,
+      'utf8',
+    )
+  } catch {
+    // Raw agent logs must never interrupt the active turn.
+  }
+}
+
+function updateProjectLogIndex(record: SessionRecord): void {
+  const workspacePath = record.session.cwd
+  const logsDir = getProjectLogsDir(workspacePath)
+  mkdirSync(logsDir, { recursive: true })
+  const indexPath = getProjectLogIndexPath(workspacePath)
+  const now = new Date().toISOString()
+  const index = readProjectLogIndex(indexPath, workspacePath)
+  index.updatedAt = now
+  index.sessions[record.session.id] = {
+    sessionId: record.session.id,
+    transcript: toProjectRelativePath(workspacePath, record.transcriptPath),
+    agentRawLog: toProjectRelativePath(workspacePath, getProjectAgentRawLogPath(workspacePath)),
+    runtimeLog: toProjectRelativePath(workspacePath, getProjectRuntimeLogPath(workspacePath)),
+    previewLog: toProjectRelativePath(workspacePath, getProjectPreviewLogPath(workspacePath)),
+    deployLog: toProjectRelativePath(workspacePath, getProjectDeployLogPath(workspacePath)),
+    updatedAt: now,
+  }
+  writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
+}
+
+function readProjectLogIndex(path: string, workspacePath: string): ProjectLogIndex {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      parsed.version === 1 &&
+      parsed.sessions &&
+      typeof parsed.sessions === 'object'
+    ) {
+      return {
+        version: 1,
+        project: typeof parsed.project === 'string'
+          ? parsed.project
+          : basename(workspacePath),
+        updatedAt: typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : new Date().toISOString(),
+        sessions: parsed.sessions as Record<string, ProjectLogIndexSession>,
+      }
+    }
+  } catch {
+    // Recreate a damaged or missing index from the active session.
+  }
+  return {
+    version: 1,
+    project: basename(workspacePath),
+    updatedAt: new Date().toISOString(),
+    sessions: {},
+  }
+}
+
+function getProjectLogsDir(workspacePath: string): string {
+  return resolve(workspacePath, 'logs')
+}
+
+function getProjectLogIndexPath(workspacePath: string): string {
+  return resolve(getProjectLogsDir(workspacePath), 'index.json')
+}
+
+function getProjectRuntimeLogPath(workspacePath: string): string {
+  return resolve(getProjectLogsDir(workspacePath), 'runtime.log')
+}
+
+function getProjectAgentRawLogPath(workspacePath: string): string {
+  return resolve(getProjectLogsDir(workspacePath), 'agent.raw.jsonl')
+}
+
+function getProjectPreviewLogPath(workspacePath: string): string {
+  return resolve(getProjectLogsDir(workspacePath), 'preview.log')
+}
+
+function getProjectDeployLogPath(workspacePath: string): string {
+  return resolve(getProjectLogsDir(workspacePath), 'deploy.log')
+}
+
+function toProjectRelativePath(workspacePath: string, path: string): string {
+  return relative(workspacePath, path).split('\\').join('/')
+}
+
+function collapseLogLine(text: string): string {
+  const collapsed = text
+    .split('\n')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .join(' ')
+  return collapsed.length > 800
+    ? `${collapsed.slice(0, 797)}...`
+    : collapsed
 }
 
 function permissionSignature(request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>): string {

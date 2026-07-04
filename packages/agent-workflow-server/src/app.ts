@@ -1830,9 +1830,16 @@ function registerBeeGameSessionRoutes(
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
+      const workspacePath = getWorkspacePathHint(
+        c.req.query('workspacePath'),
+        {
+          workspacePath: c.req.header('x-beegame-workspace-path'),
+        },
+      )
       return c.json(
         beeGameSessions.runtimeSnapshot(
           c.req.param('id'),
+          workspacePath,
         ),
       )
     } catch (err) {

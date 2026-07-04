@@ -1401,6 +1401,52 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
+      const logsDir = join(workspace, 'logs')
+      const logIndex = JSON.parse(
+        await readFile(join(logsDir, 'index.json'), 'utf8'),
+      ) as {
+        version: number
+        project: string
+        sessions: Record<string, {
+          transcript: string
+          agentRawLog: string
+          runtimeLog: string
+          previewLog: string
+          deployLog: string
+        }>
+      }
+      expect(logIndex).toEqual(expect.objectContaining({
+        version: 1,
+        project: 'game-one',
+      }))
+      expect(logIndex.sessions[session.id]).toEqual(expect.objectContaining({
+        transcript: `transcripts/${transcriptFiles[0]}`,
+        agentRawLog: 'logs/agent.raw.jsonl',
+        runtimeLog: 'logs/runtime.log',
+        previewLog: 'logs/preview.log',
+        deployLog: 'logs/deploy.log',
+      }))
+      const runtimeLog = await readFile(join(logsDir, 'runtime.log'), 'utf8')
+      expect(runtimeLog).toContain('session.started')
+      expect(runtimeLog).toContain('turn.started')
+      expect(runtimeLog).toContain('turn.completed')
+      const rawAgentLog = await readFile(join(logsDir, 'agent.raw.jsonl'), 'utf8')
+      const rawAgentEvents = rawAgentLog
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line) as { sessionId: string; message: { type?: string } })
+      expect(rawAgentEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: session.id,
+            message: expect.objectContaining({ type: 'assistant' }),
+          }),
+          expect.objectContaining({
+            sessionId: session.id,
+            message: expect.objectContaining({ type: 'result' }),
+          }),
+        ]),
+      )
       const restartedApp = createAgentWorkflowApp({
         sessionRunner: createFakeRunner().runner,
         defaultWorkspacePath: projectsRoot,
@@ -3108,6 +3154,74 @@ describe('beegame session routes', () => {
       expect(snapshot).toEqual(expect.objectContaining({
         phaseName: 'idle',
         phaseStatus: 'idle',
+      }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('recovers an unclosed transcript-only turn as idle after backend restart', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const sessionId = 'beegame_recovered_unclosed_turn'
+    const turnId = `${sessionId}-turn-1`
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const app = createAgentWorkflowApp()
+    try {
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const now = new Date().toISOString()
+      await writeFile(
+        transcriptPath,
+        [
+          {
+            id: 1,
+            sessionId,
+            type: 'session.started',
+            text: 'Created BeeGame session',
+            createdAt: now,
+          },
+          {
+            id: 2,
+            sessionId,
+            turnId,
+            type: 'turn.started',
+            text: 'Turn started',
+            createdAt: now,
+          },
+          {
+            id: 3,
+            sessionId,
+            turnId,
+            type: 'assistant.message',
+            text: 'The turn produced a final response.',
+            payload: {
+              type: 'assistant',
+              usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+            },
+            createdAt: now,
+          },
+          {
+            id: 4,
+            sessionId,
+            turnId,
+            type: 'system.status',
+            text: 'Credit refund is pending',
+            payload: { type: 'credit.refund_pending' },
+            createdAt: now,
+          },
+        ].map(event => JSON.stringify(event)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const snapshotRes = await app.request(
+        `/api/beegame-sessions/${sessionId}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const snapshot = await snapshotRes.json()
+
+      expect(snapshotRes.status).toBe(200)
+      expect(snapshot).toEqual(expect.objectContaining({
+        phaseName: 'idle',
+        phaseStatus: 'idle',
+        usage: expect.objectContaining({ total_tokens: 15 }),
       }))
     } finally {
       await rm(workspace, { recursive: true, force: true })
