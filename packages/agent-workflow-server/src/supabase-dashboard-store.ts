@@ -27,6 +27,7 @@ import type {
   BeeGameProjectMetadata,
   BeeGameProjectRuntimeSnapshot,
 } from './project-metadata-store'
+import type { BeeGameDeploymentRecord } from './beegame/deployment-manager'
 import type { RuntimeSettingsConfig } from './runtime-settings-store'
 import type {
   AppendAuditEventInput,
@@ -196,6 +197,26 @@ type SupabasePreviewRow = {
   metadata: JsonObject
   created_at: string
   updated_at: string
+}
+
+type SupabaseDeploymentRow = {
+  id: string
+  session_id: string
+  project_id: string | null
+  owner_id: string
+  workspace_path: string
+  status: BeeGameDeploymentRecord['status']
+  url: string
+  build_command: string | null
+  build_log: string | null
+  entrypoint: string | null
+  output_dir: string | null
+  artifact_path: string | null
+  artifact_hash: string | null
+  message: string | null
+  created_at: string
+  updated_at: string
+  deployed_at: string | null
 }
 
 export function createSupabaseDashboardStoreFromEnv(
@@ -818,6 +839,47 @@ export class SupabaseDashboardStore {
     return rows[0] ? rowToPreviewSnapshot(rows[0]) : undefined
   }
 
+  async listDeploymentRecords(
+    ownerId: string,
+    sessionId?: string,
+  ): Promise<BeeGameDeploymentRecord[]> {
+    const sessionFilter = sessionId ? `&session_id=eq.${q(sessionId)}` : ''
+    const rows = await this.rest<SupabaseDeploymentRow[]>(
+      `/rest/v1/beegame_deployments?owner_id=eq.${q(ownerId)}${sessionFilter}&select=*&order=created_at.desc,updated_at.desc`,
+    )
+    return rows.map(rowToDeploymentRecord)
+  }
+
+  async upsertDeploymentRecord(
+    ownerId: string,
+    record: BeeGameDeploymentRecord,
+  ): Promise<BeeGameDeploymentRecord> {
+    const row = await this.upsert<SupabaseDeploymentRow>(
+      'beegame_deployments',
+      {
+        id: record.id,
+        owner_id: ownerId,
+        session_id: record.sessionId,
+        project_id: record.projectId ?? null,
+        workspace_path: record.workspacePath,
+        status: record.status,
+        url: record.url,
+        build_command: record.buildCommand ?? null,
+        build_log: record.buildLog ?? null,
+        entrypoint: record.entrypoint ?? null,
+        output_dir: record.outputDir ?? null,
+        artifact_path: record.artifactPath ?? null,
+        artifact_hash: record.artifactHash ?? null,
+        message: record.message ?? null,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+        deployed_at: record.deployedAt ?? null,
+      },
+      'id',
+    )
+    return rowToDeploymentRecord(row)
+  }
+
   private async getMcpServer(
     ownerId: string,
     id: string,
@@ -1385,6 +1447,27 @@ function rowToPreviewSnapshot(row: SupabasePreviewRow): BeeGamePreviewSnapshot {
   }
 }
 
+function rowToDeploymentRecord(row: SupabaseDeploymentRow): BeeGameDeploymentRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    ...(row.project_id ? { projectId: row.project_id } : {}),
+    workspacePath: row.workspace_path,
+    status: normalizeDeploymentStatus(row.status),
+    url: row.url,
+    ...(row.build_command ? { buildCommand: row.build_command } : {}),
+    ...(row.build_log ? { buildLog: row.build_log } : {}),
+    ...(row.entrypoint ? { entrypoint: row.entrypoint } : {}),
+    ...(row.output_dir ? { outputDir: row.output_dir } : {}),
+    ...(row.artifact_path ? { artifactPath: row.artifact_path } : {}),
+    ...(row.artifact_hash ? { artifactHash: row.artifact_hash } : {}),
+    ...(row.message ? { message: row.message } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.deployed_at ? { deployedAt: row.deployed_at } : {}),
+  }
+}
+
 function normalizePreviewStatus(value: unknown): BeeGamePreviewSnapshot['status'] {
   return value === 'idle' ||
     value === 'starting' ||
@@ -1394,6 +1477,18 @@ function normalizePreviewStatus(value: unknown): BeeGamePreviewSnapshot['status'
     value === 'unsupported'
     ? value
     : 'idle'
+}
+
+function normalizeDeploymentStatus(
+  value: unknown,
+): BeeGameDeploymentRecord['status'] {
+  return value === 'queued' ||
+    value === 'building' ||
+    value === 'publishing' ||
+    value === 'succeeded' ||
+    value === 'failed'
+    ? value
+    : 'failed'
 }
 
 function sumCreditSummaryKind(

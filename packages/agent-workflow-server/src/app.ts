@@ -24,6 +24,7 @@ import {
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisherFromEnv,
+  type BeeGameDeploymentRecord,
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
@@ -857,6 +858,18 @@ export function createAgentWorkflowApp(
           metadata,
           snapshot,
         ),
+      listDeploymentRecords: (request, sessionId) =>
+        dashboardRepository.listDeploymentRecords(
+          request,
+          getCurrentUser(request),
+          sessionId,
+        ),
+      persistDeploymentRecord: (request, record) =>
+        dashboardRepository.upsertDeploymentRecord(
+          request,
+          getCurrentUser(request),
+          record,
+        ),
       persistAssetManifest: (request, metadata, manifest) =>
         dashboardRepository.upsertAssetManifest(
           request,
@@ -1663,6 +1676,14 @@ function registerBeeGameSessionRoutes(
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
       snapshot: BeeGamePreviewSnapshot,
     ) => Promise<void>
+    listDeploymentRecords?: (
+      request: Request,
+      sessionId: string,
+    ) => Promise<BeeGameDeploymentRecord[] | undefined>
+    persistDeploymentRecord?: (
+      request: Request,
+      record: BeeGameDeploymentRecord,
+    ) => Promise<BeeGameDeploymentRecord | undefined>
     persistAssetManifest: (
       request: Request,
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
@@ -2168,6 +2189,11 @@ function registerBeeGameSessionRoutes(
       if (forbidden) return c.json(forbidden, 403)
       const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
       if (sessionForbidden) return c.json(sessionForbidden, 404)
+      const persisted = await options.listDeploymentRecords?.(
+        c.req.raw,
+        c.req.param('id'),
+      )
+      if (persisted) return c.json(persisted)
       return c.json(await beeGameDeployments.list(c.req.param('id')))
     })
 
@@ -2194,7 +2220,11 @@ function registerBeeGameSessionRoutes(
             ? { authToken: getBearerToken(c.req.raw) }
             : {}),
         })
-        return c.json(deployment)
+        const persisted = await options.persistDeploymentRecord?.(
+          c.req.raw,
+          deployment,
+        )
+        return c.json(persisted ?? deployment)
       } catch (err) {
         return c.json({ error: toErrorMessage(err) }, 400)
       }

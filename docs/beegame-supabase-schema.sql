@@ -268,6 +268,47 @@ create table if not exists public.beegame_previews (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_deployments (
+  id text primary key,
+  session_id text not null references public.beegame_sessions(id) on delete cascade,
+  project_id text references public.beegame_projects(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  workspace_path text not null,
+  status text not null check (status in ('queued', 'building', 'publishing', 'succeeded', 'failed')),
+  url text not null default '',
+  build_command text,
+  build_log text,
+  entrypoint text,
+  output_dir text,
+  artifact_path text,
+  artifact_hash text,
+  message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deployed_at timestamptz
+);
+
+alter table public.beegame_deployments
+  add column if not exists session_id text references public.beegame_sessions(id) on delete cascade,
+  add column if not exists project_id text references public.beegame_projects(id) on delete cascade,
+  add column if not exists owner_id uuid references auth.users(id) on delete cascade,
+  add column if not exists workspace_path text,
+  add column if not exists status text,
+  add column if not exists url text,
+  add column if not exists build_command text,
+  add column if not exists build_log text,
+  add column if not exists entrypoint text,
+  add column if not exists output_dir text,
+  add column if not exists artifact_path text,
+  add column if not exists artifact_hash text,
+  add column if not exists message text,
+  add column if not exists created_at timestamptz default now(),
+  add column if not exists updated_at timestamptz default now(),
+  add column if not exists deployed_at timestamptz;
+
+create index if not exists beegame_deployments_owner_session_idx
+  on public.beegame_deployments (owner_id, session_id, created_at desc);
+
 create table if not exists public.beegame_credit_accounts (
   user_id uuid primary key references auth.users(id) on delete cascade,
   plan text not null default 'free',
@@ -1461,6 +1502,7 @@ alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_previews enable row level security;
+alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
 alter table public.beegame_credit_accounts enable row level security;
 alter table public.beegame_credit_ledger enable row level security;
@@ -1557,6 +1599,10 @@ create policy "asset owner access" on public.beegame_assets
 
 drop policy if exists "preview owner access" on public.beegame_previews;
 create policy "preview owner access" on public.beegame_previews
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists "deployment owner access" on public.beegame_deployments;
+create policy "deployment owner access" on public.beegame_deployments
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 drop policy if exists "account link owner access" on public.beegame_account_links;

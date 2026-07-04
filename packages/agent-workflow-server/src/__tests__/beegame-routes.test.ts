@@ -4944,11 +4944,6 @@ describe('beegame session routes', () => {
       defaultWorkspacePath: projectsRoot,
     })
     try {
-      await mkdir(workspace, { recursive: true })
-      await writeFile(
-        join(workspace, 'package.json'),
-        JSON.stringify({ scripts: { build: 'vite build' } }),
-      )
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -4960,6 +4955,12 @@ describe('beegame session routes', () => {
         }),
       })
       const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(sessionWorkspace, { recursive: true })
+      await writeFile(
+        join(sessionWorkspace, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST' },
@@ -5025,11 +5026,6 @@ describe('beegame session routes', () => {
       },
     })
     try {
-      await mkdir(workspace, { recursive: true })
-      await writeFile(
-        join(workspace, 'package.json'),
-        JSON.stringify({ scripts: { build: 'vite build' } }),
-      )
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
         headers: {
@@ -5043,6 +5039,12 @@ describe('beegame session routes', () => {
         }),
       })
       const session = await sessionRes.json()
+      const sessionWorkspace = session.cwd as string
+      await mkdir(sessionWorkspace, { recursive: true })
+      await writeFile(
+        join(sessionWorkspace, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST', headers: { authorization: 'Bearer user-route-token' } },
@@ -5060,6 +5062,126 @@ describe('beegame session routes', () => {
         files: ['index.html'],
       }])
     } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('mirrors deployment records to Supabase when configured', async () => {
+    const originalUrl = process.env.BEEGAME_SUPABASE_URL
+    const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY
+    const originalDeploymentBucket = process.env.BEEGAME_DEPLOYMENT_STORAGE_BUCKET
+    const originalFetch = globalThis.fetch
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-deploy-supabase-'))
+    const workspace = join(projectsRoot, 'users', 'deploy-user', 'deploy-metadata-project')
+    const deploymentRows: Array<Record<string, unknown>> = []
+    const deploymentRunner: BeeGameDeploymentRunner = async (_command, options) => {
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Deploy metadata game</main>')
+      return { exitCode: 0, stdout: 'built', stderr: '' }
+    }
+    try {
+      process.env.BEEGAME_SUPABASE_URL = 'https://project.supabase.co'
+      process.env.BEEGAME_SUPABASE_ANON_KEY = 'anon-key'
+      delete process.env.BEEGAME_DEPLOYMENT_STORAGE_BUCKET
+      globalThis.fetch = (async (input, init) => {
+        const requestUrl = String(input)
+        if (requestUrl.includes('/rest/v1/beegame_sessions')) {
+          if (init?.method === 'POST') return Response.json([JSON.parse(String(init.body))])
+          return Response.json([])
+        }
+        if (requestUrl.includes('/rest/v1/beegame_deployments')) {
+          if (init?.method === 'POST') {
+            const row = JSON.parse(String(init.body)) as Record<string, unknown>
+            deploymentRows.push(row)
+            return Response.json([{
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+              deployed_at: row.deployed_at ?? null,
+              ...row,
+            }])
+          }
+          return Response.json(deploymentRows)
+        }
+        return new Response('Not found', { status: 404 })
+      }) as typeof fetch
+
+      const app = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        sessionRunner: createFakeRunner().runner,
+        deploymentRunner,
+        currentUser: {
+          id: 'deploy-user',
+          role: 'owner',
+        },
+      })
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer user-token',
+        },
+        body: JSON.stringify({
+          workspacePath: workspace,
+          projectId: 'project_deploy_metadata',
+        }),
+      })
+      const session = await sessionRes.json()
+      const deploySessionWorkspace = session.cwd as string
+      await mkdir(deploySessionWorkspace, { recursive: true })
+      await writeFile(
+        join(deploySessionWorkspace, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
+      const deployRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { method: 'POST', headers: { authorization: 'Bearer user-token' } },
+      )
+      const deployment = await deployRes.json()
+      const listRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { headers: { authorization: 'Bearer user-token' } },
+      )
+      const deployments = await listRes.json()
+
+      expect(deployRes.status).toBe(200)
+      expect(listRes.status).toBe(200)
+      expect(deployment.status).toBe('succeeded')
+      expect(deployments).toEqual([
+        expect.objectContaining({
+          id: deployment.id,
+          sessionId: session.id,
+          projectId: 'project_deploy_metadata',
+          status: 'succeeded',
+        }),
+      ])
+      expect(deploymentRows).toEqual([
+        expect.objectContaining({
+          id: deployment.id,
+          owner_id: 'deploy-user',
+          session_id: session.id,
+          project_id: 'project_deploy_metadata',
+          status: 'succeeded',
+          url: deployment.url,
+          artifact_hash: deployment.artifactHash,
+        }),
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalUrl === undefined) {
+        delete process.env.BEEGAME_SUPABASE_URL
+      } else {
+        process.env.BEEGAME_SUPABASE_URL = originalUrl
+      }
+      if (originalAnonKey === undefined) {
+        delete process.env.BEEGAME_SUPABASE_ANON_KEY
+      } else {
+        process.env.BEEGAME_SUPABASE_ANON_KEY = originalAnonKey
+      }
+      if (originalDeploymentBucket === undefined) {
+        delete process.env.BEEGAME_DEPLOYMENT_STORAGE_BUCKET
+      } else {
+        process.env.BEEGAME_DEPLOYMENT_STORAGE_BUCKET = originalDeploymentBucket
+      }
       await rm(projectsRoot, { recursive: true, force: true })
     }
   })

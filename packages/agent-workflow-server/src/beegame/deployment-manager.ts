@@ -351,6 +351,9 @@ export function createSupabaseStorageDeploymentPublisher(options: {
         const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodeObjectPath(
           options.bucket,
         )}/${encodeObjectPath(objectPath)}`
+        const bytes = await file.bytes()
+        const body = new ArrayBuffer(bytes.byteLength)
+        new Uint8Array(body).set(bytes)
         const response = await fetchImpl(uploadUrl, {
           method: 'POST',
           headers: {
@@ -359,7 +362,7 @@ export function createSupabaseStorageDeploymentPublisher(options: {
             'content-type': contentTypeForPath(file.path),
             'x-upsert': 'true',
           },
-          body: await file.bytes(),
+          body,
         })
         if (!response.ok) {
           throw new Error(

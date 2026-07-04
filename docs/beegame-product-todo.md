@@ -15,6 +15,8 @@ on system-level work, not individual generated game fixes.
 - Static Web deployments can be published by the runtime host under
   `/deployments/*` for local/dev use, or to Supabase Storage when
   `BEEGAME_DEPLOYMENT_STORAGE_BUCKET` is configured.
+- Deployment records are mirrored to Supabase so published URLs and statuses can
+  survive runtime host replacement.
 
 ## P0
 
@@ -23,8 +25,8 @@ on system-level work, not individual generated game fixes.
     deployment metadata and lifecycle controls are still minimal.
   - Scope:
     - Verify Supabase Storage deployment in a production-like environment.
-    - Persist deployment records in Supabase, including project id, version,
-      artifact hash, URL, logs, status, and created user.
+    - Extend Supabase deployment records with explicit version labels and richer
+      deployment logs.
     - Add deployment logs/history UI.
     - Add redeploy and rollback actions.
   - Acceptance:

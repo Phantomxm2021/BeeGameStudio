@@ -11,6 +11,79 @@ describe('SupabaseDashboardStore', () => {
     globalThis.fetch = originalFetch
   })
 
+  test('persists deployment records through Supabase REST', async () => {
+    const ownerId = '00000000-0000-0000-0000-000000000001'
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const deploymentRows: Array<Record<string, unknown>> = []
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      const method = init?.method ?? 'GET'
+      const body = init?.body
+        ? JSON.parse(String(init.body)) as Record<string, unknown>
+        : undefined
+      calls.push({
+        url: requestUrl,
+        method,
+        ...(body ? { body } : {}),
+      })
+
+      if (requestUrl.includes('/beegame_deployments')) {
+        if (method === 'POST') {
+          deploymentRows.unshift(body ?? {})
+          return Response.json([body])
+        }
+        return Response.json(deploymentRows)
+      }
+
+      return Response.json([])
+    }) as typeof fetch
+
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+    })
+    const record = await store.upsertDeploymentRecord(ownerId, {
+      id: 'deploy_1',
+      sessionId: 'beegame_1',
+      projectId: 'project_1',
+      workspacePath: '/workspace/project_1',
+      status: 'succeeded',
+      url: 'https://games.example.com/deploy_1/index.html',
+      buildCommand: 'npm run build',
+      buildLog: 'built',
+      entrypoint: 'package.json',
+      outputDir: '/workspace/project_1/dist',
+      artifactPath: 'supabase://beegame-deployments/deployments/user/deploy_1',
+      artifactHash: 'hash_1',
+      message: 'Published',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      updatedAt: '2026-07-04T00:01:00.000Z',
+      deployedAt: '2026-07-04T00:01:00.000Z',
+    })
+    const listed = await store.listDeploymentRecords(ownerId, 'beegame_1')
+
+    expect(record).toEqual(expect.objectContaining({
+      id: 'deploy_1',
+      sessionId: 'beegame_1',
+      projectId: 'project_1',
+      status: 'succeeded',
+      url: 'https://games.example.com/deploy_1/index.html',
+    }))
+    expect(listed).toEqual([record])
+    expect(calls.some(call =>
+      call.method === 'POST' &&
+      call.url.includes('/rest/v1/beegame_deployments') &&
+      call.url.includes('on_conflict=id'),
+    )).toBe(true)
+    expect(calls.some(call =>
+      call.method === 'GET' &&
+      call.url.includes('/rest/v1/beegame_deployments') &&
+      call.url.includes(`owner_id=eq.${encodeURIComponent(ownerId)}`) &&
+      call.url.includes('session_id=eq.beegame_1'),
+    )).toBe(true)
+  })
+
   test('accepts frontend Supabase env names for dashboard data access', async () => {
     const calls: string[] = []
     globalThis.fetch = (async (url, init) => {

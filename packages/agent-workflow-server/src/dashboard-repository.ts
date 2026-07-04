@@ -43,6 +43,7 @@ import type {
   BeeGameSessionInternalMetadata,
   BeeGameSessionCreditBackend,
 } from './beegame/session-manager'
+import type { BeeGameDeploymentRecord } from './beegame/deployment-manager'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import {
   loadRuntimeSettingsConfig,
@@ -551,6 +552,28 @@ export class DashboardRepository {
     appendAuditEvent(input, {
       dataDir: this.options.getUserDataRoot(request),
     })
+  }
+
+  async listDeploymentRecords(
+    request: Request,
+    user: BeeGameUserContext,
+    sessionId?: string,
+  ): Promise<BeeGameDeploymentRecord[] | undefined> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listDeploymentRecords(user.id, sessionId)
+      : undefined
+  }
+
+  async upsertDeploymentRecord(
+    request: Request,
+    user: BeeGameUserContext,
+    record: BeeGameDeploymentRecord,
+  ): Promise<BeeGameDeploymentRecord | undefined> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.upsertDeploymentRecord(user.id, record)
+      : undefined
   }
 
   async listAuditEvents(
