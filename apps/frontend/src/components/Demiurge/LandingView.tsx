@@ -288,12 +288,6 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
     notes: '',
 });
 
-const optionTags = (option: BeeGameIntakeOption): string[] => [
-    option.recommendedPlatform,
-    option.recommendedDimension,
-    option.recommendedGenre,
-].filter(tag => tag && tag !== 'Auto');
-
 const optionsWithCurrentValue = (options: string[], value: string): string[] => {
     if (!value || value === 'Auto' || options.includes(value)) return options;
     return [value, ...options];

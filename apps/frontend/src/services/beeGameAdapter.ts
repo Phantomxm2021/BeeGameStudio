@@ -386,7 +386,7 @@ export const beeGameAdapter = {
     };
   },
 
-  async openProject(projectId: string): Promise<{ opened: boolean }> {
+  async openProject(_projectId: string): Promise<{ opened: boolean }> {
     return { opened: true };
   },
 
@@ -732,6 +732,22 @@ export const beeGameAdapter = {
       return postJson(`/api/beegame-sessions/${binding.sessionId}/deployments`, {
         workspacePath: binding.workspacePath,
       });
+    }
+  },
+
+  async listProjectDeployments(projectId: string): Promise<BeeGameDeploymentPayload[]> {
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) return [];
+    try {
+      return await getJson<BeeGameDeploymentPayload[]>(
+        `/api/beegame-sessions/${binding.sessionId}/deployments`,
+      );
+    } catch (error) {
+      if (!isSessionNotFoundError(error)) throw error;
+      await restoreBeeGameSessionForBinding(binding);
+      return getJson<BeeGameDeploymentPayload[]>(
+        `/api/beegame-sessions/${binding.sessionId}/deployments`,
+      );
     }
   },
 

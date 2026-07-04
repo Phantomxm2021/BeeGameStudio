@@ -20,6 +20,7 @@ const apiMocks = vi.hoisted(() => ({
     startProjectPreview: vi.fn().mockResolvedValue({}),
     restartProjectPreview: vi.fn().mockResolvedValue({}),
     stopProjectPreview: vi.fn().mockResolvedValue({}),
+    listProjectDeployments: vi.fn().mockResolvedValue([]),
     deployProject: vi.fn().mockResolvedValue({
         id: 'deploy_1',
         sessionId: 'beegame_proj_1',
@@ -162,6 +163,7 @@ vi.mock('../../services/api', () => ({
         startProjectPreview: apiMocks.startProjectPreview,
         restartProjectPreview: apiMocks.restartProjectPreview,
         stopProjectPreview: apiMocks.stopProjectPreview,
+        listProjectDeployments: apiMocks.listProjectDeployments,
         deployProject: apiMocks.deployProject,
     },
 }));
@@ -583,6 +585,39 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
         const frame = await screen.findByTestId('beegame-live-preview-frame');
         expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/');
+    });
+
+    it('loads deployment history and supports redeploy from the preview surface', async () => {
+        const user = userEvent.setup();
+        apiMocks.listProjectDeployments.mockResolvedValueOnce([
+            {
+                id: 'deploy_previous',
+                sessionId: 'beegame_proj_1',
+                workspacePath: '/tmp/Projects/project-one',
+                status: 'succeeded',
+                url: 'https://games.example.com/project-one/previous/',
+                buildCommand: 'npm run build',
+                message: 'Published',
+                createdAt: '2026-06-21T00:00:00.000Z',
+                updatedAt: '2026-06-21T00:00:00.000Z',
+                deployedAt: '2026-06-21T00:00:00.000Z',
+            },
+        ]);
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(apiMocks.listProjectDeployments).toHaveBeenCalledWith('proj_1'));
+        expect(await screen.findByText('发布记录')).toBeInTheDocument();
+        const frame = await screen.findByTestId('beegame-live-preview-frame');
+        expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/previous/');
+
+        await user.click(screen.getByRole('button', { name: '重新发布' }));
+
+        await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
     });
 
     it('keeps deployment failures visible in the preview surface', async () => {

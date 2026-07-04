@@ -600,5 +600,18 @@
       "noPurpose": "未提供用途說明"
     },
     "savedPrefixSeparator": "："
+  },
+  "dashboard": {
+    "livePreview": {
+      "redeploy": "重新發布",
+      "deploymentHistory": "發布記錄",
+      "deploymentQueued": "等待發布",
+      "deploymentBuilding": "正在建置",
+      "deploymentPublishing": "正在上傳",
+      "deploymentSucceeded": "發布成功",
+      "deploymentFailed": "發布失敗",
+      "deploymentFailureLog": "失敗日誌",
+      "version": "版本"
+    }
   }
 }

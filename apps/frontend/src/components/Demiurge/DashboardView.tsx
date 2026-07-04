@@ -81,6 +81,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
     const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
+    const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
     const [deploymentBuildReport, setDeploymentBuildReport] = useState<BuildReportPayload | null>(null);
     const [isDeployingProject, setDeployingProject] = useState(false);
     const hasSentInitialPrompt = useRef(false);
@@ -105,7 +106,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         tasks,
         loadTasks,
         isSyncing,
-        status,
         isDark,
         toggleTheme,
         hasPermission,
@@ -135,6 +135,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             setCreditSummary(await getCreditSummary(projectId));
         } catch (error) {
             console.error('Failed to load credit summary:', error);
+        }
+    }, [isBeeGameMode, projectId]);
+
+    const refreshDeploymentHistory = useCallback(async () => {
+        if (!isBeeGameMode) return;
+        try {
+            setDeploymentHistory(await api.listProjectDeployments(projectId));
+        } catch (error) {
+            console.error('Failed to load deployment history:', error);
         }
     }, [isBeeGameMode, projectId]);
 
@@ -189,8 +198,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         hasSentInitialPrompt.current = false;
         setInitialGateStateReady(false);
         setCreditSummary(null);
+        setDeploymentHistory([]);
+        setDeploymentBuildReport(null);
         void refreshCreditSummary();
-    }, [projectId, refreshCreditSummary]);
+        void refreshDeploymentHistory();
+    }, [projectId, refreshCreditSummary, refreshDeploymentHistory]);
 
     useEffect(() => {
         if (!isBeeGameMode) return;
@@ -325,6 +337,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         try {
             const deployment = await api.deployProject(projectId);
             setDeploymentBuildReport(deploymentToBuildReport(deployment));
+            setDeploymentHistory((current) => [
+                deployment,
+                ...current.filter((item) => item.id !== deployment.id),
+            ]);
+            await refreshDeploymentHistory();
             if (deployment.status !== 'succeeded' || !deployment.url) {
                 throw new Error(deployment.message || 'Deployment failed');
             }
@@ -441,6 +458,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             modelConfigs[0],
         ) || savedRuntimeSnapshot?.model_name || '';
     }, [modelConfigs, projectStatus?.model_config_id, savedRuntimeSnapshot?.model_name]);
+
+    const latestDeploymentBuildReport = useMemo(() => {
+        const latest = deploymentHistory[0];
+        return latest ? deploymentToBuildReport(latest) : null;
+    }, [deploymentHistory]);
 
     useEffect(() => {
         if (!isBeeGameMode || !projectId) return;
@@ -576,7 +598,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 credits={creditSummary}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
-                buildReport={deploymentBuildReport || projectStatus?.build_report || null}
+                buildReport={deploymentBuildReport || latestDeploymentBuildReport || projectStatus?.build_report || null}
+                deployments={deploymentHistory}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
                 onStopPreview={canManagePreview ? handleStopPreview : undefined}

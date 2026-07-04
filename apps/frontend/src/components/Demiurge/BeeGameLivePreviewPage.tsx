@@ -1,11 +1,11 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ExternalLink, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square } from 'lucide-react';
-import { LANGUAGE_OPTIONS, type Language } from './AgentsConfig';
+import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square } from 'lucide-react';
+import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { UserAccountMenu, type UserAccountMenuItem } from './Landing/UserAccountMenu';
-import type { BuildReportPayload } from '../../services/api';
+import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
 import { useSystemStore } from '../../store/systemStore';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
@@ -25,6 +25,7 @@ interface BeeGameLivePreviewPageProps {
     modelName: string;
     isSyncing: boolean;
     buildReport?: BuildReportPayload | null;
+    deployments?: BeeGameDeploymentPayload[];
     onStartPreview?: () => void | Promise<void>;
     onRestartPreview?: () => void | Promise<void>;
     onStopPreview?: () => void | Promise<void>;
@@ -62,6 +63,7 @@ export function BeeGameLivePreviewPage({
     modelName,
     isSyncing,
     buildReport,
+    deployments = [],
     onStartPreview,
     onRestartPreview,
     onStopPreview,
@@ -213,7 +215,7 @@ export function BeeGameLivePreviewPage({
             </header>
 
             <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
-                <section className="min-h-0 flex-1 overflow-visible rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
+                <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
                     <div className="flex h-20 items-center justify-between px-9">
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
@@ -281,7 +283,17 @@ export function BeeGameLivePreviewPage({
                         </div>
                     </div>
 
-                    <div className="mx-9 mb-9 h-[calc(100%-7.25rem)] rounded-xl border border-zinc-800 bg-black p-4">
+                    {deployments.length > 0 ? (
+                        <DeploymentHistoryPanel
+                            deployments={deployments}
+                            labels={labels}
+                            onOpenExternal={onOpenExternal}
+                            onRedeploy={handleDeploy}
+                            isDeploying={isDeploying}
+                        />
+                    ) : null}
+
+                    <div className="mx-9 mb-9 min-h-0 flex-1 rounded-xl border border-zinc-800 bg-black p-4">
                         {canShowPreview ? (
                             <iframe
                                 key={previewUrl}
@@ -320,6 +332,121 @@ export function BeeGameLivePreviewPage({
 
         </main>
     );
+}
+
+function DeploymentHistoryPanel({
+    deployments,
+    labels,
+    onOpenExternal,
+    onRedeploy,
+    isDeploying,
+}: {
+    deployments: BeeGameDeploymentPayload[];
+    labels: Record<string, string>;
+    onOpenExternal?: (url: string) => void;
+    onRedeploy: () => void | Promise<void>;
+    isDeploying: boolean;
+}) {
+    const latest = deployments[0];
+    const recent = deployments.slice(0, 4);
+    const latestUrl = normalizeUrl(latest?.url);
+    const failureLog = latest?.status === 'failed'
+        ? (latest.buildLog || latest.message || labels.deploymentFailed)
+        : '';
+    return (
+        <div className="mx-9 mb-4 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-4 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                    <div className="type-caption-1 text-zinc-500">
+                        {labels.deploymentHistory}
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${latest?.status === 'succeeded' ? 'bg-emerald-300' : latest?.status === 'failed' ? 'bg-red-300' : 'bg-amber-300'}`} />
+                        <span className="type-callout truncate text-zinc-100">
+                            {deploymentStatusLabel(latest?.status, labels)}
+                        </span>
+                        {latest?.deployedAt || latest?.updatedAt ? (
+                            <span className="type-footnote shrink-0 text-zinc-500">
+                                {formatDeploymentTime(latest.deployedAt || latest.updatedAt)}
+                            </span>
+                        ) : null}
+                    </div>
+                    {failureLog ? (
+                        <p className="type-footnote mt-1 line-clamp-1 text-red-200/80">
+                            {failureLog}
+                        </p>
+                    ) : latestUrl ? (
+                        <p className="type-footnote mt-1 truncate text-zinc-500">
+                            {latestUrl}
+                        </p>
+                    ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                    {latestUrl ? (
+                        <button
+                            type="button"
+                            onClick={() => onOpenExternal?.(latestUrl)}
+                            className="secondary-pill type-button px-4 py-2 text-zinc-200"
+                        >
+                            {labels.openLive}
+                        </button>
+                    ) : null}
+                    <button
+                        type="button"
+                        onClick={onRedeploy}
+                        disabled={isDeploying}
+                        className="primary-pill type-button px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {isDeploying ? labels.deploying : labels.redeploy}
+                    </button>
+                </div>
+            </div>
+            {failureLog ? (
+                <div className="mt-3 rounded-xl border border-red-200/10 bg-red-950/10 p-3">
+                    <div className="type-caption-2 mb-2 text-red-100/70">
+                        {labels.deploymentFailureLog}
+                    </div>
+                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
+                        {failureLog}
+                    </pre>
+                </div>
+            ) : null}
+            {recent.length > 1 ? (
+                <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
+                    {recent.map((deployment, index) => (
+                        <div
+                            key={deployment.id}
+                            className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2"
+                        >
+                            <div className="flex items-center gap-2">
+                                <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                <span className="type-caption-2 truncate text-zinc-300">
+                                    {labels.version} {recent.length - index}
+                                </span>
+                            </div>
+                            <div className="type-caption-2 mt-1 truncate text-zinc-500">
+                                {deploymentStatusLabel(deployment.status, labels)}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function deploymentStatusLabel(status: BeeGameDeploymentPayload['status'] | undefined, labels: Record<string, string>): string {
+    if (status === 'succeeded') return labels.deploymentSucceeded;
+    if (status === 'failed') return labels.deploymentFailed;
+    if (status === 'building') return labels.deploymentBuilding;
+    if (status === 'publishing') return labels.deploymentPublishing;
+    return labels.deploymentQueued;
+}
+
+function formatDeploymentTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
 }
 
 function ProjectHintRow({ label, value }: { label: string; value: string }) {

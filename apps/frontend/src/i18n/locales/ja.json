@@ -588,5 +588,18 @@
     "credits": {
       "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
     }
+  },
+  "dashboard": {
+    "livePreview": {
+      "redeploy": "Redeploy",
+      "deploymentHistory": "Deployment history",
+      "deploymentQueued": "Queued",
+      "deploymentBuilding": "Building",
+      "deploymentPublishing": "Publishing",
+      "deploymentSucceeded": "Published",
+      "deploymentFailed": "Deployment failed",
+      "deploymentFailureLog": "Failure log",
+      "version": "Version"
+    }
   }
 }

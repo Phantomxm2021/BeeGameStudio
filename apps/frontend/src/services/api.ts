@@ -116,6 +116,14 @@ export interface ProjectBaselineStatusPayload {
   last_resume_failure_stage?: string | null;
   last_resume_failure_at?: string | null;
   can_retry_continue?: boolean;
+  clarification_required?: boolean;
+  answered_slots?: Record<string, unknown>;
+  pending_slots?: string[];
+  clarification_questions?: string[];
+  clarification_suggestions?: unknown[];
+  intent_analysis?: unknown;
+  confidence?: unknown;
+  reasoning_summary?: unknown;
   context?: ContextVisibilityPayload | null;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
@@ -1040,6 +1048,13 @@ export const api = {
   deployProject: (projectId: string) => {
     if (isBeeGameAdapterEnabled()) {
       return beeGameAdapter.deployProject(projectId);
+    }
+    throw new Error('Project deployment is only available for BeeGame projects');
+  },
+
+  listProjectDeployments: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.listProjectDeployments(projectId);
     }
     throw new Error('Project deployment is only available for BeeGame projects');
   },

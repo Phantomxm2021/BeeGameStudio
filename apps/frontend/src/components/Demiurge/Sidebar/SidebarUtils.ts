@@ -1,11 +1,7 @@
 import type { ProjectTask } from '../../../store/systemStore';
-import type {
-    ReviewStatusPayload,
-} from '../../../services/api';
 import { localizeReviewMessage } from '../../../utils/reviewStatus';
 import type {
     ReviewDisplayModel,
-    ReviewStatusDisplayPayload,
 } from '../../../viewModels/displayModels';
 
 export const TASK_STATUS_COLORS: Record<string, string> = {
