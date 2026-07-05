@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let latestWebSocketOptions: { onMessage?: (message: any) => void } = {};
+let latestWebSocketOptions: { onMessage?: (message: any) => void; onOpen?: () => void | Promise<void> } = {};
 const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock, systemStoreState } = vi.hoisted(() => {
   const state = {
     pendingReviews: [] as any[],
@@ -20,6 +20,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     setIsStreaming: vi.fn(),
     loadHistory: vi.fn(),
     clearMessages: vi.fn(),
+    messages: [] as any[],
   };
   const systemState = {
     updateTokenUsage: vi.fn(),
@@ -33,6 +34,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     setAgentStatus: vi.fn(),
     refreshAgents: vi.fn().mockResolvedValue(undefined),
     setIsSyncing: vi.fn(),
+    tasks: [] as any[],
   };
   const chatHook = Object.assign(() => chatState, {
     getState: () => chatState,
@@ -71,7 +73,9 @@ vi.mock('../store/projectStore', () => ({
 }));
 
 vi.mock('../store/systemStore', () => ({
-  useSystemStore: () => systemStoreState,
+  useSystemStore: Object.assign(() => systemStoreState, {
+    getState: () => systemStoreState,
+  }),
 }));
 
 vi.mock('../services/api', () => ({
@@ -119,6 +123,7 @@ describe('useChat clarification gate handling', () => {
         value.mockClear();
       }
     });
+    systemStoreState.tasks = [];
     Object.values(systemStoreState).forEach((value) => {
       if (typeof value === 'function' && 'mockClear' in value) {
         value.mockClear();
@@ -246,6 +251,33 @@ describe('useChat clarification gate handling', () => {
     );
     expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
     expect(onTaskEvent).toHaveBeenCalledWith('usage', { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
+  });
+
+  it('restores loading state when reconnect sync finds an already running BeeGame task', async () => {
+    systemStoreState.loadTasks.mockImplementation(async () => {
+      systemStoreState.tasks = [{
+        id: 'session_running_1',
+        status: 'running',
+        task_status: 'running',
+        lifecycle_status: 'running',
+        summary: 'Build in progress',
+        assignee: null,
+        phase: null,
+        depends_on: [],
+        updated_at: Date.now(),
+      }];
+    });
+
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await latestWebSocketOptions.onOpen?.();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(true);
+    });
+    expect(result.current.currentTaskId).toBe('session_running_1');
   });
 
   it('refreshes project runtime visibility when a tool starts', async () => {

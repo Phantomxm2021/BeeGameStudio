@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWebSocket } from './useWebSocket';
 import { useChatStore } from '../store/chatStore';
 import { useProjectStore } from '../store/projectStore';
-import { useSystemStore } from '../store/systemStore';
+import { useSystemStore, type ProjectTask } from '../store/systemStore';
 import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ReviewBindingPayload } from '../services/api';
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api';
 import type { WebSocketMessage } from '../types/message';
@@ -30,6 +30,14 @@ import {
 } from '../services/creditsApi';
 
 const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'resuming']);
+
+function findActiveTask(tasks: ProjectTask[]): ProjectTask | undefined {
+  return tasks.find(task => [task.lifecycle_status, task.task_status, task.status].some(status => (
+    typeof status === 'string' && ACTIVE_TASK_STATUSES.has(status)
+  )));
+}
 
 /**
  * Options for useChat hook
@@ -672,6 +680,12 @@ export const useChat = ({
 
       // 3. Sync tasks
       await loadTasks(projectId);
+      const activeTask = findActiveTask(useSystemStore.getState().tasks);
+      if (activeTask) {
+        setCurrentTaskId(activeTask.id);
+        setIsLoading(true);
+        setCanContinue(false);
+      }
 
       // 4. Sync artifacts/activities
       await loadActivities();
