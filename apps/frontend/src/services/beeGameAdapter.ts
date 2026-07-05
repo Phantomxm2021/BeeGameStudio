@@ -1039,6 +1039,13 @@ function isDeleteAlreadyGoneError(error: unknown): boolean {
   );
 }
 
+function isDeleteStaleWorkspacePathError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.startsWith(
+    'Workspace path must stay inside the default Projects directory:',
+  );
+}
+
 async function resolveWorkspacePath(input?: string): Promise<string> {
   const workspacePath = (input || ENV_WORKSPACE_PATH || readConfiguredWorkspaceRoot() || '').trim();
   if (isAbsolutePath(workspacePath)) {
@@ -1310,7 +1317,7 @@ async function deleteBeeGameSession(
   try {
     await deleteJson(`/api/beegame-sessions/${sessionId}${query}`);
   } catch (error) {
-    if (isDeleteAlreadyGoneError(error)) return;
+    if (isDeleteAlreadyGoneError(error) || isDeleteStaleWorkspacePathError(error)) return;
     throw error;
   }
 }

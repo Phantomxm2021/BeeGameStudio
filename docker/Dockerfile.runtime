@@ -7,7 +7,8 @@ RUN apk add --no-cache \
     git \
     nodejs \
     npm \
-    ripgrep
+    ripgrep \
+    su-exec
 
 WORKDIR /app
 
@@ -27,8 +28,6 @@ RUN bun install --frozen-lockfile
 RUN mkdir -p /srv/beegame/projects /home/bun/.beegame && \
     chmod +x /usr/local/bin/beegame-runtime-entrypoint.sh && \
     chown -R bun:bun /srv/beegame /home/bun/.beegame /app /opt/beegame/default-config
-
-USER bun
 
 ENV NODE_ENV=production
 ENV AGENT_WORKFLOW_HOST=0.0.0.0

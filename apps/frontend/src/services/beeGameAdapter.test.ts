@@ -2791,6 +2791,43 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
   });
 
+  it('deletes stale local project records when their old workspace is outside the current default workspace', async () => {
+    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
+      {
+        id: 'project_legacy_path',
+        name: 'Legacy Path',
+        root_path: '/app/Projects/legacy-path',
+        created_at: 1710000000000,
+        updated_at: 1710000000000,
+      },
+    ]));
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
+      {
+        projectId: 'project_legacy_path',
+        sessionId: 'beegame_legacy_path',
+        workspacePath: '/app/Projects/legacy-path',
+      },
+    ]));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (
+        path === '/api/beegame-sessions/beegame_legacy_path?deleteArtifacts=1&workspacePath=%2Fapp%2FProjects%2Flegacy-path' &&
+        init?.method === 'DELETE'
+      ) {
+        return jsonResponse({
+          error: 'Workspace path must stay inside the default Projects directory: /srv/beegame/projects',
+        }, 400);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.deleteProject('project_legacy_path')).resolves.toEqual({ ok: true });
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
+    expect(localStorage.getItem('beegame-adapter-bindings')).toBe('[]');
+  });
+
   it('lists only docs markdown files plus an on-demand project package artifact', async () => {
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
