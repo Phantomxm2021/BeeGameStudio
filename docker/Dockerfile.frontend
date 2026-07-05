@@ -5,6 +5,7 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml tsconfig.json tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
+COPY scripts ./scripts
 
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
@@ -15,6 +16,7 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_WS_BASE_URL=$VITE_WS_BASE_URL
+ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
 RUN bun install --frozen-lockfile
 RUN cd apps/frontend && bun run build

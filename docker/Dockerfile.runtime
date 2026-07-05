@@ -20,6 +20,8 @@ COPY vendor ./vendor
 COPY .beegame /opt/beegame/default-config
 COPY docker/runtime-entrypoint.sh /usr/local/bin/beegame-runtime-entrypoint.sh
 
+ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
+
 RUN bun install --frozen-lockfile
 
 RUN mkdir -p /srv/beegame/projects /home/bun/.beegame && \
