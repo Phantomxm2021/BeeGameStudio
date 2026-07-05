@@ -39,6 +39,15 @@ function findActiveTask(tasks: ProjectTask[]): ProjectTask | undefined {
   )));
 }
 
+function isProjectStatusRunning(status: unknown): boolean {
+  return Boolean(
+    status &&
+    typeof status === 'object' &&
+    'phase' in status &&
+    (status as { phase?: unknown }).phase === 'running'
+  );
+}
+
 /**
  * Options for useChat hook
  */
@@ -678,7 +687,16 @@ export const useChat = ({
       // 2. Sync active agents
       await loadAgents();
 
-      // 3. Sync tasks
+      // 3. Sync runtime visibility before restoring composer state
+      await refreshProjectVisibility();
+      const projectStatus = useProjectStore.getState().projectStatus;
+      if (isProjectStatusRunning(projectStatus)) {
+        setCurrentTaskId(currentTaskId || projectId);
+        setIsLoading(true);
+        setCanContinue(false);
+      }
+
+      // 4. Sync tasks
       await loadTasks(projectId);
       const activeTask = findActiveTask(useSystemStore.getState().tasks);
       if (activeTask) {
@@ -687,10 +705,10 @@ export const useChat = ({
         setCanContinue(false);
       }
 
-      // 4. Sync artifacts/activities
+      // 5. Sync artifacts/activities
       await loadActivities();
 
-      // 5. Sync chat history (only if not currently streaming)
+      // 6. Sync chat history (only if not currently streaming)
       const { isStreaming } = useChatStore.getState();
       if (!isStreaming) {
         const history = await api.getChatHistory(projectId) as unknown;

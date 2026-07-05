@@ -253,19 +253,18 @@ describe('useChat clarification gate handling', () => {
     expect(onTaskEvent).toHaveBeenCalledWith('usage', { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
   });
 
-  it('restores loading state when reconnect sync finds an already running BeeGame task', async () => {
-    systemStoreState.loadTasks.mockImplementation(async () => {
-      systemStoreState.tasks = [{
-        id: 'session_running_1',
-        status: 'running',
-        task_status: 'running',
-        lifecycle_status: 'running',
-        summary: 'Build in progress',
-        assignee: null,
-        phase: null,
-        depends_on: [],
-        updated_at: Date.now(),
-      }];
+  it('restores loading state when reconnect sync finds an already running BeeGame project status', async () => {
+    projectStoreState.loadProjectStatus.mockImplementation(async () => {
+      projectStoreState.projectStatus = {
+        project_id: 'proj_1',
+        phase: 'running',
+        blocked: false,
+        active_agents: ['beegame'],
+        updated_at: '2026-07-05T00:00:00.000Z',
+        approval_required: false,
+        next_action: 'BeeGame is building',
+        review_status: null,
+      };
     });
 
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
@@ -277,7 +276,7 @@ describe('useChat clarification gate handling', () => {
     await waitFor(() => {
       expect(result.current.isLoading).toBe(true);
     });
-    expect(result.current.currentTaskId).toBe('session_running_1');
+    expect(result.current.currentTaskId).toBe('proj_1');
   });
 
   it('refreshes project runtime visibility when a tool starts', async () => {

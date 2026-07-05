@@ -8,13 +8,14 @@ services:
     environment:
       AGENT_WORKFLOW_HOST: 0.0.0.0
       AGENT_WORKFLOW_PORT: 62174
+      AGENT_WORKFLOW_WORKSPACE_PATH: /srv/beegame/projects
       BEEGAME_WORKSPACE_ROOT: /srv/beegame/projects
       BEEGAME_CONFIG_DIR: /home/bun/.beegame
     ports:
       - "62174:62174"
     volumes:
-      - beegame-projects:/srv/beegame/projects
-      - beegame-config:/home/bun/.beegame
+      - ../.beegame/projects:/srv/beegame/projects
+      - ../.beegame/config:/home/bun/.beegame
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62174/health"]
@@ -39,6 +40,3 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-volumes:
-  beegame-projects:
-  beegame-config:
