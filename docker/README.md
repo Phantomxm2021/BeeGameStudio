@@ -33,7 +33,7 @@ docker compose -f docker/docker-compose.yml --env-file docker/.env.production up
 
 Default local ports:
 
-- Frontend: `http://127.0.0.1:8080`
+- Frontend: `http://127.0.0.1:18080`
 - Runtime host: `http://127.0.0.1:62174`
 
 ## Reverse Proxy
@@ -41,7 +41,7 @@ Default local ports:
 In production, terminate TLS in Caddy, Nginx, Traefik, or your cloud load
 balancer:
 
-- `https://app.your-domain.com` -> frontend port `8080`
+- `https://app.your-domain.com` -> frontend port `18080`
 - `https://runtime.your-domain.com` -> runtime host port `62174`
 
 The runtime domain must support WebSocket upgrades.

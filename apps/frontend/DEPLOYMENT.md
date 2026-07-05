@@ -95,7 +95,7 @@ docker compose -f docker/docker-compose.yml --env-file docker/.env.production up
 
 Default local ports:
 
-- Frontend: `http://127.0.0.1:8080`
+- Frontend: `http://127.0.0.1:18080`
 - Runtime host: `http://127.0.0.1:62174`
 
 For production, put a TLS reverse proxy in front of those services:
