@@ -54,6 +54,9 @@ export default defineConfig(({ mode }) => {
       // Target browsers
       target: 'es2015',
 
+      // Keep unprefixed backdrop-filter for browsers that do not use the WebKit prefix.
+      cssTarget: ['chrome111', 'firefox115', 'safari16'],
+
       // Enable code splitting and chunk optimization
       rollupOptions: {
         output: {
