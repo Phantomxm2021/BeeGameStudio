@@ -15,7 +15,7 @@ services:
       - "62174:62174"
     volumes:
       - ../.beegame/projects:/srv/beegame/projects
-      - ../.beegame/config:/home/bun/.beegame
+      - beegame-config:/home/bun/.beegame
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62174/health"]
@@ -40,3 +40,5 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+volumes:
+  beegame-config:
