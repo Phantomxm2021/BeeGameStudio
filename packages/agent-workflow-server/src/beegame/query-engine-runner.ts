@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { getMacroDefines } from '../../../../scripts/defines'
 import type {
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -21,6 +22,16 @@ type QueryEngineLike = {
 type QueryEngineConstructor = new (
   config: Record<string, unknown>,
 ) => QueryEngineLike
+
+type BeeGameMacroGlobals = {
+  VERSION: string
+  BUILD_TIME: string
+  FEEDBACK_CHANNEL: string
+  ISSUES_EXPLAINER: string
+  NATIVE_PACKAGE_URL: string
+  PACKAGE_URL: string
+  VERSION_CHANGELOG: string
+}
 
 export type MutableAppState = Record<string, unknown> & {
   toolPermissionContext?: Record<string, unknown>
@@ -106,6 +117,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   private async ensureEngine(): Promise<QueryEngineLike> {
     if (this.engine) return this.engine
+
+    ensureBeeGameMacroGlobals()
 
     const [
       queryEngineModule,
@@ -276,6 +289,17 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
     return this.engine
   }
+}
+
+export function ensureBeeGameMacroGlobals(): void {
+  const target = globalThis as typeof globalThis & { MACRO?: BeeGameMacroGlobals }
+  if (target.MACRO) return
+  target.MACRO = Object.fromEntries(
+    Object.entries(getMacroDefines()).map(([key, value]) => [
+      key.replace('MACRO.', ''),
+      JSON.parse(value) as string,
+    ]),
+  ) as BeeGameMacroGlobals
 }
 
 export async function stopRunningLocalShellTasks(

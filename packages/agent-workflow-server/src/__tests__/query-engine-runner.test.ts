@@ -1,10 +1,37 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ensureBeeGameMacroGlobals,
   type MutableAppState,
   stopRunningLocalShellTasks,
 } from '../beegame/query-engine-runner'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('installs MACRO globals before loading root CLI modules', () => {
+    const target = globalThis as typeof globalThis & { MACRO?: Record<string, string> }
+    const previous = target.MACRO
+    Reflect.deleteProperty(target, 'MACRO')
+    try {
+      ensureBeeGameMacroGlobals()
+
+      expect(target.MACRO).toEqual(expect.objectContaining({
+        VERSION: expect.any(String),
+        BUILD_TIME: expect.any(String),
+        FEEDBACK_CHANNEL: '',
+        ISSUES_EXPLAINER: '',
+        NATIVE_PACKAGE_URL: '',
+        PACKAGE_URL: '',
+        VERSION_CHANGELOG: '',
+      }))
+    } finally {
+      if (previous === undefined) {
+        Reflect.deleteProperty(target, 'MACRO')
+      } else {
+        target.MACRO = previous
+      }
+    }
+  })
+
   test('kills only running local shell tasks for the current runtime app state', async () => {
     const killed: string[] = []
     let state: MutableAppState = {
