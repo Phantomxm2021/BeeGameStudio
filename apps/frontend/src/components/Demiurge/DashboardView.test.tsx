@@ -593,6 +593,8 @@ describe('DashboardView runtime loading', () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await user.click(screen.getByRole('button', { name: '发布游戏' }));
+        const deploymentDialog = await screen.findByRole('dialog', { name: '发布游戏' });
+        await user.click(within(deploymentDialog).getByRole('button', { name: '发布游戏' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
         const frame = await screen.findByTestId('beegame-live-preview-frame');
@@ -623,11 +625,14 @@ describe('DashboardView runtime loading', () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await waitFor(() => expect(apiMocks.listProjectDeployments).toHaveBeenCalledWith('proj_1'));
-        expect(await screen.findByText('发布记录')).toBeInTheDocument();
         const frame = await screen.findByTestId('beegame-live-preview-frame');
         expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/previous/');
 
-        await user.click(screen.getByRole('button', { name: '重新发布' }));
+        await user.click(screen.getByRole('button', { name: '发布游戏' }));
+        const deploymentDialog = await screen.findByRole('dialog', { name: '发布游戏' });
+        expect(within(deploymentDialog).getByText('历史版本')).toBeInTheDocument();
+
+        await user.click(within(deploymentDialog).getByRole('button', { name: '重新发布' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
     });
@@ -665,8 +670,12 @@ describe('DashboardView runtime loading', () => {
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        expect(await screen.findByText('发布记录')).toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: /回滚|Rollback/ }));
+        await waitFor(() => expect(apiMocks.listProjectDeployments).toHaveBeenCalledWith('proj_1'));
+        await user.click(screen.getByRole('button', { name: '发布游戏' }));
+        const deploymentDialog = await screen.findByRole('dialog', { name: '发布游戏' });
+        expect(within(deploymentDialog).getByText('历史版本')).toBeInTheDocument();
+
+        await user.click(within(deploymentDialog).getByRole('button', { name: /回滚|Rollback/ }));
 
         await waitFor(() => expect(apiMocks.rollbackProjectDeployment).toHaveBeenCalledWith('proj_1', 'deploy_previous'));
     });
@@ -692,6 +701,8 @@ describe('DashboardView runtime loading', () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await user.click(screen.getByRole('button', { name: '发布游戏' }));
+        const deploymentDialog = await screen.findByRole('dialog', { name: '发布游戏' });
+        await user.click(within(deploymentDialog).getByRole('button', { name: '发布游戏' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
         await waitFor(() => expect(screen.getAllByText('预览不可用').length).toBeGreaterThan(0));

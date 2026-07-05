@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -43,6 +43,16 @@ const normalizeUrl = (url?: string): string => {
     return value;
 };
 
+const displayDeploymentUrl = (url?: string): string => {
+    const value = normalizeUrl(url);
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) return value.toLowerCase();
+    if (value.startsWith('/') && typeof window !== 'undefined') {
+        return `${window.location.origin}${value}`.toLowerCase();
+    }
+    return value.toLowerCase();
+};
+
 const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPayload | null): PreviewState => {
     const reportStatus = String(buildReport?.status || '').toLowerCase();
     const url = normalizeUrl(buildReport?.build_url);
@@ -77,6 +87,7 @@ export function BeeGameLivePreviewPage({
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
     const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
@@ -263,10 +274,10 @@ export function BeeGameLivePreviewPage({
                             <PreviewControlButton
                                 control="deploy"
                                 label={isDeploying ? labels.deploying : labels.deploy}
-                                disabled={!canDeploy}
+                                disabled={!onDeployProject}
                                 hoveredControl={hoveredControl}
                                 setHoveredControl={setHoveredControl}
-                                onClick={handleDeploy}
+                                onClick={() => setDeploymentDialogOpen(true)}
                             >
                                 <Rocket className="h-4 w-4" />
                             </PreviewControlButton>
@@ -284,17 +295,6 @@ export function BeeGameLivePreviewPage({
                             </PreviewControlButton>
                         </div>
                     </div>
-
-                    {deployments.length > 0 ? (
-                        <DeploymentHistoryPanel
-                            deployments={deployments}
-                            labels={labels}
-                            onOpenExternal={onOpenExternal}
-                            onRedeploy={handleDeploy}
-                            onRollback={onRollbackDeployment}
-                            isDeploying={isDeploying}
-                        />
-                    ) : null}
 
                     <div className="mx-9 mb-9 min-h-0 flex-1 rounded-xl border border-zinc-800 bg-black p-4">
                         {canShowPreview ? (
@@ -332,125 +332,232 @@ export function BeeGameLivePreviewPage({
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
             />
+            <DeploymentDialog
+                isOpen={isDeploymentDialogOpen}
+                deployments={deployments}
+                labels={labels}
+                onClose={() => setDeploymentDialogOpen(false)}
+                onOpenExternal={onOpenExternal}
+                onDeploy={handleDeploy}
+                onRollback={onRollbackDeployment}
+                isDeploying={isDeploying}
+                canDeploy={canDeploy}
+            />
 
         </main>
     );
 }
 
-function DeploymentHistoryPanel({
+function DeploymentDialog({
+    isOpen,
     deployments,
     labels,
+    onClose,
     onOpenExternal,
-    onRedeploy,
+    onDeploy,
     onRollback,
     isDeploying,
+    canDeploy,
 }: {
+    isOpen: boolean;
     deployments: BeeGameDeploymentPayload[];
     labels: Record<string, string>;
+    onClose: () => void;
     onOpenExternal?: (url: string) => void;
-    onRedeploy: () => void | Promise<void>;
+    onDeploy: () => void | Promise<void>;
     onRollback?: (deploymentId: string) => void | Promise<void>;
     isDeploying: boolean;
+    canDeploy: boolean;
 }) {
+    if (!isOpen) return null;
     const latest = deployments[0];
-    const recent = deployments.slice(0, 4);
+    const versionList = deployments;
     const latestUrl = normalizeUrl(latest?.url);
+    const latestDisplayUrl = displayDeploymentUrl(latest?.url);
     const failureLog = latest?.status === 'failed'
         ? (latest.buildLog || latest.message || labels.deploymentFailed)
         : '';
     return (
-        <div className="mx-9 mb-4 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-4 backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                    <div className="type-caption-1 text-zinc-500">
-                        {labels.deploymentHistory}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${latest?.status === 'succeeded' ? 'bg-emerald-300' : latest?.status === 'failed' ? 'bg-red-300' : 'bg-amber-300'}`} />
-                        <span className="type-callout truncate text-zinc-100">
-                            {deploymentStatusLabel(latest?.status, labels)}
-                        </span>
-                        {latest?.deployedAt || latest?.updatedAt ? (
-                            <span className="type-footnote shrink-0 text-zinc-500">
-                                {formatDeploymentTime(latest.deployedAt || latest.updatedAt)}
-                            </span>
-                        ) : null}
-                    </div>
-                    {failureLog ? (
-                        <p className="type-footnote mt-1 line-clamp-1 text-red-200/80">
-                            {failureLog}
-                        </p>
-                    ) : latestUrl ? (
-                        <p className="type-footnote mt-1 truncate text-zinc-500">
-                            {latestUrl}
-                        </p>
-                    ) : null}
+        <div
+            className="fixed inset-0 z-[180] grid place-items-center bg-black/55 px-6 py-8 backdrop-blur-2xl"
+            role="presentation"
+            onMouseDown={(event) => {
+                if (event.target === event.currentTarget) onClose();
+            }}
+        >
+            <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="beegame-deployment-dialog-title"
+                className="relative w-full max-w-2xl overflow-hidden rounded-[2.25rem] border border-white/18 bg-zinc-950/76 p-7 text-zinc-50 shadow-[0_32px_100px_rgba(0,0,0,0.7)] backdrop-blur-2xl"
+            >
+                <button
+                    type="button"
+                    aria-label={labels.close || 'Close'}
+                    onClick={onClose}
+                    className="glass-icon-button absolute right-6 top-6 h-11 w-11 rounded-full text-zinc-300"
+                >
+                    <X className="h-5 w-5" />
+                </button>
+
+                <div className="pr-16">
+                    <h2 id="beegame-deployment-dialog-title" className="type-title-2 text-zinc-50">
+                        {labels.deploy}
+                    </h2>
+                    <p className="type-callout mt-2 max-w-xl text-zinc-400">
+                        {labels.deploymentDialogDescription}
+                    </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                    {latestUrl ? (
-                        <button
-                            type="button"
-                            onClick={() => onOpenExternal?.(latestUrl)}
-                            className="secondary-pill type-button px-4 py-2 text-zinc-200"
-                        >
-                            {labels.openLive}
-                        </button>
-                    ) : null}
-                    <button
-                        type="button"
-                        onClick={onRedeploy}
-                        disabled={isDeploying}
-                        className="primary-pill type-button px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        {isDeploying ? labels.deploying : labels.redeploy}
-                    </button>
-                </div>
-            </div>
-            {failureLog ? (
-                <div className="mt-3 rounded-xl border border-red-200/10 bg-red-950/10 p-3">
-                    <div className="type-caption-2 mb-2 text-red-100/70">
-                        {labels.deploymentFailureLog}
-                    </div>
-                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
-                        {failureLog}
-                    </pre>
-                </div>
-            ) : null}
-            {recent.length > 1 ? (
-                <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-                    {recent.map((deployment, index) => {
-                        const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
-                        return (
-                            <div
-                                key={deployment.id}
-                                className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2"
-                            >
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="flex min-w-0 items-center gap-2">
-                                        <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                                        <span className="type-caption-2 truncate text-zinc-300">
-                                            {labels.version} {recent.length - index}
-                                        </span>
-                                    </div>
-                                    {canRollback ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onRollback?.(deployment.id)}
-                                            disabled={isDeploying}
-                                            className="type-caption-2 shrink-0 text-emerald-200/80 transition-colors hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {labels.rollback || 'Rollback'}
-                                        </button>
-                                    ) : null}
+
+                <div className="mt-7 rounded-[1.75rem] border border-white/12 bg-white/[0.045] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                    <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <div className="type-caption-1 text-zinc-500">
+                                    {labels.deploymentLatest}
                                 </div>
-                                <div className="type-caption-2 mt-1 truncate text-zinc-500">
-                                    {deploymentStatusLabel(deployment.status, labels)}
+                                <div className="mt-2 flex min-w-0 items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${latest?.status === 'succeeded' ? 'bg-emerald-300' : latest?.status === 'failed' ? 'bg-red-300' : latest ? 'bg-amber-300' : 'bg-zinc-600'}`} />
+                                    <span className="type-headline truncate text-zinc-100">
+                                        {latest ? deploymentStatusLabel(latest.status, labels) : labels.deploymentNotPublished}
+                                    </span>
                                 </div>
                             </div>
-                        );
-                    })}
+                            <button
+                                type="button"
+                                aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
+                                title={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
+                                onClick={onDeploy}
+                                disabled={!canDeploy}
+                                className="secondary-pill type-button inline-flex shrink-0 items-center gap-2 px-4 py-2 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {isDeploying ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                ) : latest ? (
+                                    <RefreshCw className="h-4 w-4" />
+                                ) : (
+                                    <Rocket className="h-4 w-4" />
+                                )}
+                                <span>{isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}</span>
+                            </button>
+                        </div>
+                        {latest?.deployedAt || latest?.updatedAt ? (
+                            <div className="type-footnote mt-1 text-zinc-500">
+                                {formatDeploymentTime(latest.deployedAt || latest.updatedAt)}
+                            </div>
+                        ) : null}
+                        {failureLog ? (
+                            <p className="type-footnote mt-2 line-clamp-2 text-red-200/80">
+                                {failureLog}
+                            </p>
+                        ) : latestDisplayUrl ? (
+                            <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="type-caption-2 text-zinc-600">URL</div>
+                                    <div className="type-footnote mt-1 truncate text-zinc-400">
+                                        {latestDisplayUrl}
+                                    </div>
+                                </div>
+                                {latestUrl ? (
+                                    <button
+                                        type="button"
+                                        aria-label={labels.openLive}
+                                        title={labels.openLive}
+                                        onClick={() => onOpenExternal?.(latestUrl)}
+                                        className="secondary-pill grid h-10 w-10 shrink-0 place-items-center p-0 text-zinc-200"
+                                    >
+                                        <ExternalLink className="h-4 w-4" />
+                                    </button>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <p className="type-footnote mt-2 text-zinc-500">
+                                {labels.deploymentNotPublishedHint}
+                            </p>
+                        )}
+                    </div>
+                    {failureLog ? (
+                        <div className="mt-4 rounded-2xl border border-red-200/10 bg-red-950/10 p-4">
+                            <div className="type-caption-2 mb-2 text-red-100/70">
+                                {labels.deploymentFailureLog}
+                            </div>
+                            <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
+                                {failureLog}
+                            </pre>
+                        </div>
+                    ) : null}
                 </div>
-            ) : null}
+
+                <div className="mt-6">
+                    <div className="type-caption-1 mb-3 text-zinc-500">
+                        {labels.deploymentVersions}
+                    </div>
+                    {versionList.length > 0 ? (
+                        <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                            {versionList.map((deployment, index) => {
+                                const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
+                                const deploymentUrl = normalizeUrl(deployment.url);
+                                const deploymentDisplayUrl = displayDeploymentUrl(deployment.url);
+                                return (
+                                    <div
+                                        key={deployment.id}
+                                        className="flex min-w-0 items-center justify-between gap-3 rounded-[1.25rem] border border-white/[0.08] bg-black/24 px-4 py-3"
+                                    >
+                                        <div className="flex min-w-0 items-center gap-3">
+                                            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-500">
+                                                <FileText className="h-4 w-4" />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="type-callout truncate text-zinc-200">
+                                                    {labels.version} {versionList.length - index}
+                                                </div>
+                                                <div className="type-footnote mt-0.5 flex min-w-0 items-center gap-2 text-zinc-500">
+                                                    <span>{deploymentStatusLabel(deployment.status, labels)}</span>
+                                                    {deployment.deployedAt || deployment.updatedAt ? (
+                                                        <span className="truncate">{formatDeploymentTime(deployment.deployedAt || deployment.updatedAt)}</span>
+                                                    ) : null}
+                                                </div>
+                                                {deploymentDisplayUrl ? (
+                                                    <div className="type-caption-2 mt-1 truncate text-zinc-600">
+                                                        {deploymentDisplayUrl}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-3">
+                                            {deploymentUrl ? (
+                                                <button
+                                                    type="button"
+                                                    aria-label={labels.open}
+                                                    title={labels.open}
+                                                    onClick={() => onOpenExternal?.(deploymentUrl)}
+                                                    className="secondary-pill grid h-9 w-9 place-items-center p-0 text-zinc-300"
+                                                >
+                                                    <ExternalLink className="h-3.5 w-3.5" />
+                                                </button>
+                                            ) : null}
+                                            {canRollback ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onRollback?.(deployment.id)}
+                                                    disabled={isDeploying}
+                                                    className="type-button px-2 py-1.5 text-emerald-200/80 transition-colors hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {labels.rollback || 'Rollback'}
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-5 text-zinc-500">
+                            <div className="type-callout">{labels.deploymentNoVersions}</div>
+                        </div>
+                    )}
+                </div>
+            </section>
         </div>
     );
 }
