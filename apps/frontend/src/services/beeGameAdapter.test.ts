@@ -185,7 +185,11 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('does not synthesize local game mode options when LLM intake fails', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ error: 'intake unavailable' }, 500));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({ error: 'intake unavailable' }, 500)
+    ));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
@@ -193,6 +197,40 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/options', expect.objectContaining({
       method: 'POST',
     }));
+  });
+
+
+  it('runs BeeGame intake through a short-lived async job when the runtime supports it', async () => {
+    const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
+        return jsonResponse({ jobId: 'intake_job_1', status: 'running' }, 202);
+      }
+      if (path === '/api/beegame-intake/jobs/intake_job_1') {
+        return jsonResponse({
+          status: 'completed',
+          result: {
+            maturity: 'directional',
+            needsOptions: true,
+            needsClarification: false,
+            detectedConstraints: ['Async constraint'],
+            recommendedNextStep: 'choose_direction',
+            options: [llmOption],
+          },
+        });
+      }
+      return jsonResponse({ error: 'unexpected request' }, 500);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea', language: 'zh' });
+
+    expect(intake.options[0]).toEqual(expect.objectContaining({ id: 'job_mode', title: 'Job Mode' }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/beegame-intake/jobs');
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
+    expect(requestBody).toEqual({ idea: 'LLM generated idea', language: 'zh' });
   });
 
   it('normalizes BeeGame intake analysis with maturity and LLM-provided option fields', async () => {
@@ -207,14 +245,18 @@ describe('beeGameAdapter prompt rules', () => {
       firstPlayableValidation: 'LLM validation',
       riskComplexity: 'LLM complexity',
     });
-    const fetchMock = vi.fn(async () => jsonResponse({
-      maturity: 'directional',
-      needsOptions: true,
-      needsClarification: false,
-      detectedConstraints: ['LLM constraint'],
-      recommendedNextStep: 'choose_direction',
-      options: [llmOption],
-    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({
+          maturity: 'directional',
+          needsOptions: true,
+          needsClarification: false,
+          detectedConstraints: ['LLM constraint'],
+          recommendedNextStep: 'choose_direction',
+          options: [llmOption],
+        })
+    ));
     vi.stubGlobal('fetch', fetchMock);
 
     const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
@@ -243,14 +285,18 @@ describe('beeGameAdapter prompt rules', () => {
 
   it('passes the selected language to BeeGame intake', async () => {
     const llmOption = makeLlmOption();
-    const fetchMock = vi.fn(async () => jsonResponse({
-      maturity: 'directional',
-      needsOptions: true,
-      needsClarification: false,
-      detectedConstraints: [],
-      recommendedNextStep: 'choose_direction',
-      options: [llmOption],
-    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({
+          maturity: 'directional',
+          needsOptions: true,
+          needsClarification: false,
+          detectedConstraints: [],
+          recommendedNextStep: 'choose_direction',
+          options: [llmOption],
+        })
+    ));
     vi.stubGlobal('fetch', fetchMock);
 
     await beeGameAdapter.runIdeaIntake({ idea: '做一个样例游戏', language: 'zh' });
@@ -260,23 +306,27 @@ describe('beeGameAdapter prompt rules', () => {
   });
 
   it('accepts structured clarification without synthesizing local options', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
-      maturity: 'vague',
-      needsOptions: false,
-      needsClarification: true,
-      clarification: {
-        prompt: 'Which direction should BeeGame use?',
-        options: [
-          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
-          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
-        ],
-        freeformLabel: 'Add detail',
-      },
-      clarificationQuestions: [],
-      detectedConstraints: [],
-      recommendedNextStep: 'clarify',
-      options: [],
-    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({
+          maturity: 'vague',
+          needsOptions: false,
+          needsClarification: true,
+          clarification: {
+            prompt: 'Which direction should BeeGame use?',
+            options: [
+              { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
+              { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
+            ],
+            freeformLabel: 'Add detail',
+          },
+          clarificationQuestions: [],
+          detectedConstraints: [],
+          recommendedNextStep: 'clarify',
+          options: [],
+        })
+    ));
     vi.stubGlobal('fetch', fetchMock);
 
     const intake = await beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' });

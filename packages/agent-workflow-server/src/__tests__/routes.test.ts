@@ -1301,6 +1301,89 @@ describe('agent workflow server routes', () => {
     }
   })
 
+
+  test('creates a BeeGame intake job and returns the completed result through polling', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Async LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    let resolveModel: ((response: Response) => void) | undefined
+    globalThis.fetch = (async () => new Promise<Response>(resolve => {
+      resolveModel = resolve
+    })) as unknown as typeof fetch
+
+    try {
+      const jobRes = await app.request('/api/beegame-intake/jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
+      })
+
+      expect(jobRes.status).toBe(202)
+      const created = await jobRes.json() as { jobId: string; status: string }
+      expect(created.jobId).toStartWith('intake_')
+      expect(created.status).toBe('running')
+
+      const runningRes = await app.request(`/api/beegame-intake/jobs/${created.jobId}`)
+      expect(runningRes.status).toBe(200)
+      expect(await runningRes.json()).toEqual({ status: 'running' })
+
+      resolveModel?.(Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                maturity: 'directional',
+                needs_options: true,
+                needs_clarification: false,
+                detected_constraints: [],
+                recommended_next_step: 'choose_direction',
+                options: [
+                  {
+                    id: 'async_mode',
+                    title: 'Async Mode',
+                    pitch: 'Async generated pitch.',
+                    gameplay: 'Async generated gameplay rules.',
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }))
+
+      let completed: unknown
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const pollRes = await app.request(`/api/beegame-intake/jobs/${created.jobId}`)
+        expect(pollRes.status).toBe(200)
+        completed = await pollRes.json()
+        if ((completed as { status?: string }).status === 'completed') break
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+
+      expect(completed).toEqual({
+        status: 'completed',
+        result: expect.objectContaining({
+          maturity: 'directional',
+          options: [expect.objectContaining({ id: 'async_mode', title: 'Async Mode' })],
+        }),
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('refunds BeeGame intake credits and explains provider authentication failures', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',

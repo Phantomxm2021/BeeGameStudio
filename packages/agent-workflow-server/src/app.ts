@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { randomUUID } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -152,6 +153,15 @@ type BeeGameIntakeAnalysis = {
   options: BeeGameIntakeOption[]
 }
 
+type BeeGameIntakeJob = {
+  ownerId: string
+  status: 'running' | 'completed' | 'failed'
+  result?: BeeGameIntakeAnalysis
+  error?: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type AgentWorkflowAppOptions = {
   sessionRunner?: BeeGameSessionRunner
   previewRunner?: BeeGamePreviewRunner
@@ -197,6 +207,7 @@ export function createAgentWorkflowApp(
     getUserDataRoot: getCurrentUserDataRoot,
     modelConfigStore,
   })
+  const intakeJobs = new Map<string, BeeGameIntakeJob>()
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -751,35 +762,33 @@ export function createAgentWorkflowApp(
     return c.json({ deleted })
   })
 
-  app.post('/api/beegame-intake/options', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.create')
-    if (forbidden) return c.json(forbidden, 403)
-    const creditBalance = await dashboardRepository.getCreditBalance(c.req.raw, user)
+  const runBeeGameIntake = async (
+    request: Request,
+    user: BeeGameUserContext,
+    body: JsonObject,
+  ): Promise<BeeGameIntakeAnalysis> => {
+    const creditBalance = await dashboardRepository.getCreditBalance(request, user)
     if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
-      return c.json({
+      throw new HttpError(402, {
         error: 'Insufficient credits',
         message: `Idea intake requires at least ${creditBalance.estimates.ideaIntake.minCredits} credit.`,
         credits: creditBalance,
-      }, 402)
+      })
     }
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['idea'])
-    if (error) return c.json({ error }, 400)
+    const modelConfigId = await resolveDefaultModelConfigId(
+      request,
+      user,
+      typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+      async (nextRequest, requestUser, id) =>
+        dashboardRepository.modelConfigExists(nextRequest, requestUser, id),
+      async (nextRequest, requestUser) =>
+        dashboardRepository.listModelConfigs(nextRequest, requestUser),
+    )
+    const policy = getCreditTaskPolicy('idea_intake')
+    const reservedCredits = policy.reservedCredits
     let reservation: { id: string } | undefined
     try {
-      const modelConfigId = await resolveDefaultModelConfigId(
-        c.req.raw,
-        user,
-        typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
-        async (request, requestUser, id) =>
-          dashboardRepository.modelConfigExists(request, requestUser, id),
-        async (request, requestUser) =>
-          dashboardRepository.listModelConfigs(request, requestUser),
-      )
-      const policy = getCreditTaskPolicy('idea_intake')
-      const reservedCredits = policy.reservedCredits
-      reservation = await dashboardRepository.reserveCredits(c.req.raw, user, {
+      reservation = await dashboardRepository.reserveCredits(request, user, {
         credits: reservedCredits,
         kind: policy.taskType,
         metadata: {
@@ -795,13 +804,13 @@ export function createAgentWorkflowApp(
         ownerId: user.id,
         modelConfigId,
         runtimeEnv: await dashboardRepository.getRuntimeEnv(
-          getCurrentUserDataRoot(c.req.raw),
+          getCurrentUserDataRoot(request),
           user.id,
-          getBearerToken(c.req.raw),
+          getBearerToken(request),
           modelConfigId,
         ),
       })
-      await dashboardRepository.settleCreditReservation(c.req.raw, user, {
+      await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
         weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
         metadata: {
@@ -810,11 +819,11 @@ export function createAgentWorkflowApp(
           displayName: policy.displayName,
         },
       })
-      return c.json({ ...intake })
+      return intake
     } catch (err) {
       if (reservation) {
         try {
-          await dashboardRepository.refundCreditReservation(c.req.raw, user, {
+          await dashboardRepository.refundCreditReservation(request, user, {
             reservationId: reservation.id,
             metadata: { reason: 'idea_intake_failed' },
           })
@@ -822,8 +831,82 @@ export function createAgentWorkflowApp(
           // Keep the original intake failure visible to the caller.
         }
       }
+      throw err
+    }
+  }
+
+  app.post('/api/beegame-intake/options', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    const body = await readJson(c.req.raw)
+    const error = requireFields(body, ['idea'])
+    if (error) return c.json({ error }, 400)
+    try {
+      const intake = await runBeeGameIntake(c.req.raw, user, body)
+      return c.json({ ...intake })
+    } catch (err) {
+      if (err instanceof HttpError) return c.json(err.body, err.status)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
+  })
+
+  app.post('/api/beegame-intake/jobs', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    const body = await readJson(c.req.raw)
+    const error = requireFields(body, ['idea'])
+    if (error) return c.json({ error }, 400)
+
+    const request = c.req.raw
+    const jobId = `intake_${randomUUID().replaceAll('-', '')}`
+    const now = Date.now()
+    intakeJobs.set(jobId, {
+      ownerId: user.id,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+    })
+    setTimeout(() => intakeJobs.delete(jobId), 30 * 60 * 1000)
+
+    void (async () => {
+      try {
+        const result = await runBeeGameIntake(request, user, body)
+        const job = intakeJobs.get(jobId)
+        if (!job) return
+        intakeJobs.set(jobId, {
+          ...job,
+          status: 'completed',
+          result,
+          updatedAt: Date.now(),
+        })
+      } catch (err) {
+        const job = intakeJobs.get(jobId)
+        if (!job) return
+        intakeJobs.set(jobId, {
+          ...job,
+          status: 'failed',
+          error: err instanceof HttpError ? getHttpErrorMessage(err.body) : toErrorMessage(err),
+          updatedAt: Date.now(),
+        })
+      }
+    })()
+
+    return c.json({ jobId, status: 'running' }, 202)
+  })
+
+  app.get('/api/beegame-intake/jobs/:jobId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const job = intakeJobs.get(c.req.param('jobId'))
+    if (!job || job.ownerId !== user.id) return c.json({ error: 'Intake job not found' }, 404)
+    if (job.status === 'completed') {
+      return c.json({ status: job.status, result: job.result })
+    }
+    if (job.status === 'failed') {
+      return c.json({ status: job.status, error: job.error || 'Intake job failed' })
+    }
+    return c.json({ status: job.status })
   })
 
   registerBeeGameSessionRoutes(
@@ -2637,6 +2720,20 @@ async function appendAuditEventBestEffort(
   } catch (err) {
     console.warn(`[BeeGame] Failed to append ${action} audit event:`, toErrorMessage(err))
   }
+}
+
+class HttpError extends Error {
+  constructor(
+    readonly status: 402,
+    readonly body: JsonObject,
+  ) {
+    super(getHttpErrorMessage(body))
+  }
+}
+
+function getHttpErrorMessage(body: JsonObject): string {
+  const message = body.message ?? body.error
+  return typeof message === 'string' ? message : 'Request failed'
 }
 
 function toErrorMessage(err: unknown): string {

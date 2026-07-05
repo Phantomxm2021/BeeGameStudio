@@ -281,7 +281,7 @@ export const beeGameAdapter = {
   },
 
   async runIdeaIntake(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIdeaIntakeResult> {
-    const response = await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
+    const response = await runIdeaIntakeJob(data) ?? await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
       '/api/beegame-intake/options',
       { idea: data.idea, ...(data.language ? { language: data.language } : {}) },
     );
@@ -2795,6 +2795,40 @@ function getPayloadArray(event: BeeGameEvent | undefined, field: string): unknow
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+type BeeGameIntakeJobCreated = {
+  jobId: string;
+  status: 'running';
+};
+
+type BeeGameIntakeJobPoll =
+  | { status: 'running' }
+  | { status: 'completed'; result: Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] } }
+  | { status: 'failed'; error?: string };
+
+const BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS = 1500;
+const BEEGAME_INTAKE_JOB_MAX_POLLS = 240;
+
+async function runIdeaIntakeJob(data: { idea: string; language?: BeeGameLanguage | string }): Promise<(Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }) | undefined> {
+  const createResponse = await authenticatedFetch('/api/beegame-intake/jobs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idea: data.idea, ...(data.language ? { language: data.language } : {}) }),
+  });
+  if (createResponse.status === 404) return undefined;
+  const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);
+  for (let index = 0; index < BEEGAME_INTAKE_JOB_MAX_POLLS; index += 1) {
+    const poll = await getJson<BeeGameIntakeJobPoll>(`/api/beegame-intake/jobs/${created.jobId}`);
+    if (poll.status === 'completed') return poll.result;
+    if (poll.status === 'failed') throw new Error(poll.error || 'BeeGame intake failed');
+    await sleep(BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS);
+  }
+  throw new Error('BeeGame intake timed out');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function getJson<T>(path: string): Promise<T> {
