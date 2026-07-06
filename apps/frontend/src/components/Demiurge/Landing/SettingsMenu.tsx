@@ -1209,6 +1209,7 @@ function getAdminSettingsCopy(translate: SettingsTranslate) {
             create: translate('admin.invitation.create'),
             list: translate('admin.invitation.list'),
             unnamed: translate('admin.invitation.unnamed'),
+            codeValue: (code: string) => translate('admin.invitation.codeValue', { code }),
             usedCount: (usedCount: number, maxUses?: number | null) => (
                 maxUses
                     ? translate('admin.invitation.usedCountLimited', { usedCount, maxUses })
@@ -1572,43 +1573,47 @@ function InvitationSettingsPanel({
                 <div className="type-caption-1 text-zinc-500">{copy.list}</div>
                 {invitations.length ? (
                     <div className="divide-y divide-white/10 overflow-hidden rounded-3xl border border-white/10">
-                        {invitations.map((invitation) => (
-                            <div key={invitation.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <span className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                                        <span className="type-footnote truncate text-zinc-100">
-                                            {invitation.code || invitation.label || copy.unnamed}
-                                        </span>
+                        {invitations.map((invitation) => {
+                            const invitationCode = String(invitation.code || '').trim();
+                            const primaryLabel = invitation.label || invitationCode || copy.unnamed;
+                            return (
+                                <div key={invitation.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                                            <span className="type-footnote truncate text-zinc-100">
+                                                {primaryLabel}
+                                            </span>
+                                        </div>
+                                        {invitationCode ? (
+                                            <div className="type-footnote mt-1 truncate pl-4 font-mono text-zinc-300">{copy.codeValue(invitationCode)}</div>
+                                        ) : null}
+                                        <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
+                                            {copy.usedCount(invitation.usedCount, invitation.maxUses)}
+                                        </div>
                                     </div>
-                                    {invitation.label && invitation.label !== invitation.code ? (
-                                        <div className="type-footnote mt-1 truncate pl-4 text-zinc-400">{invitation.label}</div>
-                                    ) : null}
-                                    <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                                        {copy.usedCount(invitation.usedCount, invitation.maxUses)}
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => onToggleInvitation(invitation)}
+                                            disabled={isSaving}
+                                            className="type-button h-9 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {invitation.enabled ? copy.disable : copy.enable}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            aria-label={copy.deleteAria}
+                                            onClick={() => onDeleteInvitation(invitation.id)}
+                                            disabled={isSaving || invitation.usedCount > 0}
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => onToggleInvitation(invitation)}
-                                        disabled={isSaving}
-                                        className="type-button h-9 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {invitation.enabled ? copy.disable : copy.enable}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        aria-label={copy.deleteAria}
-                                        onClick={() => onDeleteInvitation(invitation.id)}
-                                        disabled={isSaving || invitation.usedCount > 0}
-                                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 ) : (
                     <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">

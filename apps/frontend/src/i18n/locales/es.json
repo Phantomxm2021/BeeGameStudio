@@ -341,6 +341,7 @@
         "create": "Create invite",
         "list": "Invite codes",
         "unnamed": "Unnamed invite",
+        "codeValue": "Invite code {{code}}",
         "usedCountLimited": "Used {{usedCount}} / {{maxUses}}",
         "usedCountUnlimited": "Used {{usedCount}}",
         "enable": "Enable",

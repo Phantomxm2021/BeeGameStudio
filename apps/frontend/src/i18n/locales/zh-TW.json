@@ -294,6 +294,7 @@
         "create": "创建邀请码",
         "list": "邀请码列表",
         "unnamed": "未命名邀请码",
+        "codeValue": "邀请码 {{code}}",
         "usedCountLimited": "已用 {{usedCount}} / {{maxUses}}",
         "usedCountUnlimited": "已用 {{usedCount}}",
         "enable": "启用",

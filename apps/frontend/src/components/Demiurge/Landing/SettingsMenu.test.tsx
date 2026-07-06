@@ -15,30 +15,42 @@ const {
     getBeeGameSubagentsEnabled,
     getWebToolsConfig,
     getRuntimeSettings,
+    getInvitationPublicSettings,
     listModelConfigs,
+    listInvitations,
     listMcpServers,
     saveRuntimeSettings,
+    saveInvitationSettings,
     saveWebToolsConfig,
     setBeeGameSubagentsEnabled,
     testMcpServer,
+    createInvitation,
+    deleteInvitation,
+    updateInvitation,
     updateMcpServer,
     updateModelConfig,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
+    createInvitation: vi.fn(),
     createMcpServer: vi.fn(),
+    deleteInvitation: vi.fn(),
     deleteMcpServer: vi.fn(),
     discoverActiveMcpServers: vi.fn(),
     discoverMcpServers: vi.fn(),
     getBeeGameWorkspaceSettings: vi.fn(),
     getBeeGameSubagentsEnabled: vi.fn(),
+    getInvitationPublicSettings: vi.fn(),
     getWebToolsConfig: vi.fn(),
     getRuntimeSettings: vi.fn(),
+    listInvitations: vi.fn(),
     listModelConfigs: vi.fn(),
     listMcpServers: vi.fn(),
+    saveInvitationSettings: vi.fn(),
     saveRuntimeSettings: vi.fn(),
     saveWebToolsConfig: vi.fn(),
     setBeeGameSubagentsEnabled: vi.fn(),
     testMcpServer: vi.fn(),
+    updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
 }));
@@ -67,6 +79,15 @@ vi.mock('../../../services/webToolsApi', () => ({
 vi.mock('../../../services/runtimeSettingsApi', () => ({
     getRuntimeSettings,
     saveRuntimeSettings,
+}));
+
+vi.mock('../../../services/invitationApi', () => ({
+    createInvitation,
+    deleteInvitation,
+    getInvitationPublicSettings,
+    listInvitations,
+    saveInvitationSettings,
+    updateInvitation,
 }));
 
 vi.mock('../../../services/mcpServersApi', () => ({
@@ -119,6 +140,16 @@ describe('SettingsMenu model settings', () => {
         });
         getWebToolsConfig.mockResolvedValue({});
         getRuntimeSettings.mockResolvedValue({});
+        getInvitationPublicSettings.mockReset();
+        getInvitationPublicSettings.mockResolvedValue({ required: false });
+        listInvitations.mockReset();
+        listInvitations.mockResolvedValue([]);
+        saveInvitationSettings.mockReset();
+        saveInvitationSettings.mockResolvedValue({ required: false });
+        createInvitation.mockReset();
+        deleteInvitation.mockReset();
+        deleteInvitation.mockResolvedValue(true);
+        updateInvitation.mockReset();
         listMcpServers.mockResolvedValue([]);
         saveRuntimeSettings.mockResolvedValue({});
         saveWebToolsConfig.mockReset();
@@ -200,6 +231,28 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
         expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
+    });
+
+    it('shows the actual invitation code separately from the invite note', async () => {
+        listInvitations.mockResolvedValue([
+            {
+                id: 'invite_1',
+                code: 'BEE-ALPHA',
+                label: '内部测试名额',
+                enabled: true,
+                maxUses: 100,
+                usedCount: 0,
+                createdAt: '2026-07-06T00:00:00.000Z',
+                updatedAt: '2026-07-06T00:00:00.000Z',
+            },
+        ]);
+
+        renderSettings({ canManageInvitations: true });
+        await openPlatformSettingsTab('邀请码');
+
+        await expect(screen.findByText('内部测试名额')).resolves.toBeInTheDocument();
+        expect(screen.getByText('邀请码 BEE-ALPHA')).toBeInTheDocument();
+        expect(screen.getByText('已用 0 / 100')).toBeInTheDocument();
     });
 
     it('hides privileged settings sections when the user lacks management permissions', () => {
