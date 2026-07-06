@@ -1085,18 +1085,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
-            const isRegisteringWithOAuth = authMode === 'register';
-            const shouldUseInvitation = isRegisteringWithOAuth && isInvitationRequired;
-            if (isRegisteringWithOAuth && !hasAcceptedTerms) {
-                setLoginError(intakeText.errors.termsRequired);
-                return;
-            }
-            if (shouldUseInvitation && !invitationCode.trim()) {
-                setLoginError(translate('intake.errors.invitationRequired', { defaultValue: '请输入邀请码。' }));
-                return;
-            }
             writePendingAuthIdeaState(pendingIdeaAfterLogin);
-            await signInWithSupabaseOAuth(provider, shouldUseInvitation ? { invitationCode } : {});
+            await signInWithSupabaseOAuth(provider);
         } catch (error) {
             clearPendingAuthIdeaState();
             setLoginError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
@@ -1661,7 +1651,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     {loginNotice}
                                 </div>
                             ) : null}
-                            {authMode !== 'resetPassword' ? (
+                            {authMode === 'login' ? (
                                 <>
                                     <div className="type-caption-1 my-5 flex items-center gap-3 text-zinc-500">
                                         <span className="h-px flex-1 bg-white/10" />

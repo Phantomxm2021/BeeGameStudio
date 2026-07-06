@@ -1485,7 +1485,7 @@ function InvitationSettingsPanel({
                             注册邀请码
                         </div>
                         <div className="type-footnote mt-1 text-zinc-500">
-                            开启后，邮箱注册和第三方登录都必须先提供可用邀请码。
+                            开启后，邮箱注册必须先提供可用邀请码。
                         </div>
                     </div>
                     <Switch checked={required} label="注册邀请码" onClick={onToggleRequired} />
