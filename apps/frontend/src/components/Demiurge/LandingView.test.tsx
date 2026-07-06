@@ -24,6 +24,21 @@ const { deleteCurrentUser } = vi.hoisted(() => ({
     deleteCurrentUser: vi.fn(),
 }));
 const {
+    createInvitation,
+    deleteInvitation,
+    getInvitationPublicSettings,
+    listInvitations,
+    saveInvitationSettings,
+    updateInvitation,
+} = vi.hoisted(() => ({
+    createInvitation: vi.fn(),
+    deleteInvitation: vi.fn(),
+    getInvitationPublicSettings: vi.fn(),
+    listInvitations: vi.fn(),
+    saveInvitationSettings: vi.fn(),
+    updateInvitation: vi.fn(),
+}));
+const {
     clearSupabaseSession,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
@@ -136,6 +151,15 @@ vi.mock('../../services/creditsApi', () => ({
 
 vi.mock('../../services/currentUserApi', () => ({
     deleteCurrentUser,
+}));
+
+vi.mock('../../services/invitationApi', () => ({
+    createInvitation,
+    deleteInvitation,
+    getInvitationPublicSettings,
+    listInvitations,
+    saveInvitationSettings,
+    updateInvitation,
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
@@ -328,6 +352,18 @@ beforeEach(() => {
     ));
     deleteCurrentUser.mockReset();
     deleteCurrentUser.mockResolvedValue({ ok: true });
+    getInvitationPublicSettings.mockReset();
+    getInvitationPublicSettings.mockResolvedValue({ required: false });
+    listInvitations.mockReset();
+    listInvitations.mockResolvedValue([]);
+    saveInvitationSettings.mockReset();
+    saveInvitationSettings.mockImplementation((required: boolean) => Promise.resolve({ required }));
+    createInvitation.mockReset();
+    createInvitation.mockResolvedValue({ id: 'invite-1', code: 'BEE-ALPHA', label: 'Alpha', enabled: true, usedCount: 0, maxUses: null });
+    updateInvitation.mockReset();
+    updateInvitation.mockImplementation((input: { id: string; enabled?: boolean }) => Promise.resolve({ id: input.id, code: 'BEE-ALPHA', label: 'Alpha', enabled: input.enabled ?? true, usedCount: 0, maxUses: null }));
+    deleteInvitation.mockReset();
+    deleteInvitation.mockResolvedValue(true);
     isSupabaseAuthConfigured.mockReset();
     isSupabaseAuthConfigured.mockReturnValue(true);
     clearSupabaseSession.mockReset();
@@ -867,7 +903,8 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '发送重置邮件' }));
 
         await waitFor(() => expect(sendSupabasePasswordReset).toHaveBeenCalledWith('player@example.com'));
-        expect(screen.getByText('重置密码邮件已发送，请检查邮箱。')).toBeInTheDocument();
+        const successDialog = await screen.findByRole('dialog', { name: '操作成功' });
+        expect(within(successDialog).getByText('重置密码邮件已发送，请检查邮箱。')).toBeInTheDocument();
     });
 
     it('switches to registration and creates a Supabase account', async () => {
@@ -928,6 +965,29 @@ describe('LandingView bootstrap submission', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Discord' }));
         expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('discord');
+    });
+
+    it('requires and forwards an invitation code for third-party login when enabled', async () => {
+        mockCurrentUser = null;
+        getInvitationPublicSettings.mockResolvedValue({ required: true });
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        await screen.findByRole('button', { name: 'GitHub' });
+
+        expect(screen.queryByText('第三方授权邀请码')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
+
+        const errorDialog = await screen.findByRole('dialog', { name: '操作失败' });
+        expect(within(errorDialog).getByText('请输入邀请码。')).toBeInTheDocument();
+        expect(signInWithSupabaseOAuth).not.toHaveBeenCalled();
+
+        fireEvent.click(within(errorDialog).getByText('知道了'));
+        fireEvent.change(screen.getByLabelText('第三方授权邀请码'), { target: { value: 'BEE-ALPHA' } });
+        fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
+
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github', { invitationCode: 'BEE-ALPHA' });
     });
 
     it('clears the Supabase session and reloads the current user when signing out', async () => {
@@ -1317,7 +1377,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('menuitem', { name: 'History Projects' }));
 
         expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
-        expect(screen.getByText('No projects found')).toBeInTheDocument();
+        expect(screen.getByText('No projects for this account yet')).toBeInTheDocument();
     });
 
     it('keeps the history modal content area stable for empty and populated project lists', () => {

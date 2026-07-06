@@ -258,7 +258,7 @@ export function SettingsMenu({
                 })
                 .catch((error) => {
                     if (!cancelled) {
-                        setInvitationStatus(error instanceof Error ? error.message : 'Invitation settings unavailable');
+                        setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.unavailable);
                     }
                 });
         }
@@ -384,10 +384,10 @@ export function SettingsMenu({
         try {
             const saved = await saveInvitationSettings(invitationRequired);
             setInvitationRequired(saved.required);
-            setInvitationStatus(saved.required ? '邀请码已开启。' : '邀请码已关闭。');
+            setInvitationStatus(saved.required ? adminCopy.invitation.enabledStatus : adminCopy.invitation.disabledStatus);
             return true;
         } catch (error) {
-            setInvitationStatus(error instanceof Error ? error.message : 'Invitation settings save failed');
+            setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.saveFailed);
             return false;
         } finally {
             setIsSavingInvitations(false);
@@ -397,12 +397,12 @@ export function SettingsMenu({
     const handleCreateInvitation = async () => {
         const code = newInvitationCode.trim();
         if (!code) {
-            setInvitationStatus('请输入邀请码。');
+            setInvitationStatus(adminCopy.invitation.codeRequired);
             return;
         }
         const maxUses = parsePositiveInteger(newInvitationMaxUses);
         if (newInvitationMaxUses.trim() && maxUses === null) {
-            setInvitationStatus('使用次数必须是正整数。');
+            setInvitationStatus(adminCopy.invitation.maxUsesInvalid);
             return;
         }
         setInvitationStatus('');
@@ -418,7 +418,7 @@ export function SettingsMenu({
             setNewInvitationLabel('');
             setNewInvitationMaxUses('');
         } catch (error) {
-            setInvitationStatus(error instanceof Error ? error.message : 'Invitation create failed');
+            setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.createFailed);
         } finally {
             setIsSavingInvitations(false);
         }
@@ -431,7 +431,7 @@ export function SettingsMenu({
             const updated = await updateInvitation({ id: invitation.id, enabled: !invitation.enabled });
             setInvitations((current) => current.map((item) => item.id === updated.id ? updated : item));
         } catch (error) {
-            setInvitationStatus(error instanceof Error ? error.message : 'Invitation update failed');
+            setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.updateFailed);
         } finally {
             setIsSavingInvitations(false);
         }
@@ -444,7 +444,7 @@ export function SettingsMenu({
             await deleteInvitation(id);
             setInvitations((current) => current.filter((item) => item.id !== id));
         } catch (error) {
-            setInvitationStatus(error instanceof Error ? error.message : 'Invitation delete failed');
+            setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
         } finally {
             setIsSavingInvitations(false);
         }
@@ -624,7 +624,7 @@ export function SettingsMenu({
     const platformTabs = useMemo(() => {
         return [
             { id: 'general' as const, label: adminCopy.deployment, icon: ShieldCheck },
-            ...(effectiveCanManageInvitations ? [{ id: 'invitations' as const, label: '邀请码', icon: Ticket }] : []),
+            ...(effectiveCanManageInvitations ? [{ id: 'invitations' as const, label: adminCopy.invitation.tab, icon: Ticket }] : []),
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
@@ -650,7 +650,7 @@ export function SettingsMenu({
             : activeTab === 'mcp'
                 ? mcpCopy.title
                 : activeTab === 'invitations'
-                    ? '邀请码'
+                    ? adminCopy.invitation.tab
                     : text.settingsModel;
     const isSavingCurrentTab = activeSection === 'platform' && activeTab === 'general'
         ? (effectiveCanManageSecrets && isSavingWebTools)
@@ -986,6 +986,7 @@ export function SettingsMenu({
 
                                 {activeSection === 'platform' && activeTab === 'invitations' && effectiveCanManageInvitations ? (
                                     <InvitationSettingsPanel
+                                        copy={adminCopy.invitation}
                                         required={invitationRequired}
                                         invitations={invitations}
                                         newCode={newInvitationCode}
@@ -1194,6 +1195,39 @@ function getAdminSettingsCopy(translate: SettingsTranslate) {
         deployment: translate('admin.deployment'),
         workspaceManaged: translate('admin.workspaceManaged'),
         workspaceNote: translate('admin.workspaceNote'),
+        invitation: {
+            tab: translate('admin.invitation.tab'),
+            title: translate('admin.invitation.title'),
+            description: translate('admin.invitation.description'),
+            newCode: translate('admin.invitation.newCode'),
+            codeAria: translate('admin.invitation.codeAria'),
+            codePlaceholder: translate('admin.invitation.codePlaceholder'),
+            labelAria: translate('admin.invitation.labelAria'),
+            labelPlaceholder: translate('admin.invitation.labelPlaceholder'),
+            maxUsesAria: translate('admin.invitation.maxUsesAria'),
+            maxUsesPlaceholder: translate('admin.invitation.maxUsesPlaceholder'),
+            create: translate('admin.invitation.create'),
+            list: translate('admin.invitation.list'),
+            unnamed: translate('admin.invitation.unnamed'),
+            usedCount: (usedCount: number, maxUses?: number | null) => (
+                maxUses
+                    ? translate('admin.invitation.usedCountLimited', { usedCount, maxUses })
+                    : translate('admin.invitation.usedCountUnlimited', { usedCount })
+            ),
+            enable: translate('admin.invitation.enable'),
+            disable: translate('admin.invitation.disable'),
+            deleteAria: translate('admin.invitation.deleteAria'),
+            empty: translate('admin.invitation.empty'),
+            unavailable: translate('admin.invitation.unavailable'),
+            enabledStatus: translate('admin.invitation.enabledStatus'),
+            disabledStatus: translate('admin.invitation.disabledStatus'),
+            saveFailed: translate('admin.invitation.saveFailed'),
+            codeRequired: translate('admin.invitation.codeRequired'),
+            maxUsesInvalid: translate('admin.invitation.maxUsesInvalid'),
+            createFailed: translate('admin.invitation.createFailed'),
+            updateFailed: translate('admin.invitation.updateFailed'),
+            deleteFailed: translate('admin.invitation.deleteFailed'),
+        },
     };
 }
 
@@ -1445,6 +1479,7 @@ function Switch({
 }
 
 function InvitationSettingsPanel({
+    copy,
     required,
     invitations,
     newCode,
@@ -1460,6 +1495,7 @@ function InvitationSettingsPanel({
     onToggleInvitation,
     onDeleteInvitation,
 }: {
+    copy: ReturnType<typeof getAdminSettingsCopy>['invitation'];
     required: boolean;
     invitations: InvitationRecord[];
     newCode: string;
@@ -1482,39 +1518,39 @@ function InvitationSettingsPanel({
                     <div className="min-w-0">
                         <div className="type-subheadline flex items-center gap-2.5 text-zinc-100">
                             <Ticket className="h-4 w-4 text-zinc-400" />
-                            注册邀请码
+                            {copy.title}
                         </div>
                         <div className="type-footnote mt-1 text-zinc-500">
-                            开启后，邮箱注册必须先提供可用邀请码。
+                            {copy.description}
                         </div>
                     </div>
-                    <Switch checked={required} label="注册邀请码" onClick={onToggleRequired} />
+                    <Switch checked={required} label={copy.title} onClick={onToggleRequired} />
                 </div>
 
                 <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr]">
-                    <span className="type-subheadline text-zinc-100 sm:mt-2.5">新增邀请码</span>
+                    <span className="type-subheadline text-zinc-100 sm:mt-2.5">{copy.newCode}</span>
                     <div className="grid gap-2">
                         <input
-                            aria-label="邀请码"
+                            aria-label={copy.codeAria}
                             value={newCode}
                             onChange={(event) => onNewCodeChange(event.target.value)}
-                            placeholder="例如 BEE-ALPHA"
+                            placeholder={copy.codePlaceholder}
                             className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                         />
                         <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
                             <input
-                                aria-label="邀请码备注"
+                                aria-label={copy.labelAria}
                                 value={newLabel}
                                 onChange={(event) => onNewLabelChange(event.target.value)}
-                                placeholder="备注，可选"
+                                placeholder={copy.labelPlaceholder}
                                 className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                             />
                             <input
-                                aria-label="最大使用次数"
+                                aria-label={copy.maxUsesAria}
                                 inputMode="numeric"
                                 value={newMaxUses}
                                 onChange={(event) => onNewMaxUsesChange(event.target.value)}
-                                placeholder="次数"
+                                placeholder={copy.maxUsesPlaceholder}
                                 className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
                             />
                         </div>
@@ -1525,7 +1561,7 @@ function InvitationSettingsPanel({
                                 disabled={isSaving || !newCode.trim()}
                                 className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                创建邀请码
+                                {copy.create}
                             </button>
                         </div>
                     </div>
@@ -1533,7 +1569,7 @@ function InvitationSettingsPanel({
             </div>
 
             <div className="space-y-2">
-                <div className="type-caption-1 text-zinc-500">邀请码列表</div>
+                <div className="type-caption-1 text-zinc-500">{copy.list}</div>
                 {invitations.length ? (
                     <div className="divide-y divide-white/10 overflow-hidden rounded-3xl border border-white/10">
                         {invitations.map((invitation) => (
@@ -1542,14 +1578,14 @@ function InvitationSettingsPanel({
                                     <div className="flex items-center gap-2">
                                         <span className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                                         <span className="type-footnote truncate text-zinc-100">
-                                            {invitation.code || invitation.label || '未命名邀请码'}
+                                            {invitation.code || invitation.label || copy.unnamed}
                                         </span>
                                     </div>
                                     {invitation.label && invitation.label !== invitation.code ? (
                                         <div className="type-footnote mt-1 truncate pl-4 text-zinc-400">{invitation.label}</div>
                                     ) : null}
                                     <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                                        已用 {invitation.usedCount}{invitation.maxUses ? ` / ${invitation.maxUses}` : ''}
+                                        {copy.usedCount(invitation.usedCount, invitation.maxUses)}
                                     </div>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-2">
@@ -1559,11 +1595,11 @@ function InvitationSettingsPanel({
                                         disabled={isSaving}
                                         className="type-button h-9 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                        {invitation.enabled ? '禁用' : '启用'}
+                                        {invitation.enabled ? copy.disable : copy.enable}
                                     </button>
                                     <button
                                         type="button"
-                                        aria-label="删除邀请码"
+                                        aria-label={copy.deleteAria}
                                         onClick={() => onDeleteInvitation(invitation.id)}
                                         disabled={isSaving || invitation.usedCount > 0}
                                         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
@@ -1576,7 +1612,7 @@ function InvitationSettingsPanel({
                     </div>
                 ) : (
                     <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">
-                        还没有邀请码。
+                        {copy.empty}
                     </div>
                 )}
                 {status ? (

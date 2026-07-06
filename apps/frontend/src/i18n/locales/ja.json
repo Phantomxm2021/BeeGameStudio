@@ -326,7 +326,37 @@
       "platform": "Platform",
       "deployment": "Deployment",
       "workspaceManaged": "Managed by server deployment",
-      "workspaceNote": "In server mode, the workspace root is a global sandbox boundary. Users cannot override it; project paths are assigned by the platform per account."
+      "workspaceNote": "In server mode, the workspace root is a global sandbox boundary. Users cannot override it; project paths are assigned by the platform per account.",
+      "invitation": {
+        "tab": "Invites",
+        "title": "Registration invite codes",
+        "description": "When enabled, email registration and third-party authorization must provide a valid invite code first.",
+        "newCode": "New invite code",
+        "codeAria": "Invite code",
+        "codePlaceholder": "For example: BEE-ALPHA",
+        "labelAria": "Invite note",
+        "labelPlaceholder": "Note, optional",
+        "maxUsesAria": "Maximum uses",
+        "maxUsesPlaceholder": "Uses",
+        "create": "Create invite",
+        "list": "Invite codes",
+        "unnamed": "Unnamed invite",
+        "usedCountLimited": "Used {{usedCount}} / {{maxUses}}",
+        "usedCountUnlimited": "Used {{usedCount}}",
+        "enable": "Enable",
+        "disable": "Disable",
+        "deleteAria": "Delete invite code",
+        "empty": "No invite codes yet.",
+        "unavailable": "Invitation settings are unavailable.",
+        "enabledStatus": "Invitation codes are enabled.",
+        "disabledStatus": "Invitation codes are disabled.",
+        "saveFailed": "Failed to save invitation settings.",
+        "codeRequired": "Enter an invite code.",
+        "maxUsesInvalid": "Uses must be a positive integer.",
+        "createFailed": "Failed to create invite code.",
+        "updateFailed": "Failed to update invite code.",
+        "deleteFailed": "Failed to delete invite code."
+      }
     },
     "runtime": {
       "autoMemory": "Auto Memory",
@@ -393,7 +423,8 @@
         "profileImageTooLarge": "Avatar image must be under 2 MB.",
         "profileAvatarSelected": "Avatar selected. Click Done to save.",
         "profileAvatarUploadFailed": "Avatar upload failed. Try another image.",
-        "profileAvatarUpdateFailed": "Unable to update avatar."
+        "profileAvatarUpdateFailed": "Unable to update avatar.",
+        "invitationRequired": "Enter an invite code."
       },
       "placeholders": {
         "notes": "Add target audience, reference games, constraints, or the experience you want to validate first."
@@ -489,11 +520,24 @@
           "password": "Password",
           "passwordAria": "Password",
           "passwordNewPlaceholder": "At least 6 characters",
-          "passwordPlaceholder": "Enter password"
+          "passwordPlaceholder": "Enter password",
+          "invitationCode": "Invite code",
+          "invitationCodeAria": "Invite code",
+          "oauthInvitationCode": "Third-party authorization invite code",
+          "oauthInvitationCodeAria": "Third-party authorization invite code",
+          "invitationCodePlaceholder": "Enter invite code"
         },
         "legalClose": "Close legal document",
         "legalUpdated": "Updated {{date}}",
-        "legalUnderstand": "I understand"
+        "legalUnderstand": "I understand",
+        "feedback": {
+          "successTitle": "Success",
+          "errorTitle": "Something went wrong",
+          "loginSuccess": "Signed in successfully.",
+          "registerSuccess": "Registration successful.",
+          "resetEmailSent": "Password reset email sent. Check your inbox.",
+          "close": "OK"
+        }
       },
       "options": {
         "Mobile": "Mobile",

@@ -144,6 +144,12 @@ type IntakeCopy = {
         registerAndContinue: string;
         signInAndContinue: string;
         oauthFailed: string;
+        successTitle: string;
+        errorTitle: string;
+        loginSuccess: string;
+        registerSuccess: string;
+        resetEmailSent: string;
+        feedbackClose: string;
         forgotPassword: string;
         acceptTermsAria: string;
         acceptTermsPrefix: string;
@@ -253,6 +259,12 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         registerAndContinue: translate('auth.registerAndContinue'),
         signInAndContinue: translate('auth.signInAndContinue'),
         oauthFailed: translate('auth.oauthFailed'),
+        successTitle: translate('auth.feedback.successTitle'),
+        errorTitle: translate('auth.feedback.errorTitle'),
+        loginSuccess: translate('auth.feedback.loginSuccess'),
+        registerSuccess: translate('auth.feedback.registerSuccess'),
+        resetEmailSent: translate('auth.feedback.resetEmailSent'),
+        feedbackClose: translate('auth.feedback.close'),
         forgotPassword: translate('auth.forgotPassword'),
         acceptTermsAria: translate('auth.acceptTermsAria'),
         acceptTermsPrefix: translate('auth.acceptTermsPrefix'),
@@ -264,6 +276,12 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
 });
 
 type LegalDocumentKind = 'terms' | 'privacy';
+
+type AuthFeedbackDialog = {
+    kind: 'success' | 'error';
+    title: string;
+    message: string;
+};
 
 type LegalDocumentBundle = Record<LegalDocumentKind, {
     title: string;
@@ -590,6 +608,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
     const [loginError, setLoginError] = useState('');
     const [loginNotice, setLoginNotice] = useState('');
+    const [authFeedbackDialog, setAuthFeedbackDialog] = useState<AuthFeedbackDialog | null>(null);
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [authMode, setAuthMode] = useState<'login' | 'register' | 'resetPassword'>('login');
     const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -642,6 +661,22 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const t = useCommonText(lang);
     const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
     const intakeText = createLandingIntakeCopy(intakeTranslate);
+    const showAuthError = (message: string) => {
+        setLoginError(message);
+        setAuthFeedbackDialog({
+            kind: 'error',
+            title: intakeText.auth.errorTitle,
+            message,
+        });
+    };
+    const showAuthSuccess = (message: string) => {
+        setLoginNotice(message);
+        setAuthFeedbackDialog({
+            kind: 'success',
+            title: intakeText.auth.successTitle,
+            message,
+        });
+    };
     const legalDocuments = translate('legal', { returnObjects: true }) as LegalDocumentBundle;
     const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
     const localizedInputs = (inputs: string[]): string => inputs.map(localizedOptionLabel).join(' / ');
@@ -928,25 +963,25 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setLoginError('');
         setLoginNotice('');
         if (!isSupabaseAuthConfigured()) {
-            setLoginError(intakeText.errors.authNotConfigured);
+            showAuthError(intakeText.errors.authNotConfigured);
             return;
         }
         const email = loginEmail.trim();
         if (!email || !loginPassword) {
-            setLoginError(intakeText.errors.missingEmailPassword);
+            showAuthError(intakeText.errors.missingEmailPassword);
             return;
         }
         if (authMode === 'register') {
             if (!registerDisplayName.trim()) {
-                setLoginError(intakeText.errors.missingDisplayName);
+                showAuthError(intakeText.errors.missingDisplayName);
                 return;
             }
             if (!hasAcceptedTerms) {
-                setLoginError(intakeText.errors.termsRequired);
+                showAuthError(intakeText.errors.termsRequired);
                 return;
             }
             if (isInvitationRequired && !invitationCode.trim()) {
-                setLoginError(translate('intake.errors.invitationRequired', { defaultValue: '请输入邀请码。' }));
+                showAuthError(translate('intake.errors.invitationRequired'));
                 return;
             }
         }
@@ -957,10 +992,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     email,
                     password: loginPassword,
                     displayName: registerDisplayName,
-                    invitationCode: invitationCode,
+                    ...(isInvitationRequired ? { invitationCode } : {}),
                 });
+                showAuthSuccess(intakeText.auth.registerSuccess);
             } else {
                 await signInWithSupabasePassword({ email, password: loginPassword });
+                showAuthSuccess(intakeText.auth.loginSuccess);
             }
             await loadCurrentUser();
             setIsLoginPromptOpen(false);
@@ -979,7 +1016,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 }
             }
         } catch (error) {
-            setLoginError(error instanceof Error ? error.message : translate('intake.errors.loginFailed'));
+            showAuthError(error instanceof Error ? error.message : translate('intake.errors.loginFailed'));
         } finally {
             setIsSigningIn(false);
         }
@@ -990,15 +1027,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setLoginNotice('');
         const email = loginEmail.trim();
         if (!email) {
-            setLoginError(translate('intake.errors.resetEmailRequired'));
+            showAuthError(translate('intake.errors.resetEmailRequired'));
             return;
         }
         setIsSigningIn(true);
         try {
             await sendSupabasePasswordReset(email);
-            setLoginNotice(translate('intake.errors.resetEmailSent'));
+            showAuthSuccess(intakeText.auth.resetEmailSent);
         } catch (error) {
-            setLoginError(error instanceof Error ? error.message : translate('intake.errors.resetEmailFailed'));
+            showAuthError(error instanceof Error ? error.message : translate('intake.errors.resetEmailFailed'));
         } finally {
             setIsSigningIn(false);
         }
@@ -1085,11 +1122,19 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
+            if (isInvitationRequired && !invitationCode.trim()) {
+                showAuthError(translate('intake.errors.invitationRequired'));
+                return;
+            }
             writePendingAuthIdeaState(pendingIdeaAfterLogin);
-            await signInWithSupabaseOAuth(provider);
+            if (isInvitationRequired) {
+                await signInWithSupabaseOAuth(provider, { invitationCode });
+            } else {
+                await signInWithSupabaseOAuth(provider);
+            }
         } catch (error) {
             clearPendingAuthIdeaState();
-            setLoginError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
+            showAuthError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
         }
     };
 
@@ -1571,15 +1616,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </label>
                                 {isInvitationRequired && authMode === 'register' ? (
                                     <label className="type-subheadline block text-zinc-200">
-                                        {translate('intake.auth.fields.invitationCode', { defaultValue: '邀请码' })}
+                                        {translate('intake.auth.fields.invitationCode')}
                                         <input
-                                            aria-label={translate('intake.auth.fields.invitationCodeAria', { defaultValue: '邀请码' })}
+                                            aria-label={translate('intake.auth.fields.invitationCodeAria')}
                                             type="text"
                                             value={invitationCode}
                                             onChange={(event) => setInvitationCode(event.target.value)}
                                             className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
                                             autoComplete="off"
-                                            placeholder={translate('intake.auth.fields.invitationCodePlaceholder', { defaultValue: '输入邀请码' })}
+                                            placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
                                         />
                                     </label>
                                 ) : null}
@@ -1658,6 +1703,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         <span>{intakeText.auth.oauthDivider}</span>
                                         <span className="h-px flex-1 bg-white/10" />
                                     </div>
+                                    {isInvitationRequired ? (
+                                        <input
+                                            aria-label={translate('intake.auth.fields.oauthInvitationCodeAria')}
+                                            type="text"
+                                            value={invitationCode}
+                                            onChange={(event) => setInvitationCode(event.target.value)}
+                                            className="glass-control type-input mb-3 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
+                                            autoComplete="off"
+                                            placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
+                                        />
+                                    ) : null}
                                     <div className="grid gap-2 sm:grid-cols-2">
                                         <OAuthButton provider="github" label="GitHub" onClick={handleOAuthSignIn} />
                                         <OAuthButton provider="google" label="Google" onClick={handleOAuthSignIn} />
@@ -1696,6 +1752,42 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                ) : null}
+
+                {authFeedbackDialog ? (
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={authFeedbackDialog.title}
+                        data-surface="frosted-glass"
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+                    >
+                        <div className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                    <h2 className="type-title-3 text-white">{authFeedbackDialog.title}</h2>
+                                    <p className="type-callout mt-3 text-zinc-300">{authFeedbackDialog.message}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label={intakeText.auth.feedbackClose}
+                                    onClick={() => setAuthFeedbackDialog(null)}
+                                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <div className="mt-6 flex justify-end border-t border-white/10 pt-5">
+                                <button
+                                    type="button"
+                                    onClick={() => setAuthFeedbackDialog(null)}
+                                    className="primary-pill type-button px-5 py-2.5"
+                                >
+                                    {intakeText.auth.feedbackClose}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 

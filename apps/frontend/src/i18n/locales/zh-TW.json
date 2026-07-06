@@ -59,7 +59,8 @@
         "profileImageTooLarge": "頭像圖片不能超過 2MB。",
         "profileAvatarSelected": "頭像已選擇，點擊完成後保存。",
         "profileAvatarUploadFailed": "頭像上傳失敗，請換一張圖片。",
-        "profileAvatarUpdateFailed": "頭像更新失敗。"
+        "profileAvatarUpdateFailed": "頭像更新失敗。",
+        "invitationRequired": "请输入邀请码。"
       },
       "placeholders": {
         "notes": "可補充目標使用者、參考遊戲、特殊限制或你想優先驗證的體驗。"
@@ -155,11 +156,24 @@
           "password": "密碼",
           "passwordAria": "密碼",
           "passwordNewPlaceholder": "至少 6 位密碼",
-          "passwordPlaceholder": "輸入密碼"
+          "passwordPlaceholder": "輸入密碼",
+          "invitationCode": "邀请码",
+          "invitationCodeAria": "邀请码",
+          "oauthInvitationCode": "第三方授权邀请码",
+          "oauthInvitationCodeAria": "第三方授权邀请码",
+          "invitationCodePlaceholder": "输入邀请码"
         },
         "legalClose": "關閉法律文件",
         "legalUpdated": "更新於 {{date}}",
-        "legalUnderstand": "我已了解"
+        "legalUnderstand": "我已了解",
+        "feedback": {
+          "successTitle": "操作成功",
+          "errorTitle": "操作失败",
+          "loginSuccess": "登录成功。",
+          "registerSuccess": "注册成功。",
+          "resetEmailSent": "重置密码邮件已发送，请检查邮箱。",
+          "close": "知道了"
+        }
       },
       "options": {
         "Mobile": "行動端",
@@ -261,7 +275,37 @@
       "platform": "平台",
       "deployment": "部署",
       "workspaceManaged": "由伺服器部署配置管理",
-      "workspaceNote": "伺服器模式下工作根目錄是全域安全邊界。普通使用者不能單獨修改，專案路徑由平台按帳號自動生成。"
+      "workspaceNote": "伺服器模式下工作根目錄是全域安全邊界。普通使用者不能單獨修改，專案路徑由平台按帳號自動生成。",
+      "invitation": {
+        "tab": "邀请码",
+        "title": "注册邀请码",
+        "description": "开启后，邮箱注册和第三方授权都必须先提供可用邀请码。",
+        "newCode": "新增邀请码",
+        "codeAria": "邀请码",
+        "codePlaceholder": "例如 BEE-ALPHA",
+        "labelAria": "邀请码备注",
+        "labelPlaceholder": "备注，可选",
+        "maxUsesAria": "最大使用次数",
+        "maxUsesPlaceholder": "次数",
+        "create": "创建邀请码",
+        "list": "邀请码列表",
+        "unnamed": "未命名邀请码",
+        "usedCountLimited": "已用 {{usedCount}} / {{maxUses}}",
+        "usedCountUnlimited": "已用 {{usedCount}}",
+        "enable": "启用",
+        "disable": "禁用",
+        "deleteAria": "删除邀请码",
+        "empty": "还没有邀请码。",
+        "unavailable": "邀请码设置不可用。",
+        "enabledStatus": "邀请码已开启。",
+        "disabledStatus": "邀请码已关闭。",
+        "saveFailed": "邀请码设置保存失败。",
+        "codeRequired": "请输入邀请码。",
+        "maxUsesInvalid": "使用次数必须是正整数。",
+        "createFailed": "邀请码创建失败。",
+        "updateFailed": "邀请码更新失败。",
+        "deleteFailed": "邀请码删除失败。"
+      }
     },
     "runtime": {
       "autoMemory": "自動記憶",
