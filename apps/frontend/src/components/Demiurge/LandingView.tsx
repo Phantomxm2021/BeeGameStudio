@@ -35,6 +35,7 @@ import {
     signInWithSupabaseOAuth,
     signInWithSupabasePassword,
     signUpWithSupabasePassword,
+    SupabaseAuthApiError,
     type SupabaseOAuthProvider,
     updateSupabaseAvatarUrl,
     uploadSupabaseAvatarImage,
@@ -606,8 +607,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [invitationCode, setInvitationCode] = useState('');
     const [isInvitationRequired, setIsInvitationRequired] = useState(false);
     const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
-    const [loginError, setLoginError] = useState('');
-    const [loginNotice, setLoginNotice] = useState('');
+    const [, setLoginError] = useState('');
+    const [, setLoginNotice] = useState('');
     const [authFeedbackDialog, setAuthFeedbackDialog] = useState<AuthFeedbackDialog | null>(null);
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [authMode, setAuthMode] = useState<'login' | 'register' | 'resetPassword'>('login');
@@ -676,6 +677,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             title: intakeText.auth.successTitle,
             message,
         });
+    };
+    const localizeAuthError = (error: unknown, fallbackMessage: string): string => {
+        if (error instanceof SupabaseAuthApiError) {
+            if (error.code === 'invalid_credentials') {
+                return translate('intake.errors.invalidCredentials');
+            }
+            if (error.code === 'email_not_confirmed') {
+                return translate('intake.errors.emailNotConfirmed');
+            }
+            if (error.code === 'signup_disabled') {
+                return translate('intake.errors.signupDisabled');
+            }
+            if (error.code === 'weak_password') {
+                return translate('intake.errors.weakPassword');
+            }
+        }
+        return fallbackMessage;
     };
     const legalDocuments = translate('legal', { returnObjects: true }) as LegalDocumentBundle;
     const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
@@ -1016,7 +1034,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 }
             }
         } catch (error) {
-            showAuthError(error instanceof Error ? error.message : translate('intake.errors.loginFailed'));
+            showAuthError(localizeAuthError(error, translate('intake.errors.loginFailed')));
         } finally {
             setIsSigningIn(false);
         }
@@ -1035,7 +1053,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             await sendSupabasePasswordReset(email);
             showAuthSuccess(intakeText.auth.resetEmailSent);
         } catch (error) {
-            showAuthError(error instanceof Error ? error.message : translate('intake.errors.resetEmailFailed'));
+            showAuthError(localizeAuthError(error, translate('intake.errors.resetEmailFailed')));
         } finally {
             setIsSigningIn(false);
         }
@@ -1134,7 +1152,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             }
         } catch (error) {
             clearPendingAuthIdeaState();
-            showAuthError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
+            showAuthError(localizeAuthError(error, intakeText.auth.oauthFailed));
         }
     };
 
@@ -1541,7 +1559,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     >
                         <form
                             onSubmit={handleLoginSubmit}
-                            className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100"
+                            className={`input-surface glass-panel scrollbar-hide max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-[28px] text-zinc-100 ${authMode === 'register' ? 'max-w-lg p-6 sm:p-7' : 'max-w-md p-6'}`}
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
@@ -1562,7 +1580,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </button>
                             </div>
                             {authMode !== 'resetPassword' ? (
-                                <div className="mt-6 grid grid-cols-2 gap-2 rounded-full border border-white/10 bg-black/10 p-1">
+                                <div className="mt-6 grid grid-cols-2 gap-1.5 rounded-[22px] border border-white/10 bg-white/[0.03] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-12px_24px_rgba(0,0,0,0.16)]">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -1570,7 +1588,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                    className={`type-button rounded-full px-3 py-2 transition ${authMode === 'login' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                        className={`type-button h-10 rounded-[18px] px-3 transition ${authMode === 'login' ? 'bg-white text-zinc-950 shadow-[0_10px_28px_rgba(255,255,255,0.12)]' : 'text-zinc-400 hover:bg-white/[0.07] hover:text-white'}`}
                                     >
                                         {translate('intake.auth.tabs.login')}
                                     </button>
@@ -1581,15 +1599,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                    className={`type-button rounded-full px-3 py-2 transition ${authMode === 'register' ? 'bg-white text-zinc-950' : 'text-zinc-300 hover:bg-white/10 hover:text-white'}`}
+                                        className={`type-button h-10 rounded-[18px] px-3 transition ${authMode === 'register' ? 'bg-white text-zinc-950 shadow-[0_10px_28px_rgba(255,255,255,0.12)]' : 'text-zinc-400 hover:bg-white/[0.07] hover:text-white'}`}
                                     >
                                         {translate('intake.auth.tabs.register')}
                                     </button>
                                 </div>
                             ) : null}
-                            <div className="mt-6 space-y-3">
+                            <div className={authMode === 'register' ? 'mt-7 space-y-4' : 'mt-6 space-y-3'}>
                                 {authMode === 'register' ? (
-                                    <label className="type-subheadline block text-zinc-200">
+                                    <label className="type-callout block text-zinc-300">
                                         {translate('intake.auth.fields.displayName')}
                                         <input
                                             aria-label={translate('intake.auth.fields.displayNameAria')}
@@ -1602,7 +1620,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         />
                                     </label>
                                 ) : null}
-                                <label className="type-subheadline block text-zinc-200">
+                                <label className="type-callout block text-zinc-300">
                                     {translate('intake.auth.fields.email')}
                                     <input
                                         aria-label={translate('intake.auth.fields.emailAria')}
@@ -1615,7 +1633,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     />
                                 </label>
                                 {isInvitationRequired && authMode === 'register' ? (
-                                    <label className="type-subheadline block text-zinc-200">
+                                    <label className="type-callout block text-zinc-300">
                                         {translate('intake.auth.fields.invitationCode')}
                                         <input
                                             aria-label={translate('intake.auth.fields.invitationCodeAria')}
@@ -1629,17 +1647,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     </label>
                                 ) : null}
                                 {authMode !== 'resetPassword' ? (
-                                    <label className="type-subheadline block text-zinc-200">
-                                    {translate('intake.auth.fields.password')}
-                                    <input
-                                        aria-label={translate('intake.auth.fields.passwordAria')}
-                                        type="password"
-                                        value={loginPassword}
-                                        onChange={(event) => setLoginPassword(event.target.value)}
-                                        className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                                        autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                                        placeholder={authMode === 'register' ? translate('intake.auth.fields.passwordNewPlaceholder') : translate('intake.auth.fields.passwordPlaceholder')}
-                                    />
+                                    <label className="type-callout block text-zinc-300">
+                                        {translate('intake.auth.fields.password')}
+                                        <input
+                                            aria-label={translate('intake.auth.fields.passwordAria')}
+                                            type="password"
+                                            value={loginPassword}
+                                            onChange={(event) => setLoginPassword(event.target.value)}
+                                            className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
+                                            autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                                            placeholder={authMode === 'register' ? translate('intake.auth.fields.passwordNewPlaceholder') : translate('intake.auth.fields.passwordPlaceholder')}
+                                        />
                                     </label>
                                 ) : null}
                                 {authMode === 'login' ? (
@@ -1653,49 +1671,39 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         disabled={isSigningIn}
                                         className="type-button mx-auto block text-center text-zinc-300 transition hover:text-white disabled:opacity-60"
                                     >
-	                                        {intakeText.auth.forgotPassword}
+                                        {intakeText.auth.forgotPassword}
                                     </button>
                                 ) : (
                                     <label className="type-callout flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-zinc-300">
                                         <input
-	                                            aria-label={intakeText.auth.acceptTermsAria}
+                                            aria-label={intakeText.auth.acceptTermsAria}
                                             type="checkbox"
                                             checked={hasAcceptedTerms}
                                             onChange={(event) => setHasAcceptedTerms(event.target.checked)}
                                             className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30"
                                         />
                                         <span>
-	                                            {intakeText.auth.acceptTermsPrefix}{' '}
+                                            {intakeText.auth.acceptTermsPrefix}{' '}
                                             <button
                                                 type="button"
                                                 onClick={() => setActiveLegalDocument('terms')}
-	                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
                                             >
-	                                                {intakeText.auth.termsLabel}
+                                                {intakeText.auth.termsLabel}
                                             </button>
-	                                            {' '}{intakeText.auth.acceptTermsConnector}{' '}
+                                            {' '}{intakeText.auth.acceptTermsConnector}{' '}
                                             <button
                                                 type="button"
                                                 onClick={() => setActiveLegalDocument('privacy')}
-	                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
+                                                className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
                                             >
-	                                                {intakeText.auth.privacyLabel}
+                                                {intakeText.auth.privacyLabel}
                                             </button>
-	                                            {intakeText.auth.acceptTermsSuffix}
+                                            {intakeText.auth.acceptTermsSuffix}
                                         </span>
                                     </label>
                                 )}
                             </div>
-                            {loginError ? (
-                                <div className="type-footnote mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-red-100">
-                                    {loginError}
-                                </div>
-                            ) : null}
-                            {loginNotice ? (
-                                <div className="type-footnote mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-emerald-100">
-                                    {loginNotice}
-                                </div>
-                            ) : null}
                             {authMode === 'login' ? (
                                 <>
                                     <div className="type-caption-1 my-5 flex items-center gap-3 text-zinc-500">
@@ -1723,7 +1731,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     </div>
                                 </>
                             ) : null}
-                            <div className="mt-6 flex items-center justify-end gap-3">
+                            <div className="mt-6 flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
                                 {authMode === 'resetPassword' ? (
                                     <button
                                         type="button"
@@ -1732,7 +1740,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                             setLoginError('');
                                             setLoginNotice('');
                                         }}
-                                        className="secondary-pill type-button px-5 py-2.5"
+                                        className="secondary-pill type-button w-full px-5 py-2.5 sm:w-auto"
                                     >
                                         {intakeText.actions.backToLogin}
                                     </button>
@@ -1740,7 +1748,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <button
                                     type="submit"
                                     disabled={isSigningIn}
-                                    className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="primary-pill type-button w-full px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                 >
                                     {isSigningIn
                                         ? intakeText.auth.signingIn

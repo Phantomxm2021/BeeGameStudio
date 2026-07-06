@@ -12,6 +12,18 @@ export type BeeGameSupabaseSession = {
   user: BeeGameSupabaseUser;
 };
 
+export class SupabaseAuthApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(message: string, options: { code?: string; status?: number } = {}) {
+    super(message);
+    this.name = 'SupabaseAuthApiError';
+    this.code = options.code ?? '';
+    this.status = options.status ?? 0;
+  }
+}
+
 export type SupabasePasswordSignInInput = {
   email: string;
   password: string;
@@ -91,7 +103,7 @@ export async function signInWithSupabasePassword(
     }),
   });
   if (!response.ok) {
-    throw new Error(await readSupabaseError(response));
+    throw await readSupabaseAuthError(response);
   }
   const session = toSupabaseSession(await response.json());
   saveSupabaseSession(session);
@@ -124,7 +136,7 @@ export async function signUpWithSupabasePassword(
     }),
   });
   if (!response.ok) {
-    throw new Error(await readSupabaseError(response));
+    throw await readSupabaseAuthError(response);
   }
   const value = await response.json();
   if (!isRecord(value) || typeof value.access_token !== 'string') return null;
@@ -151,7 +163,7 @@ export async function sendSupabasePasswordReset(email: string): Promise<void> {
     }),
   });
   if (!response.ok) {
-    throw new Error(await readSupabaseError(response));
+    throw await readSupabaseAuthError(response);
   }
 }
 
@@ -590,10 +602,31 @@ function getSupabaseMetadataRecords(
   return records;
 }
 
+async function readSupabaseAuthError(response: Response): Promise<SupabaseAuthApiError> {
+  const details = await readSupabaseErrorDetails(response);
+  return new SupabaseAuthApiError(details.message, {
+    code: details.code,
+    status: details.status,
+  });
+}
+
 async function readSupabaseError(response: Response): Promise<string> {
+  return (await readSupabaseErrorDetails(response)).message;
+}
+
+async function readSupabaseErrorDetails(response: Response): Promise<{
+  code: string;
+  message: string;
+  status: number;
+}> {
   try {
     const value = await response.json() as unknown;
     if (isRecord(value)) {
+      const code = typeof value.code === 'string'
+        ? value.code
+        : typeof value.error_code === 'string'
+          ? value.error_code
+          : '';
       const message = typeof value.msg === 'string'
         ? value.msg
         : typeof value.message === 'string'
@@ -603,13 +636,23 @@ async function readSupabaseError(response: Response): Promise<string> {
             : typeof value.error === 'string'
               ? value.error
               : '';
-      if (message.trim()) return message.trim();
+      if (message.trim()) {
+        return {
+          code: code.trim(),
+          message: message.trim(),
+          status: response.status,
+        };
+      }
     }
   } catch {
     // Fall through to generic text/status handling.
   }
   const text = await response.text().catch(() => '');
-  return text.trim() || `Supabase Auth failed (${response.status})`;
+  return {
+    code: '',
+    message: text.trim() || `Supabase Auth failed (${response.status})`,
+    status: response.status,
+  };
 }
 
 function readOAuthError(params: URLSearchParams): string | undefined {

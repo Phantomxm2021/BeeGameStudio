@@ -416,6 +416,10 @@
         "termsRequired": "Read and accept the terms first.",
         "intakeFailed": "Failed to generate options. Please try again.",
         "loginFailed": "Sign-in failed. Please try again.",
+        "invalidCredentials": "The email or password is incorrect. Please check and try again.",
+        "emailNotConfirmed": "This email has not been verified yet. Please check your verification email first.",
+        "signupDisabled": "Registration is not available right now. Please try again later.",
+        "weakPassword": "This password is not strong enough. Please choose a safer one.",
         "resetEmailRequired": "Enter your email and we will send a password reset email.",
         "resetEmailSent": "Password reset email sent. Check your inbox.",
         "resetEmailFailed": "Unable to send password reset email.",
@@ -494,18 +498,18 @@
         "termsLabel": "Terms",
         "privacyLabel": "Privacy Policy",
         "acceptTermsConnector": "and",
-        "acceptTermsSuffix": ", and I understand generation consumes credits.",
+        "acceptTermsSuffix": ", and I understand creation uses credits.",
         "dialogLabel": "Sign in / Register BeeGame",
         "close": "Close sign-in dialog",
         "title": {
-          "resetPassword": "Reset password",
-          "register": "Create BeeGame account",
+          "resetPassword": "Find your way back",
+          "register": "Own your game studio",
           "login": "Welcome back"
         },
         "description": {
-          "resetPassword": "Enter your account email and we will send a password reset email.",
-          "register": "Set a display name to save projects, sync settings, and continue generating game directions.",
-          "login": "Sign in to continue your projects, generation progress, and account settings."
+          "resetPassword": "Enter your email and we will reconnect you here.",
+          "register": "Let every idea begin here.",
+          "login": "Your ideas and projects are waiting here."
         },
         "tabs": {
           "login": "Sign in",
@@ -532,7 +536,7 @@
         "legalUnderstand": "I understand",
         "feedback": {
           "successTitle": "Success",
-          "errorTitle": "Something went wrong",
+          "errorTitle": "Error",
           "loginSuccess": "Signed in successfully.",
           "registerSuccess": "Registration successful.",
           "resetEmailSent": "Password reset email sent. Check your inbox.",

@@ -52,6 +52,10 @@
         "termsRequired": "請先閱讀並同意使用者協議。",
         "intakeFailed": "方案生成失敗，請重試。",
         "loginFailed": "登入失敗，請重試。",
+        "invalidCredentials": "信箱或密碼不正確，請檢查後重試。",
+        "emailNotConfirmed": "信箱尚未完成驗證，請先檢查驗證郵件。",
+        "signupDisabled": "目前暫未開放註冊，請稍後再試。",
+        "weakPassword": "密碼強度不足，請換一個更安全的密碼。",
         "resetEmailRequired": "請輸入信箱，我們會寄送密碼重置郵件。",
         "resetEmailSent": "重置密碼郵件已寄出，請檢查信箱。",
         "resetEmailFailed": "重置密碼郵件寄送失敗。",
@@ -130,18 +134,18 @@
         "termsLabel": "使用者協議",
         "privacyLabel": "隱私條款",
         "acceptTermsConnector": "與",
-        "acceptTermsSuffix": "，理解生成內容會消耗 credit。",
+        "acceptTermsSuffix": "，並了解創作過程會使用額度。",
         "dialogLabel": "登入 / 註冊 BeeGame",
         "close": "關閉登入彈窗",
         "title": {
-          "resetPassword": "重置密碼",
-          "register": "建立 BeeGame 帳號",
+          "resetPassword": "找回通往創作的鑰匙",
+          "register": "擁有自己的遊戲工作室",
           "login": "歡迎回來"
         },
         "description": {
-          "resetPassword": "輸入註冊信箱，我們會寄送密碼重置郵件。",
-          "register": "設定暱稱後即可保存專案、同步設定，並繼續生成遊戲方案。",
-          "login": "登入後繼續你的專案、生成進度和帳號設定。"
+          "resetPassword": "輸入信箱，我們會幫你重新連接到這裡。",
+          "register": "讓每個想法，都從這裡開始。",
+          "login": "你的靈感與專案，正在這裡等待繼續。"
         },
         "tabs": {
           "login": "登入",
@@ -168,7 +172,7 @@
         "legalUnderstand": "我已了解",
         "feedback": {
           "successTitle": "操作成功",
-          "errorTitle": "操作失败",
+          "errorTitle": "錯誤提示",
           "loginSuccess": "登录成功。",
           "registerSuccess": "注册成功。",
           "resetEmailSent": "重置密码邮件已发送，请检查邮箱。",

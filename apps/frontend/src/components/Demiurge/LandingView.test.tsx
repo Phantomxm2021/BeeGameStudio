@@ -39,6 +39,7 @@ const {
     updateInvitation: vi.fn(),
 }));
 const {
+    SupabaseAuthApiError,
     clearSupabaseSession,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
@@ -48,6 +49,17 @@ const {
     updateSupabaseAvatarUrl,
     uploadSupabaseAvatarImage,
 } = vi.hoisted(() => ({
+    SupabaseAuthApiError: class SupabaseAuthApiError extends Error {
+        readonly code: string;
+        readonly status: number;
+
+        constructor(message: string, options: { code?: string; status?: number } = {}) {
+            super(message);
+            this.name = 'SupabaseAuthApiError';
+            this.code = options.code ?? '';
+            this.status = options.status ?? 0;
+        }
+    },
     clearSupabaseSession: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
     sendSupabasePasswordReset: vi.fn(),
@@ -163,6 +175,7 @@ vi.mock('../../services/invitationApi', () => ({
 }));
 
 vi.mock('../../services/supabaseAuthApi', () => ({
+    SupabaseAuthApiError,
     clearSupabaseSession,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
@@ -410,7 +423,7 @@ describe('LandingView bootstrap submission', () => {
         submitIdea('LLM generated idea');
 
         expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-        expect(screen.getByText('登录后继续你的项目、生成进度和账号设置。')).toBeInTheDocument();
+        expect(screen.getByText('你的灵感与项目，正在这里等待继续。')).toBeInTheDocument();
         expect(runIdeaIntake).not.toHaveBeenCalled();
         expect(getCreditBalance).not.toHaveBeenCalled();
     });
@@ -462,6 +475,28 @@ describe('LandingView bootstrap submission', () => {
         });
         expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
         expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+    });
+
+    it('shows localized feedback for invalid Supabase login credentials', async () => {
+        mockCurrentUser = null;
+        signInWithSupabasePassword.mockRejectedValueOnce(
+            new SupabaseAuthApiError('Invalid login credentials', {
+                code: 'invalid_credentials',
+                status: 400,
+            }),
+        );
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+        fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
+        fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'wrong-password' } });
+        fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
+
+        const errorDialog = await screen.findByRole('dialog', { name: '错误提示' });
+        expect(within(errorDialog).getByText('邮箱或密码不正确，请检查后重试。')).toBeInTheDocument();
+        expect(within(errorDialog).queryByText('Invalid login credentials')).not.toBeInTheDocument();
     });
 
     it('restores the pending idea after an OAuth redirect and continues generation', async () => {
@@ -895,7 +930,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
         fireEvent.click(await screen.findByRole('button', { name: '忘记密码？' }));
 
-        expect(await screen.findByText('重置密码')).toBeInTheDocument();
+        expect(await screen.findByText('找回通往创作的钥匙')).toBeInTheDocument();
         expect(screen.queryByLabelText('密码')).not.toBeInTheDocument();
         expect(sendSupabasePasswordReset).not.toHaveBeenCalled();
 
@@ -979,7 +1014,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByText('第三方授权邀请码')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
-        const errorDialog = await screen.findByRole('dialog', { name: '操作失败' });
+        const errorDialog = await screen.findByRole('dialog', { name: '错误提示' });
         expect(within(errorDialog).getByText('请输入邀请码。')).toBeInTheDocument();
         expect(signInWithSupabaseOAuth).not.toHaveBeenCalled();
 
