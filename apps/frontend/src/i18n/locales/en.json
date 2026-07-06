@@ -204,6 +204,7 @@
         "Gamepad": "Gamepad",
         "Touch": "Touch",
         "Voice": "Voice",
+        "Hand tracking": "Hand tracking",
         "Hand tracking XR": "Hand tracking XR"
       }
     },

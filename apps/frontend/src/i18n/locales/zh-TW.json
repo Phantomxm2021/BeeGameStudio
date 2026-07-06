@@ -202,6 +202,7 @@
         "Gamepad": "手把",
         "Touch": "觸控",
         "Voice": "語音",
+        "Hand tracking": "手追",
         "Hand tracking XR": "手勢追蹤 XR"
       }
     },

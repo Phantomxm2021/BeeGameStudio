@@ -1931,9 +1931,23 @@ function normalizeClarification(value: unknown): BeeGameClarification | undefine
 }
 
 function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption {
+  const rawOption = option as BeeGameIntakeOption & {
+    project_folder_name?: string;
+    recommended_platform?: string;
+    recommended_engine?: string;
+    recommended_dimension?: string;
+    recommended_genre?: string;
+    recommended_style?: string;
+    recommended_inputs?: unknown;
+  };
+  const recommendedInputs = Array.isArray(option.recommendedInputs)
+    ? option.recommendedInputs
+    : Array.isArray(rawOption.recommended_inputs)
+      ? rawOption.recommended_inputs.map(String).filter(Boolean)
+      : [];
   return {
     ...option,
-    projectFolderName: option.projectFolderName || (option as BeeGameIntakeOption & { project_folder_name?: string }).project_folder_name || '',
+    projectFolderName: option.projectFolderName || rawOption.project_folder_name || '',
     coreGameplayHypothesis: option.coreGameplayHypothesis || option.coreMechanic || option.gameplay,
     experienceSnapshot: option.experienceSnapshot || option.pitch,
     playerFirstMinute: option.playerFirstMinute || option.gameplay,
@@ -1947,7 +1961,12 @@ function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption
     fit: option.fit || option.pitch,
     firstPlayableValidation: option.firstPlayableValidation || option.gameplay,
     riskComplexity: option.riskComplexity || '复杂度取决于最终范围，需要先控制第一版目标。',
-    recommendedEngine: option.recommendedEngine || (option as BeeGameIntakeOption & { recommended_engine?: string }).recommended_engine || '',
+    recommendedPlatform: option.recommendedPlatform || rawOption.recommended_platform || '',
+    recommendedEngine: option.recommendedEngine || rawOption.recommended_engine || '',
+    recommendedDimension: option.recommendedDimension || rawOption.recommended_dimension || '',
+    recommendedGenre: option.recommendedGenre || rawOption.recommended_genre || '',
+    recommendedStyle: option.recommendedStyle || rawOption.recommended_style || '',
+    recommendedInputs,
   };
 }
 

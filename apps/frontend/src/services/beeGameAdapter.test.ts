@@ -283,6 +283,46 @@ describe('beeGameAdapter prompt rules', () => {
     expect(requestBody).toEqual({ idea: 'LLM generated idea' });
   });
 
+  it('normalizes snake_case intake setting fields before the UI builds production settings', async () => {
+    const llmOption = makeLlmOption({
+      recommendedPlatform: undefined,
+      recommendedDimension: undefined,
+      recommendedGenre: undefined,
+      recommendedStyle: undefined,
+      recommendedInputs: undefined,
+      recommended_platform: 'PC',
+      recommended_engine: 'Unity',
+      recommended_dimension: '3D',
+      recommended_genre: 'Racing',
+      recommended_style: 'Realistic',
+      recommended_inputs: ['Keyboard/mouse', 'Gamepad'],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({ error: 'not found' }, 404)
+        : jsonResponse({
+          maturity: 'directional',
+          needsOptions: true,
+          needsClarification: false,
+          detectedConstraints: [],
+          recommendedNextStep: 'choose_direction',
+          options: [llmOption],
+        })
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
+
+    expect(intake.options[0]).toEqual(expect.objectContaining({
+      recommendedPlatform: 'PC',
+      recommendedEngine: 'Unity',
+      recommendedDimension: '3D',
+      recommendedGenre: 'Racing',
+      recommendedStyle: 'Realistic',
+      recommendedInputs: ['Keyboard/mouse', 'Gamepad'],
+    }));
+  });
+
   it('passes the selected language to BeeGame intake', async () => {
     const llmOption = makeLlmOption();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => (

@@ -61,6 +61,15 @@ type ProductionSettingOptions = {
     inputs: string[];
 };
 
+const CONFIGURED_PRODUCTION_SETTING_OPTIONS: ProductionSettingOptions = {
+    platforms: ['Web', 'Mobile', 'PC', 'Console', 'VR/AR'],
+    engines: ['React', 'Unity', 'Godot', 'Unreal'],
+    dimensions: ['2D', '2.5D', '3D', 'VR', 'AR'],
+    genres: ['Arcade', 'Action', 'Adventure', 'Puzzle', 'Racing', 'RPG', 'Strategy', 'Simulation', 'Shooter', 'Platformer', 'Casual'],
+    styles: ['Pixel', 'Cartoon', 'Stylized', 'Minimal', 'Realistic', 'Low Poly', 'Hand-drawn', 'Sci-fi', 'Fantasy'],
+    inputs: ['Keyboard/mouse', 'Touch', 'Gamepad', 'Motion', 'Voice', 'Hand tracking'],
+};
+
 type IntakeCopy = {
     modal: {
         chooseOption: string;
@@ -304,38 +313,30 @@ interface LandingViewProps {
 }
 
 const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings => ({
-    platform: '',
-    engine: '',
-    visualStyle: '',
-    dimension: '',
-    genre: '',
-    inputs: [],
+    platform: pickConfiguredProductionValue(option.recommendedPlatform, CONFIGURED_PRODUCTION_SETTING_OPTIONS.platforms),
+    engine: pickConfiguredProductionValue(normalizeEngine(option.recommendedEngine), CONFIGURED_PRODUCTION_SETTING_OPTIONS.engines),
+    visualStyle: pickConfiguredProductionValue(option.recommendedStyle, CONFIGURED_PRODUCTION_SETTING_OPTIONS.styles),
+    dimension: pickConfiguredProductionValue(option.recommendedDimension, CONFIGURED_PRODUCTION_SETTING_OPTIONS.dimensions),
+    genre: pickConfiguredProductionValue(option.recommendedGenre, CONFIGURED_PRODUCTION_SETTING_OPTIONS.genres),
+    inputs: (option.recommendedInputs || [])
+        .map(input => pickConfiguredProductionValue(input, CONFIGURED_PRODUCTION_SETTING_OPTIONS.inputs))
+        .filter(Boolean),
     scope: option.scope || 'Prototype',
     notes: '',
 });
 
-const optionsWithCurrentValue = (options: string[], value: string): string[] => {
-    if (!value || value === 'Auto' || options.includes(value)) return options;
-    return [value, ...options];
+const optionsWithCurrentValue = (options: string[], _value: string): string[] => {
+    return options;
 };
 
-function buildProductionSettingOptions(options: BeeGameIntakeOption[]): ProductionSettingOptions {
-    return {
-        platforms: uniqueNonEmpty(options.map(option => option.recommendedPlatform)),
-        engines: uniqueNonEmpty(options.map(option => option.recommendedEngine)),
-        dimensions: uniqueNonEmpty(options.map(option => option.recommendedDimension)),
-        genres: uniqueNonEmpty(options.map(option => option.recommendedGenre)),
-        styles: uniqueNonEmpty(options.map(option => option.recommendedStyle)),
-        inputs: uniqueNonEmpty(options.flatMap(option => option.recommendedInputs)),
-    };
+function buildProductionSettingOptions(_options: BeeGameIntakeOption[]): ProductionSettingOptions {
+    return CONFIGURED_PRODUCTION_SETTING_OPTIONS;
 }
 
-function uniqueNonEmpty(values: Array<string | undefined>): string[] {
-    return values.reduce<string[]>((items, value) => {
-        const normalized = value?.trim();
-        if (!normalized || normalized === 'Auto' || items.includes(normalized)) return items;
-        return [...items, normalized];
-    }, []);
+function pickConfiguredProductionValue(value: string | undefined, options: string[]): string {
+    const normalized = value?.trim();
+    if (!normalized || normalized === 'Auto') return '';
+    return options.includes(normalized) ? normalized : '';
 }
 
 function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean {
