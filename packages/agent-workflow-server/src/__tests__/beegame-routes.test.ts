@@ -3328,6 +3328,243 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('uses the live project session workspace when runtime state includes preview data', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-runtime-state-root-'))
+    const staleProjectRoot = join(projectsRoot, 'stale-root')
+    const liveWorkspace = join(projectsRoot, 'live-root')
+    await mkdir(staleProjectRoot, { recursive: true })
+    await mkdir(liveWorkspace, { recursive: true })
+    const previewRunner: BeeGamePreviewRunner = (_command, options) => {
+      options.onOutput('Local: http://127.0.0.1:63210/\n')
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+      previewRunner,
+      previewPortAllocator: async () => 63210,
+      previewReadinessProbe: async () => true,
+    })
+    try {
+      const projectId = 'project_runtime_state_live_workspace'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Runtime State Live Workspace',
+          root_path: staleProjectRoot,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          workspacePath: liveWorkspace,
+        }),
+      })
+      expect(sessionRes.status).toBe(200)
+      const session = await sessionRes.json()
+      await writeFile(
+        join(liveWorkspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^5.0.0' },
+        }),
+      )
+      const previewRes = await app.request(
+        `/api/beegame-sessions/${session.id}/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: liveWorkspace }),
+        },
+      )
+      expect(previewRes.status).toBe(200)
+
+      const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+      const state = await stateRes.json()
+      expect(stateRes.status).toBe(200)
+      expect(state.build_report).toEqual(expect.objectContaining({
+        status: 'passed',
+        build_url: 'http://127.0.0.1:63210/',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('returns and resolves project-scoped permission requests without exposing session binding decisions', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_scoped_permission'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Project Scoped Permission',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const ensureRes = await app.request(
+        `/api/projects/${projectId}/session/ensure`,
+        { method: 'POST' },
+      )
+      const ensured = await ensureRes.json()
+      await app.request(`/api/beegame-sessions/${ensured.session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Run validation.' }),
+      })
+
+      await waitFor(async () => {
+        const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+        const state = await stateRes.json()
+        return Array.isArray(state.pending_permissions) && state.pending_permissions.length === 1
+      })
+
+      const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+      const state = await stateRes.json()
+      expect(state.pending_permissions).toEqual([
+        expect.objectContaining({
+          id: 'tool_1',
+          session_id: ensured.session.id,
+          tool_name: 'Bash',
+        }),
+      ])
+
+      const resolveRes = await app.request(
+        `/api/projects/${projectId}/permissions/tool_1`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'allow' }),
+        },
+      )
+      expect(resolveRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.permissionResults[0] === 'allow')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('manages preview and deployment through project-scoped runtime routes', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const previewRunner: BeeGamePreviewRunner = (_command, options) => {
+      options.onOutput('Local: http://127.0.0.1:63220/\n')
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    const deploymentRunner: BeeGameDeploymentRunner = async (_command, options) => {
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Project route</main>')
+      return { exitCode: 0, stdout: 'built', stderr: '' }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+      previewRunner,
+      previewPortAllocator: async () => 63220,
+      previewReadinessProbe: async () => true,
+      deploymentRunner,
+    })
+    try {
+      const projectId = 'project_scoped_preview_deploy'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Project Scoped Preview Deploy',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: {
+            dev: 'vite --host 127.0.0.1',
+            build: 'vite build',
+          },
+          devDependencies: { vite: '^5.0.0' },
+        }),
+      )
+
+      const previewRes = await app.request(
+        `/api/projects/${projectId}/preview`,
+        { method: 'POST' },
+      )
+      const preview = await previewRes.json()
+      expect(previewRes.status).toBe(200)
+      expect(preview).toEqual(expect.objectContaining({
+        status: 'running',
+        url: 'http://127.0.0.1:63220/',
+      }))
+
+      const deployRes = await app.request(
+        `/api/projects/${projectId}/deployments`,
+        { method: 'POST' },
+      )
+      expect(deployRes.status).toBe(200)
+      const deployment = await deployRes.json()
+      expect(deployment).toEqual(expect.objectContaining({
+        status: 'succeeded',
+        projectId,
+      }))
+
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(workspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({
+          version: 1,
+          slots: [{
+            id: 'title_logo',
+            name: 'Title logo',
+            type: 'image_2d',
+            target: { path: 'public/assets/title-logo.png' },
+          }],
+        }),
+      )
+      const assetsRes = await app.request(`/api/projects/${projectId}/assets`)
+      expect(assetsRes.status).toBe(200)
+      expect(await assetsRes.json()).toEqual(expect.objectContaining({
+        slots: [expect.objectContaining({ id: 'title_logo' })],
+      }))
+
+      const form = new FormData()
+      form.set('file', new File(['logo-bytes'], 'title-logo.png', { type: 'image/png' }))
+      const uploadRes = await app.request(
+        `/api/projects/${projectId}/assets/title_logo/upload`,
+        { method: 'POST', body: form },
+      )
+      const upload = await uploadRes.json()
+      expect(uploadRes.status).toBe(200)
+      expect(upload).toEqual(expect.objectContaining({
+        path: 'public/assets/title-logo.png',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('ensures project sessions without requiring frontend restore decisions', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const app = createAgentWorkflowApp({

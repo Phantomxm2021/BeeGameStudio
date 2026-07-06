@@ -1425,6 +1425,7 @@ describe('LandingView bootstrap submission', () => {
 
         expect(background).toHaveAttribute('data-background', 'video');
         expect(screen.getByTestId('landing-background-video')).toBeInTheDocument();
+        expect(screen.getByTestId('landing-background-video')).toHaveAttribute('loop');
     });
 
     it('keeps the video background stable while typing in the prompt', () => {

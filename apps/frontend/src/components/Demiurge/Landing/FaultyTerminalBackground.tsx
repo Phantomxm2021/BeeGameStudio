@@ -1,11 +1,21 @@
 import { motion } from 'framer-motion';
-import backgroundVideo from '../../../assets/background.mp4';
+import { useState } from 'react';
+
+import {
+    fallbackLandingBackgroundVideo,
+    landingBackgroundVideos,
+    selectDailyLandingBackgroundVideo,
+} from './landingBackgroundVideos';
 
 interface FaultyTerminalBackgroundProps {
     isTransitioning: boolean;
 }
 
 export function FaultyTerminalBackground({ isTransitioning }: FaultyTerminalBackgroundProps) {
+    const [backgroundVideo, setBackgroundVideo] = useState(() =>
+        selectDailyLandingBackgroundVideo(landingBackgroundVideos),
+    );
+
     return (
         <motion.div
             data-testid="faulty-terminal-background"
@@ -20,9 +30,11 @@ export function FaultyTerminalBackground({ isTransitioning }: FaultyTerminalBack
                 className="h-full w-full object-cover"
                 src={backgroundVideo}
                 autoPlay
-                muted 
+                muted
+                loop
                 playsInline
                 preload="metadata"
+                onError={() => setBackgroundVideo(fallbackLandingBackgroundVideo)}
             />
             <div className="absolute inset-0 bg-zinc-950/50" />
         </motion.div>

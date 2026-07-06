@@ -54,6 +54,20 @@ type BeeGameEvent = {
   createdAt: string;
 };
 
+type BeeGamePendingPermissionPayload = {
+  id?: string;
+  session_id?: string;
+  event_id?: number;
+  tool_name?: string;
+  message?: string;
+  created_at?: string;
+  input?: unknown;
+};
+
+type ProjectRuntimeStateWithPermissions = ProjectBaselineStatusPayload & {
+  pending_permissions?: BeeGamePendingPermissionPayload[];
+};
+
 type ModelConfig = {
   id: string;
   isDefault?: boolean;
@@ -494,12 +508,14 @@ export const beeGameAdapter = {
   },
 
   async getPendingUserReviews(projectId: string): Promise<{ items: PendingUserReviewItem[] }> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) return { items: [] };
-    const eventResult = await fetchBeeGameEventsResultForBinding(binding);
-    if (eventResult.recoveredFromTranscript) return { items: [] };
+    const runtimeState = await getJson<ProjectRuntimeStateWithPermissions>(
+      `/api/projects/${encodeURIComponent(projectId)}/runtime-state`,
+    );
+    const pendingPermissions = Array.isArray(runtimeState.pending_permissions)
+      ? runtimeState.pending_permissions
+      : [];
     return {
-      items: getPendingPermissionEvents(eventResult.events).map(event => permissionEventToReview(event, binding)),
+      items: pendingPermissions.map(permission => pendingPermissionToReview(projectId, permission)),
     };
   },
 
@@ -509,10 +525,8 @@ export const beeGameAdapter = {
     action: 'approve' | 'revise' | 'reject';
     feedback?: string;
   }): Promise<{ ok: boolean }> {
-    const binding = getBinding(data.project_id);
-    if (!binding) throw new Error('BeeGame session not found for project');
     const decision = data.action === 'approve' ? 'allow' : 'deny';
-    await postJson(`/api/beegame-sessions/${binding.sessionId}/permissions/${encodeURIComponent(data.gate_id)}`, {
+    await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`, {
       decision,
       remember: decision === 'allow',
       ...(data.feedback ? { message: data.feedback } : {}),
@@ -627,115 +641,41 @@ export const beeGameAdapter = {
   },
 
   async getProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await fetchBeeGamePreview(binding);
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      return fetchBeeGamePreview(await ensureBackendProjectBinding(projectId));
-    }
+    return getJson(`/api/projects/${encodeURIComponent(projectId)}/preview`);
   },
 
   async startProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await postJson(`/api/beegame-sessions/${binding.sessionId}/preview`, {
-        workspacePath: binding.workspacePath,
-      });
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return postJson(`/api/beegame-sessions/${ensured.sessionId}/preview`, {
-        workspacePath: ensured.workspacePath,
-      });
-    }
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/preview`, {});
   },
 
   async restartProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await postJson(`/api/beegame-sessions/${binding.sessionId}/preview/restart`, {
-        workspacePath: binding.workspacePath,
-      });
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return postJson(`/api/beegame-sessions/${ensured.sessionId}/preview/restart`, {
-        workspacePath: ensured.workspacePath,
-      });
-    }
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/preview/restart`, {});
   },
 
   async stopProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await deleteJson<BeeGamePreviewPayload>(`/api/beegame-sessions/${binding.sessionId}/preview?workspacePath=${encodeURIComponent(binding.workspacePath)}`);
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return deleteJson<BeeGamePreviewPayload>(`/api/beegame-sessions/${ensured.sessionId}/preview?workspacePath=${encodeURIComponent(ensured.workspacePath)}`);
-    }
+    return deleteJson<BeeGamePreviewPayload>(`/api/projects/${encodeURIComponent(projectId)}/preview`);
   },
 
   async deployProject(projectId: string): Promise<BeeGameDeploymentPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await postJson(`/api/beegame-sessions/${binding.sessionId}/deployments`, {
-        workspacePath: binding.workspacePath,
-      });
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return postJson(`/api/beegame-sessions/${ensured.sessionId}/deployments`, {
-        workspacePath: ensured.workspacePath,
-      });
-    }
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/deployments`, {});
   },
 
   async listProjectDeployments(projectId: string): Promise<BeeGameDeploymentPayload[]> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) return [];
-    try {
-      return await getJson<BeeGameDeploymentPayload[]>(
-        `/api/beegame-sessions/${binding.sessionId}/deployments`,
-      );
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return getJson<BeeGameDeploymentPayload[]>(
-        `/api/beegame-sessions/${ensured.sessionId}/deployments`,
-      );
-    }
+    return getJson<BeeGameDeploymentPayload[]>(
+      `/api/projects/${encodeURIComponent(projectId)}/deployments`,
+    );
   },
 
   async rollbackProjectDeployment(projectId: string, deploymentId: string): Promise<BeeGameDeploymentPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
-    try {
-      return await postJson<BeeGameDeploymentPayload>(
-        `/api/beegame-sessions/${binding.sessionId}/deployments/${encodeURIComponent(deploymentId)}/rollback`,
-        {},
-      );
-    } catch (error) {
-      if (!isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(projectId);
-      return postJson<BeeGameDeploymentPayload>(
-        `/api/beegame-sessions/${ensured.sessionId}/deployments/${encodeURIComponent(deploymentId)}/rollback`,
-        {},
-      );
-    }
+    return postJson<BeeGameDeploymentPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/deployments/${encodeURIComponent(deploymentId)}/rollback`,
+      {},
+    );
   },
 
   async getProjectAssets(projectId: string): Promise<BeeGameAssetManifestPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) return { version: 1, slots: [] };
     return getJson<BeeGameAssetManifestPayload>(
-      `/api/beegame-sessions/${binding.sessionId}/assets?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
+      `/api/projects/${encodeURIComponent(projectId)}/assets`,
     );
   },
 
@@ -744,12 +684,10 @@ export const beeGameAdapter = {
     slotId: string,
     file: File,
   ): Promise<BeeGameAssetUploadPayload> {
-    const binding = await ensureProjectBinding(projectId);
-    if (!binding) throw new Error('BeeGame session not found for project');
     const form = new FormData();
     form.set('file', file);
     return postForm<BeeGameAssetUploadPayload>(
-      `/api/beegame-sessions/${binding.sessionId}/assets/${encodeURIComponent(slotId)}/upload?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/upload`,
       form,
     );
   },
@@ -1087,12 +1025,6 @@ async function getDefaultModelConfigId(): Promise<string> {
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
   const params = new URLSearchParams({ workspacePath: binding.workspacePath });
   return authenticatedFetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
-}
-
-async function fetchBeeGamePreview(binding: ProjectSessionBinding): Promise<BeeGamePreviewPayload> {
-  return getJson(
-    `/api/beegame-sessions/${binding.sessionId}/preview?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
-  );
 }
 
 async function fetchBeeGameDiscoveredArtifactsIfAvailable(
@@ -2389,6 +2321,35 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
       blocking_issue_count: 1,
     },
   };
+}
+
+function pendingPermissionToReview(
+  projectId: string,
+  permission: BeeGamePendingPermissionPayload,
+): PendingUserReviewItem {
+  const sessionId = String(permission.session_id || projectId);
+  const toolUseID = String(permission.id || permission.event_id || '');
+  const toolName = String(permission.tool_name || 'BeeGame tool');
+  const event: BeeGameEvent = {
+    id: typeof permission.event_id === 'number' ? permission.event_id : 0,
+    sessionId,
+    type: 'permission.requested',
+    text: String(permission.message || toolName),
+    payload: {
+      type: 'permission.requested',
+      toolUseID,
+      toolName,
+      input: permission.input && typeof permission.input === 'object' && !Array.isArray(permission.input)
+        ? permission.input as Record<string, unknown>
+        : {},
+    },
+    createdAt: String(permission.created_at || new Date().toISOString()),
+  };
+  return permissionEventToReview(event, {
+    projectId,
+    sessionId,
+    workspacePath: '',
+  });
 }
 
 function userQuestionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {

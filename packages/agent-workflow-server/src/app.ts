@@ -793,6 +793,370 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.post('/api/projects/:id/permissions/:toolUseID', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.approve_tool')
+    if (forbidden) return c.json(forbidden, 403)
+    const projectId = c.req.param('id')
+    const body = await readJson(c.req.raw)
+    const decision = body.decision
+    if (decision !== 'allow' && decision !== 'deny') {
+      return c.json({ error: 'Permission decision must be allow or deny' }, 400)
+    }
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, projectId, dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      const resolved = beeGameSessions.resolvePermission(
+        sessionRef.sessionId,
+        c.req.param('toolUseID'),
+        {
+          behavior: decision,
+          remember: body.remember === true,
+          ...(typeof body.message === 'string'
+            ? { message: body.message }
+            : {}),
+        },
+      )
+      await appendAuditEventBestEffort('agent_permission.resolved', () =>
+        dashboardRepository.appendAuditEvent(c.req.raw, user, {
+          actorId: user.id,
+          action: 'agent_permission.resolved',
+          targetType: 'beegame_session',
+          targetId: sessionRef.sessionId,
+          metadata: {
+            projectId,
+            toolUseID: c.req.param('toolUseID'),
+            decision,
+            remember: body.remember === true,
+          },
+        }),
+      )
+      return c.json(resolved)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 404)
+    }
+  })
+
+  app.get('/api/projects/:id/preview', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      return c.json(beeGamePreviews.status(sessionRef.sessionId, sessionRef.workspacePath))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/preview', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({
+        request: c.req.raw,
+        user,
+        project,
+        body: {},
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        getUserDataRoot: getCurrentUserDataRoot,
+      })
+      const snapshot = await beeGamePreviews.start({
+        sessionId: ensured.session.id,
+        workspacePath: ensured.binding.workspacePath,
+      })
+      await dashboardRepository.upsertPreviewSnapshot(
+        c.req.raw,
+        user,
+        beeGameSessions.metadata(ensured.session.id),
+        snapshot,
+      )
+      return c.json(snapshot)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/preview/restart', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({
+        request: c.req.raw,
+        user,
+        project,
+        body: {},
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        getUserDataRoot: getCurrentUserDataRoot,
+      })
+      const snapshot = await beeGamePreviews.restart({
+        sessionId: ensured.session.id,
+        workspacePath: ensured.binding.workspacePath,
+      })
+      await dashboardRepository.upsertPreviewSnapshot(
+        c.req.raw,
+        user,
+        beeGameSessions.metadata(ensured.session.id),
+        snapshot,
+      )
+      return c.json(snapshot)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.delete('/api/projects/:id/preview', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'preview.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      const snapshot = beeGamePreviews.stop(sessionRef.sessionId, sessionRef.workspacePath)
+      await dashboardRepository.upsertPreviewSnapshot(
+        c.req.raw,
+        user,
+        beeGameSessions.metadata(sessionRef.sessionId),
+        snapshot,
+      )
+      return c.json(snapshot)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.get('/api/projects/:id/deployments', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json([])
+      const persisted =
+        (await dashboardRepository.listDeploymentRecords(
+          c.req.raw,
+          user,
+          sessionRef.sessionId,
+        )) ?? []
+      const records = persisted.length > 0
+        ? persisted
+        : await beeGameDeployments.list(sessionRef.sessionId)
+      return c.json(records)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/deployments', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'deployment.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({
+        request: c.req.raw,
+        user,
+        project,
+        body: {},
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        getUserDataRoot: getCurrentUserDataRoot,
+      })
+      const deployment = await beeGameDeployments.deploy({
+        sessionId: ensured.session.id,
+        userId: user.id,
+        projectId: project.id,
+        workspacePath: ensured.binding.workspacePath,
+        ...(getBearerToken(c.req.raw)
+          ? { authToken: getBearerToken(c.req.raw) }
+          : {}),
+      })
+      const persisted = await dashboardRepository.upsertDeploymentRecord(
+        c.req.raw,
+        user,
+        deployment,
+      )
+      return c.json(persisted || deployment)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/deployments/:deploymentId/rollback', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'deployment.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      const persistedRecords =
+        (await dashboardRepository.listDeploymentRecords(
+          c.req.raw,
+          user,
+          sessionRef.sessionId,
+        )) ?? []
+      const records = persistedRecords.length > 0
+        ? persistedRecords
+        : await beeGameDeployments.list(sessionRef.sessionId)
+      const source = records.find(record => record.id === c.req.param('deploymentId'))
+      if (!source) return c.json({ error: 'Deployment not found' }, 404)
+      const rollback = await beeGameDeployments.rollbackTo(source)
+      const persisted = await dashboardRepository.upsertDeploymentRecord(
+        c.req.raw,
+        user,
+        rollback,
+      )
+      return c.json(persisted || rollback)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.get('/api/projects/:id/assets', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ version: 1, slots: [] })
+      try {
+        const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
+        if (manifest.slots.length && sessionRef.live) {
+          await dashboardRepository.upsertAssetManifest(
+            c.req.raw,
+            user,
+            beeGameSessions.metadata(sessionRef.sessionId),
+            manifest,
+          )
+        }
+        return c.json(manifest)
+      } catch (err) {
+        if (sessionRef.live) {
+          const manifest = await dashboardRepository.loadAssetManifest(
+            c.req.raw,
+            user,
+            beeGameSessions.metadata(sessionRef.sessionId),
+          )
+          if (manifest) return c.json(manifest)
+        }
+        return c.json({ error: toErrorMessage(err) }, 400)
+      }
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/assets/:slotId/upload', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    const form = await c.req.raw.formData()
+    const file = form.get('file')
+    if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({
+        request: c.req.raw,
+        user,
+        project,
+        body: {},
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        getUserDataRoot: getCurrentUserDataRoot,
+      })
+      const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
+      const uploadedUrl = await dashboardRepository.uploadAssetFile(
+        c.req.raw,
+        user,
+        sessionMetadata,
+        file,
+      )
+      const result = await uploadBeeGameAsset(
+        ensured.binding.workspacePath,
+        c.req.param('slotId'),
+        file,
+        uploadedUrl,
+      )
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, sessionMetadata, result.manifest)
+      return c.json(result)
+    } catch (err) {
+      const message = toErrorMessage(err)
+      return c.json(
+        { error: message },
+        message.startsWith('Asset slot not found') ? 404 : 400,
+      )
+    }
+  })
+
   app.delete('/api/projects/:id', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
@@ -1880,38 +2244,26 @@ async function getBeeGameProjectRuntimeState(input: {
   beeGamePreviews: BeeGamePreviewManager
   dashboardRepository: DashboardRepository
 }): Promise<JsonObject> {
-  const latest = await getLatestProjectSessionMetadata(input)
-  const live = findLiveProjectSession(
-    input.beeGameSessions,
-    input.user.id,
-    input.project.id,
-  )
-  const sessionId = live?.id || latest?.id || inferBeeGameSessionIdFromProjectId(input.project.id)
-  const workspacePath = input.project.root_path || latest?.workspacePath
-  if (!sessionId || !workspacePath) {
+  const sessionRef = await resolveBeeGameProjectSessionReference(input)
+  if (!sessionRef) {
     return createIdleProjectRuntimeState(input.project.id)
   }
-
-  const resolvedWorkspacePath = await resolveSessionWorkspacePath(
-    workspacePath,
-    input.defaultWorkspacePath,
-  )
   const events = await getProjectRuntimeEvents({
-    sessionId,
-    workspacePath: resolvedWorkspacePath,
+    sessionId: sessionRef.sessionId,
+    workspacePath: sessionRef.workspacePath,
     dashboardDataRoot: input.dashboardDataRoot,
     beeGameSessions: input.beeGameSessions,
   })
   const snapshot = getProjectRuntimeSnapshot({
-    sessionId,
-    workspacePath: resolvedWorkspacePath,
+    sessionId: sessionRef.sessionId,
+    workspacePath: sessionRef.workspacePath,
     beeGameSessions: input.beeGameSessions,
   })
   const pending = getPendingBeeGamePermissionEvents(events)
   const runtime = deriveBeeGameRuntimeStatus(events, pending, snapshot?.phaseStatus === 'recovered')
   const preview = getProjectPreviewSnapshot({
-    sessionId,
-    workspacePath: resolvedWorkspacePath,
+    sessionId: sessionRef.sessionId,
+    workspacePath: sessionRef.workspacePath,
     beeGamePreviews: input.beeGamePreviews,
   })
   return {
@@ -1926,7 +2278,8 @@ async function getBeeGameProjectRuntimeState(input: {
     context: deriveBeeGameContextVisibility(events, snapshot),
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
-    model_config_id: live?.modelConfigId ?? latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
+    model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
+    pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
 }
 
@@ -2035,6 +2388,40 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     build_report: null,
     review_status: null,
     model_config_id: null,
+    pending_permissions: [],
+  }
+}
+
+async function resolveBeeGameProjectSessionReference(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  defaultWorkspacePath?: string
+  beeGameSessions: BeeGameSessionManager
+  dashboardRepository: DashboardRepository
+}): Promise<{
+  sessionId: string
+  workspacePath: string
+  live?: BeeGameSession
+  latest?: Awaited<ReturnType<DashboardRepository['listProjectSessions']>>[number]
+} | undefined> {
+  const latest = await getLatestProjectSessionMetadata(input)
+  const live = findLiveProjectSession(
+    input.beeGameSessions,
+    input.user.id,
+    input.project.id,
+  )
+  const sessionId = live?.id || latest?.id || inferBeeGameSessionIdFromProjectId(input.project.id)
+  const workspacePath = live?.cwd || input.project.root_path || latest?.workspacePath
+  if (!sessionId || !workspacePath) return undefined
+  return {
+    sessionId,
+    workspacePath: await resolveSessionWorkspacePath(
+      workspacePath,
+      input.defaultWorkspacePath,
+    ),
+    ...(live ? { live } : {}),
+    ...(latest ? { latest } : {}),
   }
 }
 
@@ -2051,6 +2438,22 @@ function getPendingBeeGamePermissionEvents(events: BeeGameEvent[]): BeeGameEvent
       const toolUseID = getBeeGamePayloadString(event, 'toolUseID')
       return toolUseID && !resolved.has(toolUseID)
     })
+}
+
+function pendingBeeGamePermissionToJson(event: BeeGameEvent): JsonObject {
+  const toolUseID = getBeeGamePayloadString(event, 'toolUseID') || event.id.toString()
+  const toolName = getBeeGamePayloadString(event, 'toolName') || ''
+  return {
+    id: toolUseID,
+    session_id: event.sessionId,
+    event_id: event.id,
+    tool_name: toolName,
+    message: event.text,
+    created_at: normalizeBeeGameCreatedAt(event.createdAt),
+    input: event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+      ? (event.payload as Record<string, unknown>).input ?? null
+      : null,
+  }
 }
 
 function deriveBeeGameRuntimeStatus(

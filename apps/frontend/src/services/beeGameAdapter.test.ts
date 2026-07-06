@@ -1931,6 +1931,24 @@ describe('beeGameAdapter prompt rules', () => {
           approval_required: true,
           next_action: 'Review BeeGame permission request',
           active_agents: ['beegame'],
+          pending_permissions: [{
+            id: 'tool_question',
+            session_id: 'beegame_question',
+            event_id: 12,
+            tool_name: 'AskUserQuestion',
+            message: '游戏模式',
+            created_at: '2026-06-21T00:00:04.000Z',
+            input: {
+              questions: [{
+                header: '游戏模式',
+                question: '你想做单人模式还是双人模式？',
+                options: [
+                  { label: '单人模式' },
+                  { label: '双人模式' },
+                ],
+              }],
+            },
+          }],
         }));
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -1968,6 +1986,37 @@ describe('beeGameAdapter prompt rules', () => {
     expect(reviews.items[0].artifact.content).toContain('双人模式');
     expect(status.approval_required).toBe(true);
     expect(status.phase).toBe('waiting_approval');
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/beegame-sessions/beegame_question/events?after=0',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('approves BeeGame permission requests through the project scoped endpoint', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/projects/project_permission/permissions/tool_question' && init?.method === 'POST') {
+        return jsonResponse({ resolved: true });
+      }
+      if (path.includes('/api/beegame-sessions/') && path.includes('/permissions/')) {
+        return jsonResponse({ error: 'legacy session permission endpoint should not be used' }, 500);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.approvePlan({
+      project_id: 'project_permission',
+      gate_id: 'tool_question',
+      action: 'approve',
+    })).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project_permission/permissions/tool_question',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
   });
 
   it('keeps multiple final assistant messages in the same turn instead of overwriting them', async () => {
@@ -3050,50 +3099,100 @@ describe('beeGameAdapter prompt rules', () => {
     expect(packageAttempts).toBe(2);
   });
 
-  it('recovers the BeeGame session and retries when deployment returns not found', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
-      {
-        projectId: 'project_deploy_retry',
-        sessionId: 'beegame_deploy_retry',
-        workspacePath: '/tmp/beegame-projects/deploy-retry',
-      },
-    ]));
-    let deployAttempts = 0;
+  it('manages preview and deployment through project scoped endpoints', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_deploy_retry/deployments') {
-        deployAttempts += 1;
-        if (deployAttempts === 1) {
-          return jsonResponse({ error: 'Session not found' }, 404);
-        }
+      if (path === '/api/projects/project_runtime/preview' && init?.method === 'POST') {
         return jsonResponse({
-          id: 'deploy_retry',
-          sessionId: 'beegame_deploy_retry',
-          workspacePath: '/tmp/beegame-projects/deploy-retry',
+          sessionId: 'beegame_runtime',
+          status: 'running',
+          url: 'http://127.0.0.1:63220/',
+        });
+      }
+      if (path === '/api/projects/project_runtime/preview/restart' && init?.method === 'POST') {
+        return jsonResponse({
+          sessionId: 'beegame_runtime',
+          status: 'running',
+          url: 'http://127.0.0.1:63221/',
+        });
+      }
+      if (path === '/api/projects/project_runtime/preview' && init?.method === 'DELETE') {
+        return jsonResponse({
+          sessionId: 'beegame_runtime',
+          status: 'stopped',
+          url: '',
+        });
+      }
+      if (path === '/api/projects/project_runtime/deployments' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'deploy_project',
+          sessionId: 'beegame_runtime',
+          workspacePath: '/tmp/beegame-projects/runtime',
           status: 'succeeded',
-          url: '/deployments/deploy_retry/',
+          url: '/deployments/deploy_project/',
           buildCommand: 'npm run build',
           createdAt: '2026-06-21T00:00:00.000Z',
           updatedAt: '2026-06-21T00:00:00.000Z',
           deployedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/projects/project_deploy_retry/session/ensure' && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          'project_deploy_retry',
-          'beegame_deploy_retry',
-          '/tmp/beegame-projects/deploy-retry',
-        ));
+      if (path === '/api/projects/project_runtime/deployments' && !init?.method) {
+        return jsonResponse([]);
+      }
+      if (path === '/api/projects/project_runtime/deployments/deploy_project/rollback' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'deploy_rollback',
+          sessionId: 'beegame_runtime',
+          workspacePath: '/tmp/beegame-projects/runtime',
+          status: 'succeeded',
+          url: '/deployments/deploy_rollback/',
+          buildCommand: 'rollback',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+          deployedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === '/api/projects/project_runtime/assets' && !init?.method) {
+        return jsonResponse({
+          version: 1,
+          slots: [{ id: 'title_logo', name: 'Title logo' }],
+        });
+      }
+      if (path === '/api/projects/project_runtime/assets/title_logo/upload' && init?.method === 'POST') {
+        return jsonResponse({
+          path: 'public/assets/title-logo.png',
+          slot: { id: 'title_logo' },
+          manifest: { version: 1, slots: [{ id: 'title_logo' }] },
+        });
+      }
+      if (path.includes('/api/beegame-sessions/') && (path.includes('/preview') || path.includes('/deployments') || path.includes('/assets'))) {
+        return jsonResponse({ error: 'legacy session runtime endpoint should not be used' }, 500);
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.deployProject('project_deploy_retry');
+    const preview = await beeGameAdapter.startProjectPreview('project_runtime');
+    const restarted = await beeGameAdapter.restartProjectPreview('project_runtime');
+    const stopped = await beeGameAdapter.stopProjectPreview('project_runtime');
+    const deployments = await beeGameAdapter.listProjectDeployments('project_runtime');
+    const deployment = await beeGameAdapter.deployProject('project_runtime');
+    const rollback = await beeGameAdapter.rollbackProjectDeployment('project_runtime', 'deploy_project');
+    const assets = await beeGameAdapter.getProjectAssets('project_runtime');
+    const upload = await beeGameAdapter.uploadProjectAsset(
+      'project_runtime',
+      'title_logo',
+      new File(['logo-bytes'], 'title-logo.png', { type: 'image/png' }),
+    );
 
-    expect(result.status).toBe('succeeded');
-    expect(result.url).toBe('/deployments/deploy_retry/');
-    expect(deployAttempts).toBe(2);
+    expect(preview.url).toBe('http://127.0.0.1:63220/');
+    expect(restarted.url).toBe('http://127.0.0.1:63221/');
+    expect(stopped.status).toBe('stopped');
+    expect(deployments).toEqual([]);
+    expect(deployment.url).toBe('/deployments/deploy_project/');
+    expect(rollback.url).toBe('/deployments/deploy_rollback/');
+    expect(assets.slots[0]?.id).toBe('title_logo');
+    expect(upload.path).toBe('public/assets/title-logo.png');
   });
 
   it('falls back to transcript when event polling sees a missing BeeGame session', async () => {
