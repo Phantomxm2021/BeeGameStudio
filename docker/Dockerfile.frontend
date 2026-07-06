@@ -18,7 +18,7 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_WS_BASE_URL=$VITE_WS_BASE_URL
 ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --registry=https://registry.npmjs.org/ --network-concurrency=8 --no-progress
 RUN cd apps/frontend && bun run build
 
 FROM nginx:1.27-alpine
