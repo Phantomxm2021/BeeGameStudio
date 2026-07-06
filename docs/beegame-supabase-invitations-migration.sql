@@ -48,7 +48,7 @@ returns text
 language sql
 immutable
 as $$
-  select encode(digest(trim(coalesce(p_code, '')), 'sha256'), 'hex')
+  select encode(extensions.digest(convert_to(trim(coalesce(p_code, '')), 'UTF8'), 'sha256'::text), 'hex')
 $$;
 
 create or replace function public.beegame_invitation_required()
