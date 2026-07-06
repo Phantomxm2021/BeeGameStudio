@@ -26,4 +26,14 @@ describe('Docker dependency registry', () => {
 
     expect(runtimeDockerfile).toContain(expectedInstall)
   })
+
+  test("keeps runtime source copies after dependency install for Docker cache reuse", () => {
+    const runtimeDockerfile = readFileSync(join(repoRoot, "docker/Dockerfile.runtime"), "utf8")
+    const installIndex = runtimeDockerfile.indexOf("RUN bun install --frozen-lockfile")
+
+    expect(installIndex).toBeGreaterThan(-1)
+    expect(runtimeDockerfile.indexOf("COPY packages ./packages")).toBeGreaterThan(installIndex)
+    expect(runtimeDockerfile.indexOf("COPY src ./src")).toBeGreaterThan(installIndex)
+    expect(runtimeDockerfile.indexOf("COPY packages/agent-workflow-server/package.json ./packages/agent-workflow-server/package.json")).toBeLessThan(installIndex)
+  })
 })
