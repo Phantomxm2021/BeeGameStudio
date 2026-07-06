@@ -87,6 +87,32 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
+  test('does not fall back to raw Supabase auth user when the BeeGame context RPC rejects access', async () => {
+    const calls: string[] = []
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async (url) => {
+        calls.push(String(url))
+        if (String(url).endsWith('/rest/v1/rpc/beegame_current_user_context')) {
+          return Response.json({ code: 'invitation_required' }, { status: 403 })
+        }
+        return Response.json({ id: 'raw-auth-user' })
+      },
+    })
+
+    expect(
+      await resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer blocked-token' },
+        }),
+      ),
+    ).toBeUndefined()
+    expect(calls).toEqual([
+      'https://project.supabase.co/rest/v1/rpc/beegame_current_user_context',
+    ])
+  })
+
   test('keeps the model config owner separate from the project owner context', async () => {
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co',

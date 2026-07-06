@@ -19,6 +19,7 @@ export type SupabasePasswordSignInInput = {
 
 export type SupabasePasswordSignUpInput = SupabasePasswordSignInInput & {
   displayName: string;
+  invitationCode?: string;
 };
 
 export type SupabaseOAuthProvider =
@@ -28,8 +29,13 @@ export type SupabaseOAuthProvider =
   | 'x'
   | 'discord';
 
+export type SupabaseOAuthSignInOptions = {
+  invitationCode?: string;
+};
+
 const SESSION_STORAGE_KEY = 'beegame_supabase_session';
 const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
+const OAUTH_START_FUNCTION_PATH = '/functions/v1/beegame-oauth-start';
 let pendingRedirectConsumption: {
   key: string;
   promise: Promise<boolean>;
@@ -111,6 +117,9 @@ export async function signUpWithSupabasePassword(
       password: input.password,
       data: {
         display_name: input.displayName.trim(),
+        ...(input.invitationCode?.trim()
+          ? { beegame_invitation_code: input.invitationCode.trim() }
+          : {}),
       },
     }),
   });
@@ -209,7 +218,10 @@ export async function uploadSupabaseAvatarImage(file: File): Promise<string> {
   return `${trimTrailingSlash(supabaseUrl)}/storage/v1/object/public/${encodeURIComponent(bucket)}/${objectPath}`;
 }
 
-export async function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): Promise<void> {
+export async function signInWithSupabaseOAuth(
+  provider: SupabaseOAuthProvider,
+  options: SupabaseOAuthSignInOptions = {},
+): Promise<void> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
   if (!supabaseUrl || !anonKey) {
@@ -217,21 +229,55 @@ export async function signInWithSupabaseOAuth(provider: SupabaseOAuthProvider): 
   }
   const codeVerifier = createPkceCodeVerifier();
   const codeChallenge = await createPkceCodeChallenge(codeVerifier);
-  sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify({
+  const invitationCode = options.invitationCode?.trim() || '';
+  const pkceContext: Record<string, unknown> = {
     provider,
     codeVerifier,
     createdAt: Date.now(),
-  }));
-  const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
-  url.searchParams.set('provider', provider);
-  url.searchParams.set('redirect_to', window.location.origin);
-  url.searchParams.set('flow_type', 'pkce');
-  url.searchParams.set('code_challenge', codeChallenge);
-  url.searchParams.set('code_challenge_method', 'S256');
-  if (provider === 'discord') {
-    url.searchParams.set('scopes', 'identify email');
+  };
+  let redirectUrl: string;
+  if (invitationCode) {
+    const response = await fetch(`${trimTrailingSlash(supabaseUrl)}${OAUTH_START_FUNCTION_PATH}`, {
+      method: 'POST',
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${anonKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        provider,
+        invitationCode,
+        redirectTo: window.location.origin,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+        ...(provider === 'discord' ? { scopes: 'identify email' } : {}),
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await readSupabaseError(response));
+    }
+    const value = await response.json();
+    if (!isRecord(value) || typeof value.url !== 'string') {
+      throw new Error('OAuth invitation start did not return a redirect URL.');
+    }
+    redirectUrl = value.url;
+    if (typeof value.nonce === 'string' && value.nonce.trim()) {
+      pkceContext.invitationNonce = value.nonce.trim();
+    }
+  } else {
+    const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
+    url.searchParams.set('provider', provider);
+    url.searchParams.set('redirect_to', window.location.origin);
+    url.searchParams.set('flow_type', 'pkce');
+    url.searchParams.set('code_challenge', codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    if (provider === 'discord') {
+      url.searchParams.set('scopes', 'identify email');
+    }
+    redirectUrl = url.toString();
   }
-  window.location.assign(url.toString());
+  sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify(pkceContext));
+  window.location.assign(redirectUrl);
 }
 
 export async function consumeSupabaseRedirectSession(): Promise<boolean> {
@@ -272,14 +318,39 @@ async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
       expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 3600) - 30) * 1000,
       user: { id: 'oauth' },
     });
+    await redeemOAuthInvitationNonce(pkce?.invitationNonce, accessToken);
     clearOAuthCallbackUrl();
     return true;
   }
   const authCode = searchParams.get('code')?.trim() || '';
   if (!authCode) return false;
-  await exchangeSupabaseOAuthCode(authCode);
+  const session = await exchangeSupabaseOAuthCode(authCode);
+  await redeemOAuthInvitationNonce(pkce?.invitationNonce, session.accessToken);
   clearOAuthCallbackUrl();
   return true;
+}
+
+async function redeemOAuthInvitationNonce(
+  invitationNonce: unknown,
+  accessToken: string,
+): Promise<void> {
+  const nonce = typeof invitationNonce === 'string' ? invitationNonce.trim() : '';
+  if (!nonce) return;
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) return;
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/rest/v1/rpc/beegame_redeem_oauth_invitation`, {
+    method: 'POST',
+    headers: {
+      apikey: anonKey,
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ p_nonce: nonce }),
+  });
+  if (!response.ok) {
+    throw new Error(await readSupabaseError(response));
+  }
 }
 
 export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSession | null> {
@@ -350,7 +421,7 @@ function saveSupabaseSession(session: BeeGameSupabaseSession): void {
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
-async function exchangeSupabaseOAuthCode(authCode: string): Promise<void> {
+async function exchangeSupabaseOAuthCode(authCode: string): Promise<BeeGameSupabaseSession> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
   if (!supabaseUrl || !anonKey) {
@@ -374,13 +445,16 @@ async function exchangeSupabaseOAuthCode(authCode: string): Promise<void> {
   if (!response.ok) {
     throw new Error(toUserFacingOAuthError(await readSupabaseError(response), pkce.provider));
   }
-  saveSupabaseSession(toSupabaseSession(await response.json()));
+  const session = toSupabaseSession(await response.json());
+  saveSupabaseSession(session);
   sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
+  return session;
 }
 
 function readStoredPkceContext(): {
   provider?: SupabaseOAuthProvider
   codeVerifier?: string
+  invitationNonce?: string
 } | undefined {
   const raw = sessionStorage.getItem(OAUTH_PKCE_STORAGE_KEY);
   if (!raw) return undefined;
@@ -395,7 +469,14 @@ function readStoredPkceContext(): {
     const provider = isSupabaseOAuthProvider(value.provider)
       ? value.provider
       : undefined;
-    return { provider, codeVerifier };
+    const invitationNonce = typeof value.invitationNonce === 'string'
+      ? value.invitationNonce.trim()
+      : '';
+    return {
+      provider,
+      codeVerifier,
+      ...(invitationNonce ? { invitationNonce } : {}),
+    };
   } catch {
     return undefined;
   }
@@ -519,7 +600,9 @@ async function readSupabaseError(response: Response): Promise<string> {
           ? value.message
           : typeof value.error_description === 'string'
             ? value.error_description
-            : '';
+            : typeof value.error === 'string'
+              ? value.error
+              : '';
       if (message.trim()) return message.trim();
     }
   } catch {

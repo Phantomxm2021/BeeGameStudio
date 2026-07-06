@@ -40,6 +40,7 @@ import {
     uploadSupabaseAvatarImage,
 } from '../../services/supabaseAuthApi';
 import { deleteCurrentUser } from '../../services/currentUserApi';
+import { getInvitationPublicSettings } from '../../services/invitationApi';
 import { listModelConfigs } from '../../services/modelConfigApi';
 
 type IntakePhase =
@@ -584,6 +585,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [loginEmail, setLoginEmail] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
     const [registerDisplayName, setRegisterDisplayName] = useState('');
+    const [invitationCode, setInvitationCode] = useState('');
+    const [isInvitationRequired, setIsInvitationRequired] = useState(false);
     const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
     const [loginError, setLoginError] = useState('');
     const [loginNotice, setLoginNotice] = useState('');
@@ -621,6 +624,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     useEffect(() => {
         void i18n.changeLanguage(normalizeI18nLanguage(lang));
     }, [i18n, lang]);
+
+    useEffect(() => {
+        let cancelled = false;
+        void getInvitationPublicSettings()
+            .then(settings => {
+                if (!cancelled) setIsInvitationRequired(settings.required);
+            })
+            .catch(() => {
+                if (!cancelled) setIsInvitationRequired(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const t = useCommonText(lang);
     const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
@@ -928,6 +945,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 setLoginError(intakeText.errors.termsRequired);
                 return;
             }
+            if (isInvitationRequired && !invitationCode.trim()) {
+                setLoginError(translate('intake.errors.invitationRequired', { defaultValue: '请输入邀请码。' }));
+                return;
+            }
         }
         setIsSigningIn(true);
         try {
@@ -936,6 +957,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     email,
                     password: loginPassword,
                     displayName: registerDisplayName,
+                    invitationCode: invitationCode,
                 });
             } else {
                 await signInWithSupabasePassword({ email, password: loginPassword });
@@ -944,6 +966,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsLoginPromptOpen(false);
             setLoginPassword('');
             setRegisterDisplayName('');
+            setInvitationCode('');
             setHasAcceptedTerms(false);
             const nextIdea = pendingIdeaAfterLogin.trim();
             setPendingIdeaAfterLogin('');
@@ -1062,8 +1085,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
+            if (isInvitationRequired && !invitationCode.trim()) {
+                setLoginError(translate('intake.errors.invitationRequired', { defaultValue: '请输入邀请码。' }));
+                return;
+            }
             writePendingAuthIdeaState(pendingIdeaAfterLogin);
-            await signInWithSupabaseOAuth(provider);
+            await signInWithSupabaseOAuth(provider, isInvitationRequired ? { invitationCode } : {});
         } catch (error) {
             clearPendingAuthIdeaState();
             setLoginError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
@@ -1303,6 +1330,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     canManageRuntimeSettings={canOpenPlatformSettings && hasPermission('runtime_settings.manage')}
                     canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
                     canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
+                    canManageInvitations={canOpenPlatformSettings}
                 />
 
                 <ProjectHistoryModal
@@ -1545,6 +1573,20 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         placeholder="you@example.com"
                                     />
                                 </label>
+                                {isInvitationRequired && authMode !== 'resetPassword' ? (
+                                    <label className="type-subheadline block text-zinc-200">
+                                        {translate('intake.auth.fields.invitationCode', { defaultValue: '邀请码' })}
+                                        <input
+                                            aria-label={translate('intake.auth.fields.invitationCodeAria', { defaultValue: '邀请码' })}
+                                            type="text"
+                                            value={invitationCode}
+                                            onChange={(event) => setInvitationCode(event.target.value)}
+                                            className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
+                                            autoComplete="off"
+                                            placeholder={translate('intake.auth.fields.invitationCodePlaceholder', { defaultValue: '输入邀请码' })}
+                                        />
+                                    </label>
+                                ) : null}
                                 {authMode !== 'resetPassword' ? (
                                     <label className="type-subheadline block text-zinc-200">
                                     {translate('intake.auth.fields.password')}

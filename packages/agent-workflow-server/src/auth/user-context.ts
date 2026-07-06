@@ -108,16 +108,7 @@ export function createSupabaseUserResolver(
   return async request => {
     const token = getBearerToken(request)
     if (!token) return undefined
-    const context = await fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
-    if (context) return context
-    const response = await fetchImpl(joinUrl(baseUrl, '/auth/v1/user'), {
-      headers: {
-        apikey: apiKey,
-        authorization: `Bearer ${token}`,
-      },
-    })
-    if (!response.ok) return undefined
-    return toSupabaseUserContext(await response.json())
+    return await fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
   }
 }
 

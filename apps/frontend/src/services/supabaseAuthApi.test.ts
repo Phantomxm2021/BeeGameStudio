@@ -104,6 +104,38 @@ describe('supabaseAuthApi', () => {
     );
   });
 
+  it('stores an invitation code in Supabase signup metadata', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const fetchMock = vi.fn(async () => Response.json({
+      access_token: 'signup-access-token',
+      expires_in: 3600,
+      user: { id: 'user-2', email: 'new@example.com' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await signUpWithSupabasePassword({
+      email: 'new@example.com',
+      password: 'secret-password',
+      displayName: 'New Player',
+      invitationCode: ' BEE-ALPHA ',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project.supabase.co/auth/v1/signup',
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: 'new@example.com',
+          password: 'secret-password',
+          data: {
+            display_name: 'New Player',
+            beegame_invitation_code: 'BEE-ALPHA',
+          },
+        }),
+      }),
+    );
+  });
+
   it('refreshes an expired session instead of clearing it immediately', async () => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
@@ -184,6 +216,93 @@ describe('supabaseAuthApi', () => {
     const discordUrl = new URL(assign.mock.calls[1][0]);
     expect(discordUrl.searchParams.get('provider')).toBe('discord');
     expect(discordUrl.searchParams.get('scopes')).toBe('identify email');
+  });
+
+  it('starts Supabase OAuth through the BeeGame invitation Edge Function when an invitation is provided', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const assign = vi.fn();
+    const fetchMock = vi.fn(async () => Response.json({
+      url: 'https://project.supabase.co/auth/v1/authorize?provider=github&nonce=nonce-1',
+      nonce: 'nonce-1',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('location', {
+      href: 'http://localhost:5173/',
+      origin: 'http://localhost:5173',
+      assign,
+    });
+
+    await signInWithSupabaseOAuth('github', { invitationCode: 'BEE-ALPHA' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project.supabase.co/functions/v1/beegame-oauth-start',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          authorization: 'Bearer anon-key',
+          'content-type': 'application/json',
+        }),
+        body: expect.stringContaining('BEE-ALPHA'),
+      }),
+    );
+    expect(assign).toHaveBeenCalledWith('https://project.supabase.co/auth/v1/authorize?provider=github&nonce=nonce-1');
+    expect(JSON.parse(sessionStorage.getItem('beegame_supabase_oauth_pkce') || '{}')).toMatchObject({
+      provider: 'github',
+      invitationNonce: 'nonce-1',
+    });
+  });
+
+  it('redeems an OAuth invitation nonce after consuming a PKCE callback', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const replaceState = vi.fn();
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/auth/v1/token?grant_type=pkce')) {
+        return Response.json({
+          access_token: 'pkce-access-token',
+          refresh_token: 'pkce-refresh-token',
+          expires_in: 3600,
+          user: { id: 'pkce-user', email: 'pkce@example.com' },
+        });
+      }
+      if (url.endsWith('/rest/v1/rpc/beegame_redeem_oauth_invitation')) {
+        return Response.json({ ok: true });
+      }
+      return new Response('unexpected url', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('history', { replaceState });
+    vi.stubGlobal('location', {
+      href: 'http://localhost:5173/?code=auth-code',
+      origin: 'http://localhost:5173',
+      pathname: '/',
+      search: '?code=auth-code',
+      hash: '',
+    });
+    sessionStorage.setItem('beegame_supabase_oauth_pkce', JSON.stringify({
+      provider: 'github',
+      codeVerifier: 'stored-code-verifier',
+      invitationNonce: 'nonce-1',
+      createdAt: Date.now(),
+    }));
+
+    await expect(consumeSupabaseRedirectSession()).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project.supabase.co/rest/v1/rpc/beegame_redeem_oauth_invitation',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          authorization: 'Bearer pkce-access-token',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify({ p_nonce: 'nonce-1' }),
+      }),
+    );
   });
 
   it('stores a Supabase session from an OAuth redirect hash', async () => {
