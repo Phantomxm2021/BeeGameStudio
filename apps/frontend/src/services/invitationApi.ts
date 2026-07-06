@@ -6,6 +6,7 @@ export type InvitationPublicSettings = {
 
 export type InvitationRecord = {
   id: string;
+  code?: string | null;
   label: string;
   enabled: boolean;
   maxUses?: number | null;

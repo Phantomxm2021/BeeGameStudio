@@ -17,6 +17,7 @@ on conflict (id) do nothing;
 
 create table if not exists public.beegame_invitations (
   id uuid primary key default gen_random_uuid(),
+  code text,
   code_hash text not null unique,
   label text not null default 'Invitation',
   enabled boolean not null default true,
@@ -33,6 +34,9 @@ create table if not exists public.beegame_invitation_redemptions (
   invitation_id uuid not null references public.beegame_invitations(id) on delete restrict,
   redeemed_at timestamptz not null default now()
 );
+
+alter table public.beegame_invitations
+  add column if not exists code text;
 
 create table if not exists public.beegame_oauth_invitation_nonces (
   nonce text primary key,
@@ -113,6 +117,7 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
     'id', i.id,
+    'code', i.code,
     'label', i.label,
     'enabled', i.enabled,
     'maxUses', i.max_uses,
@@ -176,14 +181,16 @@ begin
   end if;
 
   insert into public.beegame_invitations (
+    code,
     code_hash,
     label,
     max_uses,
     expires_at,
     created_by
   ) values (
+    trim(p_code),
     public.beegame_invitation_code_hash(p_code),
-    coalesce(nullif(trim(coalesce(p_label, '')), ''), 'Invitation'),
+    coalesce(nullif(trim(coalesce(p_label, '')), ''), trim(p_code)),
     p_max_uses,
     p_expires_at,
     auth.uid()
@@ -192,6 +199,7 @@ begin
 
   return jsonb_build_object(
     'id', created.id,
+    'code', created.code,
     'label', created.label,
     'enabled', created.enabled,
     'maxUses', created.max_uses,
@@ -243,6 +251,7 @@ begin
 
   return jsonb_build_object(
     'id', updated.id,
+    'code', updated.code,
     'label', updated.label,
     'enabled', updated.enabled,
     'maxUses', updated.max_uses,

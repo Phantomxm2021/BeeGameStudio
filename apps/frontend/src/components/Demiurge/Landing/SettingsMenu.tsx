@@ -1542,9 +1542,12 @@ function InvitationSettingsPanel({
                                     <div className="flex items-center gap-2">
                                         <span className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                                         <span className="type-footnote truncate text-zinc-100">
-                                            {invitation.label || '未命名邀请码'}
+                                            {invitation.code || invitation.label || '未命名邀请码'}
                                         </span>
                                     </div>
+                                    {invitation.label && invitation.label !== invitation.code ? (
+                                        <div className="type-footnote mt-1 truncate pl-4 text-zinc-400">{invitation.label}</div>
+                                    ) : null}
                                     <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
                                         已用 {invitation.usedCount}{invitation.maxUses ? ` / ${invitation.maxUses}` : ''}
                                     </div>

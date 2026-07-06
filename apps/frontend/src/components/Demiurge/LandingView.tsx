@@ -1085,12 +1085,18 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
-            if (isInvitationRequired && !invitationCode.trim()) {
+            const isRegisteringWithOAuth = authMode === 'register';
+            const shouldUseInvitation = isRegisteringWithOAuth && isInvitationRequired;
+            if (isRegisteringWithOAuth && !hasAcceptedTerms) {
+                setLoginError(intakeText.errors.termsRequired);
+                return;
+            }
+            if (shouldUseInvitation && !invitationCode.trim()) {
                 setLoginError(translate('intake.errors.invitationRequired', { defaultValue: '请输入邀请码。' }));
                 return;
             }
             writePendingAuthIdeaState(pendingIdeaAfterLogin);
-            await signInWithSupabaseOAuth(provider, isInvitationRequired ? { invitationCode } : {});
+            await signInWithSupabaseOAuth(provider, shouldUseInvitation ? { invitationCode } : {});
         } catch (error) {
             clearPendingAuthIdeaState();
             setLoginError(error instanceof Error ? error.message : intakeText.auth.oauthFailed);
@@ -1573,7 +1579,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         placeholder="you@example.com"
                                     />
                                 </label>
-                                {isInvitationRequired && authMode !== 'resetPassword' ? (
+                                {isInvitationRequired && authMode === 'register' ? (
                                     <label className="type-subheadline block text-zinc-200">
                                         {translate('intake.auth.fields.invitationCode', { defaultValue: '邀请码' })}
                                         <input
@@ -1655,7 +1661,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     {loginNotice}
                                 </div>
                             ) : null}
-                            {authMode === 'login' ? (
+                            {authMode !== 'resetPassword' ? (
                                 <>
                                     <div className="type-caption-1 my-5 flex items-center gap-3 text-zinc-500">
                                         <span className="h-px flex-1 bg-white/10" />
