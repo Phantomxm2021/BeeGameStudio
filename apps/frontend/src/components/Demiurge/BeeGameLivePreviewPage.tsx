@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
@@ -11,6 +12,7 @@ import { useSystemStore } from '../../store/systemStore';
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
 type PreviewControl = 'reload' | 'stop' | 'play' | 'open' | 'deploy';
+type TooltipPosition = { left: number; top: number };
 
 interface BeeGameLivePreviewPageProps {
     lang: Language;
@@ -228,8 +230,8 @@ export function BeeGameLivePreviewPage({
             </header>
 
             <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
-                <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
-                    <div className="flex h-20 items-center justify-between px-9">
+                <section className="flex min-h-0 flex-1 flex-col overflow-visible rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
+                    <div className="relative z-10 flex h-20 items-center justify-between overflow-visible px-9">
                         <div className="min-w-0">
                             <div className="flex items-baseline gap-3">
                                 <h1 className="type-title-3 text-zinc-100">
@@ -237,7 +239,7 @@ export function BeeGameLivePreviewPage({
                                 </h1>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="relative z-20 flex items-center gap-3 overflow-visible">
                             <PreviewControlButton
                                 control="reload"
                                 label={labels.reload}
@@ -607,33 +609,76 @@ function PreviewControlButton({
     children: ReactNode;
 }) {
     const isHintVisible = hoveredControl === control;
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
+    const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition | null>(null);
+    const updateTooltipPosition = useCallback(() => {
+        const button = buttonRef.current;
+        if (!button) return;
+        const rect = button.getBoundingClientRect();
+        setTooltipPosition({
+            left: rect.left + rect.width / 2,
+            top: rect.top - 8,
+        });
+    }, []);
+
+    useEffect(() => {
+        if (!isHintVisible) {
+            setTooltipPosition(null);
+            return;
+        }
+
+        updateTooltipPosition();
+        window.addEventListener('resize', updateTooltipPosition);
+        window.addEventListener('scroll', updateTooltipPosition, true);
+        return () => {
+            window.removeEventListener('resize', updateTooltipPosition);
+            window.removeEventListener('scroll', updateTooltipPosition, true);
+        };
+    }, [isHintVisible, updateTooltipPosition]);
+
+    const showTooltip = () => {
+        setHoveredControl(control);
+        updateTooltipPosition();
+    };
+
+    const hideTooltip = () => {
+        setHoveredControl(null);
+        setTooltipPosition(null);
+    };
+
     return (
         <div
-            className="relative"
-            onMouseEnter={() => setHoveredControl(control)}
-            onMouseLeave={() => setHoveredControl(null)}
+            className="relative z-30"
+            onMouseEnter={showTooltip}
+            onMouseLeave={hideTooltip}
         >
             <button
+                ref={buttonRef}
                 type="button"
                 aria-label={label}
                 aria-describedby={isHintVisible ? `beegame-preview-control-${control}` : undefined}
                 title={label}
-                onFocus={() => setHoveredControl(control)}
-                onBlur={() => setHoveredControl(null)}
+                onFocus={showTooltip}
+                onBlur={hideTooltip}
                 onClick={onClick}
                 disabled={disabled}
                 className="glass-icon-button h-11 w-11 rounded-xl text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
             >
                 {children}
             </button>
-            {isHintVisible ? (
+            {isHintVisible && tooltipPosition && typeof document !== 'undefined' ? createPortal(
                 <div
                     id={`beegame-preview-control-${control}`}
                     role="tooltip"
-                    className="type-footnote pointer-events-none absolute -top-10 left-1/2 z-[100] -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-zinc-200 shadow-xl shadow-black/40"
+                    className="type-footnote pointer-events-none fixed z-[9999] -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-zinc-200 shadow-xl shadow-black/40"
+                    style={{
+                        left: tooltipPosition.left,
+                        top: tooltipPosition.top,
+                    }}
                 >
                     {label}
-                </div>
+                </div>,
+                document.body,
             ) : null}
         </div>
     );
