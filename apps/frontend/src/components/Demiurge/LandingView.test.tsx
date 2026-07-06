@@ -244,6 +244,7 @@ const makeIntakeOptions = () => [
         firstPlayableValidation: 'LLM generated validation A.',
         riskComplexity: 'LLM generated complexity A.',
         recommendedPlatform: 'Web',
+        recommendedEngine: 'React',
         recommendedDimension: '2D',
         recommendedGenre: 'Arcade',
         recommendedStyle: 'Pixel',
@@ -269,8 +270,9 @@ const makeIntakeOptions = () => [
         firstPlayableValidation: 'LLM generated validation B.',
         riskComplexity: 'LLM generated complexity B.',
         recommendedPlatform: 'Web',
-        recommendedDimension: '2D',
-        recommendedGenre: 'Casual',
+        recommendedEngine: 'Godot',
+        recommendedDimension: '3D',
+        recommendedGenre: 'Puzzle',
         recommendedStyle: 'Cartoon',
         recommendedInputs: ['Keyboard/mouse'],
         scope: 'Vertical slice',
@@ -641,7 +643,13 @@ describe('LandingView bootstrap submission', () => {
 
         await submitIdeaAndConfirmIntake('Cached brief idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+        fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
         fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
+        fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
+        fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
+        fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
+        fireEvent.click(screen.getByRole('button', { name: '请选择' }));
+        fireEvent.click(screen.getByRole('option', { name: '键鼠' }));
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
         unmount();
@@ -866,6 +874,29 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('button', { name: 'X' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Discord' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '忘记密码？' })).toBeInTheDocument();
+    });
+
+    it('keeps the auth dialog size stable when switching between login and registration', async () => {
+        mockCurrentUser = null;
+
+        renderLanding();
+
+        fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+        const authDialog = await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+        const authPanel = authDialog.querySelector('form');
+
+        expect(authPanel).toHaveClass('max-w-[520px]');
+        expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+
+        fireEvent.click(screen.getByRole('button', { name: '注册账号' }));
+
+        expect(authPanel).toHaveClass('max-w-[520px]');
+        expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+
+        fireEvent.click(screen.getByRole('button', { name: '登录' }));
+
+        expect(authPanel).toHaveClass('max-w-[520px]');
+        expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
     });
 
     it('does not start generation after account-menu email login without an explicit generate click', async () => {
@@ -1215,6 +1246,89 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
     });
 
+    it('requires production settings to be chosen from values returned by the LLM', async () => {
+        runIdeaIntake.mockResolvedValueOnce({
+            maturity: 'vague',
+            needsOptions: true,
+            needsClarification: false,
+            clarificationQuestions: [],
+            detectedConstraints: [],
+            recommendedNextStep: 'choose_direction',
+            options: [
+                {
+                    ...makeIntakeOptions()[0],
+                    recommendedPlatform: 'Web',
+                    recommendedEngine: 'Unity',
+                    recommendedDimension: '2D',
+                    recommendedGenre: 'Arcade',
+                    recommendedStyle: 'Pixel',
+                    recommendedInputs: ['Keyboard/mouse'],
+                },
+                {
+                    ...makeIntakeOptions()[1],
+                    recommendedPlatform: 'Mobile',
+                    recommendedEngine: 'Godot',
+                    recommendedDimension: '3D',
+                    recommendedGenre: 'Puzzle',
+                    recommendedStyle: 'Cartoon',
+                    recommendedInputs: ['Touch'],
+                },
+            ],
+        });
+
+        renderLanding();
+
+        await submitIdeaAndConfirmIntake('LLM generated idea');
+
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+
+        const platformSelect = screen.getByRole('combobox', { name: '平台' });
+        const engineSelect = screen.getByRole('combobox', { name: '引擎' });
+        const dimensionSelect = screen.getByRole('combobox', { name: '表现形式' });
+        const genreSelect = screen.getByRole('combobox', { name: '游戏类型' });
+        const styleSelect = screen.getByRole('combobox', { name: '风格' });
+
+        expect(platformSelect).toHaveValue('');
+        expect(engineSelect).toHaveValue('');
+        expect(dimensionSelect).toHaveValue('');
+        expect(genreSelect).toHaveValue('');
+        expect(styleSelect).toHaveValue('');
+
+        expect(within(platformSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
+            'Web',
+            'Mobile',
+        ]);
+        expect(within(engineSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
+            'Unity',
+            'Godot',
+        ]);
+        expect(within(dimensionSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
+            '2D',
+            '3D',
+        ]);
+        expect(within(genreSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
+            'Arcade',
+            'Puzzle',
+        ]);
+        expect(within(styleSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
+            'Pixel',
+            'Cartoon',
+        ]);
+        expect(within(platformSelect).queryByRole('option', { name: 'Desktop' })).not.toBeInTheDocument();
+        expect(within(engineSelect).queryByRole('option', { name: 'React' })).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+
+        expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+        expect(screen.queryByTestId('confirmed-brief')).not.toBeInTheDocument();
+        expect(screen.getByText('请选择制作设置。')).toBeInTheDocument();
+    });
+
     it('confirms an intake brief before starting the BeeGame session', async () => {
         const onStart = vi.fn().mockResolvedValue({ status: 'started', projectId: 'proj_1' });
 
@@ -1231,25 +1345,25 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByText('Auto')).not.toBeInTheDocument();
 
         const engineSelect = screen.getByRole('combobox', { name: '引擎' });
-        expect(within(engineSelect).getAllByRole('option').map((option) => option.textContent)).toEqual([
+        expect(within(engineSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+            '',
             'React',
-            'Unity',
             'Godot',
-            'Unreal',
         ]);
         fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
         fireEvent.change(engineSelect, { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
         fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
-        fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Minimal' } });
-        fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
+        fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
+        fireEvent.click(screen.getByRole('button', { name: '请选择' }));
         const inputListbox = screen.getByRole('listbox', { name: '输入方式' });
         expect(inputListbox).toHaveAttribute('data-surface', 'frosted-glass');
         expect(inputListbox).toHaveAttribute('data-glass-density', 'reinforced');
         expect(inputListbox).toHaveAttribute('data-floating-layer', 'true');
         expect(inputListbox).toHaveClass('fixed', 'z-[220]');
         expect(inputListbox).toHaveClass('backdrop-blur-2xl');
-        fireEvent.click(screen.getByRole('option', { name: '语音' }));
+        fireEvent.click(screen.getByRole('option', { name: '键鼠' }));
+        fireEvent.click(screen.getByRole('option', { name: '触屏' }));
         fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: '优先验证关卡节奏。' } });
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
@@ -1272,8 +1386,8 @@ describe('LandingView bootstrap submission', () => {
                 engine: 'Godot',
                 dimension: '3D',
                 genre: 'Puzzle',
-                visualStyle: 'Minimal',
-                inputs: ['Keyboard/mouse', 'Touch', 'Voice'],
+                visualStyle: 'Cartoon',
+                inputs: ['Keyboard/mouse', 'Touch'],
                 notes: '优先验证关卡节奏。',
             },
         });
@@ -1284,7 +1398,7 @@ describe('LandingView bootstrap submission', () => {
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
         fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
-        fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
+        fireEvent.click(screen.getByRole('button', { name: '请选择' }));
 
         expect(screen.getByRole('listbox', { name: '输入方式' })).toBeInTheDocument();
 

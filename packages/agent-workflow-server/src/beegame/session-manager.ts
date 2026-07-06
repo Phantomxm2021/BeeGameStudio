@@ -248,6 +248,8 @@ const localCreditBackend: BeeGameSessionCreditBackend = {
   refundCreditReservation,
 }
 
+const MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS = 8
+
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -343,6 +345,7 @@ export class BeeGameSessionManager {
         recoveredTranscript?.events ?? [],
       ),
     }
+    archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
     this.persistRuntimeSnapshot(record)
@@ -384,11 +387,12 @@ export class BeeGameSessionManager {
           dataDir: record.userDataRoot ?? this.dashboardDataRoot,
           reservationId: operation.reservation.id,
           weightedTokens: operation.weightedTokens,
-          projectId: record.session.id,
+          projectId: getCreditProjectId(record),
           metadata: {
             taskType: operation.policy.taskType,
             displayName: operation.policy.displayName,
             sessionId: record.session.id,
+            ...(record.projectId ? { projectId: record.projectId } : {}),
             workspacePath: record.session.cwd,
             totalTokens: operation.settleToTotalTokens,
             previousSettledTotalTokens: record.lastSettledTotalTokens,
@@ -415,9 +419,10 @@ export class BeeGameSessionManager {
       const refund = await this.creditBackend.refundCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: operation.reservation.id,
-        projectId: record.session.id,
+        projectId: getCreditProjectId(record),
         metadata: {
           sessionId: record.session.id,
+          ...(record.projectId ? { projectId: record.projectId } : {}),
           reason: 'turn_finished_without_billable_usage',
           retry: true,
         },
@@ -925,6 +930,19 @@ export class BeeGameSessionManager {
         message: workspaceViolation,
       })
     }
+    if (request.toolName === 'Bash' && hasReachedBashPermissionRequestLimit(record)) {
+      const message = `BeeGame stopped this turn after too many Bash permission requests (${MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS}). The agent should summarize the current result instead of continuing validation.`
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'deny',
+        autoDenied: true,
+        reason: message,
+        input: request.input,
+      })
+      throw new Error(message)
+    }
     const policyDecision = getBeeGamePermissionPolicyDecision(
       record,
       sessionWorkspaceRoot,
@@ -1108,11 +1126,12 @@ export class BeeGameSessionManager {
         dataDir,
         credits: policy.reservedCredits,
         kind: policy.taskType,
-        projectId: record.session.id,
+        projectId: getCreditProjectId(record),
         metadata: {
           taskType: policy.taskType,
           displayName: policy.displayName,
           sessionId: record.session.id,
+          ...(record.projectId ? { projectId: record.projectId } : {}),
           workspacePath: record.session.cwd,
           ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
         },
@@ -1144,11 +1163,12 @@ export class BeeGameSessionManager {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: reservation.id,
         weightedTokens: tokenDelta,
-        projectId: record.session.id,
+        projectId: getCreditProjectId(record),
         metadata: {
           taskType: policy.taskType,
           displayName: policy.displayName,
           sessionId: record.session.id,
+          ...(record.projectId ? { projectId: record.projectId } : {}),
           workspacePath: record.session.cwd,
           totalTokens: usage.total_tokens,
           previousSettledTotalTokens: record.lastSettledTotalTokens,
@@ -1192,9 +1212,10 @@ export class BeeGameSessionManager {
       const refund = await this.creditBackend.refundCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: reservation.id,
-        projectId: record.session.id,
+        projectId: getCreditProjectId(record),
         metadata: {
           sessionId: record.session.id,
+          ...(record.projectId ? { projectId: record.projectId } : {}),
           reason: 'turn_finished_without_billable_usage',
         },
         ...(record.authToken ? { authToken: record.authToken } : {}),
@@ -1473,6 +1494,7 @@ export async function readSessionTranscriptFromDisk(
   dashboardDataRoot?: string,
 ): Promise<Array<{
   id: number
+  sessionId?: string
   type: BeeGameEventType
   text: string
   turnId?: string
@@ -2211,6 +2233,18 @@ function getBeeGamePermissionPolicyDecision(
     }
   }
   if (request.toolName === 'Bash') {
+    if (isGlobalProcessControlBashCommand(request.input)) {
+      return {
+        behavior: 'auto_deny',
+        message: 'Global process control is managed by BeeGame preview controls.',
+      }
+    }
+    if (isBackgroundProcessBashCommand(request.input)) {
+      return {
+        behavior: 'auto_deny',
+        message: 'Background processes are managed by BeeGame preview controls.',
+      }
+    }
     return {
       behavior: isSafeBeeGameBashCommand(
         request.input,
@@ -2304,6 +2338,170 @@ function isSafeBeeGameBashCommand(
     }
   }
   return true
+}
+
+function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
+  const turnId = findLatestInterruptedTurnId(record.events)
+  if (!turnId) return
+  const previousTurnId = record.currentTurnId
+  record.currentTurnId = turnId
+  record.session.turnStatus = 'idle'
+  record.session.status = 'running'
+  record.events.push({
+    id: record.nextEventId,
+    sessionId: record.session.id,
+    turnId,
+    type: 'turn.failed',
+    text: 'Previous BeeGame turn was interrupted before completion.',
+    createdAt: new Date(),
+  })
+  appendTranscriptEvent(record.transcriptPath, record.events.at(-1) as BeeGameEvent)
+  record.nextEventId += 1
+  record.currentTurnId = previousTurnId
+  record.session.updatedAt = new Date()
+}
+
+function getCreditProjectId(record: SessionRecord): string {
+  return record.projectId || record.session.id
+}
+
+function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'turn.started' && event.turnId && !hasTurnEnded(events, event.turnId)) {
+      return event.turnId
+    }
+  }
+  return ''
+}
+
+function hasReachedBashPermissionRequestLimit(record: SessionRecord): boolean {
+  if (!record.currentTurnId) return false
+  const toolUseIDs = new Set<string>()
+  for (const event of record.events) {
+    if (event.turnId !== record.currentTurnId) continue
+    if (event.type !== 'permission.requested' && event.type !== 'permission.resolved') {
+      continue
+    }
+    const payload = event.payload
+    if (payload?.toolName !== 'Bash') continue
+    const toolUseID = typeof payload.toolUseID === 'string'
+      ? payload.toolUseID
+      : `${event.id}`
+    toolUseIDs.add(toolUseID)
+  }
+  return toolUseIDs.size >= MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS
+}
+
+function isGlobalProcessControlBashCommand(input: Record<string, unknown>): boolean {
+  const command = typeof input.command === 'string' ? input.command.trim() : ''
+  if (!command) return false
+  return splitShellCommandSegments(command).some(part => {
+    const tokens = splitShellLike(part)
+      .map(cleanShellToken)
+      .filter(token => token && !isHarmlessShellRedirectionToken(token))
+    return isGlobalProcessControlTokens(tokens)
+  })
+}
+
+function isBackgroundProcessBashCommand(input: Record<string, unknown>): boolean {
+  const command = typeof input.command === 'string' ? input.command.trim() : ''
+  if (!command) return false
+  return hasShellBackgroundOperator(command)
+}
+
+function hasShellBackgroundOperator(command: string): boolean {
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = null
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char !== '&') continue
+    if (command[index - 1] === '>') continue
+    if (command[index + 1] === '&') {
+      index += 1
+      continue
+    }
+    return true
+  }
+  return false
+}
+
+function splitShellCommandSegments(command: string): string[] {
+  const segments: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      current += char
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = null
+      current += char
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      current += char
+      continue
+    }
+    if (char === ';' || char === '|' || char === '\n' || char === '\r') {
+      if (current.trim()) segments.push(current.trim())
+      current = ''
+      if (command[index + 1] === char) index += 1
+      continue
+    }
+    if (char === '&' && command[index + 1] === '&') {
+      if (current.trim()) segments.push(current.trim())
+      current = ''
+      index += 1
+      continue
+    }
+    current += char
+  }
+  if (current.trim()) segments.push(current.trim())
+  return segments
+}
+
+function isGlobalProcessControlTokens(tokens: string[]): boolean {
+  const command = tokens[0]?.toLowerCase()
+  if (!command) return false
+  if (command === 'kill' || command === 'pkill' || command === 'killall') return true
+  if (command === 'fuser' && tokens.some(token => token.toLowerCase() === '-k')) return true
+  if (
+    command === 'xargs' &&
+    tokens.slice(1).some(token => {
+      const normalized = token.toLowerCase()
+      return normalized === 'kill' || normalized === 'pkill' || normalized === 'killall'
+    })
+  ) {
+    return true
+  }
+  return false
 }
 
 function hasUnsafeShellControlSyntax(command: string): boolean {

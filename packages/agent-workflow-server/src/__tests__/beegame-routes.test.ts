@@ -34,6 +34,9 @@ type FakeRuntimeMode =
   | 'permission_different_tool'
   | 'dangerous_bash_permission'
   | 'dangerous_bash_twice'
+  | 'global_process_control_bash'
+  | 'background_process_bash'
+  | 'repeated_bash_validation_loop'
   | 'workspace_bash_pipeline'
   | 'workspace_bash_cleanup'
   | 'workspace_unknown_bash'
@@ -384,6 +387,47 @@ class FakeBeeGameRuntime {
       })
       this.permissionResults.push(decision.behavior)
       input.onMessage({ type: 'result', result: 'unknown workspace command done' })
+      return
+    }
+    if (this.mode === 'global_process_control_bash') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_global_process_control',
+        toolName: 'Bash',
+        message: 'Stop a background process?',
+        input: {
+          command: 'pkill -f vite',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `process control ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'background_process_bash') {
+      const decision = await input.requestPermission({
+        toolUseID: 'tool_background_process',
+        toolName: 'Bash',
+        message: 'Start a background process?',
+        input: {
+          command: 'node tools/local-server.js > server.log 2>&1 &',
+        },
+      })
+      this.permissionResults.push(decision.behavior)
+      input.onMessage({ type: 'result', result: `background ${decision.behavior}` })
+      return
+    }
+    if (this.mode === 'repeated_bash_validation_loop') {
+      for (let index = 0; index < 12; index += 1) {
+        const decision = await input.requestPermission({
+          toolUseID: `tool_repeated_validation_${index + 1}`,
+          toolName: 'Bash',
+          message: 'Run another validation command?',
+          input: {
+            command: 'npm run build',
+          },
+        })
+        this.permissionResults.push(decision.behavior)
+      }
+      input.onMessage({ type: 'result', result: 'validation loop ended' })
       return
     }
     if (this.mode === 'outside_permission') {
@@ -1588,6 +1632,69 @@ describe('beegame session routes', () => {
           projectId: session.id,
         },
       ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('attributes turn credit ledger entries to the owning project id', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-project-summary-'))
+    const workspace = join(projectsRoot, 'credit-project-game')
+    const projectId = 'proj_credit_summary'
+    await mkdir(workspace, { recursive: true })
+    const fake = createFakeRunner([
+      {
+        type: 'result',
+        result: 'Done',
+        usage: {
+          input_tokens: 20_000,
+          output_tokens: 3_001,
+          total_tokens: 23_001,
+        },
+      },
+    ])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer user-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ workspacePath: workspace, projectId }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/beegame-sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'Build the game.', taskType: 'edit_turn' }),
+        },
+      )
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { payload?: { type?: string } }) =>
+          event.payload?.type === 'credit.settled',
+        )
+      })
+
+      const summaryRes = await app.request(`/api/credits/summary?projectId=${projectId}`)
+      expect(await summaryRes.json()).toEqual(expect.objectContaining({
+        reservedCredits: 50,
+        settledCredits: 3,
+        refundedCredits: 47,
+        outstandingReservedCredits: 0,
+        weightedTokens: 23_001,
+      }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3163,6 +3270,113 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('returns project runtime state from backend-owned BeeGame session state', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_runtime_state'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Runtime State',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const ensureRes = await app.request(
+        `/api/projects/${projectId}/session/ensure`,
+        { method: 'POST' },
+      )
+      expect(ensureRes.status).toBe(200)
+      const ensured = await ensureRes.json()
+      await app.request(`/api/beegame-sessions/${ensured.session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build the project.' }),
+      })
+
+      await waitFor(async () => {
+        const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+        const state = await stateRes.json()
+        return state.approval_required === true
+      })
+
+      const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+      const state = await stateRes.json()
+      expect(stateRes.status).toBe(200)
+      expect(state).toEqual(expect.objectContaining({
+        project_id: projectId,
+        phase: 'waiting_approval',
+        blocked: true,
+        approval_required: true,
+        active_agents: ['beegame'],
+      }))
+      expect(state.context).toEqual(expect.objectContaining({
+        token_budget: expect.objectContaining({
+          status: 'tracking',
+        }),
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('ensures project sessions without requiring frontend restore decisions', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_backend_ensure'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Backend Ensure',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+
+      const firstRes = await app.request(
+        `/api/projects/${projectId}/session/ensure`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'zh' }),
+        },
+      )
+      expect(firstRes.status).toBe(200)
+      const first = await firstRes.json()
+      const secondRes = await app.request(
+        `/api/projects/${projectId}/session/ensure`,
+        { method: 'POST' },
+      )
+      const second = await secondRes.json()
+
+      expect(secondRes.status).toBe(200)
+      expect(second.session.id).toBe(first.session.id)
+      const expectedWorkspace = await realpath(workspace)
+      expect(second.binding).toEqual({
+        projectId,
+        sessionId: first.session.id,
+        workspacePath: expectedWorkspace,
+      })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('recovers an unclosed transcript-only turn as idle after backend restart', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const sessionId = 'beegame_recovered_unclosed_turn'
@@ -3226,6 +3440,160 @@ describe('beegame session routes', () => {
         phaseStatus: 'idle',
         usage: expect.objectContaining({ total_tokens: 15 }),
       }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns recovered transcript-only interrupted turns as closed', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-recovered-transcript-'))
+    const sessionId = 'beegame_recovered_transcript_interrupted'
+    const turnId = `${sessionId}-turn-1`
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const app = createAgentWorkflowApp()
+    try {
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const now = new Date().toISOString()
+      await writeFile(
+        transcriptPath,
+        [
+          {
+            id: 1,
+            sessionId,
+            type: 'session.started',
+            text: 'Created BeeGame session',
+            createdAt: now,
+          },
+          {
+            id: 2,
+            sessionId,
+            turnId,
+            type: 'turn.started',
+            text: 'Turn started',
+            createdAt: now,
+          },
+          {
+            id: 3,
+            sessionId,
+            turnId,
+            type: 'permission.resolved',
+            text: 'Bash: allow',
+            payload: {
+              type: 'permission.resolved',
+              toolUseID: 'tool_global_process_control',
+              toolName: 'Bash',
+              decision: 'allow',
+            },
+            createdAt: now,
+          },
+        ].map(event => JSON.stringify(event)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const transcriptRes = await app.request(
+        `/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const events = await transcriptRes.json()
+
+      expect(transcriptRes.status).toBe(200)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 4,
+          sessionId,
+          turnId,
+          type: 'turn.failed',
+          text: expect.stringContaining('interrupted'),
+        }),
+      ]))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('archives an interrupted recovered turn before resuming a live session', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resume-interrupted-'))
+    const sessionId = 'beegame_interrupted_resume'
+    const turnId = `${sessionId}-turn-1`
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const app = createAgentWorkflowApp()
+    try {
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const now = new Date().toISOString()
+      await writeFile(
+        transcriptPath,
+        [
+          {
+            id: 1,
+            sessionId,
+            type: 'session.started',
+            text: 'Created BeeGame session',
+            createdAt: now,
+          },
+          {
+            id: 2,
+            sessionId,
+            turnId,
+            type: 'turn.started',
+            text: 'Turn started',
+            createdAt: now,
+          },
+          {
+            id: 3,
+            sessionId,
+            turnId,
+            type: 'tool.started',
+            text: 'Bash',
+            payload: {
+              type: 'tool.started',
+              toolUseID: 'tool_global_process_control',
+              toolName: 'Bash',
+              input: {},
+            },
+            createdAt: now,
+          },
+          {
+            id: 4,
+            sessionId,
+            turnId,
+            type: 'permission.resolved',
+            text: 'Bash: allow',
+            payload: {
+              type: 'permission.resolved',
+              toolUseID: 'tool_global_process_control',
+              toolName: 'Bash',
+              decision: 'allow',
+            },
+            createdAt: now,
+          },
+        ].map(event => JSON.stringify(event)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace, transcriptSessionId: sessionId }),
+      })
+      const session = await sessionRes.json()
+      const snapshotRes = await app.request(
+        `/api/beegame-sessions/${session.id}/runtime-snapshot?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const snapshot = await snapshotRes.json()
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+
+      expect(sessionRes.status).toBe(200)
+      expect(snapshot).toEqual(expect.objectContaining({
+        phaseName: 'idle',
+        phaseStatus: 'idle',
+      }))
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'turn.failed',
+          turnId,
+          text: expect.stringContaining('interrupted'),
+        }),
+      ]))
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -4086,6 +4454,138 @@ describe('beegame session routes', () => {
               decision: 'deny',
               autoDenied: true,
             }),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-denies global process control Bash commands without opening an approval gate', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-global-process-control-'))
+    const fake = createFakeRunner(undefined, 'global_process_control_bash')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Stop the preview server.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults[0] === 'deny')
+
+      const eventsRes = await app.request(
+        `/api/beegame-sessions/${session.id}/events`,
+      )
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['deny'])
+      expect(
+        events.some((event: { type: string }) => event.type === 'permission.requested'),
+      ).toBe(false)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'permission.resolved',
+            payload: expect.objectContaining({
+              toolUseID: 'tool_global_process_control',
+              toolName: 'Bash',
+              decision: 'deny',
+              autoDenied: true,
+            }),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('auto-denies background Bash processes without opening an approval gate', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-background-process-'))
+    const fake = createFakeRunner(undefined, 'background_process_bash')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Start a preview server.' }),
+      })
+
+      await waitFor(() => fake.runtimes[0]?.permissionResults[0] === 'deny')
+
+      const eventsRes = await app.request(
+        `/api/beegame-sessions/${session.id}/events`,
+      )
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults).toEqual(['deny'])
+      expect(
+        events.some((event: { type: string }) => event.type === 'permission.requested'),
+      ).toBe(false)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'permission.resolved',
+            payload: expect.objectContaining({
+              toolUseID: 'tool_background_process',
+              toolName: 'Bash',
+              decision: 'deny',
+              autoDenied: true,
+            }),
+          }),
+        ]),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('stops a turn that keeps requesting Bash validation permissions', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-validation-loop-'))
+    const fake = createFakeRunner(undefined, 'repeated_bash_validation_loop')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Keep checking the build.' }),
+      })
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.failed')
+      })
+
+      const eventsRes = await app.request(`/api/beegame-sessions/${session.id}/events`)
+      const events = await eventsRes.json()
+      expect(fake.runtimes[0].permissionResults.length).toBeLessThan(12)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'turn.failed',
+            text: expect.stringContaining('too many Bash permission requests'),
           }),
         ]),
       )

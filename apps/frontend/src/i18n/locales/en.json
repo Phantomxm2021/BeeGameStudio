@@ -21,7 +21,8 @@
         "inputs": "Inputs",
         "notes": "Notes",
         "presentation": "Presentation",
-        "type": "Type"
+        "type": "Type",
+        "selectPlaceholder": "Choose"
       },
       "actions": {
         "chooseAgain": "Choose again",
@@ -50,6 +51,7 @@
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",
         "termsRequired": "Read and accept the terms first.",
+        "missingProductionSettings": "Choose the build settings.",
         "intakeFailed": "Failed to generate options. Please try again.",
         "loginFailed": "Sign-in failed. Please try again.",
         "invalidCredentials": "The email or password is incorrect. Please check and try again.",

@@ -87,8 +87,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const hasSentInitialPrompt = useRef(false);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const runtimeSnapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const lastPersistedRuntimeSnapshotRef = useRef('');
     const isBeeGameMode = isBeeGameAdapterEnabled();
     const { i18n } = useTranslation('beegame');
     const translateBeeGame = useMemo(
@@ -481,72 +479,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         const latest = deploymentHistory[0];
         return latest ? deploymentToBuildReport(latest) : null;
     }, [deploymentHistory]);
-
-    useEffect(() => {
-        if (!isBeeGameMode || !projectId) return;
-        const usage = {
-            prompt_tokens: Math.max(
-                Number(tokenUsage[projectId]?.prompt_tokens) || 0,
-                Number(projectStatus?.context?.token_budget?.prompt_tokens) || 0,
-                Number(savedRuntimeSnapshot?.usage?.prompt_tokens) || 0,
-            ),
-            completion_tokens: Math.max(
-                Number(tokenUsage[projectId]?.completion_tokens) || 0,
-                Number(projectStatus?.context?.token_budget?.completion_tokens) || 0,
-                Number(savedRuntimeSnapshot?.usage?.completion_tokens) || 0,
-            ),
-            total_tokens: displayedTokenTotal,
-        };
-        const phaseName = String(phaseInfo?.phase_name || savedRuntimeSnapshot?.phase_name || '').trim();
-        const modelConfigId = String(projectStatus?.model_config_id || savedRuntimeSnapshot?.model_config_id || '').trim();
-        const modelName = String(currentModelName || savedRuntimeSnapshot?.model_name || '').trim();
-        if (!phaseName && !modelConfigId && !modelName && usage.total_tokens <= 0) return;
-
-        const snapshot = {
-            usage,
-            ...(phaseName ? { phase_name: phaseName } : {}),
-            ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
-            ...(modelName ? { model_name: modelName } : {}),
-            updated_at: Date.now(),
-        };
-        const snapshotKey = JSON.stringify({
-            usage,
-            phase_name: phaseName,
-            model_config_id: modelConfigId,
-            model_name: modelName,
-        });
-        if (snapshotKey === lastPersistedRuntimeSnapshotRef.current) return;
-        if (runtimeSnapshotTimerRef.current) clearTimeout(runtimeSnapshotTimerRef.current);
-        runtimeSnapshotTimerRef.current = setTimeout(() => {
-            lastPersistedRuntimeSnapshotRef.current = snapshotKey;
-            useProjectStore.getState().persistProjectRuntimeSnapshot(projectId, snapshot).catch((error) => {
-                lastPersistedRuntimeSnapshotRef.current = '';
-                console.error('Failed to persist project runtime snapshot:', error);
-            });
-            runtimeSnapshotTimerRef.current = null;
-        }, 1200);
-        return () => {
-            if (runtimeSnapshotTimerRef.current) {
-                clearTimeout(runtimeSnapshotTimerRef.current);
-                runtimeSnapshotTimerRef.current = null;
-            }
-        };
-    }, [
-        currentModelName,
-        displayedTokenTotal,
-        isBeeGameMode,
-        phaseInfo?.phase_name,
-        projectId,
-        projectStatus?.context?.token_budget?.completion_tokens,
-        projectStatus?.context?.token_budget?.prompt_tokens,
-        projectStatus?.model_config_id,
-        savedRuntimeSnapshot?.model_config_id,
-        savedRuntimeSnapshot?.model_name,
-        savedRuntimeSnapshot?.phase_name,
-        savedRuntimeSnapshot?.usage?.completion_tokens,
-        savedRuntimeSnapshot?.usage?.prompt_tokens,
-        tokenUsage,
-    ]);
 
     // Logging Token Usage and Progress
     useEffect(() => {

@@ -12,6 +12,9 @@ import {
   BeeGameSessionManager,
   deleteSessionArtifactsFromTranscript,
   readSessionTranscriptFromDisk,
+  type BeeGameEvent,
+  type BeeGameRuntimeSnapshot,
+  type BeeGameSession,
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
@@ -122,6 +125,7 @@ type BeeGameIntakeOption = {
   firstPlayableValidation: string
   riskComplexity: string
   recommendedPlatform: string
+  recommendedEngine?: string
   recommendedDimension: string
   recommendedGenre: string
   recommendedStyle: string
@@ -738,6 +742,55 @@ export function createAgentWorkflowApp(
     return latest
       ? c.json(latest)
       : c.json({ error: 'Session not found' }, 404)
+  })
+
+  app.post('/api/projects/:id/session/ensure', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const projectId = c.req.param('id')
+    const body = await readOptionalJson(c.req.raw)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, projectId, dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({
+        request: c.req.raw,
+        user,
+        project,
+        body,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+        getUserDataRoot: getCurrentUserDataRoot,
+      })
+      return c.json(ensured)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.get('/api/projects/:id/runtime-state', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const projectId = c.req.param('id')
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, projectId, dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const state = await getBeeGameProjectRuntimeState({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
+        beeGameSessions,
+        beeGamePreviews,
+        dashboardRepository,
+      })
+      return c.json(state)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
   })
 
   app.delete('/api/projects/:id', async c => {
@@ -1366,7 +1419,7 @@ async function generateBeeGameIntakeOptions(input: {
             'When needs_clarification=true, clarification must contain exactly one prompt string for the most blocking question, 2 to 4 short options with id, label, optional description, and optional value, plus optional freeform_label. Do not bundle multiple questions into one prompt.',
             'When needs_clarification=true, recommended_next_step must be "clarify"; options may be empty because the user must answer first.',
             'When needs_clarification=false, return 1 to 3 valid options.',
-            'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+            'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
             'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
             'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
             'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
@@ -1374,7 +1427,7 @@ async function generateBeeGameIntakeOptions(input: {
             'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
             'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
             'Choose recommended metadata by understanding the full user request and the proposed game mode, not by keyword matching and not from a fixed menu.',
-            'recommendedPlatform, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs must be concise natural metadata that fits the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
+            'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs must be concise natural metadata that fits the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
             'Do not output Auto or placeholder values for recommended metadata.',
             'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
             'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
@@ -1585,6 +1638,7 @@ function normalizeBeeGameIntakeOption(
     firstPlayableValidation: getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
     riskComplexity: getStringField(value, 'riskComplexity', 'risk_complexity') || 'Complexity depends on selected scope.',
     recommendedPlatform: getStringishField(value, 'recommendedPlatform', 'recommended_platform'),
+    recommendedEngine: getStringishField(value, 'recommendedEngine', 'recommended_engine'),
     recommendedDimension: getStringishField(value, 'recommendedDimension', 'recommended_dimension'),
     recommendedGenre: getStringishField(value, 'recommendedGenre', 'recommended_genre'),
     recommendedStyle: getStringishField(value, 'recommendedStyle', 'recommended_style'),
@@ -1729,6 +1783,471 @@ function extractFirstBalancedJsonObject(text: string): string | undefined {
 
 function joinApiPath(baseUrl: string, path: string): string {
   return `${baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl}${path}`
+}
+
+async function getOwnedProjectMetadata(
+  request: Request,
+  user: BeeGameUserContext,
+  projectId: string,
+  repository: DashboardRepository,
+): Promise<BeeGameProjectMetadata | undefined> {
+  return (await repository.listProjects(request, user))
+    .find(project => project.id === projectId)
+}
+
+async function ensureBeeGameProjectSession(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  body: JsonObject
+  defaultWorkspacePath?: string
+  beeGameSessions: BeeGameSessionManager
+  dashboardRepository: DashboardRepository
+  getUserDataRoot: (request?: Request) => string
+}): Promise<{
+  session: BeeGameSession
+  binding: {
+    projectId: string
+    sessionId: string
+    workspacePath: string
+    language?: BeeGameSessionLanguage
+  }
+  previousSessionId?: string
+}> {
+  const latest = await getLatestProjectSessionMetadata(input)
+  const live = findLiveProjectSession(
+    input.beeGameSessions,
+    input.user.id,
+    input.project.id,
+  )
+  const language = isBeeGameSessionLanguage(input.body.language)
+    ? input.body.language
+    : undefined
+  const workspacePath = await resolveSessionWorkspacePath(
+    input.project.root_path || latest?.workspacePath || '',
+    input.defaultWorkspacePath,
+  )
+  if (
+    input.user.id !== DEFAULT_LOCAL_USER_ID &&
+    !(await input.dashboardRepository.ownsProjectWorkspacePath(input.request, input.user, workspacePath))
+  ) {
+    throw new Error('Project workspace does not belong to the current user')
+  }
+
+  if (live && normalizeResolvedPath(live.cwd) === normalizeResolvedPath(workspacePath)) {
+    const metadata = input.beeGameSessions.metadata(live.id)
+    await input.dashboardRepository.upsertSessionMetadata(
+      input.request,
+      input.user,
+      metadata,
+    )
+    return {
+      session: live,
+      binding: createProjectSessionBinding(input.project.id, live.id, workspacePath),
+    }
+  }
+
+  const session = input.beeGameSessions.start({
+    workspacePath,
+    projectId: input.project.id,
+    ...(latest?.id ? { transcriptSessionId: latest.id } : {}),
+    ...(latest?.modelConfigId ? { modelConfigId: latest.modelConfigId } : {}),
+    ...(language ? { language } : {}),
+    userId: input.user.id,
+    ...(getBearerToken(input.request) ? { authToken: getBearerToken(input.request) } : {}),
+    userDataRoot: input.getUserDataRoot(input.request),
+  })
+  const metadata = input.beeGameSessions.metadata(session.id)
+  await input.dashboardRepository.upsertSessionMetadata(
+    input.request,
+    input.user,
+    metadata,
+  )
+  return {
+    session,
+    binding: createProjectSessionBinding(input.project.id, session.id, workspacePath, language),
+    ...(latest?.id && latest.id !== session.id ? { previousSessionId: latest.id } : {}),
+  }
+}
+
+async function getBeeGameProjectRuntimeState(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  defaultWorkspacePath?: string
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+  beeGamePreviews: BeeGamePreviewManager
+  dashboardRepository: DashboardRepository
+}): Promise<JsonObject> {
+  const latest = await getLatestProjectSessionMetadata(input)
+  const live = findLiveProjectSession(
+    input.beeGameSessions,
+    input.user.id,
+    input.project.id,
+  )
+  const sessionId = live?.id || latest?.id || inferBeeGameSessionIdFromProjectId(input.project.id)
+  const workspacePath = input.project.root_path || latest?.workspacePath
+  if (!sessionId || !workspacePath) {
+    return createIdleProjectRuntimeState(input.project.id)
+  }
+
+  const resolvedWorkspacePath = await resolveSessionWorkspacePath(
+    workspacePath,
+    input.defaultWorkspacePath,
+  )
+  const events = await getProjectRuntimeEvents({
+    sessionId,
+    workspacePath: resolvedWorkspacePath,
+    dashboardDataRoot: input.dashboardDataRoot,
+    beeGameSessions: input.beeGameSessions,
+  })
+  const snapshot = getProjectRuntimeSnapshot({
+    sessionId,
+    workspacePath: resolvedWorkspacePath,
+    beeGameSessions: input.beeGameSessions,
+  })
+  const pending = getPendingBeeGamePermissionEvents(events)
+  const runtime = deriveBeeGameRuntimeStatus(events, pending, snapshot?.phaseStatus === 'recovered')
+  const preview = getProjectPreviewSnapshot({
+    sessionId,
+    workspacePath: resolvedWorkspacePath,
+    beeGamePreviews: input.beeGamePreviews,
+  })
+  return {
+    project_id: input.project.id,
+    phase: runtime.phase,
+    blocked: pending.length > 0 || runtime.agentStatus === 'failed',
+    blocked_reason: pending[0]?.text ?? (runtime.agentStatus === 'failed' ? runtime.nextAction : null),
+    active_agents: runtime.activeAgents,
+    updated_at: runtime.updatedAt,
+    approval_required: pending.length > 0,
+    next_action: runtime.nextAction,
+    context: deriveBeeGameContextVisibility(events, snapshot),
+    build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
+    review_status: null,
+    model_config_id: live?.modelConfigId ?? latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
+  }
+}
+
+async function getLatestProjectSessionMetadata(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  dashboardRepository: DashboardRepository
+}): Promise<Awaited<ReturnType<DashboardRepository['listProjectSessions']>>[number] | undefined> {
+  return (await input.dashboardRepository.listProjectSessions(
+    input.request,
+    input.user,
+    input.project.id,
+  ))[0]
+}
+
+function findLiveProjectSession(
+  beeGameSessions: BeeGameSessionManager,
+  userId: string,
+  projectId: string,
+): BeeGameSession | undefined {
+  return beeGameSessions
+    .list(userId)
+    .find(session => beeGameSessions.metadata(session.id)?.projectId === projectId)
+}
+
+function createProjectSessionBinding(
+  projectId: string,
+  sessionId: string,
+  workspacePath: string,
+  language?: BeeGameSessionLanguage,
+): {
+  projectId: string
+  sessionId: string
+  workspacePath: string
+  language?: BeeGameSessionLanguage
+} {
+  return {
+    projectId,
+    sessionId,
+    workspacePath,
+    ...(language ? { language } : {}),
+  }
+}
+
+async function getProjectRuntimeEvents(input: {
+  sessionId: string
+  workspacePath: string
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+}): Promise<BeeGameEvent[]> {
+  try {
+    return input.beeGameSessions.events(input.sessionId)
+  } catch (err) {
+    if (toErrorMessage(err) !== 'Session not found') throw err
+    const transcript = await readSessionTranscriptFromDisk(
+      input.sessionId,
+      input.workspacePath,
+      input.dashboardDataRoot,
+    )
+    return closeInterruptedTranscriptTurns(input.sessionId, transcript)
+      .map(event => ({
+        ...event,
+        sessionId: event.sessionId || input.sessionId,
+        createdAt: new Date(event.createdAt),
+      }))
+  }
+}
+
+function getProjectRuntimeSnapshot(input: {
+  sessionId: string
+  workspacePath: string
+  beeGameSessions: BeeGameSessionManager
+}): BeeGameRuntimeSnapshot | undefined {
+  try {
+    return input.beeGameSessions.runtimeSnapshot(input.sessionId, input.workspacePath)
+  } catch {
+    return undefined
+  }
+}
+
+function getProjectPreviewSnapshot(input: {
+  sessionId: string
+  workspacePath: string
+  beeGamePreviews: BeeGamePreviewManager
+}): BeeGamePreviewSnapshot | undefined {
+  try {
+    return input.beeGamePreviews.status(input.sessionId, input.workspacePath)
+  } catch {
+    return undefined
+  }
+}
+
+function createIdleProjectRuntimeState(projectId: string): JsonObject {
+  const updatedAt = new Date().toISOString()
+  return {
+    project_id: projectId,
+    phase: 'idle',
+    blocked: false,
+    blocked_reason: null,
+    active_agents: [],
+    updated_at: updatedAt,
+    approval_required: false,
+    next_action: 'Ready for next request',
+    context: null,
+    build_report: null,
+    review_status: null,
+    model_config_id: null,
+  }
+}
+
+function getPendingBeeGamePermissionEvents(events: BeeGameEvent[]): BeeGameEvent[] {
+  const resolved = new Set(
+    events
+      .filter(event => event.type === 'permission.resolved')
+      .map(event => getBeeGamePayloadString(event, 'toolUseID'))
+      .filter(Boolean),
+  )
+  return events
+    .filter(event => event.type === 'permission.requested')
+    .filter(event => {
+      const toolUseID = getBeeGamePayloadString(event, 'toolUseID')
+      return toolUseID && !resolved.has(toolUseID)
+    })
+}
+
+function deriveBeeGameRuntimeStatus(
+  events: BeeGameEvent[],
+  pending: BeeGameEvent[],
+  recoveredFromTranscript = false,
+): {
+  phase: string
+  nextAction: string
+  updatedAt: string
+  activeAgents: string[]
+  agentStatus: string
+} {
+  const latest = events.at(-1)
+  const updatedAt = normalizeBeeGameCreatedAt(latest?.createdAt) || new Date().toISOString()
+  if (pending.length > 0) {
+    return {
+      phase: 'waiting_approval',
+      nextAction: 'Review BeeGame permission request',
+      updatedAt,
+      activeAgents: ['beegame'],
+      agentStatus: 'waiting',
+    }
+  }
+  const activeTurn = getActiveBeeGameTurn(events)
+  if (activeTurn) {
+    return recoveredFromTranscript
+      ? {
+          phase: 'idle',
+          nextAction: 'Ready for next request',
+          updatedAt,
+          activeAgents: [],
+          agentStatus: 'idle',
+        }
+      : {
+          phase: 'running',
+          nextAction: 'BeeGame is processing',
+          updatedAt,
+          activeAgents: ['beegame'],
+          agentStatus: 'working',
+        }
+  }
+  if (latest?.type === 'turn.failed' || latest?.type === 'session.failed') {
+    return {
+      phase: 'paused',
+      nextAction: latest.text || 'BeeGame turn failed',
+      updatedAt,
+      activeAgents: [],
+      agentStatus: 'failed',
+    }
+  }
+  return {
+    phase: 'idle',
+    nextAction: 'Ready for next request',
+    updatedAt,
+    activeAgents: [],
+    agentStatus: 'idle',
+  }
+}
+
+function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
+  const ended = new Set(
+    events
+      .filter(event =>
+        event.type === 'turn.completed' ||
+        event.type === 'turn.empty' ||
+        event.type === 'turn.failed' ||
+        event.type === 'result' ||
+        event.type === 'session.stopped' ||
+        event.type === 'session.failed'
+      )
+      .map(event => event.turnId)
+      .filter(Boolean),
+  )
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'turn.started' && event.turnId && !ended.has(event.turnId)) {
+      return event.turnId
+    }
+  }
+  return ''
+}
+
+function deriveBeeGameContextVisibility(
+  events: BeeGameEvent[],
+  snapshot?: BeeGameRuntimeSnapshot,
+): JsonObject | null {
+  const usage = getLatestBeeGameTokenUsage(events) ?? snapshot?.usage
+  const observation = [...events].reverse().find(event => event.type === 'runtime.observation')
+  if (!usage && !observation) return null
+  const counters = isObject(observation?.payload?.counters)
+    ? observation.payload.counters
+    : {}
+  return {
+    bundle_id: observation ? `beegame-runtime-${observation.sessionId}` : 'beegame-runtime',
+    phase: getBeeGamePayloadString(observation, 'phase') || snapshot?.phaseName || 'idle',
+    status: getBeeGamePayloadString(observation, 'status') || 'active',
+    summary: 'BeeGame runtime observability is active for this session.',
+    blackboard_record_count: Number(counters.eventCount ?? events.length),
+    memory_hits: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
+    rag_sources: observation ? ['transcripts/<project-folder>__<session-hash>.jsonl'] : [],
+    selected_skills: [],
+    runtime_features: [],
+    ...(usage ? {
+      token_budget: {
+        status: 'tracking',
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+      },
+    } : {}),
+    counters: {
+      eventCount: Number(counters.eventCount ?? events.length),
+      toolUseCount: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
+      turnIndex: Number(counters.turnIndex ?? 0),
+    },
+  }
+}
+
+function getLatestBeeGameTokenUsage(events: BeeGameEvent[]): {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+} | null {
+  for (const event of [...events].reverse()) {
+    const usage = getBeeGameUsageFromPayload(event.payload)
+    if (usage) return usage
+  }
+  return null
+}
+
+function getBeeGameUsageFromPayload(payload: unknown): {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+} | null {
+  if (!isObject(payload)) return null
+  const usage = isObject(payload.usage) ? payload.usage : undefined
+  if (!usage) return null
+  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens) || 0
+  const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens) || 0
+  const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens
+  return totalTokens > 0
+    ? {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+      }
+    : null
+}
+
+function previewSnapshotToProjectBuildReport(preview: BeeGamePreviewSnapshot): JsonObject | null {
+  if (preview.status === 'idle' && !preview.url) return null
+  const running = preview.status === 'running' && Boolean(preview.url)
+  const unavailable = preview.status === 'failed' || preview.status === 'unsupported'
+  return {
+    status: running ? 'passed' : unavailable ? 'failed' : preview.status,
+    entrypoint: preview.entrypoint || '',
+    report_path: '',
+    build_url: running ? preview.url : '',
+    agents: ['dashboard-preview'],
+    generated_paths: [],
+    checks: [{
+      name: preview.script || 'preview',
+      status: running ? 'passed' : preview.status,
+      detail: preview.message || '',
+      path: '',
+    }],
+    summary: running
+      ? `Managed preview available at ${preview.url}`
+      : preview.message || 'Preview is not running',
+    failure_reason: unavailable ? preview.message || 'Preview unavailable' : '',
+    created_at: preview.updatedAt,
+  }
+}
+
+function getBeeGamePayloadString(
+  event: BeeGameEvent | undefined,
+  key: string,
+): string {
+  const value = event?.payload?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeBeeGameCreatedAt(value: Date | string | undefined): string {
+  if (!value) return ''
+  return value instanceof Date ? value.toISOString() : String(value)
+}
+
+function inferBeeGameSessionIdFromProjectId(projectId: string): string {
+  return projectId.startsWith('project_beegame_')
+    ? projectId.slice('project_'.length)
+    : ''
+}
+
+function normalizeResolvedPath(path: string): string {
+  return resolve(path)
 }
 
 function registerBeeGameSessionRoutes(
@@ -2536,12 +3055,77 @@ async function readTranscriptFromWorkspace(
       resolvedWorkspace,
       dashboardDataRoot,
     )
+    const recoveredEvents = closeInterruptedTranscriptTurns(
+      sessionId,
+      events,
+    )
     return Response.json(
-      after > 0 ? events.filter(event => event.id > after) : events,
+      after > 0
+        ? recoveredEvents.filter(event => event.id > after)
+        : recoveredEvents,
     )
   } catch (err) {
     return Response.json({ error: toErrorMessage(err) }, { status: 404 })
   }
+}
+
+type RecoveredTranscriptEvent = Awaited<
+  ReturnType<typeof readSessionTranscriptFromDisk>
+>[number]
+
+function closeInterruptedTranscriptTurns(
+  sessionId: string,
+  events: RecoveredTranscriptEvent[],
+): RecoveredTranscriptEvent[] {
+  const turnId = findLatestOpenTranscriptTurnId(events)
+  if (!turnId) return events
+  const latestId = events.reduce((max, event) => Math.max(max, event.id), 0)
+  const latestCreatedAt = events.at(-1)?.createdAt
+  return [
+    ...events,
+    {
+      id: latestId + 1,
+      sessionId,
+      turnId,
+      type: 'turn.failed',
+      text: 'Previous BeeGame turn was interrupted before completion.',
+      createdAt: latestCreatedAt || new Date().toISOString(),
+    },
+  ]
+}
+
+function findLatestOpenTranscriptTurnId(
+  events: RecoveredTranscriptEvent[],
+): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (
+      event?.type === 'turn.started' &&
+      event.turnId &&
+      !hasTranscriptTurnEnded(events, event.turnId)
+    ) {
+      return event.turnId
+    }
+  }
+  return ''
+}
+
+function hasTranscriptTurnEnded(
+  events: RecoveredTranscriptEvent[],
+  turnId?: string,
+): boolean {
+  if (!turnId) return true
+  return events.some(event =>
+    event.turnId === turnId &&
+    (
+      event.type === 'turn.completed' ||
+      event.type === 'turn.empty' ||
+      event.type === 'turn.failed' ||
+      event.type === 'result' ||
+      event.type === 'session.stopped' ||
+      event.type === 'session.failed'
+    )
+  )
 }
 
 function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {

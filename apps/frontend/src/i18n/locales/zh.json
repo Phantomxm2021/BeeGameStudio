@@ -21,7 +21,8 @@
         "inputs": "输入方式",
         "notes": "补充说明",
         "presentation": "表现",
-        "type": "类型"
+        "type": "类型",
+        "selectPlaceholder": "请选择"
       },
       "actions": {
         "chooseAgain": "重新选择",
@@ -50,6 +51,7 @@
         "missingEmailPassword": "请输入邮箱和密码。",
         "missingDisplayName": "请设置昵称。",
         "termsRequired": "请先阅读并同意用户协议。",
+        "missingProductionSettings": "请选择制作设置。",
         "intakeFailed": "方案生成失败，请重试。",
         "loginFailed": "登录失败，请重试。",
         "invalidCredentials": "邮箱或密码不正确，请检查后重试。",

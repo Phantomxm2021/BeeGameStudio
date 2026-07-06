@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Camera, Check, ChevronDown, X } from 'lucide-react';
@@ -52,12 +52,14 @@ type IntakePhase =
     | 'confirming_brief'
     | 'starting_build';
 
-const platformOptions = ['Web', 'Mobile', 'Desktop', 'XR', 'Console'];
-const engineOptions = ['React', 'Unity', 'Godot', 'Unreal'];
-const dimensionOptions = ['2D', '3D', 'Mixed'];
-const genreOptions = ['Arcade', 'Puzzle', 'Action', 'Adventure', 'Casual', 'Simulation', 'Strategy', 'RPG'];
-const styleOptions = ['Pixel', 'Cartoon', 'Minimal', 'Painterly', 'Sci-fi', 'Fantasy', 'Realistic'];
-const inputOptions = ['Keyboard/mouse', 'Gamepad', 'Touch', 'Voice', 'Hand tracking XR'];
+type ProductionSettingOptions = {
+    platforms: string[];
+    engines: string[];
+    dimensions: string[];
+    genres: string[];
+    styles: string[];
+    inputs: string[];
+};
 
 type IntakeCopy = {
     modal: {
@@ -81,6 +83,7 @@ type IntakeCopy = {
         notes: string;
         presentation: string;
         type: string;
+        selectPlaceholder: string;
     };
     actions: {
         chooseAgain: string;
@@ -108,6 +111,7 @@ type IntakeCopy = {
         missingEmailPassword: string;
         missingDisplayName: string;
         termsRequired: string;
+        missingProductionSettings: string;
     };
     placeholders: {
         notes: string;
@@ -185,6 +189,7 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         notes: translate('fields.notes'),
         presentation: translate('fields.presentation'),
         type: translate('fields.type'),
+        selectPlaceholder: translate('fields.selectPlaceholder'),
     },
     actions: {
         chooseAgain: translate('actions.chooseAgain'),
@@ -216,6 +221,7 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         missingEmailPassword: translate('errors.missingEmailPassword'),
         missingDisplayName: translate('errors.missingDisplayName'),
         termsRequired: translate('errors.termsRequired'),
+        missingProductionSettings: translate('errors.missingProductionSettings'),
     },
     placeholders: {
         notes: translate('placeholders.notes'),
@@ -298,12 +304,12 @@ interface LandingViewProps {
 }
 
 const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings => ({
-    platform: normalizeOptionValue(platformOptions, inferPlatform(option.recommendedPlatform), 'Web'),
-    engine: normalizeOptionValue(engineOptions, inferEngine(option.recommendedPlatform), 'React'),
-    visualStyle: normalizeOptionValue(styleOptions, option.recommendedStyle, 'Cartoon'),
-    dimension: normalizeOptionValue(dimensionOptions, option.recommendedDimension, '2D'),
-    genre: normalizeOptionValue(genreOptions, option.recommendedGenre, 'Arcade'),
-    inputs: normalizeInputs(option.recommendedInputs),
+    platform: '',
+    engine: '',
+    visualStyle: '',
+    dimension: '',
+    genre: '',
+    inputs: [],
     scope: option.scope || 'Prototype',
     notes: '',
 });
@@ -313,36 +319,38 @@ const optionsWithCurrentValue = (options: string[], value: string): string[] => 
     return [value, ...options];
 };
 
-function normalizeInputs(inputs: string[]): string[] {
-    const normalized = inputs.filter(input => input && input !== 'Auto');
-    return normalized.length > 0 ? normalized : ['Keyboard/mouse'];
+function buildProductionSettingOptions(options: BeeGameIntakeOption[]): ProductionSettingOptions {
+    return {
+        platforms: uniqueNonEmpty(options.map(option => option.recommendedPlatform)),
+        engines: uniqueNonEmpty(options.map(option => option.recommendedEngine)),
+        dimensions: uniqueNonEmpty(options.map(option => option.recommendedDimension)),
+        genres: uniqueNonEmpty(options.map(option => option.recommendedGenre)),
+        styles: uniqueNonEmpty(options.map(option => option.recommendedStyle)),
+        inputs: uniqueNonEmpty(options.flatMap(option => option.recommendedInputs)),
+    };
 }
 
-function normalizeOptionValue(_options: string[], value: string | undefined, fallback: string): string {
-    const normalized = value?.trim();
-    if (!normalized || normalized === 'Auto') return fallback;
-    return normalized;
+function uniqueNonEmpty(values: Array<string | undefined>): string[] {
+    return values.reduce<string[]>((items, value) => {
+        const normalized = value?.trim();
+        if (!normalized || normalized === 'Auto' || items.includes(normalized)) return items;
+        return [...items, normalized];
+    }, []);
 }
 
-function inferPlatform(value: string | undefined): string {
-    const normalized = value?.trim();
-    if (!normalized || normalized === 'Auto') return 'Web';
-    if (engineOptions.includes(normalized)) return normalized === 'React' ? 'Web' : 'Desktop';
-    return normalized;
-}
-
-function inferEngine(value: string | undefined): string {
-    const normalized = value?.trim();
-    if (!normalized || normalized === 'Auto') return 'React';
-    if (normalized === 'Unreal Engine') return 'Unreal';
-    if (engineOptions.includes(normalized)) return normalized;
-    if (normalized === 'Web') return 'React';
-    if (normalized === 'XR') return 'Unity';
-    return 'React';
+function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean {
+    return Boolean(
+        settings.platform.trim() &&
+        settings.engine?.trim() &&
+        settings.dimension.trim() &&
+        settings.genre.trim() &&
+        settings.visualStyle.trim() &&
+        settings.inputs.length > 0,
+    );
 }
 
 function normalizeEngine(value: string | undefined): string {
-    return normalizeOptionValue(engineOptions, value === 'Unreal Engine' ? 'Unreal' : value, 'React');
+    return value === 'Unreal Engine' ? 'Unreal' : value || '';
 }
 
 const pendingCreditStorageKey = 'beegame.pendingCreditQuote.v1';
@@ -697,7 +705,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     };
     const legalDocuments = translate('legal', { returnObjects: true }) as LegalDocumentBundle;
     const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
-    const localizedInputs = (inputs: string[]): string => inputs.map(localizedOptionLabel).join(' / ');
+    const localizedInputs = (inputs: string[]): string => inputs.length > 0
+        ? inputs.map(localizedOptionLabel).join(' / ')
+        : intakeText.fields.selectPlaceholder;
+    const productionSettingOptions = useMemo(
+        () => buildProductionSettingOptions(intakeOptions),
+        [intakeOptions],
+    );
     const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
     const modalTitle = intakePhase === 'options_ready'
         ? intakeText.modal.chooseOption
@@ -1225,6 +1239,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const handleConfirmSettings = () => {
         if (!selectedOption || !settings) return;
+        if (!hasRequiredProductionSettings(settings)) {
+            setIntakeError(intakeText.errors.missingProductionSettings);
+            return;
+        }
+        setIntakeError('');
         setIsInputMenuOpen(false);
         setIntakePhase('confirming_brief');
         persistIntakeFlow('confirming_brief', intakeOptions, selectedOption, settings);
@@ -1555,7 +1574,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     >
                         <form
                             onSubmit={handleLoginSubmit}
-                            className={`input-surface glass-panel scrollbar-hide max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-[28px] text-zinc-100 ${authMode === 'register' ? 'max-w-lg p-6 sm:p-7' : 'max-w-md p-6'}`}
+                            className="input-surface glass-panel scrollbar-hide h-[min(700px,calc(100vh-2rem))] w-full max-w-[520px] overflow-y-auto rounded-[28px] p-6 text-zinc-100 sm:p-7"
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div>
@@ -1930,31 +1949,36 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <label className="type-subheadline text-zinc-300">
                                     {intakeText.fields.platform}
                                     <select aria-label={intakeText.fields.platform} value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        {optionsWithCurrentValue(platformOptions, settings.platform).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                        {optionsWithCurrentValue(productionSettingOptions.platforms, settings.platform).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-subheadline text-zinc-300">
                                     {intakeText.fields.engine}
                                     <select aria-label={intakeText.fields.engine} value={normalizeEngine(settings.engine)} onChange={(event) => updateSettings({ engine: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        {engineOptions.map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                        {optionsWithCurrentValue(productionSettingOptions.engines, settings.engine || '').map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-subheadline text-zinc-300">
                                     {intakeText.fields.dimension}
                                     <select aria-label={intakeText.fields.dimension} value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        {optionsWithCurrentValue(dimensionOptions, settings.dimension).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                        {optionsWithCurrentValue(productionSettingOptions.dimensions, settings.dimension).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-subheadline text-zinc-300">
                                     {intakeText.fields.genre}
                                     <select aria-label={intakeText.fields.genre} value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        {optionsWithCurrentValue(genreOptions, settings.genre).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                        {optionsWithCurrentValue(productionSettingOptions.genres, settings.genre).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <label className="type-subheadline text-zinc-300">
                                     {intakeText.fields.style}
                                     <select aria-label={intakeText.fields.style} value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        {optionsWithCurrentValue(styleOptions, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
+                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                        {optionsWithCurrentValue(productionSettingOptions.styles, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
                                 <div ref={inputMenuRef} className="type-subheadline relative text-zinc-300">
@@ -2039,7 +2063,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             className="input-surface glass-panel fixed z-[220] overflow-hidden rounded-3xl p-1.5 text-zinc-100 backdrop-blur-2xl"
                         >
                             <div className="relative z-10">
-                                {inputOptions.map((input) => {
+                                {optionsWithCurrentValue(productionSettingOptions.inputs, '').map((input) => {
                                     const active = settings.inputs.includes(input);
                                     return (
                                         <button
