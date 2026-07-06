@@ -5,10 +5,10 @@ import { describe, expect, test } from 'bun:test'
 const repoRoot = join(import.meta.dir, '..', '..')
 
 describe('Docker dependency registry', () => {
-  test('keeps Bun lockfile tarballs away from unstable mirror registries', () => {
+  test('keeps Bun lockfile tarballs away from legacy taobao mirror registries', () => {
     const lockfile = readFileSync(join(repoRoot, 'bun.lock'), 'utf8')
 
-    expect(lockfile).not.toContain('registry.npmmirror.com')
+    expect(lockfile).not.toContain('registry.npm.taobao.org')
   })
 
   test('keeps frontend Docker builds independent from the root Bun workspace install', () => {
@@ -20,9 +20,9 @@ describe('Docker dependency registry', () => {
     expect(frontendDockerfile).not.toContain('COPY packages ./packages')
   })
 
-  test('pins runtime Docker Bun install to the npm registry with conservative network concurrency', () => {
+  test('pins runtime Docker Bun install to the Aliyun npm mirror with conservative network concurrency', () => {
     const runtimeDockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.runtime'), 'utf8')
-    const expectedInstall = 'bun install --frozen-lockfile --registry=https://registry.npmjs.org/ --network-concurrency=8 --no-progress'
+    const expectedInstall = 'bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=8 --no-progress'
 
     expect(runtimeDockerfile).toContain(expectedInstall)
   })
