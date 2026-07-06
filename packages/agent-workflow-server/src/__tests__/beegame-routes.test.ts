@@ -4971,7 +4971,7 @@ describe('beegame session routes', () => {
       expect(deployRes.status).toBe(200)
       expect(deployment).toEqual(expect.objectContaining({
         status: 'succeeded',
-        buildCommand: 'npm run build',
+        buildCommand: 'npm run build -- --base=./',
       }))
       expect(deployment.url).toMatch(/^\/deployments\/deploy_/)
       expect(liveRes.status).toBe(200)

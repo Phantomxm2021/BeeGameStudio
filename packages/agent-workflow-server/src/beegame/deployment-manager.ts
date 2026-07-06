@@ -435,7 +435,7 @@ function createDeploymentPlan(workspacePath: string): DeploymentPlan {
         supported: true,
         cwd: workspacePath,
         entrypoint: 'package.json',
-        command: buildRunCommand(workspacePath, 'build'),
+        command: buildRunCommand(workspacePath, 'build', manifest.scripts?.build),
       }
     }
   }
@@ -449,7 +449,7 @@ function createDeploymentPlan(workspacePath: string): DeploymentPlan {
         supported: true,
         cwd: clientPath,
         entrypoint: 'client/package.json',
-        command: buildRunCommand(clientPath, 'build'),
+        command: buildRunCommand(clientPath, 'build', clientManifest.scripts?.build),
       }
     }
   }
@@ -475,9 +475,15 @@ function hasBuildScript(manifest: PackageManifest): boolean {
   return typeof manifest.scripts?.build === 'string' && manifest.scripts.build.trim().length > 0
 }
 
-function buildRunCommand(workspacePath: string, script: string): string[] {
+function buildRunCommand(workspacePath: string, script: string, scriptCommand?: string): string[] {
   const manager = detectPackageManager(workspacePath)
-  return manager === 'npm' ? ['npm', 'run', script] : [manager, 'run', script]
+  const command = manager === 'npm' ? ['npm', 'run', script] : [manager, 'run', script]
+  return isViteBuildScript(scriptCommand) ? [...command, '--', '--base=./'] : command
+}
+
+function isViteBuildScript(scriptCommand?: string): boolean {
+  return typeof scriptCommand === 'string' &&
+    scriptCommand.split(/\s+/).some(part => part === 'vite')
 }
 
 function detectPackageManager(workspacePath: string): 'npm' | 'pnpm' | 'yarn' | 'bun' {

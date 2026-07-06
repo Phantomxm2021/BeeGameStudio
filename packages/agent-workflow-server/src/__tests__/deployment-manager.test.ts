@@ -48,10 +48,39 @@ describe('BeeGameDeploymentManager', () => {
 
     expect(deployment.status).toBe('succeeded')
     expect(deployment.url).toMatch(/^http:\/\/127\.0\.0\.1:3040\/deployments\/deploy_/)
-    expect(deployment.buildCommand).toBe('npm run build')
-    expect(commands).toEqual([['npm', 'run', 'build']])
+    expect(deployment.buildCommand).toBe('npm run build -- --base=./')
+    expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
     expect(await readFile(join(deployment.artifactPath || '', 'index.html'), 'utf8'))
       .toBe('<h1>Playable</h1>')
+  })
+
+  test('does not append Vite base flags to non-Vite build scripts', async () => {
+    const commands: string[][] = []
+    const runner: BeeGameDeploymentRunner = async (command, options) => {
+      commands.push(command)
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist', 'index.html'), '<h1>Static</h1>')
+      return { exitCode: 0, stdout: 'built', stderr: '' }
+    }
+    await writeFile(
+      join(workspace, 'package.json'),
+      JSON.stringify({ scripts: { build: 'node build.js' } }),
+    )
+
+    const manager = new BeeGameDeploymentManager({
+      dataRoot: root,
+      runner,
+      publicBaseUrl: 'http://127.0.0.1:3040',
+    })
+    const deployment = await manager.deploy({
+      sessionId: 'beegame_static',
+      projectId: 'project_static',
+      workspacePath: workspace,
+    })
+
+    expect(deployment.status).toBe('succeeded')
+    expect(deployment.buildCommand).toBe('npm run build')
+    expect(commands).toEqual([['npm', 'run', 'build']])
   })
 
   test('publishes static output through a configured remote publisher', async () => {
@@ -99,7 +128,7 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.url).toBe('https://cdn.example.com/games/' + deployment.id + '/')
     expect(deployment.artifactPath).toBe(`remote://${deployment.id}`)
     expect(deployment.message).toBe('Remote deployment published')
-    expect(commands).toEqual([['npm', 'run', 'build']])
+    expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
     expect(publishedFiles).toEqual([
       { path: 'assets/game.js', content: 'console.log("play")' },
       { path: 'index.html', content: '<main>Remote game</main>' },
