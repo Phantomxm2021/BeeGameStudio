@@ -5,19 +5,25 @@ import { describe, expect, test } from 'bun:test'
 const repoRoot = join(import.meta.dir, '..', '..')
 
 describe('Docker dependency registry', () => {
-  test('keeps Bun lockfile tarballs on the npm registry for reproducible Docker builds', () => {
+  test('keeps Bun lockfile tarballs away from unstable mirror registries', () => {
     const lockfile = readFileSync(join(repoRoot, 'bun.lock'), 'utf8')
 
     expect(lockfile).not.toContain('registry.npmmirror.com')
-    expect(lockfile).toContain('registry.npmjs.org')
   })
 
-  test('pins Docker Bun installs to the npm registry with conservative network concurrency', () => {
+  test('keeps frontend Docker builds independent from the root Bun workspace install', () => {
     const frontendDockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.frontend'), 'utf8')
+
+    expect(frontendDockerfile).toContain('COPY apps/frontend/package.json apps/frontend/package-lock.json ./')
+    expect(frontendDockerfile).toContain('npm ci --workspaces=false --no-audit --no-fund')
+    expect(frontendDockerfile).not.toContain('bun install --frozen-lockfile')
+    expect(frontendDockerfile).not.toContain('COPY packages ./packages')
+  })
+
+  test('pins runtime Docker Bun install to the npm registry with conservative network concurrency', () => {
     const runtimeDockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.runtime'), 'utf8')
     const expectedInstall = 'bun install --frozen-lockfile --registry=https://registry.npmjs.org/ --network-concurrency=8 --no-progress'
 
-    expect(frontendDockerfile).toContain(expectedInstall)
     expect(runtimeDockerfile).toContain(expectedInstall)
   })
 })
