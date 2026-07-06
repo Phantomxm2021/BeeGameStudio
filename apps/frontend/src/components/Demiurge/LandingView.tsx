@@ -1140,12 +1140,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
         setLoginError('');
         try {
-            if (isInvitationRequired && !invitationCode.trim()) {
-                showAuthError(translate('intake.errors.invitationRequired'));
-                return;
-            }
             writePendingAuthIdeaState(pendingIdeaAfterLogin);
-            if (isInvitationRequired) {
+            if (invitationCode.trim()) {
                 await signInWithSupabaseOAuth(provider, { invitationCode });
             } else {
                 await signInWithSupabaseOAuth(provider);

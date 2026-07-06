@@ -71,4 +71,19 @@ describe('BeeGame owner bootstrap', () => {
     expect(noWorkspaceContext).toContain('modelConfigOwnerId')
     expect(noWorkspaceContext).toContain('model_config_owner_id')
   })
+
+  test('keeps OAuth invitation-free accounts at zero credits until redemption', async () => {
+    const migration = await Bun.file(
+      new URL('../../docs/beegame-supabase-invitations-migration.sql', import.meta.url),
+    ).text()
+
+    expect(migration).not.toContain("else\n      return new;")
+    expect(migration).toContain('initial_included_credits := 0;')
+    expect(migration).toMatch(
+      /insert into public\.beegame_credit_accounts \(user_id, included_credits\)[\s\S]*values \(canonical_account_id, initial_included_credits\)/,
+    )
+    expect(migration).toMatch(
+      /create or replace function public\.beegame_redeem_oauth_invitation\(p_nonce text\)[\s\S]*insert into public\.beegame_credit_accounts \(user_id\)[\s\S]*on conflict \(user_id\) do update[\s\S]*included_credits = greatest\(/,
+    )
+  })
 })

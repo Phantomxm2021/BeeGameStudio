@@ -902,7 +902,7 @@ export class SupabaseDashboardStore {
       {
         user_id: ownerId,
         plan: 'free',
-        included_credits: getDefaultFreeCredits(),
+        included_credits: 0,
         consumed_credits: 0,
         reserved_credits: 0,
         updated_at: new Date().toISOString(),

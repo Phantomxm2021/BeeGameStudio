@@ -108,6 +108,47 @@ describe('SupabaseDashboardStore', () => {
     ])
   })
 
+  test('creates missing Supabase credit accounts with zero included credits', async () => {
+    const ownerId = '00000000-0000-0000-0000-000000000001'
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      const method = init?.method ?? 'GET'
+      const body = init?.body
+        ? JSON.parse(String(init.body)) as Record<string, unknown>
+        : undefined
+      calls.push({
+        url: requestUrl,
+        method,
+        ...(body ? { body } : {}),
+      })
+
+      if (requestUrl.includes('/beegame_credit_accounts')) {
+        if (method === 'POST') return Response.json([body])
+        return Response.json([])
+      }
+      return Response.json([])
+    }) as typeof fetch
+
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+    })
+
+    const balance = await store.getCreditBalance(ownerId)
+
+    expect(balance.includedCredits).toBe(0)
+    expect(balance.balanceCredits).toBe(0)
+    expect(calls).toContainEqual(expect.objectContaining({
+      method: 'POST',
+      body: expect.objectContaining({
+        user_id: ownerId,
+        included_credits: 0,
+      }),
+    }))
+  })
+
   test('loads and upserts owner scoped dashboard data through Supabase REST', async () => {
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
     const creditAccount = {

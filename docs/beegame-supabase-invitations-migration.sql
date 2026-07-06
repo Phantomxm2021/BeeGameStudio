@@ -371,12 +371,14 @@ set search_path = public
 as $$
 declare
   current_user_id uuid;
+  current_account_id uuid;
   nonce_row public.beegame_oauth_invitation_nonces%rowtype;
 begin
   current_user_id := auth.uid();
   if current_user_id is null then
     raise exception 'Authentication required';
   end if;
+  current_account_id := public.beegame_account_id(current_user_id);
 
   select *
   into nonce_row
@@ -401,6 +403,12 @@ begin
   set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) ||
     jsonb_build_object('beegame_invitation_redeemed_at', now())
   where id = current_user_id;
+
+  insert into public.beegame_credit_accounts (user_id)
+  values (current_account_id)
+  on conflict (user_id) do update
+  set included_credits = greatest(public.beegame_credit_accounts.included_credits, 300),
+      updated_at = now();
 
   return jsonb_build_object('ok', true);
 end
@@ -432,6 +440,7 @@ declare
   profile_avatar_url text;
   initial_role text;
   invited_platform_owner boolean;
+  initial_included_credits integer := 300;
 begin
   invited_platform_owner := exists (
     select 1
@@ -455,7 +464,7 @@ begin
     elsif coalesce(new.raw_app_meta_data->>'provider', 'email') = 'email' then
       raise exception 'Invitation code is required';
     else
-      return new;
+      initial_included_credits := 0;
     end if;
   end if;
   profile_name := coalesce(
@@ -529,8 +538,8 @@ begin
       and (claimed_user_id is null or claimed_user_id = new.id);
   end if;
 
-  insert into public.beegame_credit_accounts (user_id)
-  values (canonical_account_id)
+  insert into public.beegame_credit_accounts (user_id, included_credits)
+  values (canonical_account_id, initial_included_credits)
   on conflict (user_id) do nothing;
 
   return new;

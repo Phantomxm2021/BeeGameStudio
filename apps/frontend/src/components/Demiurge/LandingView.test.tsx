@@ -1002,7 +1002,7 @@ describe('LandingView bootstrap submission', () => {
         expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('discord');
     });
 
-    it('requires and forwards an invitation code for third-party login when enabled', async () => {
+    it('allows third-party login without an invitation code when invitations are enabled', async () => {
         mockCurrentUser = null;
         getInvitationPublicSettings.mockResolvedValue({ required: true });
 
@@ -1014,11 +1014,7 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByText('第三方授权邀请码')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
-        const errorDialog = await screen.findByRole('dialog', { name: '错误提示' });
-        expect(within(errorDialog).getByText('请输入邀请码。')).toBeInTheDocument();
-        expect(signInWithSupabaseOAuth).not.toHaveBeenCalled();
-
-        fireEvent.click(within(errorDialog).getByText('知道了'));
+        expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
         fireEvent.change(screen.getByLabelText('第三方授权邀请码'), { target: { value: 'BEE-ALPHA' } });
         fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
