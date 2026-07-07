@@ -57,6 +57,7 @@ export type BeeGameEventType =
   | 'user.message'
   | 'assistant.message'
   | 'assistant.partial'
+  | 'assistant.thinking'
   | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'
@@ -200,6 +201,7 @@ type SessionRecord = {
   monitoredSubagentOutputFiles: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
   assistantPartialTextByTurn: Map<string, string>
+  thinkingBlockIndexes: Set<number>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
@@ -354,6 +356,7 @@ export class BeeGameSessionManager {
       monitoredSubagentOutputFiles: new Set(),
       toolUses: new Map(),
       assistantPartialTextByTurn: new Map(),
+      thinkingBlockIndexes: new Set(),
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
@@ -839,7 +842,7 @@ export class BeeGameSessionManager {
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
-        const mapped = mapSDKMessageToEvent(message)
+        const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
             this.append(record, mapped.type, mapped.text, message)
@@ -850,7 +853,7 @@ export class BeeGameSessionManager {
               mapped.text,
             ), message)
           } else {
-            this.append(record, mapped.type, mapped.text, message)
+            this.append(record, mapped.type, mapped.text, mapped.payload ?? message)
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
@@ -3080,9 +3083,10 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function mapSDKMessageToEvent(message: DashboardSDKMessage): {
+function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessage): {
   type: BeeGameEventType
   text: string
+  payload?: DashboardSDKMessage
 } | null {
   switch (message.type) {
     case 'user':
@@ -3092,7 +3096,7 @@ function mapSDKMessageToEvent(message: DashboardSDKMessage): {
     case 'partial_assistant':
       return mapTextEvent('assistant.partial', extractAssistantVisibleText(message))
     case 'stream_event':
-      return mapTextEvent('assistant.partial', extractStreamTextDelta(message))
+      return mapStreamEvent(record, message)
     case 'tool_progress':
       return mapTextEvent('tool.progress', extractMessageText(message))
     case 'result':
@@ -3111,6 +3115,26 @@ function mapTextEvent(
 ): { type: BeeGameEventType; text: string } | null {
   const normalized = text.trim()
   return normalized ? { type, text: normalized } : null
+}
+
+function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
+  type: BeeGameEventType
+  text: string
+  payload?: DashboardSDKMessage
+} | null {
+  const textDelta = extractStreamTextDelta(message)
+  if (textDelta.trim()) return mapTextEvent('assistant.partial', textDelta)
+
+  const thinking = extractStreamThinkingStatus(record, message)
+  if (!thinking) return null
+  return {
+    type: 'assistant.thinking',
+    text: 'Thinking',
+    payload: {
+      type: 'assistant.thinking',
+      status: thinking,
+    },
+  }
 }
 
 function mapSDKMessageToToolEvents(
@@ -3261,6 +3285,35 @@ function extractStreamTextDelta(message: DashboardSDKMessage): string {
   return getStringField(delta, 'text')
 }
 
+function extractStreamThinkingStatus(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): 'started' | 'streaming' | 'ended' | null {
+  const event = getObjectField(message, 'event') ?? message
+  const eventType = getStringField(event, 'type')
+  if (eventType === 'content_block_start') {
+    const contentBlock = getObjectField(event, 'content_block')
+    const blockType = getStringField(contentBlock, 'type')
+    if (blockType !== 'thinking' && blockType !== 'redacted_thinking') return null
+    const index = getNumberField(event, 'index')
+    if (index !== undefined) record.thinkingBlockIndexes.add(index)
+    return 'started'
+  }
+  if (eventType === 'content_block_stop') {
+    const index = getNumberField(event, 'index')
+    if (index === undefined || !record.thinkingBlockIndexes.has(index)) return null
+    record.thinkingBlockIndexes.delete(index)
+    return 'ended'
+  }
+  if (eventType !== 'content_block_delta') return null
+
+  const delta = getObjectField(event, 'delta')
+  const deltaType = getStringField(delta, 'type')
+  return deltaType === 'thinking_delta' || deltaType === 'redacted_thinking_delta'
+    ? 'streaming'
+    : null
+}
+
 function extractAssistantPartialText(message: DashboardSDKMessage): string {
   if (message.type === 'stream_event') return extractStreamTextDelta(message)
   if (message.type === 'partial_assistant') {
@@ -3283,6 +3336,14 @@ function getBooleanField(
 ): boolean | undefined {
   const fieldValue = value?.[field]
   return typeof fieldValue === 'boolean' ? fieldValue : undefined
+}
+
+function getNumberField(
+  value: Record<string, unknown> | undefined,
+  field: string,
+): number | undefined {
+  const fieldValue = value?.[field]
+  return typeof fieldValue === 'number' ? fieldValue : undefined
 }
 
 function getObjectField(

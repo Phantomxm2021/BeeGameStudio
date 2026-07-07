@@ -2391,6 +2391,40 @@ describe('beeGameAdapter prompt rules', () => {
     expect(firstPoll.messages.some(message => message.type === 'token')).toBe(false);
   });
 
+  it('maps BeeGame thinking events to redacted status messages', async () => {
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
+      {
+        projectId: 'project_thinking',
+        sessionId: 'beegame_thinking',
+        workspacePath: '/tmp/beegame-projects/thinking',
+      },
+    ]));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_thinking/events?after=0') {
+        return jsonResponse([
+          thinkingEvent(30, 'beegame_thinking', 'turn-1', 'started'),
+          thinkingEvent(31, 'beegame_thinking', 'turn-1', 'streaming'),
+          thinkingEvent(32, 'beegame_thinking', 'turn-1', 'ended'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const polled = await beeGameAdapter.pollMessages('project_thinking', 0);
+
+    expect(polled.messages).toHaveLength(1);
+    expect(polled.messages[0]).toEqual(expect.objectContaining({
+      type: 'agent_message',
+      sender: 'beegame',
+      content: 'Thinking',
+      task_kind: 'assistant_thinking',
+      message_id: 'beegame-event-31',
+    }));
+    expect(JSON.stringify(polled.messages)).not.toContain('private reasoning');
+  });
+
   it('keeps assistant and tool messages in BeeGame event order', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -3538,6 +3572,21 @@ function assistantPartialEvent(id: number, sessionId: string, turnId: string, te
     type: 'assistant.partial',
     text,
     payload: { type: 'assistant.partial' },
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
+  };
+}
+
+function thinkingEvent(id: number, sessionId: string, turnId: string, status: 'started' | 'streaming' | 'ended') {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'assistant.thinking',
+    text: 'Thinking',
+    payload: {
+      type: 'assistant.thinking',
+      status,
+    },
     createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }

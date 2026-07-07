@@ -66,6 +66,11 @@ const isAgentMessage = (message: ChatDisplayMessage): boolean => {
     return message.sender === 'beegame' || message.sender === 'agent';
 };
 
+const isThinkingMessage = (message: ChatDisplayMessage): boolean => {
+    const raw = message as ChatDisplayMessage & { task_kind?: string };
+    return message.type === 'thought' || message.taskKind === 'assistant_thinking' || raw.task_kind === 'assistant_thinking';
+};
+
 const getStructuredLineValue = (content: string, label: string): string => {
     const prefix = `${label}:`;
     const line = content
@@ -173,6 +178,7 @@ const getAgentPreview = (content: string): { preview: string; isTruncated: boole
 
 type FeedEntry =
     | { kind: 'user'; message: ChatDisplayMessage }
+    | { kind: 'thinking'; message: ChatDisplayMessage }
     | { kind: 'agent'; message: ChatDisplayMessage; tools: NormalizedTool[] }
     | { kind: 'tools'; id: string; tools: NormalizedTool[] };
 
@@ -182,6 +188,11 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     for (const message of messages) {
         if (message.sender === 'user') {
             entries.push({ kind: 'user', message });
+            continue;
+        }
+
+        if (isThinkingMessage(message)) {
+            entries.push({ kind: 'thinking', message });
             continue;
         }
 
@@ -211,6 +222,7 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
 
 export const BeeGameCollaborationFeed = memo(({
     messages,
+    projectStatus,
     onPreviewArtifact,
     lang = 'en',
     currentUserDisplayName,
@@ -233,6 +245,14 @@ export const BeeGameCollaborationFeed = memo(({
                                 currentUserDisplayName={currentUserDisplayName}
                                 currentUserEmail={currentUserEmail}
                                 currentUserAvatarUrl={currentUserAvatarUrl}
+                            />
+                        </div>
+                    ) : entry.kind === 'thinking' ? (
+                        <div key={entry.message.id} data-beegame-message-anchor={entry.message.id}>
+                            <ThinkingStatusCard
+                                message={entry.message}
+                                lang={lang}
+                                isRunning={projectStatus?.phase === 'running'}
                             />
                         </div>
                     ) : entry.kind === 'agent' ? (
@@ -370,6 +390,14 @@ const buildAxisEntries = (entries: FeedEntry[], text: BeeGameText): AxisEntry[] 
                 id: entry.message.id,
                 title: text.assistantName,
                 preview: toAxisPreview(entry.message.content),
+                tone: 'agent',
+            };
+        }
+        if (entry.kind === 'thinking') {
+            return {
+                id: entry.message.id,
+                title: text.assistantName,
+                preview: toAxisPreview(entry.message.content || 'Thinking...'),
                 tone: 'agent',
             };
         }
@@ -582,6 +610,40 @@ const getAxisLinePresentation = (
             : 'bg-zinc-600/70',
     };
 };
+
+function ThinkingStatusCard({
+    message,
+    lang,
+    isRunning,
+}: {
+    message: ChatDisplayMessage;
+    lang: Language;
+    isRunning: boolean;
+}) {
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (!isRunning) return undefined;
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [isRunning]);
+
+    const elapsedMs = Math.max(0, now - Number(message.timestamp || now));
+    const isStalled = isRunning && elapsedMs >= 60000;
+    const label = lang.startsWith('zh')
+        ? (isStalled ? '仍在 Thinking，可继续等待或停止' : 'AI 正在思考...')
+        : (isStalled ? 'Still thinking. You can wait or stop.' : 'Thinking...');
+
+    return (
+        <section
+            data-testid={`beegame-thinking-message-${message.id}`}
+            className="glass-control inline-flex max-w-full items-center gap-2 rounded-2xl px-3 py-2 text-zinc-400 shadow-sm backdrop-blur-2xl"
+        >
+            <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" />
+            <span className="type-footnote min-w-0 truncate">{label}</span>
+        </section>
+    );
+}
 
 function UserMessageCard({
     message,

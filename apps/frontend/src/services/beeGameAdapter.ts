@@ -36,6 +36,7 @@ type BeeGameEvent = {
     | 'user.message'
     | 'assistant.message'
     | 'assistant.partial'
+    | 'assistant.thinking'
     | 'tool.started'
     | 'tool.completed'
     | 'tool.failed'
@@ -1257,6 +1258,14 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       return [];
     case 'assistant.partial':
       return [];
+    case 'assistant.thinking':
+      if (getPayloadString(event, 'status') === 'ended') return [];
+      return [{
+        ...baseMessage('agent_message', event, projectId, 'beegame'),
+        type: 'agent_message',
+        content: event.text || 'Thinking',
+        task_kind: 'assistant_thinking',
+      } as WebSocketMessage];
     case 'assistant.message': {
       const usage = getUsageFromEventPayload(event.payload);
       return [
@@ -1557,15 +1566,25 @@ function normalizeBeeGameEvents(
       .map(getTurnDisplayId),
   );
   let bufferedPartial: BeeGameEvent | null = null;
+  let bufferedThinking: BeeGameEvent | null = null;
   const flushPartial = () => {
     if (bufferedPartial) {
       visible.push(bufferedPartial);
       bufferedPartial = null;
     }
   };
+  const flushThinking = () => {
+    if (bufferedThinking) {
+      visible.push(bufferedThinking);
+      bufferedThinking = null;
+    }
+  };
   for (const event of events) {
     if (event.type !== 'assistant.partial') {
       flushPartial();
+    }
+    if (event.type !== 'assistant.thinking') {
+      flushThinking();
     }
     if (event.type === 'user.message') {
       if (!options.includeUserMessages) continue;
@@ -1600,9 +1619,27 @@ function normalizeBeeGameEvents(
       }
       continue;
     }
+    if (event.type === 'assistant.thinking') {
+      if (!options.includePartialsWhenFinalExists && turnsWithFinal.has(getTurnDisplayId(event))) {
+        continue;
+      }
+      if (getPayloadString(event, 'status') === 'ended') {
+        flushThinking();
+        visible.push(event);
+        continue;
+      }
+      if (bufferedThinking && getTurnDisplayId(bufferedThinking) === getTurnDisplayId(event)) {
+        bufferedThinking = event;
+      } else {
+        flushThinking();
+        bufferedThinking = event;
+      }
+      continue;
+    }
     visible.push(event);
   }
   flushPartial();
+  flushThinking();
   return visible;
 }
 
@@ -1708,6 +1745,9 @@ function getActiveTurn(events: BeeGameEvent[]): string | null {
 function describeRuntimeAction(event?: BeeGameEvent): string {
   if (!event) return 'BeeGame is working';
   if (event.type === 'assistant.partial') return 'Streaming BeeGame response';
+  if (event.type === 'assistant.thinking') {
+    return getPayloadString(event, 'status') === 'ended' ? 'BeeGame is working' : 'BeeGame is thinking';
+  }
   if (event.type === 'assistant.message') return 'Finalizing BeeGame response';
   if (event.type === 'permission.resolved') {
     const decision = getPayloadString(event, 'decision');

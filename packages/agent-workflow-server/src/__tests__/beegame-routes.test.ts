@@ -2945,6 +2945,7 @@ describe('beegame session routes', () => {
         type: 'stream_event',
         event: {
           type: 'content_block_start',
+          index: 0,
           content_block: { type: 'thinking', thinking: '' },
         },
       },
@@ -2952,7 +2953,15 @@ describe('beegame session routes', () => {
         type: 'stream_event',
         event: {
           type: 'content_block_delta',
+          index: 0,
           delta: { type: 'thinking_delta', thinking: 'private reasoning' },
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_stop',
+          index: 0,
         },
       },
       {
@@ -3027,6 +3036,27 @@ describe('beegame session routes', () => {
       )
       expect(events.map((event: { text: string }) => event.text)).not.toContain(
         'input_json_delta',
+      )
+      expect(JSON.stringify(events)).not.toContain('private reasoning')
+      expect(
+        events.filter((event: { type: string }) => event.type === 'assistant.thinking'),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            text: 'Thinking',
+            payload: expect.objectContaining({
+              type: 'assistant.thinking',
+              status: 'started',
+            }),
+          }),
+          expect.objectContaining({
+            text: 'Thinking',
+            payload: expect.objectContaining({
+              type: 'assistant.thinking',
+              status: 'ended',
+            }),
+          }),
+        ]),
       )
       expect(events).toEqual(
         expect.arrayContaining([
