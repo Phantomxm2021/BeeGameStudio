@@ -31,7 +31,6 @@ export function FaultyTerminalBackground({ isTransitioning }: FaultyTerminalBack
                 src={backgroundVideo}
                 autoPlay
                 muted
-                loop
                 playsInline
                 preload="metadata"
                 onError={() => setBackgroundVideo(fallbackLandingBackgroundVideo)}

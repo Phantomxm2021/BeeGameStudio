@@ -233,6 +233,48 @@ describe('beeGameAdapter prompt rules', () => {
     expect(requestBody).toEqual({ idea: 'LLM generated idea', language: 'zh' });
   });
 
+  it('sends selected BeeGame intake thinking mode to the async job', async () => {
+    const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
+        return jsonResponse({ jobId: 'intake_job_1', status: 'running' }, 202);
+      }
+      if (path === '/api/beegame-intake/jobs/intake_job_1') {
+        return jsonResponse({
+          status: 'completed',
+          result: {
+            maturity: 'directional',
+            needsOptions: true,
+            needsClarification: false,
+            detectedConstraints: [],
+            recommendedNextStep: 'choose_direction',
+            options: [llmOption],
+          },
+        });
+      }
+      return jsonResponse({ error: 'unexpected request' }, 500);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.runIdeaIntake({
+      idea: 'LLM generated idea',
+      language: 'zh',
+      thinkingMode: 'disabled',
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as {
+      idea?: string;
+      language?: string;
+      thinkingMode?: string;
+    };
+    expect(requestBody).toEqual({
+      idea: 'LLM generated idea',
+      language: 'zh',
+      thinkingMode: 'disabled',
+    });
+  });
+
   it('normalizes BeeGame intake analysis with maturity and LLM-provided option fields', async () => {
     const llmOption = makeLlmOption({
       title: 'LLM Mode',
@@ -345,7 +387,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(requestBody).toEqual({ idea: '做一个样例游戏', language: 'zh' });
   });
 
-  it('accepts structured clarification without synthesizing local options', async () => {
+  it('rejects structured clarification responses without intake options', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
       String(input) === '/api/beegame-intake/jobs'
         ? jsonResponse({ error: 'not found' }, 404)
@@ -369,21 +411,9 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     vi.stubGlobal('fetch', fetchMock);
 
-    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' });
-
-    expect(intake).toMatchObject({
-      needsClarification: true,
-      recommendedNextStep: 'clarify',
-      options: [],
-      clarification: {
-        prompt: 'Which direction should BeeGame use?',
-        options: [
-          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
-          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
-        ],
-        freeformLabel: 'Add detail',
-      },
-    });
+    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' })).rejects.toThrow(
+      'BeeGame intake did not return game mode options',
+    );
   });
 
   it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {

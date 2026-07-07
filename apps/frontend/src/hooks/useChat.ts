@@ -15,7 +15,7 @@ import { useWebSocket } from './useWebSocket';
 import { useChatStore } from '../store/chatStore';
 import { useProjectStore } from '../store/projectStore';
 import { useSystemStore, type ProjectTask } from '../store/systemStore';
-import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ReviewBindingPayload } from '../services/api';
+import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ChatImageAttachmentPayload, type ReviewBindingPayload } from '../services/api';
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api';
 import type { WebSocketMessage } from '../types/message';
 import type { WebSocketState } from './useWebSocket';
@@ -83,6 +83,7 @@ export interface UseChatReturn {
     content: string,
     terminationNode?: string,
     taskType?: BeeGameCreditTaskType,
+    attachments?: ChatImageAttachmentPayload[],
   ) => Promise<void>;
 
   /**
@@ -150,7 +151,7 @@ export interface UseChatReturn {
 }
 
 type PendingAction =
-  | { kind: 'send_message'; content: string; terminationNode?: string }
+  | { kind: 'send_message'; content: string; terminationNode?: string; attachments?: ChatImageAttachmentPayload[] }
   | { kind: 'continue_task'; taskId?: string };
 
 /**
@@ -734,7 +735,8 @@ export const useChat = ({
           : await api.sendMessage({
             content: pending.content,
             project_id: projectId,
-            termination_node: pending.terminationNode
+            termination_node: pending.terminationNode,
+            attachments: pending.attachments,
           });
         const resumed = response as ContinueTaskResponse | SendMessageResponse;
         const resumedTaskId = 'resume_task_id' in resumed ? resumed.resume_task_id : resumed.task_id;
@@ -806,6 +808,7 @@ export const useChat = ({
     content: string,
     terminationNode?: string,
     taskType: BeeGameCreditTaskType = 'edit_turn',
+    attachments?: ChatImageAttachmentPayload[],
   ) => {
     if (waitingApproval.isBlockingChat) {
       emitWaitingApprovalBlock(waitingApproval.message);
@@ -829,6 +832,7 @@ export const useChat = ({
         clientMessageId,
         sender: 'user',
         content,
+        attachments,
         timestamp: optimisticTimestamp,
         type: 'text',
       });
@@ -842,6 +846,7 @@ export const useChat = ({
         termination_node: terminationNode,
         client_message_id: clientMessageId,
         taskType,
+        attachments,
       }) as SendMessageResponse;
 
       setCurrentTaskId(response.task_id);
@@ -855,6 +860,7 @@ export const useChat = ({
           kind: 'send_message',
           content,
           terminationNode,
+          attachments,
         };
       }
 

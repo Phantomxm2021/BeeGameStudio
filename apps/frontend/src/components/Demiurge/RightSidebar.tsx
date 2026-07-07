@@ -3,6 +3,7 @@ import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
+import type { ChatImageAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import type { BeeGameCreditTaskType } from '../../services/creditsApi';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -17,12 +18,24 @@ import { ArtifactsPanel } from './Sidebar/ArtifactsPanel';
 import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 
+const dedupeImageAttachments = (attachments: ChatImageAttachmentPayload[]): ChatImageAttachmentPayload[] => {
+    const seen = new Set<string>();
+    const uniqueAttachments: ChatImageAttachmentPayload[] = [];
+    for (const attachment of attachments) {
+        const key = [attachment.mediaType, attachment.data].join('\u0000');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueAttachments.push(attachment);
+    }
+    return uniqueAttachments;
+};
+
 interface RightSidebarProps {
     projectId: string;
     lang: Language;
     messages: ChatDisplayMessage[];
     progress: number;
-    onSendMessage: (msg: string, taskType?: BeeGameCreditTaskType) => void;
+    onSendMessage: (msg: string, taskType?: BeeGameCreditTaskType, attachments?: ChatImageAttachmentPayload[]) => void;
     isLoading: boolean;
     isRuntimeBusy?: boolean;
     onApprovePlan?: (
@@ -81,6 +94,7 @@ export function RightSidebar({
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
     const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [imageAttachments, setImageAttachments] = useState<ChatImageAttachmentPayload[]>([]);
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
@@ -129,9 +143,10 @@ export function RightSidebar({
 
     // Handlers
     const handleSend = () => {
-        if (!canSendMessage || !chatInput.trim() || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage(chatInput);
+        if (!canSendMessage || (!chatInput.trim() && imageAttachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
+        onSendMessage(chatInput, undefined, imageAttachments);
         setChatInput('');
+        setImageAttachments([]);
     };
 
     const handleDownloadArtifact = async (artifactId: string, title: string) => {
@@ -382,6 +397,13 @@ export function RightSidebar({
                                 onChatInputChange={setChatInput}
                                 onSend={handleSend}
                                 onSendMessage={onSendMessage}
+                                imageAttachments={imageAttachments}
+                                onAddImageAttachments={(attachments) => {
+                                    setImageAttachments(current => dedupeImageAttachments([...current, ...attachments]));
+                                }}
+                                onRemoveImageAttachment={(index) => {
+                                    setImageAttachments(current => current.filter((_, itemIndex) => itemIndex !== index));
+                                }}
                                 onPreviewArtifact={handlePreviewArtifact}
                                 textareaRef={textareaRef}
                                 scrollContainerRef={scrollContainerRef}

@@ -1,8 +1,9 @@
 import { memo } from 'react';
-import { MessageSquare, AlertCircle, Send } from 'lucide-react';
+import { MessageSquare, AlertCircle, Send, ImagePlus, X } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed, BeeGameConversationOverviewRuler } from './BeeGameCollaborationFeed';
 import type { ReviewBindingPayload } from '../../../services/api';
+import type { ChatImageAttachmentPayload } from '../../../services/api';
 import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
@@ -17,6 +18,9 @@ interface ChatPanelProps {
     onChatInputChange: (val: string) => void;
     onSend: () => void;
     onSendMessage?: (message: string) => void;
+    imageAttachments?: ChatImageAttachmentPayload[];
+    onAddImageAttachments?: (attachments: ChatImageAttachmentPayload[]) => void;
+    onRemoveImageAttachment?: (index: number) => void;
     onPreviewArtifact: (id: string, title: string, content?: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -57,6 +61,60 @@ const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & {
     return review as unknown as ReviewBindingPayload & { gate_id: string };
 };
 
+const SUPPORTED_IMAGE_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+]);
+
+const fileToImageAttachment = (file: File): Promise<ChatImageAttachmentPayload | null> => {
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) return Promise.resolve(null);
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            const commaIndex = result.indexOf(',');
+            const data = commaIndex >= 0 ? result.slice(commaIndex + 1) : result;
+            resolve(data ? {
+                type: 'image',
+                mediaType: file.type as ChatImageAttachmentPayload['mediaType'],
+                data,
+                filename: file.name || undefined,
+            } : null);
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+    });
+};
+
+const filesToImageAttachments = async (files: File[]): Promise<ChatImageAttachmentPayload[]> => {
+    const attachments = await Promise.all(files.map(fileToImageAttachment));
+    return attachments.filter((item): item is ChatImageAttachmentPayload => Boolean(item));
+};
+
+const dedupeImageFiles = (files: File[]): File[] => {
+    const seen = new Set<string>();
+    const uniqueFiles: File[] = [];
+    for (const file of files) {
+        const key = [file.name, file.type, file.size, file.lastModified].join('\u0000');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueFiles.push(file);
+    }
+    return uniqueFiles;
+};
+
+const clipboardDataToImageFiles = (clipboardData: DataTransfer | null): File[] => {
+    if (!clipboardData) return [];
+    const files = Array.from(clipboardData.files || []).filter(file => file.type.startsWith('image/'));
+    const itemFiles = Array.from(clipboardData.items || [])
+        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
+    return dedupeImageFiles([...files, ...itemFiles]);
+};
+
 export const ChatPanel = memo(({
     messages,
     isLoading,
@@ -64,6 +122,9 @@ export const ChatPanel = memo(({
     onChatInputChange,
     onSend,
     onSendMessage,
+    imageAttachments = [],
+    onAddImageAttachments,
+    onRemoveImageAttachment,
     onPreviewArtifact,
     textareaRef,
     scrollContainerRef,
@@ -132,6 +193,12 @@ export const ChatPanel = memo(({
         onSendMessage?.(message);
     };
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat;
+    const canSubmitComposer = Boolean(chatInput.trim() || imageAttachments.length > 0);
+    const handleImageFiles = async (files: File[]) => {
+        if (!files.length || !onAddImageAttachments) return;
+        const attachments = await filesToImageAttachments(files);
+        if (attachments.length > 0) onAddImageAttachments(attachments);
+    };
 
     const isBeeGameVariant = variant === 'beegame';
     const panelClassName = isBeeGameVariant
@@ -328,13 +395,65 @@ export const ChatPanel = memo(({
                         />
                     </div>
                 ) : (
-                    <div className="relative group flex items-end" data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
+                    <div className="relative group" data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
+                        {imageAttachments.length > 0 ? (
+                            <div className="mb-3 flex gap-2 overflow-x-auto">
+                                {imageAttachments.map((attachment, index) => (
+                                    <div
+                                        key={`${attachment.filename || 'image'}-${index}`}
+                                        className="relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-black/30"
+                                    >
+                                        <img
+                                            src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                            alt={attachment.filename || `image-${index + 1}`}
+                                            className="h-full w-full object-cover"
+                                        />
+                                        <button
+                                            type="button"
+                                            aria-label="Remove image"
+                                            onClick={() => onRemoveImageAttachment?.(index)}
+                                            className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white"
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
+                        <div className="relative flex items-end">
+                            <input
+                                id="beegame-chat-image-upload"
+                                type="file"
+                                accept="image/png,image/jpeg,image/gif,image/webp"
+                                multiple
+                                className="hidden"
+                                onChange={(event) => {
+                                    const files = Array.from(event.target.files || []);
+                                    event.target.value = '';
+                                    void handleImageFiles(files);
+                                }}
+                                disabled={isComposerDisabled}
+                            />
+                            <label
+                                htmlFor="beegame-chat-image-upload"
+                                aria-label="Attach image"
+                                title="Attach image"
+                                className={`absolute bottom-2.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
+                            >
+                                <ImagePlus className="h-5 w-5" />
+                            </label>
                         <textarea
                             ref={textareaRef}
-                            className={textareaClassName}
+                            className={`${textareaClassName} pl-14`}
                             placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
                             value={chatInput}
                             onChange={(e) => onChatInputChange(e.target.value)}
+                            onPaste={(e) => {
+                                const files = clipboardDataToImageFiles(e.clipboardData);
+                                if (files.length === 0) return;
+                                e.preventDefault();
+                                void handleImageFiles(files);
+                            }}
                             onCompositionStart={() => setIsComposing(true)}
                             onCompositionEnd={() => setIsComposing(false)}
                             onKeyDown={(e) => {
@@ -347,11 +466,13 @@ export const ChatPanel = memo(({
                         />
                         <button
                             onClick={onSend}
-                            disabled={!chatInput.trim() || isComposerDisabled}
+                            aria-label="Send message"
+                            disabled={!canSubmitComposer || isComposerDisabled}
                             className={sendButtonClassName}
                         >
                             <Send className="w-5 h-5 -ml-0.5" />
                         </button>
+                        </div>
                     </div>
                 )}
             </div>

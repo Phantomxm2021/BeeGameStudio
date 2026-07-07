@@ -59,6 +59,14 @@ export interface Message {
   /** Content of the message */
   content: string;
 
+  /** Image attachments submitted with the message */
+  attachments?: Array<{
+    type: 'image';
+    mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+    data: string;
+    filename?: string;
+  }>;
+
   /** Timestamp when the message was created (Unix timestamp in milliseconds) */
   timestamp: number;
 

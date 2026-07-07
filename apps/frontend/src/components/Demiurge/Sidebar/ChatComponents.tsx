@@ -709,7 +709,25 @@ export const MessageItem = memo(({
                             </div>
                         );
                     }
-                    return <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} lang={lang} />;
+                    return (
+                        <>
+                            {m.attachments?.length ? (
+                                <div className="mb-3 flex flex-wrap gap-2">
+                                    {m.attachments.map((attachment, index) => (
+                                        <img
+                                            key={`${attachment.filename || 'image'}-${index}`}
+                                            src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                            alt={attachment.filename || `image-${index + 1}`}
+                                            className="max-h-44 rounded-2xl border border-white/15 object-contain"
+                                        />
+                                    ))}
+                                </div>
+                            ) : null}
+                            {m.content.trim() ? (
+                                <MarkdownRenderer content={m.content} isUser={isUser} messageId={m.id} variant={variant} lang={lang} />
+                            ) : null}
+                        </>
+                    );
                 })()}
 
                 {m.thought && !isUser && (

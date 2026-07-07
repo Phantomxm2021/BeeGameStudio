@@ -72,6 +72,23 @@ describe('BeeGame owner bootstrap', () => {
     expect(noWorkspaceContext).toContain('model_config_owner_id')
   })
 
+  test('uses platform runtime capability settings independently from model config ownership', async () => {
+    const schema = await Bun.file(
+      new URL('../../docs/beegame-supabase-schema.sql', import.meta.url),
+    ).text()
+
+    expect(schema).toContain(
+      'create or replace function public.beegame_is_platform_owner_id(target_user_id uuid)',
+    )
+    expect(schema).toContain('runtime_settings_owner_id uuid;')
+    expect(schema).toContain('platform_owner_with_runtime_settings uuid;')
+    expect(schema).toContain(
+      'runtime_settings_owner_id := coalesce(platform_owner_with_runtime_settings, config_owner_id);',
+    )
+    expect(schema).toContain('where owner_id = runtime_settings_owner_id')
+    expect(schema).toContain('public.beegame_is_platform_owner_id(owner_id)')
+  })
+
   test('keeps OAuth invitation-free accounts at zero credits until redemption', async () => {
     const migration = await Bun.file(
       new URL('../../docs/beegame-supabase-invitations-migration.sql', import.meta.url),

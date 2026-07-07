@@ -143,6 +143,7 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     ...incoming,
     id: incoming.messageId || incoming.clientMessageId || existing.id,
     content: incoming.content || existing.content,
+    attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
     timestamp: incoming.timestamp || existing.timestamp,
     type: incoming.type || existing.type,

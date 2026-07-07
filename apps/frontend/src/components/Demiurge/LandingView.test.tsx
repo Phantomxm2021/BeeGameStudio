@@ -277,6 +277,32 @@ const makeIntakeOptions = () => [
         recommendedInputs: ['Keyboard/mouse'],
         scope: 'Vertical slice',
     },
+    {
+        id: 'llm_mode_c',
+        title: 'LLM Mode C',
+        pitch: 'LLM generated pitch C.',
+        gameplay: 'LLM generated gameplay rules C.',
+        coreGameplayHypothesis: 'LLM generated hypothesis C.',
+        experienceSnapshot: 'LLM generated snapshot C.',
+        playerFirstMinute: 'LLM generated first minute C.',
+        whyFitsIdea: 'LLM generated fit C.',
+        playablePrototype: 'LLM generated first playable C.',
+        validationTarget: 'LLM generated validation target C.',
+        coreMechanic: 'LLM generated core mechanic C.',
+        firstBuild: 'LLM generated first build C.',
+        validationGoal: 'LLM generated validation goal C.',
+        risk: 'LLM generated risk C.',
+        fit: 'LLM generated fit C.',
+        firstPlayableValidation: 'LLM generated validation C.',
+        riskComplexity: 'LLM generated complexity C.',
+        recommendedPlatform: 'PC',
+        recommendedEngine: 'Unity',
+        recommendedDimension: '3D',
+        recommendedGenre: 'Adventure',
+        recommendedStyle: 'Low Poly',
+        recommendedInputs: ['Gamepad'],
+        scope: 'Prototype',
+    },
 ];
 
 beforeEach(() => {
@@ -476,7 +502,11 @@ describe('LandingView bootstrap submission', () => {
             password: 'secret-password',
         });
         expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({
+            idea: 'LLM generated idea',
+            language: 'zh',
+            thinkingMode: 'disabled',
+        });
     });
 
     it('shows localized feedback for invalid Supabase login credentials', async () => {
@@ -574,7 +604,11 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(await screen.findByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({
+            idea: 'LLM generated idea',
+            language: 'zh',
+            thinkingMode: 'disabled',
+        });
     });
 
     it('restores a pending intake credit quote after a page refresh', async () => {
@@ -1091,7 +1125,12 @@ describe('LandingView bootstrap submission', () => {
         expect(textbox).toBeDisabled();
         await screen.findByText('LLM Mode A');
         expect(screen.getByText('LLM Mode B')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'LLM generated idea', language: 'zh' });
+        expect(screen.getByText('LLM Mode C')).toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledWith({
+            idea: 'LLM generated idea',
+            language: 'zh',
+            thinkingMode: 'disabled',
+        });
         expect(onStart).not.toHaveBeenCalled();
         expect(analyzeIdeaIntake).not.toHaveBeenCalled();
     });
@@ -1104,70 +1143,47 @@ describe('LandingView bootstrap submission', () => {
         const dialog = await screen.findByRole('dialog', { name: '选择方案' });
 
         expect(dialog).toContainElement(screen.getByTestId('intake-options'));
+        expect(dialog.firstElementChild).toHaveClass('max-w-5xl');
         expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
-        expect(dialog).toContainElement(screen.getAllByText('游戏模式')[0]);
-        expect(dialog).toContainElement(screen.getAllByText('玩法')[0]);
+        const modeLabel = screen.getAllByText('游戏模式')[0];
+        const gameplayLabel = screen.getAllByText('玩法')[0];
+        expect(dialog).toContainElement(modeLabel);
+        expect(dialog).toContainElement(gameplayLabel);
+        expect(modeLabel).toHaveClass('type-footnote');
+        expect(modeLabel).not.toHaveClass('type-caption-1');
+        expect(gameplayLabel).toHaveClass('type-footnote');
+        expect(gameplayLabel).not.toHaveClass('type-caption-1');
         expect(dialog).toContainElement(screen.getByText('LLM generated gameplay rules A.'));
         expect(dialog).not.toHaveTextContent('AUTO');
         expect(dialog).not.toHaveTextContent('核心假设');
         expect(dialog).not.toHaveTextContent('第一分钟');
         expect(dialog).not.toHaveTextContent('为什么适合');
         expect(dialog).not.toHaveTextContent('首版原型');
+        const optionsGrid = screen.getByTestId('intake-options').firstElementChild;
+        expect(optionsGrid).toHaveClass('md:grid-cols-3');
+        expect(optionsGrid).not.toHaveClass('md:grid-cols-2');
         const cards = within(dialog).getAllByTestId('intake-option-card');
         expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)]');
         expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
-        expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('min-h-0', 'overflow-y-auto');
+        expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('type-title-3');
+        expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('type-body', 'min-h-0', 'overflow-y-auto');
         expect(within(cards[0]).queryByTestId('intake-option-tags')).not.toBeInTheDocument();
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
         expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
         expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
     });
 
-    it('shows clarification as a neutral prompt and continues intake after an answer', async () => {
-        runIdeaIntake
-            .mockResolvedValueOnce({
-                maturity: 'vague',
-                needsOptions: false,
-                needsClarification: true,
-                clarification: {
-                    prompt: 'Which interpretation should BeeGame use?',
-                    options: [
-                        { id: 'clarify_a', label: 'Interpretation A', description: 'Use the first interpretation.' },
-                        { id: 'clarify_b', label: 'Interpretation B', value: 'Use the second interpretation.' },
-                    ],
-                    freeformLabel: 'Add more detail',
-                },
-                clarificationQuestions: [],
-                detectedConstraints: [],
-                recommendedNextStep: 'clarify',
-                options: [],
-            })
-            .mockResolvedValueOnce({
-                maturity: 'directional',
-                needsOptions: true,
-                needsClarification: false,
-                clarificationQuestions: [],
-                detectedConstraints: [],
-                recommendedNextStep: 'choose_direction',
-                options: makeIntakeOptions(),
-            });
+    it('does not show clarification when intake returns an old clarification-only response', async () => {
+        runIdeaIntake.mockRejectedValueOnce(new Error('BeeGame intake did not return game mode options'));
 
         renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM generated idea');
 
-        const clarification = await screen.findByTestId('intake-clarification');
-        expect(clarification).toHaveTextContent('需求补充');
-        expect(clarification).toHaveTextContent('Which interpretation should BeeGame use?');
-        expect(clarification).not.toHaveClass('bg-red-950/60');
-        expect(screen.queryByText('Which interpretation should BeeGame use? /')).not.toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', { name: /Interpretation B/ }));
-
-        await screen.findByText('LLM Mode A');
-        expect(runIdeaIntake).toHaveBeenCalledTimes(2);
-        expect(runIdeaIntake.mock.calls[1][0].idea).toContain('Question: Which interpretation should BeeGame use?');
-        expect(runIdeaIntake.mock.calls[1][0].idea).toContain('Answer: Use the second interpretation.');
+        expect(await screen.findByText('BeeGame intake did not return game mode options')).toBeInTheDocument();
+        expect(screen.queryByTestId('intake-clarification')).not.toBeInTheDocument();
+        expect(screen.queryByText('需求补充')).not.toBeInTheDocument();
+        expect(runIdeaIntake).toHaveBeenCalledTimes(1);
     });
 
     it('keeps the landing content visible without opening a modal while generating options', async () => {
@@ -1358,12 +1374,12 @@ describe('LandingView bootstrap submission', () => {
         expect(within(platformSelect).getByRole('option', { name: 'Web' })).toBeInTheDocument();
         expect(within(platformSelect).getByRole('option', { name: 'PC' })).toBeInTheDocument();
         expect(within(engineSelect).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
-            '',
             'React',
             'Unity',
             'Godot',
             'Unreal',
         ]);
+        expect(within(engineSelect).queryByRole('option', { name: '请选择' })).not.toBeInTheDocument();
         expect(within(dimensionSelect).getByRole('option', { name: '2D' })).toBeInTheDocument();
         expect(within(genreSelect).getByRole('option', { name: 'Racing' })).toBeInTheDocument();
         expect(within(styleSelect).getByRole('option', { name: '写实' })).toBeInTheDocument();
@@ -1462,7 +1478,7 @@ describe('LandingView bootstrap submission', () => {
 
         expect(background).toHaveAttribute('data-background', 'video');
         expect(screen.getByTestId('landing-background-video')).toBeInTheDocument();
-        expect(screen.getByTestId('landing-background-video')).toHaveAttribute('loop');
+        expect(screen.getByTestId('landing-background-video')).not.toHaveAttribute('loop');
     });
 
     it('keeps the video background stable while typing in the prompt', () => {
@@ -1473,6 +1489,29 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.change(screen.getByRole('textbox'), { target: { value: '像素跑酷游戏' } });
 
         expect(screen.getByTestId('landing-background-video')).toBe(video);
+    });
+
+    it('uses compact two-option thinking mode controls for idea intake', async () => {
+        renderLanding();
+
+        const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
+        expect(thinkingSelect).toHaveValue('disabled');
+        expect(thinkingSelect).toHaveClass('type-button');
+        expect(thinkingSelect).not.toHaveClass('type-caption-1');
+        expect(within(thinkingSelect).getByRole('option', { name: '关闭思考' })).toBeInTheDocument();
+        expect(within(thinkingSelect).getByRole('option', { name: '启用思考' })).toBeInTheDocument();
+        expect(within(thinkingSelect).queryByRole('option', { name: /自动/ })).not.toBeInTheDocument();
+
+        thinkingSelect.focus();
+        fireEvent.change(thinkingSelect, { target: { value: 'enabled' } });
+        expect(document.activeElement).not.toBe(thinkingSelect);
+        await submitIdeaAndConfirmIntake('LLM generated idea');
+
+        expect(runIdeaIntake).toHaveBeenCalledWith({
+            idea: 'LLM generated idea',
+            language: 'zh',
+            thinkingMode: 'enabled',
+        });
     });
 
     it('renders the idea prompt as a frosted glass surface', () => {

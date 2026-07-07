@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
@@ -22,6 +22,46 @@ describe('agent workflow server routes', () => {
   afterEach(async () => {
     await rm(testRoot, { recursive: true, force: true })
   })
+
+  const makeModelOptions = (baseId: string, firstOption: Record<string, unknown> = {}) => [
+    {
+      id: baseId,
+      title: 'Mode One',
+      gameplay: 'First playable mode.',
+      recommendedPlatform: 'Web',
+      recommendedEngine: 'React',
+      recommendedDimension: '2D',
+      recommendedGenre: 'Action',
+      recommendedStyle: 'Minimal',
+      recommendedInputs: ['Keyboard/mouse'],
+      scope: 'Playable demo',
+      ...firstOption,
+    },
+    {
+      id: `${baseId}_two`,
+      title: 'Mode Two',
+      gameplay: 'Second playable mode.',
+      recommendedPlatform: 'Web',
+      recommendedEngine: 'React',
+      recommendedDimension: '2D',
+      recommendedGenre: 'Action',
+      recommendedStyle: 'Minimal',
+      recommendedInputs: ['Keyboard/mouse'],
+      scope: 'Playable demo',
+    },
+    {
+      id: `${baseId}_three`,
+      title: 'Mode Three',
+      gameplay: 'Third playable mode.',
+      recommendedPlatform: 'Web',
+      recommendedEngine: 'React',
+      recommendedDimension: '2D',
+      recommendedGenre: 'Action',
+      recommendedStyle: 'Minimal',
+      recommendedInputs: ['Keyboard/mouse'],
+      scope: 'Playable demo',
+    },
+  ]
 
   test('creates and lists masked model configs for the current user', async () => {
     const createRes = await app.request('/api/model-configs', {
@@ -1193,14 +1233,37 @@ describe('agent workflow server routes', () => {
                     riskComplexity: 'LLM generated complexity.',
                     gameplay: 'LLM generated gameplay rules.',
                     recommendedPlatform: 'Web',
+                    recommendedEngine: 'React',
                     recommendedDimension: '2D',
                     recommendedGenre: 'Strategy',
                     recommendedStyle: 'Pixel',
                     recommendedInputs: ['Keyboard/mouse'],
                     scope: 'Playable demo',
                   },
-                  { id: 'mode_two', title: 'Mode Two', gameplay: 'Second playable mode.' },
-                  { id: 'mode_three', title: 'Mode Three', gameplay: 'Third playable mode.' },
+                  {
+                    id: 'mode_two',
+                    title: 'Mode Two',
+                    gameplay: 'Second playable mode.',
+                    recommendedPlatform: 'Web',
+                    recommendedEngine: 'React',
+                    recommendedDimension: '2D',
+                    recommendedGenre: 'Action',
+                    recommendedStyle: 'Minimal',
+                    recommendedInputs: ['Keyboard/mouse'],
+                    scope: 'Playable demo',
+                  },
+                  {
+                    id: 'mode_three',
+                    title: 'Mode Three',
+                    gameplay: 'Third playable mode.',
+                    recommendedPlatform: 'Web',
+                    recommendedEngine: 'React',
+                    recommendedDimension: '2D',
+                    recommendedGenre: 'Action',
+                    recommendedStyle: 'Minimal',
+                    recommendedInputs: ['Keyboard/mouse'],
+                    scope: 'Playable demo',
+                  },
                   { id: 'mode_four', title: 'Mode Four', gameplay: 'Fourth playable mode.' },
                 ],
               }),
@@ -1301,6 +1364,116 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('analyzes BeeGame intake from streamed model deltas', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Streaming LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const modelContent = JSON.stringify({
+      maturity: 'concrete',
+      needs_options: false,
+      needs_clarification: false,
+      detected_constraints: ['streamed model response'],
+      recommended_next_step: 'configure_details',
+      options: [
+        {
+          id: 'streamed_mode',
+          title: 'Streamed Mode',
+          gameplay: 'The player completes streamed gameplay rules.',
+          risk: 'The main risk is validating the streamed flow.',
+          fit: 'This mode fits the streamed idea.',
+          recommendedPlatform: 'Web',
+          recommendedEngine: 'React',
+          recommendedDimension: '2D',
+          recommendedGenre: 'Action',
+          recommendedStyle: 'Minimal',
+          recommendedInputs: ['Keyboard/mouse'],
+          scope: 'Playable demo',
+        },
+      ],
+    })
+    const streamBody = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: modelContent.slice(0, 80) } }] })}`,
+      '',
+      `data: ${JSON.stringify({ choices: [{ delta: { content: modelContent.slice(80) } }] })}`,
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+
+    const originalFetch = globalThis.fetch
+    const originalDebug = process.env.BEEGAME_INTAKE_STREAM_DEBUG
+    const originalLogPath = process.env.BEEGAME_INTAKE_STREAM_LOG_PATH
+    const streamLogPath = join(testRoot, 'intake-stream-debug.jsonl')
+    const fetchCalls: Array<{ body: unknown }> = []
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        body: JSON.parse(String(init?.body ?? '{}')),
+      })
+      return new Response(streamBody, {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      process.env.BEEGAME_INTAKE_STREAM_DEBUG = '1'
+      process.env.BEEGAME_INTAKE_STREAM_LOG_PATH = streamLogPath
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea', language: 'zh' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
+        model: 'balanced-model',
+        response_format: { type: 'json_object' },
+        stream: true,
+      }))
+      expect(intake).toEqual(expect.objectContaining({
+        maturity: 'concrete',
+        needsOptions: false,
+        needsClarification: false,
+        detectedConstraints: ['streamed model response'],
+        recommendedNextStep: 'configure_details',
+      }))
+      expect(intake.options).toHaveLength(1)
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'streamed_mode',
+        title: 'Streamed Mode',
+        gameplay: 'The player completes streamed gameplay rules.',
+      }))
+      const streamLog = await readFile(streamLogPath, 'utf8')
+      expect(streamLog).toContain('"event":"raw_chunk"')
+      expect(streamLog).toContain('"event":"content_delta"')
+      expect(streamLog).toContain('"event":"complete"')
+      expect(streamLog).toContain('Streamed Mode')
+    } finally {
+      globalThis.fetch = originalFetch
+      if (originalDebug === undefined) {
+        delete process.env.BEEGAME_INTAKE_STREAM_DEBUG
+      } else {
+        process.env.BEEGAME_INTAKE_STREAM_DEBUG = originalDebug
+      }
+      if (originalLogPath === undefined) {
+        delete process.env.BEEGAME_INTAKE_STREAM_LOG_PATH
+      } else {
+        process.env.BEEGAME_INTAKE_STREAM_LOG_PATH = originalLogPath
+      }
+    }
+  })
+
 
   test('creates a BeeGame intake job and returns the completed result through polling', async () => {
     const createRes = await app.request('/api/model-configs', {
@@ -1349,14 +1522,11 @@ describe('agent workflow server routes', () => {
                 needs_clarification: false,
                 detected_constraints: [],
                 recommended_next_step: 'choose_direction',
-                options: [
-                  {
-                    id: 'async_mode',
-                    title: 'Async Mode',
-                    pitch: 'Async generated pitch.',
-                    gameplay: 'Async generated gameplay rules.',
-                  },
-                ],
+                options: makeModelOptions('async_mode', {
+                  title: 'Async Mode',
+                  pitch: 'Async generated pitch.',
+                  gameplay: 'Async generated gameplay rules.',
+                }),
               }),
             },
           },
@@ -1372,13 +1542,17 @@ describe('agent workflow server routes', () => {
         await new Promise(resolve => setTimeout(resolve, 0))
       }
 
-      expect(completed).toEqual({
+      expect(completed).toEqual(expect.objectContaining({
         status: 'completed',
         result: expect.objectContaining({
           maturity: 'directional',
-          options: [expect.objectContaining({ id: 'async_mode', title: 'Async Mode' })],
+          needsOptions: true,
         }),
-      })
+      }))
+      expect((completed as { result?: { options?: Array<{ id: string; title: string }> } }).result?.options).toHaveLength(3)
+      expect((completed as { result?: { options?: Array<{ id: string; title: string }> } }).result?.options?.[0]).toEqual(
+        expect.objectContaining({ id: 'async_mode', title: 'Async Mode' }),
+      )
     } finally {
       globalThis.fetch = originalFetch
     }
@@ -1530,11 +1704,7 @@ describe('agent workflow server routes', () => {
                 needs_clarification: false,
                 detected_constraints: [],
                 recommended_next_step: 'choose_direction',
-                options: [
-                  { id: 'mode_one', title: 'Mode One', gameplay: 'First playable mode.' },
-                  { id: 'mode_two', title: 'Mode Two', gameplay: 'Second playable mode.' },
-                  { id: 'mode_three', title: 'Mode Three', gameplay: 'Third playable mode.' },
-                ],
+	                options: makeModelOptions('mode_one'),
               }),
             },
           }],
@@ -1582,7 +1752,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('returns structured clarification when the model cannot recommend modes yet', async () => {
+  test('rejects intake responses that ask for clarification instead of returning options', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1631,24 +1801,136 @@ describe('agent workflow server routes', () => {
         body: JSON.stringify({ idea: 'idea requiring clarification' }),
       })
 
-      expect(res.status).toBe(200)
-      const intake = await res.json()
-      expect(intake).toEqual({
-        maturity: 'vague',
-        needsOptions: false,
-        needsClarification: true,
-        clarification: {
-          prompt: 'Which interpretation should BeeGame use?',
-          options: [
-            { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
-            { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
-          ],
-          freeformLabel: 'Add detail',
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: expect.stringContaining('Model intake response did not include valid options'),
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('rejects broad intake responses that return fewer than three options', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'vague',
+              needs_options: true,
+              needs_clarification: false,
+              clarification: '',
+              clarification_questions: [],
+              detected_constraints: ['broad request'],
+              recommended_next_step: 'choose_direction',
+              options: makeModelOptions('mode_one').slice(0, 2),
+            }),
+          },
         },
-        clarificationQuestions: [],
-        detectedConstraints: [],
-        recommendedNextStep: 'clarify',
-        options: [],
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'broad game idea' }),
+      })
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: expect.stringContaining('Expected 3, received 2'),
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('rejects clarification choices because they do not contain production metadata', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'vague',
+              needs_options: true,
+              needs_clarification: true,
+              clarification: 'Which direction should the first playable focus on?',
+              clarification_questions: [
+                {
+                  prompt: 'Which direction should the first playable focus on?',
+                  options: [
+                    {
+                      id: 'core_loop',
+                      label: 'Core Loop',
+                      description: 'Focus on the primary repeated action.',
+                      value: 'core_loop',
+                    },
+                    {
+                      id: 'exploration',
+                      label: 'Exploration',
+                      description: 'Focus on discovery and navigation.',
+                      value: 'exploration',
+                    },
+                    {
+                      id: 'challenge',
+                      label: 'Challenge',
+                      description: 'Focus on difficulty and pressure.',
+                      value: 'challenge',
+                    },
+                  ],
+                  freeform_label: 'Describe another direction',
+                },
+              ],
+              detected_constraints: ['broad request'],
+              recommended_next_step: 'clarify',
+              options: [],
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'broad game idea' }),
+      })
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: expect.stringContaining('recommendedPlatform'),
       })
     } finally {
       globalThis.fetch = originalFetch
@@ -1680,19 +1962,16 @@ describe('agent workflow server routes', () => {
               needs_options: true,
               needs_clarification: false,
               recommended_next_step: 'choose_direction',
-              options: [
-                {
-                  id: 'llm_minimal_mode',
-                  title: 'LLM Minimal Mode',
-                  gameplay: 'LLM generated playable rules.',
-                  recommended_platform: 'Web',
-                  recommended_dimension: '2D',
-                  recommended_genre: 'Action',
-                  recommended_style: 'Minimal',
-                  recommended_inputs: ['Keyboard/mouse'],
-                  scope: 'Playable demo',
-                },
-              ],
+              options: makeModelOptions('llm_minimal_mode', {
+                title: 'LLM Minimal Mode',
+                gameplay: 'LLM generated playable rules.',
+                recommended_platform: 'Web',
+                recommended_dimension: '2D',
+                recommended_genre: 'Action',
+                recommended_style: 'Minimal',
+                recommended_inputs: ['Keyboard/mouse'],
+                scope: 'Playable demo',
+              }),
             }),
           },
         },
@@ -1720,6 +1999,68 @@ describe('agent workflow server routes', () => {
         recommendedGenre: 'Action',
         recommendedStyle: 'Minimal',
         recommendedInputs: ['Keyboard/mouse'],
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('passes selected BeeGame intake thinking mode into the model request', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    let modelRequestBody: Record<string, unknown> = {}
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      modelRequestBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                maturity: 'directional',
+                needs_options: true,
+                needs_clarification: false,
+                recommended_next_step: 'choose_direction',
+                options: makeModelOptions('llm_thinking_mode', {
+                  title: 'LLM Thinking Mode',
+                  gameplay: 'LLM generated playable rules.',
+                  recommended_platform: 'Web',
+                  recommended_dimension: '2D',
+                  recommended_genre: 'Action',
+                  recommended_style: 'Minimal',
+                  recommended_inputs: ['Keyboard/mouse'],
+                  scope: 'Playable demo',
+                }),
+              }),
+            },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea', thinkingMode: 'disabled' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(modelRequestBody).toEqual(expect.objectContaining({
+        stream: true,
+        enable_thinking: false,
       }))
     } finally {
       globalThis.fetch = originalFetch
@@ -1754,19 +2095,16 @@ describe('agent workflow server routes', () => {
                   needs_options: true,
                   needs_clarification: false,
                   recommended_next_step: 'choose_direction',
-                  options: [
-                    {
-                      id: 'llm_content_array_mode',
-                      title: 'LLM Content Array Mode',
-                      gameplay: 'LLM generated playable rules from content array.',
-                      recommended_platform: 'Web',
-                      recommended_dimension: '2D',
-                      recommended_genre: 'Action',
-                      recommended_style: 'Minimal',
-                      recommended_inputs: ['Keyboard/mouse'],
-                      scope: 'Playable demo',
-                    },
-                  ],
+                  options: makeModelOptions('llm_content_array_mode', {
+                    title: 'LLM Content Array Mode',
+                    gameplay: 'LLM generated playable rules from content array.',
+                    recommended_platform: 'Web',
+                    recommended_dimension: '2D',
+                    recommended_genre: 'Action',
+                    recommended_style: 'Minimal',
+                    recommended_inputs: ['Keyboard/mouse'],
+                    scope: 'Playable demo',
+                  }),
                 }),
               },
             ],
@@ -1856,7 +2194,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('does not reject otherwise valid intake options when optional inputs are omitted', async () => {
+  test('rejects intake options when recommended inputs are omitted', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1879,18 +2217,63 @@ describe('agent workflow server routes', () => {
             content: JSON.stringify({
               maturity: 'directional',
               needs_options: true,
-              options: [
-                {
-                  id: 'llm_no_inputs_mode',
-                  title: 'LLM No Inputs Mode',
-                  gameplay: 'LLM generated playable rules without input metadata.',
-                  recommendedPlatform: 'Web',
-                  recommendedDimension: '2D',
-                  recommendedGenre: 'Action',
-                  recommendedStyle: 'Minimal',
-                  scope: 'Playable demo',
-                },
-              ],
+              options: makeModelOptions('llm_no_inputs_mode', {
+                title: 'LLM No Inputs Mode',
+                gameplay: 'LLM generated playable rules without input metadata.',
+              }).map(option => ({
+                ...option,
+                recommendedInputs: [],
+              })),
+            }),
+          },
+        },
+      ],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'LLM generated idea' }),
+      })
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: expect.stringContaining('recommendedInputs'),
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('accepts a single selected input value from model metadata', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              maturity: 'directional',
+              needs_options: true,
+              options: makeModelOptions('single_input_mode', {
+                title: 'Single Input Mode',
+                gameplay: 'LLM generated playable rules with one selected input.',
+                recommendedInputs: 'Keyboard/mouse',
+              }),
             }),
           },
         },
@@ -1907,8 +2290,8 @@ describe('agent workflow server routes', () => {
       expect(res.status).toBe(200)
       const intake = await res.json()
       expect(intake.options[0]).toEqual(expect.objectContaining({
-        id: 'llm_no_inputs_mode',
-        recommendedInputs: [],
+        id: 'single_input_mode',
+        recommendedInputs: ['Keyboard/mouse'],
       }))
     } finally {
       globalThis.fetch = originalFetch
@@ -1933,18 +2316,15 @@ describe('agent workflow server routes', () => {
     const modelJson = JSON.stringify({
       maturity: 'directional',
       needs_options: true,
-      options: [
-        {
-          id: 'llm_wrapped_mode',
-          title: 'LLM Wrapped Mode',
-          gameplay: 'LLM generated playable rules from wrapped output.',
-          recommendedPlatform: 'Web',
-          recommendedDimension: '2D',
-          recommendedGenre: 'Action',
-          recommendedStyle: 'Minimal',
-          scope: 'Playable demo',
-        },
-      ],
+      options: makeModelOptions('llm_wrapped_mode', {
+        title: 'LLM Wrapped Mode',
+        gameplay: 'LLM generated playable rules from wrapped output.',
+        recommendedPlatform: 'Web',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Action',
+        recommendedStyle: 'Minimal',
+        scope: 'Playable demo',
+      }),
     })
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => Response.json({

@@ -117,6 +117,241 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: '最小化聊天' })).not.toBeInTheDocument();
     });
 
+    it('sends an uploaded screenshot attachment without requiring text', async () => {
+        const user = userEvent.setup();
+        const onSendMessage = vi.fn();
+
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const image = new File(['png-bytes'], 'screen.png', { type: 'image/png' });
+        await user.upload(screen.getByLabelText('Attach image'), image);
+
+        await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
+        await user.click(screen.getByRole('button', { name: 'Send message' }));
+
+        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+            expect.objectContaining({
+                type: 'image',
+                mediaType: 'image/png',
+                filename: 'screen.png',
+            }),
+        ]);
+        expect(onSendMessage.mock.calls[0][2][0].data).toEqual(expect.any(String));
+    });
+
+    it('accepts pasted screenshot attachments in the chat composer', async () => {
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const image = new File(['png-bytes'], 'pasted-screen.png', { type: 'image/png' });
+        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+            clipboardData: {
+                files: [image],
+            },
+        });
+
+        await waitFor(() => expect(screen.getByAltText('pasted-screen.png')).toBeInTheDocument());
+    });
+
+    it('accepts pasted screenshots exposed as clipboard items', async () => {
+        const onSendMessage = vi.fn();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const image = new File(['png-bytes'], 'clipboard-screen.png', { type: 'image/png' });
+        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+            clipboardData: {
+                files: [],
+                items: [{
+                    kind: 'file',
+                    type: 'image/png',
+                    getAsFile: () => image,
+                }],
+            },
+        });
+
+        await waitFor(() => expect(screen.getByAltText('clipboard-screen.png')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+            expect.objectContaining({
+                type: 'image',
+                mediaType: 'image/png',
+                filename: 'clipboard-screen.png',
+            }),
+        ]);
+    });
+
+    it('deduplicates pasted screenshots exposed through both clipboard files and items', async () => {
+        const onSendMessage = vi.fn();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const image = new File(['png-bytes'], 'duplicated-screen.png', { type: 'image/png' });
+        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+            clipboardData: {
+                files: [image],
+                items: [{
+                    kind: 'file',
+                    type: 'image/png',
+                    getAsFile: () => image,
+                }],
+            },
+        });
+
+        await waitFor(() => expect(screen.getAllByAltText('duplicated-screen.png')).toHaveLength(1));
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+    });
+
+    it('deduplicates pasted screenshots with identical image data even when clipboard file metadata differs', async () => {
+        const onSendMessage = vi.fn();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const clipboardFile = new File(['same-png-bytes'], 'clipboard.png', {
+            type: 'image/png',
+            lastModified: 1,
+        });
+        const itemFile = new File(['same-png-bytes'], 'image.png', {
+            type: 'image/png',
+            lastModified: 2,
+        });
+        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+            clipboardData: {
+                files: [clipboardFile],
+                items: [{
+                    kind: 'file',
+                    type: 'image/png',
+                    getAsFile: () => itemFile,
+                }],
+            },
+        });
+
+        await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(1));
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+    });
+
+    it('deduplicates the same pasted screenshot if duplicate paste events append it twice', async () => {
+        const onSendMessage = vi.fn();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const pasteTarget = screen.getByPlaceholderText('Type...');
+        const image = new File(['same-png-bytes'], 'pasted-again.png', { type: 'image/png' });
+        fireEvent.paste(pasteTarget, {
+            clipboardData: {
+                files: [image],
+            },
+        });
+        fireEvent.paste(pasteTarget, {
+            clipboardData: {
+                files: [image],
+            },
+        });
+
+        await waitFor(() => expect(screen.getAllByAltText('pasted-again.png')).toHaveLength(1));
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+    });
+
     it('uploads assets without automatically sending an integration prompt', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();

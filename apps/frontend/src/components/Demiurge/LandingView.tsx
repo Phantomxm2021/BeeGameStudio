@@ -16,9 +16,9 @@ import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
     type BeeGameBuildBrief,
-    type BeeGameClarification,
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
+    type BeeGameThinkingMode,
 } from '../../services/beeGameAdapter';
 import {
     getCreditBalance,
@@ -105,11 +105,6 @@ type IntakeCopy = {
         cancel: string;
         confirmGenerate: string;
         confirmBuild: string;
-    };
-    clarification: {
-        title: string;
-        freeformLabel: string;
-        placeholder: string;
     };
     errors: {
         missingPlatformModel: string;
@@ -211,11 +206,6 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         cancel: translate('actions.cancel'),
         confirmGenerate: translate('actions.confirmGenerate'),
         confirmBuild: translate('actions.confirmBuild'),
-    },
-    clarification: {
-        title: translate('clarification.title'),
-        freeformLabel: translate('clarification.freeformLabel'),
-        placeholder: translate('clarification.placeholder'),
     },
     errors: {
         missingPlatformModel: translate('errors.missingPlatformModel'),
@@ -328,6 +318,10 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
 const optionsWithCurrentValue = (options: string[], _value: string): string[] => {
     return options;
 };
+
+const renderSelectPlaceholder = (label: string) => (
+    <option value="" disabled hidden>{label}</option>
+);
 
 function buildProductionSettingOptions(_options: BeeGameIntakeOption[]): ProductionSettingOptions {
     return CONFIGURED_PRODUCTION_SETTING_OPTIONS;
@@ -607,8 +601,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(restoredIntakeFlow?.selectedOption || null);
     const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings || null);
     const [intakeError, setIntakeError] = useState('');
-    const [clarification, setClarification] = useState<BeeGameClarification | null>(null);
-    const [clarificationDraft, setClarificationDraft] = useState('');
+    const [thinkingMode, setThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
@@ -912,28 +905,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSettings(null);
         setIntakeOptions([]);
         clearPendingIntakeFlowState();
-        setClarification(null);
-        setClarificationDraft('');
         setIsPreparing(true);
         setIntakePhase('generating_options');
         try {
-            const intake = await beeGameAdapter.runIdeaIntake({ idea, language: lang });
-            if (intake.needsClarification && intake.clarification) {
-                setIsPreparing(false);
-                setIntakePhase('idle');
-                setClarification(intake.clarification);
-                return;
-            }
-            if (intake.needsClarification && intake.clarificationQuestions.length > 0) {
-                setIsPreparing(false);
-                setIntakePhase('idle');
-                setClarification({
-                    prompt: intake.clarificationQuestions[0],
-                    options: [],
-                    freeformLabel: translate('intake.clarification.freeformOption'),
-                });
-                return;
-            }
+            const intake = await beeGameAdapter.runIdeaIntake({
+                idea,
+                language: lang,
+                thinkingMode,
+            });
             const nextOptions = intake.options;
             setIntakeOptions(nextOptions);
             clearPendingIdeaDraftState();
@@ -1178,23 +1157,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             clearPendingCreditState();
             clearPendingIntakeFlowState();
             setIntakeError('');
-            setClarification(null);
-            setClarificationDraft('');
         }
-    };
-
-    const handleClarificationAnswer = async (answer: string) => {
-        if (!clarification || isPreparing || isTransitioning) return;
-        const normalizedAnswer = answer.trim();
-        if (!normalizedAnswer) return;
-        const clarifiedIdea = [
-            projectName.trim(),
-            '',
-            'Additional clarification:',
-            `Question: ${clarification.prompt}`,
-            `Answer: ${normalizedAnswer}`,
-        ].join('\n');
-        await runIntake(clarifiedIdea);
     };
 
     const handleSelectOption = (option: BeeGameIntakeOption) => {
@@ -1266,8 +1229,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSettings(null);
         setIsInputMenuOpen(false);
         setIntakeError('');
-        setClarification(null);
-        setClarificationDraft('');
         clearIntakeRecoveryState();
     };
 
@@ -1722,7 +1683,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             </div>
                             {authMode === 'login' ? (
                                 <>
-                                    <div className="type-caption-1 my-5 flex items-center gap-3 text-zinc-500">
+                                    <div className="type-footnote my-5 flex items-center gap-3 text-zinc-500">
                                         <span className="h-px flex-1 bg-white/10" />
                                         <span>{intakeText.auth.oauthDivider}</span>
                                         <span className="h-px flex-1 bg-white/10" />
@@ -1829,7 +1790,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                     <h2 className="type-title-3 text-white">
                                         {legalDocuments[activeLegalDocument].title}
                                     </h2>
-                                    <p className="type-caption-1 mt-2 text-zinc-500">
+                                    <p className="type-footnote mt-2 text-zinc-500">
                                         {translate('intake.auth.legalUpdated', { date: legalDocuments[activeLegalDocument].updatedAt })}
                                     </p>
                                     <p className="type-callout mt-4 text-zinc-300">
@@ -1878,8 +1839,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     value={projectName}
                     placeholder={t.ideaPlaceholder}
                     generateLabel={t.generate}
+                    thinkingMode={thinkingMode}
+                    thinkingLabel={t.thinkingLabel || 'Thinking'}
+                    thinkingOptions={[
+                        { value: 'disabled', label: t.thinkingOff || 'Disable Thinking' },
+                        { value: 'enabled', label: t.thinkingOn || 'Enable Thinking' },
+                    ]}
                     isTransitioning={isTransitioning || isPreparing}
                     onChange={handleProjectNameChange}
+                    onThinkingModeChange={setThinkingMode}
                     onSubmit={handleStart}
                 />
 
@@ -1923,7 +1891,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         className="group grid h-[25rem] grid-rows-[5.25rem_1.75rem_minmax(0,1fr)] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
                                     >
                                         <div className="min-h-0">
-                                            <div className="type-caption-1 text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.mode}</div>
+                                            <div className="type-footnote text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.mode}</div>
                                             <div
                                                 data-testid="intake-option-title"
                                                 className="type-title-3 mt-2 line-clamp-2 overflow-hidden text-white"
@@ -1931,7 +1899,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                                 {option.title}
                                             </div>
                                         </div>
-                                        <div className="type-caption-1 self-start text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.gameplay}</div>
+                                        <div className="type-footnote self-start text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.gameplay}</div>
                                         <div
                                             data-testid="intake-option-gameplay"
                                             className="type-body min-h-0 overflow-y-auto pr-1 text-zinc-300 [scrollbar-width:thin]"
@@ -1947,42 +1915,42 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     {intakePhase === 'configuring_details' && selectedOption && settings ? (
                         <div className="space-y-4" data-testid="intake-settings" data-panel-depth="single">
                             <div className="grid gap-3 sm:grid-cols-2">
-                                <label className="type-subheadline text-zinc-300">
+                                <label className="type-callout text-zinc-300">
                                     {intakeText.fields.platform}
-                                    <select aria-label={intakeText.fields.platform} value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                    <select aria-label={intakeText.fields.platform} value={settings.platform} onChange={(event) => updateSettings({ platform: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
                                         {optionsWithCurrentValue(productionSettingOptions.platforms, settings.platform).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="type-subheadline text-zinc-300">
+                                <label className="type-callout text-zinc-300">
                                     {intakeText.fields.engine}
-                                    <select aria-label={intakeText.fields.engine} value={normalizeEngine(settings.engine)} onChange={(event) => updateSettings({ engine: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                    <select aria-label={intakeText.fields.engine} value={normalizeEngine(settings.engine)} onChange={(event) => updateSettings({ engine: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
                                         {optionsWithCurrentValue(productionSettingOptions.engines, settings.engine || '').map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="type-subheadline text-zinc-300">
+                                <label className="type-callout text-zinc-300">
                                     {intakeText.fields.dimension}
-                                    <select aria-label={intakeText.fields.dimension} value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                    <select aria-label={intakeText.fields.dimension} value={settings.dimension} onChange={(event) => updateSettings({ dimension: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
                                         {optionsWithCurrentValue(productionSettingOptions.dimensions, settings.dimension).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="type-subheadline text-zinc-300">
+                                <label className="type-callout text-zinc-300">
                                     {intakeText.fields.genre}
-                                    <select aria-label={intakeText.fields.genre} value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                    <select aria-label={intakeText.fields.genre} value={settings.genre} onChange={(event) => updateSettings({ genre: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
                                         {optionsWithCurrentValue(productionSettingOptions.genres, settings.genre).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <label className="type-subheadline text-zinc-300">
+                                <label className="type-callout text-zinc-300">
                                     {intakeText.fields.style}
-                                    <select aria-label={intakeText.fields.style} value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3">
-                                        <option value="">{intakeText.fields.selectPlaceholder}</option>
+                                    <select aria-label={intakeText.fields.style} value={settings.visualStyle} onChange={(event) => updateSettings({ visualStyle: event.target.value })} className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3">
+                                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
                                         {optionsWithCurrentValue(productionSettingOptions.styles, settings.visualStyle).map((option) => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}
                                     </select>
                                 </label>
-                                <div ref={inputMenuRef} className="type-subheadline relative text-zinc-300">
+                                <div ref={inputMenuRef} className="type-callout relative text-zinc-300">
                                     {intakeText.fields.inputs}
                                     <button
                                         ref={inputMenuButtonRef}
@@ -1990,7 +1958,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         aria-haspopup="listbox"
                                         aria-expanded={isInputMenuOpen}
                                         onClick={() => setIsInputMenuOpen(value => !value)}
-                                        className="glass-control type-input mt-2 flex h-11 w-full items-center justify-between gap-3 rounded-2xl px-3 text-left"
+                                        className="glass-control type-input mt-2 flex h-10 w-full items-center justify-between gap-3 rounded-[20px] px-3 text-left"
                                     >
                                         <span className="min-w-0 truncate">{localizedInputs(settings.inputs)}</span>
                                         <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-400 transition ${isInputMenuOpen ? 'rotate-180' : ''}`} />
@@ -1998,14 +1966,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 </div>
                             </div>
 
-                            <label className="type-subheadline block text-zinc-300">
+                            <label className="type-callout block text-zinc-300">
                                 {intakeText.fields.notes}
                                 <textarea
                                     aria-label={intakeText.fields.notes}
                                     value={settings.notes || ''}
                                     onChange={(event) => updateSettings({ notes: event.target.value })}
                                     placeholder={intakeText.placeholders.notes}
-                                    className="glass-control type-callout mt-2 min-h-24 w-full resize-none rounded-2xl px-3 py-3 placeholder:text-zinc-500"
+                                    className="glass-control type-footnote mt-2 min-h-24 w-full resize-none rounded-[20px] px-3 py-3 placeholder:text-zinc-500"
                                 />
                             </label>
 
@@ -2024,12 +1992,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
                             <p className="type-body mt-3 text-zinc-300">{selectedOption.pitch}</p>
                             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.platform}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd></div>
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.engine}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.engine || 'React')}</dd></div>
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.presentation}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.dimension)}</dd></div>
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.type}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.genre)}</dd></div>
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.style}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.visualStyle)}</dd></div>
-	                                <div><dt className="type-caption-1 text-zinc-500">{intakeText.fields.inputs}</dt><dd className="type-callout mt-1 text-white">{localizedInputs(settings.inputs)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.platform}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.engine}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.engine || 'React')}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.presentation}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.dimension)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.type}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.genre)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.style}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.visualStyle)}</dd></div>
+                                <div><dt className="type-footnote text-zinc-500">{intakeText.fields.inputs}</dt><dd className="type-callout mt-1 text-white">{localizedInputs(settings.inputs)}</dd></div>
                             </dl>
                             {settings.notes ? <p className="type-footnote mt-4 rounded-2xl bg-white/5 p-3 text-zinc-300">{settings.notes}</p> : null}
                             <div className="mt-5 flex flex-wrap justify-end gap-3">
@@ -2086,59 +2054,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     )
                     : null}
 
-                {clarification ? (
-                    <div
-                        role="status"
-                        aria-live="polite"
-                        data-testid="intake-clarification"
-                        className="relative z-20 mt-4 w-[min(760px,calc(100vw-2rem))] rounded-[24px] border border-white/15 bg-zinc-950/60 px-5 py-4 text-left text-zinc-100 shadow-[0_18px_55px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
-                    >
-                        <div className="type-caption-1 text-amber-300">{intakeText.clarification.title}</div>
-                        <p className="type-callout mt-2 text-zinc-200">{clarification.prompt}</p>
-                        {clarification.options.length > 0 ? (
-                            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                                {clarification.options.map((option) => (
-                                    <button
-                                        key={option.id}
-                                        type="button"
-                                        disabled={isPreparing || isTransitioning}
-                                        onClick={() => handleClarificationAnswer(option.value || option.label)}
-                                        className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-left transition hover:border-amber-300/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <span className="type-subheadline block text-white">{option.label}</span>
-                                        {option.description ? (
-                                            <span className="type-callout mt-1 block text-zinc-400">{option.description}</span>
-                                        ) : null}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : null}
-                        <form
-                            className="mt-4 flex flex-col gap-2 sm:flex-row"
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                void handleClarificationAnswer(clarificationDraft);
-                            }}
-                        >
-                            <input
-                                aria-label={clarification.freeformLabel || intakeText.clarification.freeformLabel}
-                                value={clarificationDraft}
-                                disabled={isPreparing || isTransitioning}
-                                onChange={(event) => setClarificationDraft(event.target.value)}
-                                placeholder={clarification.freeformLabel || intakeText.clarification.placeholder}
-                                className="glass-control type-input min-w-0 flex-1 rounded-full px-4 py-3 placeholder:text-zinc-500 disabled:cursor-not-allowed disabled:opacity-60"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!clarificationDraft.trim() || isPreparing || isTransitioning}
-                                className="primary-pill type-button px-5 py-3 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {intakeText.actions.continue}
-                            </button>
-                        </form>
-                    </div>
-                ) : null}
-
                 {intakeCreditQuote ? (
                     <CreditConfirmDialog
                         quote={intakeCreditQuote}
@@ -2194,7 +2109,7 @@ function CreditConfirmDialog({
                     <div className="credit-ticket">
                         <div className="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-stretch px-10 py-5">
                             <div className="min-w-0 pr-5">
-                                <div className="type-caption-1 text-zinc-500">
+                                <div className="type-footnote text-zinc-500">
                                     {copy.credits.balance}
                                 </div>
                                 <div className="type-title-3 mt-2 text-emerald-200">
@@ -2203,7 +2118,7 @@ function CreditConfirmDialog({
                             </div>
                             <div className="credit-ticket-divider" aria-hidden="true" />
                             <div className="min-w-0 pl-5 text-right">
-                                <div className="type-caption-1 text-zinc-500">
+                                <div className="type-footnote text-zinc-500">
                                     {copy.credits.reserved}
                                 </div>
                                 <div className="type-title-3 mt-2 text-white">
@@ -2212,7 +2127,7 @@ function CreditConfirmDialog({
                             </div>
                         </div>
                         <div className="border-t border-white/10 px-7 py-3">
-                            <p className="type-caption-2 truncate text-zinc-400">
+                            <p className="type-footnote truncate text-zinc-400">
                                 {copy.credits.refundRule}
                             </p>
                         </div>
@@ -2250,7 +2165,7 @@ function CreditMetric({
 }) {
     return (
         <div className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
-            <div className="type-caption-1 text-zinc-500">{label}</div>
+            <div className="type-footnote text-zinc-500">{label}</div>
             <div className={`type-headline mt-1 truncate ${tone === 'positive' ? 'text-emerald-200' : 'text-zinc-100'}`}>
                 {value}
             </div>

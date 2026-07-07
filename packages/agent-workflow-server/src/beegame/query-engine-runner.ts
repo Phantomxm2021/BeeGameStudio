@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines'
 import type {
+  BeeGamePromptInput,
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
   BeeGameSessionRuntime,
@@ -14,7 +15,7 @@ import type {
 type DynamicModule = Record<string, unknown>
 
 type QueryEngineLike = {
-  submitMessage(prompt: string): AsyncGenerator<DashboardSDKMessage, void, unknown>
+  submitMessage(prompt: BeeGamePromptInput): AsyncGenerator<DashboardSDKMessage, void, unknown>
   interrupt(): void
   resetAbortController(): void
 }

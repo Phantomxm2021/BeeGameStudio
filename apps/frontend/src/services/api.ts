@@ -20,6 +20,13 @@ export interface SendMessageResponse {
   trace_id: string;
 }
 
+export interface ChatImageAttachmentPayload {
+  type: 'image';
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  data: string;
+  filename?: string;
+}
+
 export interface ContinueTaskResponse {
   command_id: string;
   resume_task_id: string;
@@ -754,6 +761,7 @@ export const api = {
     termination_node?: string;
     client_message_id?: string;
     taskType?: import('./creditsApi').BeeGameCreditTaskType;
+    attachments?: ChatImageAttachmentPayload[];
   }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.sendMessage(data)

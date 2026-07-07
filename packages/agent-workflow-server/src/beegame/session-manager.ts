@@ -22,6 +22,27 @@ import {
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { createQueryEngineRunner } from './query-engine-runner'
 
+export type BeeGameImageAttachment = {
+  type: 'image'
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  data: string
+  filename?: string
+}
+
+export type BeeGamePromptInput =
+  | string
+  | Array<
+    | { type: 'text'; text: string }
+    | {
+      type: 'image'
+      source: {
+        type: 'base64'
+        media_type: BeeGameImageAttachment['mediaType']
+        data: string
+      }
+    }
+  >
+
 export type BeeGameSessionStatus = 'running' | 'stopped' | 'failed'
 
 export type BeeGameTurnStatus = 'idle' | 'running'
@@ -112,7 +133,7 @@ export type BeeGameSessionRunnerStartInput = {
 }
 
 export type BeeGameSessionSubmitInput = {
-  prompt: string
+  prompt: BeeGamePromptInput
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
@@ -571,6 +592,7 @@ export class BeeGameSessionManager {
       authToken?: string
       clientMessageId?: string
       language?: BeeGameSessionLanguage
+      attachments?: BeeGameImageAttachment[]
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -605,7 +627,11 @@ export class BeeGameSessionManager {
 
     void this.runDirectTurn(
       record,
-      withSessionLanguageContract(text, record.language),
+      buildBeeGamePromptInput({
+        text,
+        language: record.language,
+        attachments: display?.attachments,
+      }),
       creditReservation,
       creditPolicy,
     )
@@ -708,7 +734,7 @@ export class BeeGameSessionManager {
 
   private async runDirectTurn(
     record: SessionRecord,
-    prompt: string,
+    prompt: BeeGamePromptInput,
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
   ): Promise<void> {
@@ -796,7 +822,7 @@ export class BeeGameSessionManager {
   private async submitToRunner(
     record: SessionRecord,
     runner: BeeGameSessionRuntime,
-    prompt: string,
+    prompt: BeeGamePromptInput,
     signal: AbortSignal,
   ): Promise<void> {
     await runner.submit({
@@ -1854,6 +1880,47 @@ function withSessionLanguageContract(
   const instruction = getSessionLanguageInstruction(language)
   if (!instruction) return prompt
   return `${instruction}\n\n${prompt}`
+}
+
+function buildBeeGamePromptInput(input: {
+  text: string
+  language?: BeeGameSessionLanguage
+  attachments?: BeeGameImageAttachment[]
+}): BeeGamePromptInput {
+  const promptText = withSessionLanguageContract(input.text, input.language)
+  const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
+  if (images.length === 0) return promptText
+  return [
+    { type: 'text', text: promptText || 'Analyze the attached image.' },
+    ...images.map(image => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: image.mediaType,
+        data: image.data,
+      },
+    })),
+  ]
+}
+
+function isBeeGameImageAttachment(
+  value: unknown,
+): value is BeeGameImageAttachment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const attachment = value as Partial<BeeGameImageAttachment>
+  return attachment.type === 'image' &&
+    isSupportedBeeGameImageMediaType(attachment.mediaType) &&
+    typeof attachment.data === 'string' &&
+    attachment.data.trim().length > 0
+}
+
+function isSupportedBeeGameImageMediaType(
+  mediaType: unknown,
+): mediaType is BeeGameImageAttachment['mediaType'] {
+  return mediaType === 'image/png' ||
+    mediaType === 'image/jpeg' ||
+    mediaType === 'image/gif' ||
+    mediaType === 'image/webp'
 }
 
 function getSessionLanguageInstruction(

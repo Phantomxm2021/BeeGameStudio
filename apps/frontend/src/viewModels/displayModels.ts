@@ -21,6 +21,7 @@ export interface ChatDisplayMessage
     | 'dedupeKey'
     | 'sender'
     | 'content'
+    | 'attachments'
     | 'timestamp'
     | 'type'
     | 'isDocument'

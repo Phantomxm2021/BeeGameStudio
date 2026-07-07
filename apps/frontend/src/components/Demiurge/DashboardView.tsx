@@ -12,7 +12,7 @@ import { SideMenu } from './SideMenu';
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
-import type { BeeGameDeploymentPayload, BuildReportPayload, PendingUserReviewItem } from '../../services/api';
+import type { BeeGameDeploymentPayload, BuildReportPayload, ChatImageAttachmentPayload, PendingUserReviewItem } from '../../services/api';
 import { api } from '../../services/api';
 import { buildApiUrl } from '../../services/apiClient';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
@@ -566,8 +566,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 lang={lang}
                 messages={displayMessages}
                 progress={progressPercent}
-                onSendMessage={(message, taskType?: BeeGameCreditTaskType) =>
-                    sendMessage(message, undefined, taskType)
+                onSendMessage={(message, taskType?: BeeGameCreditTaskType, attachments?: ChatImageAttachmentPayload[]) =>
+                    sendMessage(message, undefined, taskType, attachments)
                 }
                 isLoading={isLoading}
                 isRuntimeBusy={currentStatus === 'running'}

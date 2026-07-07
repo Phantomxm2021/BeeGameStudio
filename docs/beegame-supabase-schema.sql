@@ -461,6 +461,26 @@ as $$
   )
 $$;
 
+create or replace function public.beegame_is_platform_owner_id(target_user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from auth.users u
+    where u.id = target_user_id
+      and u.raw_app_meta_data->>'beegame_role' = 'owner'
+  ) or exists (
+    select 1
+    from public.beegame_platform_owner_invites i
+    where i.claimed_user_id = target_user_id
+      and i.claimed_at is not null
+  )
+$$;
+
 create or replace function public.beegame_model_config_owner_id(target_user_id uuid)
 returns uuid
 language plpgsql
@@ -949,6 +969,8 @@ declare
   base_config_dir text;
   runtime_root_dir text;
   config_owner_id uuid;
+  runtime_settings_owner_id uuid;
+  platform_owner_with_runtime_settings uuid;
 begin
   if p_user_id is null then
     raise exception 'User id is required';
@@ -957,6 +979,15 @@ begin
     raise exception 'Forbidden';
   end if;
   config_owner_id := public.beegame_model_config_owner_id(p_user_id);
+
+  select s.owner_id
+  into platform_owner_with_runtime_settings
+  from public.beegame_runtime_settings s
+  where public.beegame_is_platform_owner_id(s.owner_id)
+  order by s.updated_at desc, s.owner_id
+  limit 1;
+
+  runtime_settings_owner_id := coalesce(platform_owner_with_runtime_settings, config_owner_id);
 
   base_config_dir := trim(trailing '/' from coalesce(p_data_dir, ''));
   if base_config_dir <> '' then
@@ -1042,7 +1073,7 @@ begin
   select *
   into settings_row
   from public.beegame_runtime_settings
-  where owner_id = config_owner_id
+  where owner_id = runtime_settings_owner_id
   limit 1;
 
   if found then
@@ -1563,7 +1594,8 @@ drop policy if exists "runtime settings managed by platform owner" on public.bee
 create policy "runtime settings readable by effective owner" on public.beegame_runtime_settings
   for select using (
     owner_id = auth.uid() or
-    owner_id = public.beegame_model_config_owner_id(auth.uid())
+    owner_id = public.beegame_model_config_owner_id(auth.uid()) or
+    public.beegame_is_platform_owner_id(owner_id)
   );
 create policy "runtime settings managed by platform owner" on public.beegame_runtime_settings
   for all using (
@@ -1634,6 +1666,9 @@ grant execute on function public.beegame_claim_platform_owner_invite() to authen
 
 revoke execute on function public.beegame_is_platform_owner() from public;
 grant execute on function public.beegame_is_platform_owner() to authenticated;
+
+revoke execute on function public.beegame_is_platform_owner_id(uuid) from public;
+grant execute on function public.beegame_is_platform_owner_id(uuid) to authenticated;
 
 revoke execute on function public.beegame_account_id(uuid) from public;
 grant execute on function public.beegame_account_id(uuid) to authenticated;

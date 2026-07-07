@@ -8,6 +8,7 @@ import type {
   ProjectBaselineStatusPayload,
   SendMessageResponse,
   StopTaskResponse,
+  ChatImageAttachmentPayload,
 } from './api';
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
@@ -123,6 +124,13 @@ type BeeGameArtifact = {
 };
 
 type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko';
+export type BeeGameThinkingMode = 'enabled' | 'disabled';
+
+type BeeGameIdeaIntakeRequest = {
+  idea: string;
+  language?: BeeGameLanguage | string;
+  thinkingMode?: BeeGameThinkingMode;
+};
 
 export type BeeGameIntakeOption = {
   id: string;
@@ -281,19 +289,19 @@ export const beeGameAdapter = {
     return project;
   },
 
-  async runIdeaIntake(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIdeaIntakeResult> {
+  async runIdeaIntake(data: BeeGameIdeaIntakeRequest): Promise<BeeGameIdeaIntakeResult> {
     const response = await runIdeaIntakeJob(data) ?? await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
       '/api/beegame-intake/options',
-      { idea: data.idea, ...(data.language ? { language: data.language } : {}) },
+      buildIdeaIntakeRequestBody(data),
     );
     const intake = normalizeIdeaIntakeResult(response);
-    if (intake.options.length === 0 && !intake.clarification) {
+    if (intake.options.length === 0) {
       throw new Error('BeeGame intake did not return game mode options');
     }
     return intake;
   },
 
-  async generateIntakeOptions(data: { idea: string; language?: BeeGameLanguage | string }): Promise<BeeGameIntakeOption[]> {
+  async generateIntakeOptions(data: BeeGameIdeaIntakeRequest): Promise<BeeGameIntakeOption[]> {
     return (await this.runIdeaIntake(data)).options;
   },
 
@@ -426,6 +434,7 @@ export const beeGameAdapter = {
     project_id: string;
     client_message_id?: string;
     taskType?: BeeGameCreditTaskType;
+    attachments?: ChatImageAttachmentPayload[];
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
@@ -436,6 +445,7 @@ export const beeGameAdapter = {
       taskType: data.taskType || 'edit_turn',
       clientMessageId: data.client_message_id,
       language,
+      attachments: data.attachments,
     });
     return {
       command_id: session.id,
@@ -1093,6 +1103,7 @@ async function sendBeeGameInput(
     taskType?: BeeGameCreditTaskType;
     clientMessageId?: string;
     language?: BeeGameLanguage;
+    attachments?: ChatImageAttachmentPayload[];
   },
 ): Promise<BeeGameSession> {
   return postJson(`/api/beegame-sessions/${sessionId}/input`, {
@@ -1102,6 +1113,7 @@ async function sendBeeGameInput(
     ...(display?.taskType ? { taskType: display.taskType } : {}),
     ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
     ...(display?.language ? { language: display.language } : {}),
+    ...(display?.attachments?.length ? { attachments: display.attachments } : {}),
   });
 }
 
@@ -1873,60 +1885,19 @@ function normalizeIdeaIntakeResult(
   response: Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] },
 ): BeeGameIdeaIntakeResult {
   const options = (response.options || []).map((option) => normalizeIntakeOption(option));
-  const clarification = normalizeClarification(response.clarification);
   const maturity = response.maturity === 'directional' || response.maturity === 'concrete' || response.maturity === 'vague'
     ? response.maturity
     : 'vague';
   return {
     maturity,
     needsOptions: typeof response.needsOptions === 'boolean' ? response.needsOptions : maturity !== 'concrete',
-    needsClarification: response.needsClarification === true,
-    ...(clarification ? { clarification } : {}),
-    clarificationQuestions: Array.isArray(response.clarificationQuestions) ? response.clarificationQuestions.map(String).filter(Boolean) : [],
+    needsClarification: false,
+    clarificationQuestions: [],
     detectedConstraints: Array.isArray(response.detectedConstraints) ? response.detectedConstraints.map(String).filter(Boolean) : [],
     recommendedNextStep: typeof response.recommendedNextStep === 'string' && response.recommendedNextStep
       ? response.recommendedNextStep
       : maturity === 'concrete' ? 'configure_details' : 'choose_direction',
     options,
-  };
-}
-
-function normalizeClarification(value: unknown): BeeGameClarification | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  const prompt = typeof record.prompt === 'string' ? record.prompt.trim() : '';
-  if (!prompt) return undefined;
-  const options = Array.isArray(record.options)
-    ? record.options
-      .map((item, index): BeeGameClarificationOption | undefined => {
-        if (!item || typeof item !== 'object') return undefined;
-        const option = item as Record<string, unknown>;
-        const label = typeof option.label === 'string' ? option.label.trim() : '';
-        if (!label) return undefined;
-        const id = typeof option.id === 'string' && option.id.trim()
-          ? option.id.trim()
-          : `clarification_${index + 1}`;
-        const description = typeof option.description === 'string' ? option.description.trim() : '';
-        const optionValue = typeof option.value === 'string' ? option.value.trim() : '';
-        return {
-          id,
-          label,
-          ...(description ? { description } : {}),
-          ...(optionValue ? { value: optionValue } : {}),
-        };
-      })
-      .filter((item): item is BeeGameClarificationOption => Boolean(item))
-      .slice(0, 4)
-    : [];
-  const freeformLabel = typeof record.freeformLabel === 'string'
-    ? record.freeformLabel.trim()
-    : typeof record.freeform_label === 'string'
-      ? record.freeform_label.trim()
-      : '';
-  return {
-    prompt,
-    options,
-    ...(freeformLabel ? { freeformLabel } : {}),
   };
 }
 
@@ -2487,11 +2458,19 @@ type BeeGameIntakeJobPoll =
 const BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS = 1500;
 const BEEGAME_INTAKE_JOB_MAX_POLLS = 240;
 
-async function runIdeaIntakeJob(data: { idea: string; language?: BeeGameLanguage | string }): Promise<(Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }) | undefined> {
+function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdeaIntakeRequest {
+  return {
+    idea: data.idea,
+    ...(data.language ? { language: data.language } : {}),
+    ...(data.thinkingMode ? { thinkingMode: data.thinkingMode } : {}),
+  };
+}
+
+async function runIdeaIntakeJob(data: BeeGameIdeaIntakeRequest): Promise<(Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }) | undefined> {
   const createResponse = await authenticatedFetch('/api/beegame-intake/jobs', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ idea: data.idea, ...(data.language ? { language: data.language } : {}) }),
+    body: JSON.stringify(buildIdeaIntakeRequestBody(data)),
   });
   if (createResponse.status === 404) return undefined;
   const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);

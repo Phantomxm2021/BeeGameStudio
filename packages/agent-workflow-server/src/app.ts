@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
@@ -15,6 +16,7 @@ import {
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
   type BeeGameSession,
+  type BeeGameImageAttachment,
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
@@ -156,6 +158,17 @@ type BeeGameIntakeAnalysis = {
   recommendedNextStep: string
   options: BeeGameIntakeOption[]
 }
+
+const BEEGAME_INTAKE_SETTING_VALUES = {
+  platforms: ['Web', 'Mobile', 'PC', 'Console', 'VR/AR'],
+  engines: ['React', 'Unity', 'Godot', 'Unreal'],
+  dimensions: ['2D', '2.5D', '3D', 'VR', 'AR'],
+  genres: ['Arcade', 'Action', 'Adventure', 'Puzzle', 'Racing', 'RPG', 'Strategy', 'Simulation', 'Shooter', 'Platformer', 'Casual'],
+  styles: ['Pixel', 'Cartoon', 'Stylized', 'Minimal', 'Realistic', 'Low Poly', 'Hand-drawn', 'Sci-fi', 'Fantasy'],
+  inputs: ['Keyboard/mouse', 'Touch', 'Gamepad', 'Motion', 'Voice', 'Hand tracking'],
+} as const
+
+type BeeGameThinkingMode = 'auto' | 'enabled' | 'disabled'
 
 type BeeGameIntakeJob = {
   ownerId: string
@@ -1085,7 +1098,14 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) return c.json({ version: 1, slots: [] })
+      if (!sessionRef) {
+        if (!project.root_path) return c.json({ version: 1, slots: [] })
+        const workspacePath = await resolveSessionWorkspacePath(
+          project.root_path,
+          options.defaultWorkspacePath,
+        )
+        return c.json(await readBeeGameAssetManifest(workspacePath))
+      }
       try {
         const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
         if (manifest.slots.length && sessionRef.live) {
@@ -1218,6 +1238,7 @@ export function createAgentWorkflowApp(
         idea: String(body.idea),
         language:
           typeof body.language === 'string' ? body.language : undefined,
+        thinkingMode: normalizeBeeGameThinkingMode(body.thinkingMode),
         ownerId: user.id,
         modelConfigId,
         runtimeEnv: await dashboardRepository.getRuntimeEnv(
@@ -1730,9 +1751,20 @@ async function requireOwnedModelConfigId(
   return modelConfigId
 }
 
+function normalizeBeeGameThinkingMode(value: unknown): BeeGameThinkingMode | undefined {
+  return value === 'auto' || value === 'enabled' || value === 'disabled' ? value : undefined
+}
+
+function toBeeGameThinkingRequest(value: BeeGameThinkingMode | undefined): JsonObject {
+  if (value === 'enabled') return { enable_thinking: true }
+  if (value === 'disabled') return { enable_thinking: false }
+  return {}
+}
+
 async function generateBeeGameIntakeOptions(input: {
   idea: string
   language?: string
+  thinkingMode?: BeeGameThinkingMode
   ownerId: string
   modelConfigId?: string
   runtimeEnv?: Record<string, string>
@@ -1769,6 +1801,8 @@ async function generateBeeGameIntakeOptions(input: {
       model,
       temperature: 0.7,
       response_format: { type: 'json_object' },
+      stream: true,
+      ...toBeeGameThinkingRequest(input.thinkingMode),
       messages: [
         {
           role: 'system',
@@ -1777,12 +1811,9 @@ async function generateBeeGameIntakeOptions(input: {
             'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
             'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
             'maturity must be one of vague, directional, concrete.',
-            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between 2 to 3 directions.',
+            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between exactly 3 distinct directions.',
             'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, repeated player activity, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
-            'Set needs_clarification=true only when a blocking contradiction or missing decision prevents a useful recommendation.',
-            'When needs_clarification=true, clarification must contain exactly one prompt string for the most blocking question, 2 to 4 short options with id, label, optional description, and optional value, plus optional freeform_label. Do not bundle multiple questions into one prompt.',
-            'When needs_clarification=true, recommended_next_step must be "clarify"; options may be empty because the user must answer first.',
-            'When needs_clarification=false, return 1 to 3 valid options.',
+            'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty. When needs_options=true, return exactly 3 valid options. When needs_options=false, return exactly 1 valid option.',
             'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
             'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
             'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
@@ -1790,14 +1821,16 @@ async function generateBeeGameIntakeOptions(input: {
             'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
             'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
             'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
-            'Choose recommended metadata by understanding the full user request and the proposed game mode, not by keyword matching.',
+            'The production setting fields are selected values, not optional suggestions. Choose them by understanding the full user request and the proposed game mode, not by keyword matching.',
             'Choose recommendedPlatform only from: Web, Mobile, PC, Console, VR/AR.',
             'Choose recommendedEngine only from: React, Unity, Godot, Unreal.',
             'Choose recommendedDimension only from: 2D, 2.5D, 3D, VR, AR.',
             'Choose recommendedGenre only from: Arcade, Action, Adventure, Puzzle, Racing, RPG, Strategy, Simulation, Shooter, Platformer, Casual.',
             'Choose recommendedStyle only from: Pixel, Cartoon, Stylized, Minimal, Realistic, Low Poly, Hand-drawn, Sci-fi, Fantasy.',
-            'Choose recommendedInputs only from: Keyboard/mouse, Touch, Gamepad, Motion, Voice, Hand tracking.',
-            'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs must fit the request while staying inside the allowed values above; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
+            'Choose recommendedInputs as a JSON array containing one or more values only from: Keyboard/mouse, Touch, Gamepad, Motion, Voice, Hand tracking.',
+            'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs are selected production settings and must use the exact English enum tokens above. Do not translate these enum token values.',
+            'These selected production settings must fit the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
+            'Choose production settings from the actual game direction and user constraints, not from a fixed menu order or default.',
             'Do not output Auto or placeholder values for recommended metadata.',
             'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
             'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
@@ -1838,8 +1871,141 @@ async function generateBeeGameIntakeOptions(input: {
       }),
     )
   }
+  return parseBeeGameIntakeResponse(response)
+}
+
+async function parseBeeGameIntakeResponse(response: Response): Promise<BeeGameIntakeAnalysis> {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.toLowerCase().includes('text/event-stream')) {
+    const content = await readOpenAiCompatibleStreamContent(response)
+    logBeeGameIntakeStreamDebug('complete', {
+      contentLength: content.length,
+      contentPreview: previewForLog(content, 4000),
+    })
+    return parseBeeGameIntakeAnalysis({
+      choices: [
+        {
+          message: { content },
+        },
+      ],
+    })
+  }
   const payload = (await response.json()) as JsonObject
   return parseBeeGameIntakeAnalysis(payload)
+}
+
+async function readOpenAiCompatibleStreamContent(response: Response): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const startedAt = Date.now()
+  let buffer = ''
+  let content = ''
+  let done = false
+  let rawChunkCount = 0
+  let eventCount = 0
+  let contentChunkCount = 0
+
+  const processEvent = (eventText: string) => {
+    const data = eventText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice('data:'.length).trim())
+      .join('\n')
+    if (!data) return
+    eventCount += 1
+    if (data === '[DONE]') {
+      logBeeGameIntakeStreamDebug('event_done', {
+        eventCount,
+        elapsedMs: Date.now() - startedAt,
+        accumulatedContentLength: content.length,
+      })
+      done = true
+      return
+    }
+    logBeeGameIntakeStreamDebug('event_data', {
+      eventCount,
+      dataLength: data.length,
+      dataPreview: previewForLog(data, 2000),
+    })
+    let event: JsonObject
+    try {
+      event = JSON.parse(data) as JsonObject
+    } catch {
+      throw new Error('Model intake stream chunk was not valid JSON')
+    }
+    const choices = Array.isArray(event.choices) ? event.choices : []
+    for (const choice of choices) {
+      if (!isObject(choice)) continue
+      const delta = isObject(choice.delta) ? choice.delta : undefined
+      const message = isObject(choice.message) ? choice.message : undefined
+      const deltaContent = delta ? extractMessageContentText(delta) : ''
+      const messageContent = message ? extractMessageContentText(message) : ''
+      const nextContent = deltaContent || messageContent
+      if (nextContent) {
+        contentChunkCount += 1
+        content += nextContent
+        logBeeGameIntakeStreamDebug('content_delta', {
+          contentChunkCount,
+          deltaLength: nextContent.length,
+          accumulatedContentLength: content.length,
+          deltaPreview: previewForLog(nextContent, 1200),
+        })
+      }
+    }
+  }
+
+  while (!done) {
+    const next = await reader.read()
+    if (next.done) break
+    const decoded = normalizeSseNewlines(decoder.decode(next.value, { stream: true }))
+    rawChunkCount += 1
+    logBeeGameIntakeStreamDebug('raw_chunk', {
+      rawChunkCount,
+      elapsedMs: Date.now() - startedAt,
+      chunkLength: decoded.length,
+      chunkPreview: previewForLog(decoded, 2000),
+    })
+    buffer += decoded
+    let eventEnd = buffer.indexOf('\n\n')
+    while (eventEnd >= 0) {
+      processEvent(buffer.slice(0, eventEnd))
+      buffer = buffer.slice(eventEnd + 2)
+      eventEnd = buffer.indexOf('\n\n')
+    }
+  }
+  buffer += normalizeSseNewlines(decoder.decode())
+  if (buffer.trim()) processEvent(buffer)
+  return content
+}
+
+function normalizeSseNewlines(value: string): string {
+  return value.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+}
+
+function logBeeGameIntakeStreamDebug(event: string, details: JsonObject): void {
+  if (process.env.BEEGAME_INTAKE_STREAM_DEBUG !== '1') return
+  const entry = {
+    timestamp: new Date().toISOString(),
+    event,
+    details,
+  }
+  const logPath = process.env.BEEGAME_INTAKE_STREAM_LOG_PATH || resolve('beegame-intake-stream-debug.jsonl')
+  try {
+    mkdirSync(dirname(logPath), { recursive: true })
+    appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf8')
+  } catch (err) {
+    console.warn('[beegame-intake-stream] failed_to_write_log_file', {
+      logPath,
+      error: toErrorMessage(err),
+    })
+  }
+}
+
+function previewForLog(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]`
 }
 
 async function describeModelIntakeFailure(
@@ -1895,7 +2061,12 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
       : undefined
   const content = message ? extractMessageContentText(message) : ''
   const parsed = parseJsonObjectFromText(content)
-  const options = Array.isArray(parsed.options) ? parsed.options : []
+  const rawNeedsOptions = getBooleanField(parsed, 'needsOptions', 'needs_options')
+  const directOptions = Array.isArray(parsed.options) ? parsed.options : []
+  const derivedOptions = directOptions.length === 0
+    ? getClarificationChoiceIntakeOptions(parsed)
+    : []
+  const options = directOptions.length > 0 ? directOptions : derivedOptions
   const normalized: BeeGameIntakeOption[] = []
   const rejectedReasons: string[] = []
   for (let index = 0; index < options.length; index += 1) {
@@ -1906,9 +2077,8 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
     )
     if (intakeOption) normalized.push(intakeOption)
   }
-  const needsClarification = getBooleanField(parsed, 'needsClarification', 'needs_clarification') ?? false
-  const clarification = normalizeBeeGameClarification(parsed.clarification)
-  if (normalized.length === 0 && !(needsClarification && clarification)) {
+  const derivedOptionsFromClarification = derivedOptions.length > 0 && normalized.length > 0
+  if (normalized.length === 0) {
     const keys = Object.keys(parsed).join(', ') || 'none'
     const reason = rejectedReasons.slice(0, 3).join('; ')
     throw new Error(
@@ -1916,45 +2086,50 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
     )
   }
   const maturity = normalizeMaturity(parsed.maturity)
+  const needsOptions = derivedOptionsFromClarification
+    ? normalized.length > 1
+    : rawNeedsOptions ?? maturity !== 'concrete'
+  const expectedOptionCount = needsOptions ? 3 : 1
+  if (normalized.length < expectedOptionCount) {
+    const keys = Object.keys(parsed).join(', ') || 'none'
+    throw new Error(
+      `Model intake response did not include enough valid options. Expected ${expectedOptionCount}, received ${normalized.length}. Parsed keys: ${keys}`,
+    )
+  }
   return {
     maturity,
-    needsOptions: getBooleanField(parsed, 'needsOptions', 'needs_options') ?? maturity !== 'concrete',
-    needsClarification,
-    ...(clarification ? { clarification } : {}),
-    clarificationQuestions: getStringArrayField(parsed, 'clarificationQuestions', 'clarification_questions'),
+    needsOptions,
+    needsClarification: false,
+    clarificationQuestions: [],
     detectedConstraints: getStringArrayField(parsed, 'detectedConstraints', 'detected_constraints'),
-    recommendedNextStep: getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (needsClarification ? 'clarify' : maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
-    options: normalized.slice(0, 3),
+    recommendedNextStep: derivedOptionsFromClarification
+      ? 'choose_direction'
+      : getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
+    options: normalized.slice(0, expectedOptionCount),
   }
 }
 
-function normalizeBeeGameClarification(value: unknown): BeeGameClarification | undefined {
-  if (!isObject(value)) return undefined
-  const prompt = getStringField(value, 'prompt')
-  if (!prompt) return undefined
-  const rawOptions = Array.isArray(value.options) ? value.options : []
-  const options = rawOptions
-    .map((option, index): BeeGameClarificationOption | undefined => {
-      if (!isObject(option)) return undefined
-      const label = getStringField(option, 'label')
+function getClarificationChoiceIntakeOptions(value: JsonObject): JsonObject[] {
+  const questions = value.clarificationQuestions ?? value.clarification_questions
+  if (!Array.isArray(questions)) return []
+  const question = questions.find(item => isObject(item))
+  if (!isObject(question)) return []
+  const choices = Array.isArray(question.options) ? question.options : []
+  return choices
+    .map((choice, index): JsonObject | undefined => {
+      if (!isObject(choice)) return undefined
+      const label = getStringField(choice, 'label')
       if (!label) return undefined
-      const description = getStringField(option, 'description')
-      const optionValue = getStringField(option, 'value')
+      const description = getStringField(choice, 'description')
       return {
-        id: getStringField(option, 'id') || `clarification_${index + 1}`,
-        label,
-        ...(description ? { description } : {}),
-        ...(optionValue ? { value: optionValue } : {}),
+        id: getStringField(choice, 'id') || `mode_${index + 1}`,
+        title: label,
+        pitch: description || label,
+        gameplay: description || label,
+        fit: description || label,
       }
     })
-    .filter((option): option is BeeGameClarificationOption => Boolean(option))
-    .slice(0, 4)
-  const freeformLabel = getStringField(value, 'freeformLabel', 'freeform_label')
-  return {
-    prompt,
-    options,
-    ...(freeformLabel ? { freeformLabel } : {}),
-  }
+    .filter((choice): choice is JsonObject => Boolean(choice))
 }
 
 function extractMessageContentText(message: JsonObject): string {
@@ -1985,7 +2160,8 @@ function normalizeBeeGameIntakeOption(
     rejectedReasons?.push('option was not an object')
     return undefined
   }
-  const inputs = getStringArrayField(value, 'recommendedInputs', 'recommended_inputs')
+  const rawInputs = getStringListField(value, 'recommendedInputs', 'recommended_inputs', 'selectedInputs', 'selected_inputs')
+  const selectedInputs = pickAllowedProductionInputs(rawInputs)
   const gameplay = String(value.gameplay || '').trim()
   const pitch = String(value.pitch || '').trim() || gameplay
   const option = {
@@ -2007,22 +2183,35 @@ function normalizeBeeGameIntakeOption(
     fit: getStringField(value, 'fit') || pitch,
     firstPlayableValidation: getStringField(value, 'firstPlayableValidation', 'first_playable_validation') || gameplay,
     riskComplexity: getStringField(value, 'riskComplexity', 'risk_complexity') || 'Complexity depends on selected scope.',
-    recommendedPlatform: getStringishField(value, 'recommendedPlatform', 'recommended_platform'),
-    recommendedEngine: getStringishField(value, 'recommendedEngine', 'recommended_engine'),
-    recommendedDimension: getStringishField(value, 'recommendedDimension', 'recommended_dimension'),
-    recommendedGenre: getStringishField(value, 'recommendedGenre', 'recommended_genre'),
-    recommendedStyle: getStringishField(value, 'recommendedStyle', 'recommended_style'),
-    recommendedInputs: inputs,
+    recommendedPlatform: pickAllowedProductionSetting(getFirstStringishField(value, 'recommendedPlatform', 'recommended_platform', 'selectedPlatform', 'selected_platform'), BEEGAME_INTAKE_SETTING_VALUES.platforms),
+    recommendedEngine: pickAllowedProductionSetting(getFirstStringishField(value, 'recommendedEngine', 'recommended_engine', 'selectedEngine', 'selected_engine'), BEEGAME_INTAKE_SETTING_VALUES.engines),
+    recommendedDimension: pickAllowedProductionSetting(getFirstStringishField(value, 'recommendedDimension', 'recommended_dimension', 'selectedDimension', 'selected_dimension'), BEEGAME_INTAKE_SETTING_VALUES.dimensions),
+    recommendedGenre: pickAllowedProductionSetting(getFirstStringishField(value, 'recommendedGenre', 'recommended_genre', 'selectedGenre', 'selected_genre'), BEEGAME_INTAKE_SETTING_VALUES.genres),
+    recommendedStyle: pickAllowedProductionSetting(getFirstStringishField(value, 'recommendedStyle', 'recommended_style', 'selectedStyle', 'selected_style'), BEEGAME_INTAKE_SETTING_VALUES.styles),
+    recommendedInputs: selectedInputs,
     scope: getStringishField(value, 'scope'),
   }
   if (
     !option.title ||
-    !option.gameplay
+    !option.gameplay ||
+    !option.recommendedPlatform ||
+    !option.recommendedEngine ||
+    !option.recommendedDimension ||
+    !option.recommendedGenre ||
+    !option.recommendedStyle ||
+    option.recommendedInputs.length === 0 ||
+    option.recommendedInputs.length !== rawInputs.length
   ) {
     rejectedReasons?.push(
       [
         !option.title ? 'title' : '',
         !option.gameplay ? 'gameplay' : '',
+        !option.recommendedPlatform ? 'recommendedPlatform' : '',
+        !option.recommendedEngine ? 'recommendedEngine' : '',
+        !option.recommendedDimension ? 'recommendedDimension' : '',
+        !option.recommendedGenre ? 'recommendedGenre' : '',
+        !option.recommendedStyle ? 'recommendedStyle' : '',
+        option.recommendedInputs.length === 0 || option.recommendedInputs.length !== rawInputs.length ? 'recommendedInputs' : '',
       ].filter(Boolean).join(', '),
     )
     return undefined
@@ -2068,6 +2257,41 @@ function getStringishField(
       .join(', ')
   }
   return ''
+}
+
+function getFirstStringishField(value: JsonObject, ...keys: string[]): string {
+  for (const key of keys) {
+    const candidate = getStringishField(value, key)
+    if (candidate) return candidate
+  }
+  return ''
+}
+
+function getStringListField(value: JsonObject, ...keys: string[]): string[] {
+  for (const key of keys) {
+    const candidate = value[key]
+    if (Array.isArray(candidate)) {
+      const values = candidate.map(item => String(item).trim()).filter(Boolean)
+      if (values.length > 0) return values
+    }
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim()
+      if (trimmed) return [trimmed]
+    }
+  }
+  return []
+}
+
+function pickAllowedProductionSetting<T extends string>(
+  value: string,
+  allowed: readonly T[],
+): T | '' {
+  return allowed.includes(value as T) ? value as T : ''
+}
+
+function pickAllowedProductionInputs(values: string[]): string[] {
+  const allowed = BEEGAME_INTAKE_SETTING_VALUES.inputs
+  return values.filter((value): value is typeof allowed[number] => allowed.includes(value as typeof allowed[number]))
 }
 
 function getStringArrayField(
@@ -3276,8 +3500,11 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['text'])
-    if (error) return c.json({ error }, 400)
+    const attachments = parseBeeGameImageAttachments(body.attachments)
+    if (body.text === undefined && attachments.length === 0) {
+      return c.json({ error: 'Missing field: text' }, 400)
+    }
+    const inputText = typeof body.text === 'string' ? body.text : ''
     try {
       const displayText = typeof body.displayText === 'string'
         ? body.displayText
@@ -3294,11 +3521,12 @@ function registerBeeGameSessionRoutes(
           ? body.client_message_id
           : undefined
       return c.json(
-        await beeGameSessions.sendWithDisplay(c.req.param('id'), String(body.text), {
+        await beeGameSessions.sendWithDisplay(c.req.param('id'), inputText, {
           displayText,
           displayKind,
           taskType,
           clientMessageId,
+          attachments,
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),
@@ -3692,6 +3920,41 @@ function isBeeGameSessionLanguage(
     value === 'zh-TW' ||
     value === 'ja' ||
     value === 'ko'
+}
+
+function parseBeeGameImageAttachments(value: unknown): BeeGameImageAttachment[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(parseBeeGameImageAttachment)
+    .filter((item): item is BeeGameImageAttachment => item !== undefined)
+}
+
+function parseBeeGameImageAttachment(
+  value: unknown,
+): BeeGameImageAttachment | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (record.type !== 'image') return undefined
+  if (!isBeeGameImageMediaType(record.mediaType)) return undefined
+  const data = typeof record.data === 'string' ? record.data.trim() : ''
+  if (!data) return undefined
+  return {
+    type: 'image',
+    mediaType: record.mediaType,
+    data,
+    ...(typeof record.filename === 'string' && record.filename.trim()
+      ? { filename: record.filename.trim() }
+      : {}),
+  }
+}
+
+function isBeeGameImageMediaType(
+  value: unknown,
+): value is BeeGameImageAttachment['mediaType'] {
+  return value === 'image/png' ||
+    value === 'image/jpeg' ||
+    value === 'image/gif' ||
+    value === 'image/webp'
 }
 
 async function refreshSessionAuthTokenFromRequest(

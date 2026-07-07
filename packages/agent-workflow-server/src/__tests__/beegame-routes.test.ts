@@ -1516,6 +1516,63 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('sends screenshot attachments to the BeeGame session runner as multimodal prompt blocks', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'game-with-screenshot')
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+
+    try {
+      const sessionRes = await app.request('/api/console/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(
+        `/api/console/sessions/${session.id}/input`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            text: '',
+            attachments: [{
+              type: 'image',
+              mediaType: 'image/png',
+              data: 'iVBORw0KGgo=',
+              filename: 'screenshot.png',
+            }],
+          }),
+        },
+      )
+
+      await waitFor(async () => fake.runtimes[0]?.submits.length === 1)
+
+      expect(inputRes.status).toBe(200)
+      expect(fake.runtimes[0].submits[0].prompt).toEqual([
+        {
+          type: 'text',
+          text: 'Analyze the attached image.',
+        },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'iVBORw0KGgo=',
+          },
+        },
+      ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('reserves turn credits and settles them from runtime token usage', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-turn-'))
     const workspace = join(projectsRoot, 'credit-game')
@@ -3559,6 +3616,68 @@ describe('beegame session routes', () => {
       expect(uploadRes.status).toBe(200)
       expect(upload).toEqual(expect.objectContaining({
         path: 'public/assets/title-logo.png',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('loads project asset manifest from project root without requiring a live session', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-project-assets-root-'))
+    const workspace = join(projectsRoot, 'asset-root-project')
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_asset_manifest_root'
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(workspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({
+          version: 1,
+          project_target: {
+            kind: 'web',
+            integration_mode: 'filesystem',
+          },
+          slots: [{
+            id: 'hero_background',
+            name: 'Hero background',
+            type: 'image_2d',
+            purpose: 'Landing screen background',
+            target: { path: 'public/assets/hero-background.png' },
+          }],
+        }),
+      )
+
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Asset Manifest Root',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+
+      const assetsRes = await app.request(`/api/projects/${projectId}/assets`)
+      const assets = await assetsRes.json()
+
+      expect(assetsRes.status).toBe(200)
+      expect(assets).toEqual(expect.objectContaining({
+        project_target: expect.objectContaining({
+          integration_mode: 'filesystem',
+        }),
+        slots: [
+          expect.objectContaining({
+            id: 'hero_background',
+            target: expect.objectContaining({
+              path: 'public/assets/hero-background.png',
+            }),
+          }),
+        ],
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
