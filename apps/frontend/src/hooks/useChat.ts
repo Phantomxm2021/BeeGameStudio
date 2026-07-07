@@ -34,6 +34,18 @@ const newClientMessageId = (): string => `client-msg-${Date.now()}-${Math.random
 
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'resuming']);
 
+function getErrorDisplayMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message || fallback;
+  }
+  if (typeof error === 'string') {
+    const message = error.trim();
+    return message || fallback;
+  }
+  return fallback;
+}
+
 function findActiveTask(tasks: ProjectTask[]): ProjectTask | undefined {
   return tasks.find(task => [task.lifecycle_status, task.task_status, task.status].some(status => (
     typeof status === 'string' && ACTIVE_TASK_STATUSES.has(status)
@@ -535,6 +547,8 @@ export const useChat = ({
         if (message.recoverable) {
           setCanContinue(true);
         }
+        refs.showToastError?.(contextualError);
+        refs.onError?.(new Error(contextualError));
         refs.onTaskEvent?.('error', message);
         break;
       }
@@ -859,6 +873,7 @@ export const useChat = ({
     } catch (error) {
       console.error('[useChat] Failed to send message:', error);
       setIsLoading(false);
+      const errorMessage = getErrorDisplayMessage(error, '发送消息失败，请重试');
       if (isNetworkIssue(error)) {
         pendingActionRef.current = {
           kind: 'send_message',
@@ -872,14 +887,15 @@ export const useChat = ({
       addMessage({
         id: `error-${Date.now()}`,
         sender: 'system',
-        content: '发送消息失败，请重试',
+        content: errorMessage,
         timestamp: Date.now(),
         type: 'error'
       });
 
-      onError?.(error as Error);
+      showToastError?.(errorMessage);
+      onError?.(error instanceof Error ? error : new Error(errorMessage));
     }
-  }, [projectId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+  }, [projectId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Continue a paused task
@@ -914,6 +930,7 @@ export const useChat = ({
       console.error('[useChat] Failed to continue task:', error);
       setIsLoading(false);
       setCanContinue(true);
+      const errorMessage = getErrorDisplayMessage(error, '继续任务失败，请重试');
       if (isNetworkIssue(error)) {
         pendingActionRef.current = {
           kind: 'continue_task',
@@ -925,14 +942,15 @@ export const useChat = ({
       addMessage({
         id: `error-${Date.now()}`,
         sender: 'system',
-        content: '继续任务失败，请重试',
+        content: errorMessage,
         timestamp: Date.now(),
         type: 'error'
       });
 
-      onError?.(error as Error);
+      showToastError?.(errorMessage);
+      onError?.(error instanceof Error ? error : new Error(errorMessage));
     }
-  }, [projectId, currentTaskId, addMessage, onError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+  }, [projectId, currentTaskId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Stop the current task

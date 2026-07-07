@@ -1065,14 +1065,8 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const body = await response.json().catch(() => ({}));
-    if (
-      typeof body === 'object' &&
-      body !== null &&
-      'error' in body &&
-      typeof body.error === 'string'
-    ) {
-      return body.error;
-    }
+    const message = getJsonErrorMessage(body);
+    if (message) return message;
   } else {
     const text = (await response.text().catch(() => '')).trim();
     if (text) return `Request failed with status ${response.status}: ${text.slice(0, 180)}`;
@@ -2570,13 +2564,18 @@ async function deleteJson<T = unknown>(path: string): Promise<T> {
 async function readResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const message =
-      typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
-        ? body.error
-        : response.statusText;
+    const message = getJsonErrorMessage(body) || response.statusText;
     throw new Error(message);
   }
   return response.json() as Promise<T>;
+}
+
+function getJsonErrorMessage(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const payload = body as { message?: unknown; error?: unknown };
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message;
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error;
+  return null;
 }
 
 function readJson<T>(key: string, fallback: T): T {

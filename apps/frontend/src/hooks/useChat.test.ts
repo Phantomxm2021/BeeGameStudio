@@ -418,6 +418,48 @@ describe('useChat clarification gate handling', () => {
     });
   });
 
+  it('surfaces backend send failures in chat and toast', async () => {
+    const showToastError = vi.fn();
+    const onError = vi.fn();
+    vi.mocked(api.sendMessage).mockRejectedValue(new Error('Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。'));
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError, showToastError }));
+
+    await act(async () => {
+      await result.current.sendMessage('fix the issue');
+    });
+
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sender: 'system',
+      content: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
+      type: 'error',
+    }));
+    expect(showToastError).toHaveBeenCalledWith('Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。');
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
+    }));
+  });
+
+  it('surfaces runtime error events as toast notifications', () => {
+    const showToastError = vi.fn();
+    renderHook(() => useChat({ projectId: 'proj_1', showToastError }));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'error',
+        task_id: 'task_1',
+        project_id: 'proj_1',
+        content: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
+      });
+    });
+
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sender: 'system',
+      content: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
+      type: 'error',
+    }));
+    expect(showToastError).toHaveBeenCalledWith('Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。');
+  });
+
   it('refreshes REST state after continueTask even when WebSocket is already connected', async () => {
     vi.mocked(api.continueTask).mockResolvedValue({
       resume_task_id: 'task_1',

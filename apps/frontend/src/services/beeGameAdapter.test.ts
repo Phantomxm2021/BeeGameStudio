@@ -199,6 +199,21 @@ describe('beeGameAdapter prompt rules', () => {
     }));
   });
 
+  it('uses backend error message text when intake returns a structured failure', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      String(input) === '/api/beegame-intake/jobs'
+        ? jsonResponse({
+          error: 'Insufficient credits',
+          message: 'Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。',
+        }, 402)
+        : jsonResponse({ error: 'not found' }, 404)
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring LLM' }))
+      .rejects.toThrow('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。');
+  });
+
 
   it('runs BeeGame intake through a short-lived async job when the runtime supports it', async () => {
     const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
