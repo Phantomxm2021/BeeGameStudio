@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
-import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
+import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { UserAccountMenu, type UserAccountMenuItem } from './Landing/UserAccountMenu';
 import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
@@ -21,6 +21,7 @@ interface BeeGameLivePreviewPageProps {
     phaseLabel: string;
     tokens: number;
     credits?: {
+        balanceCredits?: number;
         settledCredits: number;
         outstandingReservedCredits: number;
     } | null;
@@ -96,6 +97,7 @@ export function BeeGameLivePreviewPage({
     const { i18n } = useTranslation('beegame');
     const labels = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame').livePreview as Record<string, string>;
     const uiText = useBeeGameText(lang);
+    const commonText = useCommonText(lang);
     const currentUser = useSystemStore(state => state.currentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
@@ -137,7 +139,7 @@ export function BeeGameLivePreviewPage({
     const userMenuItems: UserAccountMenuItem[] = [
         {
             key: 'settings',
-            label: labels.settings,
+            label: commonText.settings,
             icon: <Settings className="h-4 w-4" />,
             onClick: () => setSettingsOpen(true),
         },
@@ -215,15 +217,16 @@ export function BeeGameLivePreviewPage({
                 </div>
 
                 <UserAccountMenu
-                    ariaLabel={labels.settings}
+                    ariaLabel={commonText.userMenu}
                     className="relative ml-auto"
                     isActive={isSettingsOpen}
                     currentUserId={currentUser?.id}
-                    currentUserDisplayName={currentUser?.displayName}
+                    currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                     currentUserEmail={currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
-                    fallbackUserLabel={labels.settings}
-                    signOutLabel=""
+                    creditBalance={credits?.balanceCredits}
+                    fallbackUserLabel={commonText.account}
+                    signOutLabel={commonText.signOut}
                     items={userMenuItems}
                     onOpenLogin={() => setSettingsOpen(true)}
                 />

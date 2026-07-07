@@ -5302,6 +5302,96 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('reads categorized asset contract slots from an owned project workspace', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-categorized-assets-'))
+    const workspace = join(projectsRoot, 'categorized-project')
+    const app = createAgentWorkflowApp({
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(
+        join(workspace, 'assets', 'asset-manifest.json'),
+        JSON.stringify({
+          version: '1.0.0',
+          project: 'categorized-project',
+          platform: 'web',
+          engine: 'react-three-fiber',
+          integration_mode: 'filesystem',
+          categories: {
+            textures_2d: {
+              description: 'Block face textures',
+              slots: [
+                {
+                  id: 'grass_top',
+                  path: 'public/textures/grass_top.png',
+                  spec: '16x16 PNG',
+                  status: 'placeholder_procedural',
+                  target: 'src/engine/textures.ts',
+                },
+              ],
+            },
+            audio: {
+              description: 'Sound effects',
+              slots: [
+                {
+                  id: 'sfx_break_block',
+                  path: 'public/audio/sfx/break_block.ogg',
+                  spec: 'OGG Vorbis',
+                  status: 'not_implemented',
+                  target: 'src/game/audio.ts',
+                },
+              ],
+            },
+          },
+        }),
+      )
+      const createProjectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_categorized_assets',
+          name: 'Categorized Project',
+          root_path: workspace,
+          created_at: '2026-06-21T00:00:00.000Z',
+        }),
+      })
+      expect(createProjectRes.status).toBe(200)
+
+      const assetsRes = await app.request('/api/projects/project_categorized_assets/assets')
+
+      expect(assetsRes.status).toBe(200)
+      expect(await assetsRes.json()).toEqual(expect.objectContaining({
+        project_target: expect.objectContaining({
+          kind: 'web',
+          engine: 'react-three-fiber',
+          integration_mode: 'filesystem',
+        }),
+        slots: [
+          expect.objectContaining({
+            id: 'grass_top',
+            type: 'textures_2d',
+            purpose: 'Block face textures',
+            target: expect.objectContaining({ path: 'public/textures/grass_top.png' }),
+            recommended_specs: expect.objectContaining({ description: '16x16 PNG' }),
+            status: 'placeholder',
+          }),
+          expect.objectContaining({
+            id: 'sfx_break_block',
+            type: 'audio',
+            purpose: 'Sound effects',
+            target: expect.objectContaining({ path: 'public/audio/sfx/break_block.ogg' }),
+            recommended_specs: expect.objectContaining({ description: 'OGG Vorbis' }),
+            status: 'missing',
+          }),
+        ],
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('mirrors project asset manifest metadata to Supabase when configured', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
     const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY

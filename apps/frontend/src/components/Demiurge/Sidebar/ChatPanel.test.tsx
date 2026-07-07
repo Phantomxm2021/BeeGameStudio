@@ -256,19 +256,36 @@ describe('ChatPanel approval bar', () => {
             } as any,
         });
 
-        expect(screen.getByTestId('beegame-collaboration-feed')).toBeInTheDocument();
-        expect(screen.getByTestId('beegame-conversation-axis')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-message-scroller')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-message-scroller-viewport')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-message-scroller-content')).toBeInTheDocument();
+        const outline = screen.getByTestId('message-scroller-outline');
+        expect(outline).toBeInTheDocument();
+        expect(screen.getAllByTestId('message-scroller-outline-line')).toHaveLength(1);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        fireEvent.mouseEnter(outline);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('message-scroller-outline-card')).not.toBeInTheDocument();
+        const firstOutlineLine = screen.getAllByTestId('message-scroller-outline-line')[0];
+        fireEvent.mouseEnter(firstOutlineLine);
+        expect(firstOutlineLine).toHaveAttribute('data-length', 'full');
+        expect(screen.getByTestId('message-scroller-outline-card')).toHaveTextContent('请构建首个可玩版本');
+        expect(document.querySelector('[data-message-id="m_user"]')).toBeInTheDocument();
+        expect(document.querySelector('[data-message-id="m_user"]')).toHaveAttribute('data-scroll-anchor', 'true');
+        expect(document.querySelector('[data-message-id="m_agent"]')).toBeInTheDocument();
+        expect(document.querySelector('[data-message-id="m_agent"]')).toHaveAttribute('data-scroll-anchor', 'false');
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
-        expect(userMessage).toHaveClass('glass-control');
+        expect(userMessage).toHaveClass('rounded-3xl');
+        expect(userMessage).toHaveClass('backdrop-blur-2xl');
         expect(userMessage).not.toHaveClass('bg-zinc-100');
         expect(userMessage).not.toHaveClass('bg-sky-950/20');
-        expect(screen.getByText('请构建首个可玩版本')).toBeInTheDocument();
+        expect(userMessage).toHaveTextContent('请构建首个可玩版本');
         expect(screen.getByText('BeeGame')).toBeInTheDocument();
         expect(screen.getByAltText('BeeGame')).toHaveAttribute('src', '/assets/beegame_avatar.png');
         expect(screen.getByText('我会先完成可运行闭环，然后验证构建入口。')).toBeInTheDocument();
-        expect(screen.getByText('Write completed')).toBeInTheDocument();
+        expect(screen.getByText('Write PLAYABLE_SPEC.md')).toBeInTheDocument();
         expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
         expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
 
@@ -285,211 +302,94 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('Build passed')).not.toBeInTheDocument();
     });
 
-    it('uses the BeeGame conversation axis as a sticky message navigator', () => {
-        const scrollIntoView = vi.fn();
-        Element.prototype.scrollIntoView = scrollIntoView;
-
-        const { container } = renderChatPanel({
+    it('hides the BeeGame message scroller button when already at the latest message', () => {
+        renderChatPanel({
             actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
             messages: [
                 {
-                    id: 'm_user_axis',
+                    id: 'm_latest_1',
                     sender: 'user',
-                    content: '让蛇移动更灵敏',
+                    content: 'message one',
                     timestamp: 1,
                 },
                 {
-                    id: 'm_agent_axis',
+                    id: 'm_latest_2',
                     sender: 'beegame',
-                    content: '我会调整输入响应并重新验证。',
+                    content: 'message two',
                     timestamp: 2,
                 },
             ],
         });
 
-        const axis = screen.getByTestId('beegame-conversation-axis');
-        const feed = screen.getByTestId('beegame-collaboration-feed');
-        expect(feed).not.toContainElement(axis);
-        expect(axis).toHaveClass('sticky');
-        expect(axis).toHaveClass('top-1/2');
-        expect(feed).toHaveClass('pl-12');
-        expect(feed).not.toHaveClass('pl-28');
-        expect(screen.getByTestId('beegame-conversation-axis-shell')).toHaveClass('left-0');
-        expect(screen.getByTestId('beegame-conversation-axis-shell')).toHaveClass('-translate-y-1/2');
-        expect(screen.getByTestId('beegame-conversation-axis-shell')).not.toHaveClass('left-[calc(100vw-420px)]');
-        const rail = screen.getByTestId('beegame-conversation-axis-rail');
-        expect(rail).toHaveClass('overflow-y-auto');
-        expect(rail).toHaveClass('py-12');
-        expect(rail).not.toHaveClass('py-8');
-
-        const firstTick = screen.getByRole('button', { name: 'Jump to message 1' });
-        expect(firstTick).toHaveAttribute('data-active', 'true');
-        expect(firstTick.querySelector('[data-testid="beegame-conversation-axis-line"]')).toHaveAttribute('data-length', 'short');
-        fireEvent.mouseEnter(firstTick);
-        expect(firstTick.querySelector('[data-testid="beegame-conversation-axis-line"]')).toHaveAttribute('data-length', 'full');
-        expect(screen.getByTestId('beegame-conversation-axis-preview')).toHaveTextContent('让蛇移动更灵敏');
-
-        const wheelEvent = new WheelEvent('wheel', { bubbles: true, deltaY: 80 });
-        const stopPropagation = vi.spyOn(wheelEvent, 'stopPropagation');
-        rail.dispatchEvent(wheelEvent);
-        expect(stopPropagation).toHaveBeenCalled();
-
-        const scrollContainer = container.querySelector('[data-testid="beegame-chat-panel"] > div') as HTMLDivElement;
-        const target = document.querySelector('[data-beegame-message-anchor="m_agent_axis"]') as HTMLDivElement;
-        Object.defineProperties(scrollContainer, {
-            scrollTop: { configurable: true, writable: true, value: 120 },
-            clientHeight: { configurable: true, value: 400 },
-        });
-        const scrollTo = vi.fn();
-        Object.defineProperty(scrollContainer, 'scrollTo', { configurable: true, value: scrollTo });
-        const performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(500);
-        let animationFrameTime = 500;
-        const requestAnimationFrameSpy = vi
-            .spyOn(window, 'requestAnimationFrame')
-            .mockImplementation((callback: FrameRequestCallback) => {
-                animationFrameTime += 300;
-                callback(animationFrameTime);
-                return 1;
-            });
-        const cancelAnimationFrameSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
-        Object.defineProperty(target, 'offsetHeight', { configurable: true, value: 80 });
-        scrollContainer.getBoundingClientRect = vi.fn(() => ({
-            top: 100,
-            bottom: 500,
-            left: 0,
-            right: 400,
-            width: 400,
-            height: 400,
-            x: 0,
-            y: 100,
-            toJSON: () => ({}),
-        }));
-        target.getBoundingClientRect = vi.fn(() => ({
-            top: 500,
-            bottom: 580,
-            left: 0,
-            right: 400,
-            width: 400,
-            height: 80,
-            x: 0,
-            y: 500,
-            toJSON: () => ({}),
-        }));
-
-        scrollIntoView.mockClear();
-        fireEvent.click(screen.getByRole('button', { name: 'Jump to message 2' }));
-        expect(requestAnimationFrameSpy).toHaveBeenCalled();
-        expect(scrollContainer.scrollTop).toBe(360);
-        expect(scrollTo).not.toHaveBeenCalled();
-        expect(scrollIntoView).not.toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
-        expect(scrollIntoView).not.toHaveBeenCalledWith({ block: 'center', behavior: 'auto' });
-        requestAnimationFrameSpy.mockRestore();
-        cancelAnimationFrameSpy.mockRestore();
-        performanceNowSpy.mockRestore();
+        const scrollButton = screen.getByRole('button', { name: 'Scroll to end' });
+        expect(scrollButton).toHaveAttribute('data-active', 'false');
+        expect(scrollButton).toHaveClass('data-[active=false]:opacity-0');
+        expect(scrollButton).toHaveClass('data-[active=false]:pointer-events-none');
     });
 
-    it('keeps BeeGame axis ticks compact and expands nearby ticks on hover', () => {
+    it('shows the BeeGame message scroller button when the transcript can scroll down', async () => {
         renderChatPanel({
             actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
-            messages: Array.from({ length: 7 }, (_, index) => ({
-                id: `m_axis_${index + 1}`,
+            messages: Array.from({ length: 8 }, (_, index) => ({
+                id: `m_scroll_${index + 1}`,
                 sender: index % 2 === 0 ? 'user' : 'beegame',
                 content: `message ${index + 1}`,
                 timestamp: index + 1,
             })),
         });
 
-        const lines = screen.getAllByTestId('beegame-conversation-axis-line');
-        expect(lines).toHaveLength(7);
-        expect(lines.every((line) => line.getAttribute('data-length') === 'short')).toBe(true);
-
-        const shell = screen.getByTestId('beegame-conversation-axis-shell');
-        const fourthTick = screen.getByRole('button', { name: 'Jump to message 4' });
-        shell.getBoundingClientRect = vi.fn(() => ({
-            top: 200,
-            bottom: 488,
+        const viewport = screen.getByTestId('beegame-message-scroller-viewport') as HTMLDivElement;
+        const content = screen.getByTestId('beegame-message-scroller-content') as HTMLDivElement;
+        Object.defineProperties(viewport, {
+            scrollTop: { configurable: true, writable: true, value: 0 },
+            clientHeight: { configurable: true, value: 120 },
+        });
+        viewport.getBoundingClientRect = vi.fn(() => ({
+            top: 0,
+            bottom: 120,
             left: 0,
-            right: 40,
-            width: 40,
-            height: 288,
+            right: 360,
+            width: 360,
+            height: 120,
             x: 0,
-            y: 200,
+            y: 0,
             toJSON: () => ({}),
         }));
-        fourthTick.getBoundingClientRect = vi.fn(() => ({
-            top: 260,
-            bottom: 270,
+        content.getBoundingClientRect = vi.fn(() => ({
+            top: 0,
+            bottom: 360,
             left: 0,
-            right: 40,
-            width: 40,
-            height: 10,
+            right: 360,
+            width: 360,
+            height: 360,
             x: 0,
-            y: 260,
+            y: 0,
             toJSON: () => ({}),
         }));
-        Object.defineProperties(fourthTick, {
-            offsetTop: { configurable: true, value: 180 },
-            offsetHeight: { configurable: true, value: 10 },
-        });
+        for (const [index, item] of Array.from(content.children).entries()) {
+            if (!(item instanceof HTMLElement) || !item.dataset.messageId) continue;
+            item.getBoundingClientRect = vi.fn(() => ({
+                top: index * 45,
+                bottom: index * 45 + 40,
+                left: 0,
+                right: 360,
+                width: 360,
+                height: 40,
+                x: 0,
+                y: index * 45,
+                toJSON: () => ({}),
+            }));
+        }
 
-        fireEvent.mouseEnter(fourthTick);
-
-        expect(lines[0]).toHaveAttribute('data-cascade', '3');
-        expect(lines[1]).toHaveAttribute('data-cascade', '2');
-        expect(lines[2]).toHaveAttribute('data-cascade', '1');
-        expect(lines[3]).toHaveAttribute('data-cascade', '0');
-        expect(lines[4]).toHaveAttribute('data-cascade', '1');
-        expect(lines[5]).toHaveAttribute('data-cascade', '2');
-        expect(lines[6]).toHaveAttribute('data-cascade', '3');
-        expect(lines[3]).toHaveAttribute('data-length', 'full');
-        expect(screen.getByTestId('beegame-conversation-axis-preview')).toHaveAttribute('data-anchor-index', '3');
-        expect(screen.getByTestId('beegame-conversation-axis-preview')).toHaveStyle({ top: '65px' });
-    });
-
-    it('highlights the final BeeGame axis tick when scrolled to the bottom', async () => {
-        const { container } = renderChatPanel({
-            actionReview: undefined,
-            pendingReviews: [],
-            variant: 'beegame',
-            messages: [
-                {
-                    id: 'm_axis_bottom_1',
-                    sender: 'beegame',
-                    content: 'first message',
-                    timestamp: 1,
-                },
-                {
-                    id: 'm_axis_bottom_2',
-                    sender: 'beegame',
-                    content: 'second message',
-                    timestamp: 2,
-                },
-                {
-                    id: 'm_axis_bottom_3',
-                    sender: 'beegame',
-                    content: 'last message',
-                    timestamp: 3,
-                },
-            ],
-        });
-
-        const scrollContainer = container.querySelector('[data-testid="beegame-chat-panel"] > div') as HTMLDivElement;
-        Object.defineProperties(scrollContainer, {
-            scrollTop: { configurable: true, value: 700 },
-            clientHeight: { configurable: true, value: 300 },
-            scrollHeight: { configurable: true, value: 1000 },
-        });
-
-        fireEvent.scroll(scrollContainer);
+        fireEvent.scroll(viewport);
 
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: 'Jump to message 3' })).toHaveAttribute('data-active', 'true');
+            expect(screen.getByRole('button', { name: 'Scroll to end' })).toHaveAttribute('data-active', 'true');
         });
-        expect(screen.getByRole('button', { name: 'Jump to message 2' })).toHaveAttribute('data-active', 'false');
     });
 
     it('shows every BeeGame tool call instead of limiting the feed to the last six', () => {
@@ -548,11 +448,11 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        expect(screen.getByText('Write completed')).toBeInTheDocument();
+        expect(screen.getByText('Write GDD.md')).toBeInTheDocument();
         expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
         expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
         expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: /Write completed/i }));
+        await user.click(screen.getByRole('button', { name: /Write GDD.md/i }));
         expect(screen.getByText('docs/GDD.md')).toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: /Bash completed/i }));
         expect(screen.getByText('bun run build')).toBeInTheDocument();
@@ -585,11 +485,10 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        const feed = screen.getByTestId('beegame-collaboration-feed');
         expect(screen.getByRole('heading', { name: '项目完成总结', level: 2 })).toBeInTheDocument();
-        expect(feed.textContent).not.toContain('docs/VERIFICATION.md');
+        expect(document.body.textContent).not.toContain('docs/VERIFICATION.md');
         await user.click(screen.getByRole('button', { name: 'View summary details' }));
-        expect(feed.textContent).toContain('docs/VERIFICATION.md');
+        expect(document.body.textContent).toContain('docs/VERIFICATION.md');
         expect(screen.getByRole('button', { name: 'Hide summary details' })).toBeInTheDocument();
     });
 
@@ -685,7 +584,7 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        const toolToggle = screen.getByRole('button', { name: /Write completed/i });
+        const toolToggle = screen.getByRole('button', { name: /Write GDD.md/i });
         expect(toolToggle).toHaveAttribute('aria-expanded', 'false');
         expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
 

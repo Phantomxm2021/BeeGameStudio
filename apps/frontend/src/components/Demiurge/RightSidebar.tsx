@@ -250,7 +250,7 @@ export function RightSidebar({
 
     // Auto-scroll to bottom logic
     useEffect(() => {
-        if (activeTab === 'chat' && scrollContainerRef.current) {
+        if (variant !== 'beegame' && activeTab === 'chat' && scrollContainerRef.current) {
             const isNewMessage = messages.length > lastMessageCountRef.current;
             // Use smooth scroll only for new incoming messages, 
             // use instant 'auto' when switching tabs to avoid "scrolling down" visual artifact.
@@ -263,7 +263,7 @@ export function RightSidebar({
             
             lastMessageCountRef.current = messages.length;
         }
-    }, [messages, activeTab]);
+    }, [messages, activeTab, variant]);
 
     // Load artifacts and review statuses
     useEffect(() => {

@@ -1,7 +1,16 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { MessageSquare, AlertCircle, Send, ImagePlus, X } from 'lucide-react';
 import { MessageItem } from './ChatComponents';
-import { BeeGameCollaborationFeed, BeeGameConversationOverviewRuler } from './BeeGameCollaborationFeed';
+import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
+import {
+    MessageScroller,
+    MessageScrollerButton,
+    MessageScrollerContent,
+    MessageScrollerItem,
+    MessageScrollerOutline,
+    MessageScrollerProvider,
+    MessageScrollerViewport,
+} from '../../ui/message-scroller';
 import type { ReviewBindingPayload } from '../../../services/api';
 import type { ChatImageAttachmentPayload } from '../../../services/api';
 import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
@@ -119,6 +128,14 @@ const clipboardDataToImageFiles = (clipboardData: DataTransfer | null): File[] =
     return dedupeImageFiles([...files, ...itemFiles]);
 };
 
+const getMessageOutlineLabel = (content: string): string => {
+    const firstLine = content
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean) || 'Message';
+    return firstLine.length > 80 ? `${firstLine.slice(0, 80).trim()}...` : firstLine;
+};
+
 export const ChatPanel = memo(({
     messages,
     isLoading,
@@ -203,19 +220,26 @@ export const ChatPanel = memo(({
     };
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat;
     const canSubmitComposer = Boolean(chatInput.trim() || imageAttachments.length > 0);
+    const isBeeGameVariant = variant === 'beegame';
+    const messageOutlineItems = useMemo(
+        () => messages
+            .filter((message) => message.sender === 'user')
+            .map((message) => ({
+                id: message.id,
+                label: getMessageOutlineLabel(String(message.content || '')),
+            })),
+        [messages],
+    );
     const handleImageFiles = async (files: File[]) => {
         if (!files.length || !onAddImageAttachments) return;
         const attachments = await filesToImageAttachments(files);
         if (attachments.length > 0) onAddImageAttachments(attachments);
     };
 
-    const isBeeGameVariant = variant === 'beegame';
     const panelClassName = isBeeGameVariant
         ? 'flex h-full flex-col bg-transparent'
         : 'flex flex-col h-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl';
-    const scrollClassName = isBeeGameVariant
-        ? 'flex-1 overflow-y-auto px-4 pt-4 relative pb-4'
-        : 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
+    const legacyScrollClassName = 'flex-1 overflow-y-auto px-8 pt-8 space-y-8 relative pb-8';
     const composerShellClassName = isBeeGameVariant
         ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
@@ -232,28 +256,100 @@ export const ChatPanel = memo(({
 
     return (
         <div className={panelClassName} data-testid={isBeeGameVariant ? 'beegame-chat-panel' : undefined}>
-            <div
-                ref={scrollContainerRef}
-                className={scrollClassName}
-            >
-                {isBeeGameVariant ? (
-                        <>
-                            <BeeGameConversationOverviewRuler
-                                messages={messages}
-                                lang={lang}
-                                scrollContainerRef={scrollContainerRef}
-                            />
-                            <BeeGameCollaborationFeed
-                                messages={messages}
-                                projectStatus={projectStatus}
-                                onPreviewArtifact={onPreviewArtifact}
-                                lang={lang}
-                                currentUserDisplayName={currentUserDisplayName}
-                                currentUserEmail={currentUserEmail}
-                                currentUserAvatarUrl={currentUserAvatarUrl}
-                            />
-                        </>
-                    ) : messages.length === 0 ? (
+            {isBeeGameVariant ? (
+                <MessageScrollerProvider
+                    autoScroll
+                >
+                    <MessageScroller
+                        data-testid="beegame-message-scroller"
+                    >
+                        <MessageScrollerViewport
+                            ref={scrollContainerRef}
+                            data-testid="beegame-message-scroller-viewport"
+                        >
+                            <MessageScrollerContent
+                                data-testid="beegame-message-scroller-content"
+                            >
+                                <BeeGameCollaborationFeed
+                                    messages={messages}
+                                    projectStatus={projectStatus}
+                                    onPreviewArtifact={onPreviewArtifact}
+                                    lang={lang}
+                                    currentUserDisplayName={currentUserDisplayName}
+                                    currentUserEmail={currentUserEmail}
+                                    currentUserAvatarUrl={currentUserAvatarUrl}
+                                />
+                                {pendingReviews.map((review: ReviewDisplayModel) => {
+                                    const isManifestReview = review?.type === 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
+                                    if (!isManifestReview) return null;
+
+                                    return (
+                                        <MessageScrollerItem
+                                            key={review.gate_id}
+                                            messageId={`review-${review.gate_id}`}
+                                            className="mt-3"
+                                        >
+                                            <div className="glass-control w-full space-y-4 rounded-3xl border border-white/15 bg-black/25 p-6 backdrop-blur-2xl">
+                                                <div className="flex items-start space-x-3">
+                                                    <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-zinc-300" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="type-caption-1 mb-1 text-zinc-100">{text.actionRequired}</div>
+                                                        <div className="type-callout mb-2 text-zinc-200 opacity-80">
+                                                            {text.resourceManifestDescription}
+                                                        </div>
+                                                        <div className="flex space-x-3 mt-4">
+                                                            <button
+                                                                onClick={() => onApproveManifest && onApproveManifest(toApprovalPayload(review))}
+                                                                disabled={isLoading}
+                                                                className="type-button flex flex-1 items-center justify-center space-x-2 rounded-xl bg-white py-2 text-zinc-950 shadow-sm transition-colors hover:bg-zinc-200 disabled:opacity-50"
+                                                            >
+                                                                <span>{text.skip}</span>
+                                                            </button>
+
+                                                            <div className="flex-1">
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".csv"
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (file && onUploadManifestCsv) {
+                                                                            const reader = new FileReader();
+                                                                            reader.onload = (e) => {
+                                                                                const content = e.target?.result as string;
+                                                                                onUploadManifestCsv(review.gate_id, content, true);
+                                                                            };
+                                                                            reader.readAsText(file);
+                                                                        }
+                                                                    }}
+                                                                    className="hidden"
+                                                                    id={`upload-csv-${review.gate_id}`}
+                                                                />
+                                                                <label
+                                                                    htmlFor={`upload-csv-${review.gate_id}`}
+                                                                    className={`type-button w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                                                                >
+                                                                    <span>{text.upload}</span>
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </MessageScrollerItem>
+                                    );
+                                })}
+                            </MessageScrollerContent>
+                        </MessageScrollerViewport>
+                        <MessageScrollerOutline items={messageOutlineItems} />
+                        <MessageScrollerButton />
+                    </MessageScroller>
+                </MessageScrollerProvider>
+            ) : (
+                <div
+                    ref={scrollContainerRef}
+                    className={legacyScrollClassName}
+                >
+                    {messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20">
                             <div className="animate-pulse">
                                 <MessageSquare className="w-16 h-16 text-zinc-400" />
@@ -329,7 +425,8 @@ export const ChatPanel = memo(({
                             </div>
                         );
                     })}
-            </div>
+                </div>
+            )}
 
             <div className={composerShellClassName}>
                 {shouldShowWaitingBanner && (

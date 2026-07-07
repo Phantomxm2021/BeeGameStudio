@@ -40,6 +40,9 @@ describe('ArtifactsPanel', () => {
         );
 
         expect(screen.getByText(/review: approved/i)).toBeInTheDocument();
+        const scrollRegion = screen.getByText('GDD.md').closest('.overflow-y-auto');
+        expect(scrollRegion).toHaveClass('overflow-y-auto');
+        expect(scrollRegion).not.toHaveClass('scrollbar-hide');
 
         await user.click(screen.getByTitle('Preview'));
         await user.click(screen.getByTitle('Download'));

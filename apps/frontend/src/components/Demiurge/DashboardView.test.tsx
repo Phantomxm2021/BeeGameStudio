@@ -187,6 +187,7 @@ vi.mock('../../services/modelConfigApi', () => ({
 
 vi.mock('../../services/creditsApi', () => ({
     getCreditSummary: vi.fn(() => Promise.resolve({
+        balanceCredits: 300,
         entriesCount: 3,
         reservedCredits: 50,
         settledCredits: 12,
@@ -483,14 +484,17 @@ describe('DashboardView runtime loading', () => {
 
         expect(screen.queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole('button', { name: '设置' }));
+        await user.click(screen.getByRole('button', { name: '用户菜单' }));
 
         const userSettingsMenu = screen.getByTestId('beegame-user-settings-menu');
         expect(userSettingsMenu).toBeInTheDocument();
+        expect(userSettingsMenu).toHaveAttribute('data-surface', 'frosted-glass');
         expect(within(userSettingsMenu).getByText('Nova Player')).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByText('nova@example.com')).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByText('300 credits')).toBeInTheDocument();
         expect(within(userSettingsMenu).queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
 
-        await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '设置' }));
+        await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '系统设置' }));
 
         const settingsDialog = await screen.findByRole('dialog', { name: '系统设置' });
         expect(screen.queryByTestId('beegame-user-settings-menu')).not.toBeInTheDocument();
@@ -506,7 +510,7 @@ describe('DashboardView runtime loading', () => {
         const topNav = await screen.findByTestId('beegame-shell-top-nav');
         expect(topNav).toHaveClass('z-[90]');
 
-        await user.click(screen.getByRole('button', { name: '设置' }));
+        await user.click(screen.getByRole('button', { name: '用户菜单' }));
 
         expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[140]');
         expect(capturedRightSidebarProps?.variant).toBe('beegame');

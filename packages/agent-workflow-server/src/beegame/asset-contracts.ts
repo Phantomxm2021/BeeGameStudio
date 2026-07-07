@@ -109,7 +109,8 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
   const record = value as Record<string, unknown>
   const slots = Array.isArray(record.slots)
     ? record.slots.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
-    : normalizeNestedAssetSlots(record.assets ?? record.resources)
+    : normalizeCategorizedAssetSlots(record.categories)
+      .concat(normalizeNestedAssetSlots(record.assets ?? record.resources))
   return {
     version: normalizeManifestVersion(record.version),
     project_target: normalizeProjectTarget(record.project_target ?? record),
@@ -117,7 +118,11 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
   }
 }
 
-function normalizeAssetSlot(value: unknown, fallbackId = ''): BeeGameAssetSlot | undefined {
+function normalizeAssetSlot(
+  value: unknown,
+  fallbackId = '',
+  fallback?: { type?: string; purpose?: string },
+): BeeGameAssetSlot | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const id = normalizeSlotId(String(record.id || fallbackId))
@@ -137,8 +142,8 @@ function normalizeAssetSlot(value: unknown, fallbackId = ''): BeeGameAssetSlot |
   return {
     id,
     name: trimString(record.name),
-    type: trimString(record.type),
-    purpose: trimString(record.purpose) || trimString(record.description),
+    type: trimString(record.type) || trimString(fallback?.type),
+    purpose: trimString(record.purpose) || trimString(record.description) || trimString(fallback?.purpose),
     required: Boolean(record.required),
     placeholder: record.placeholder !== false &&
       record.status !== 'implemented' &&
@@ -181,6 +186,25 @@ function normalizeNestedAssetSlots(value: unknown): BeeGameAssetSlot[] {
   return slots
 }
 
+function normalizeCategorizedAssetSlots(value: unknown): BeeGameAssetSlot[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  const slots: BeeGameAssetSlot[] = []
+  for (const [categoryKey, categoryValue] of Object.entries(value as Record<string, unknown>)) {
+    if (!categoryValue || typeof categoryValue !== 'object' || Array.isArray(categoryValue)) continue
+    const category = categoryValue as Record<string, unknown>
+    const categorySlots = Array.isArray(category.slots) ? category.slots : []
+    const categoryDescription = trimString(category.description)
+    for (const slotValue of categorySlots) {
+      const slot = normalizeAssetSlot(slotValue, '', {
+        type: categoryKey,
+        purpose: categoryDescription,
+      })
+      if (slot) slots.push(slot)
+    }
+  }
+  return slots
+}
+
 function isAssetLikeRecord(record: Record<string, unknown>): boolean {
   return typeof record.path === 'string' ||
     typeof record.type === 'string' ||
@@ -195,7 +219,7 @@ function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | und
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   return {
-    kind: trimString(record.kind),
+    kind: trimString(record.kind) || trimString(record.platform),
     engine: trimString(record.engine),
     integration_mode: normalizeIntegrationMode(record.integration_mode),
     mcp_server: trimString(record.mcp_server),
@@ -220,6 +244,8 @@ function normalizeSlotStatus(value: unknown): BeeGameAssetSlot['status'] {
     value === 'missing' ||
     value === 'failed'
     ? value === 'implemented' ? 'integrated' : value
+    : value === 'not_implemented'
+      ? 'missing'
     : 'placeholder'
 }
 
@@ -233,6 +259,7 @@ function collectLegacySpecs(record: Record<string, unknown>): Record<string, unk
   for (const key of ['dimensions', 'loop', 'category', 'note']) {
     if (record[key] !== undefined) specs[key] = record[key]
   }
+  if (record.spec !== undefined) specs.description = record.spec
   return Object.keys(specs).length ? specs : undefined
 }
 

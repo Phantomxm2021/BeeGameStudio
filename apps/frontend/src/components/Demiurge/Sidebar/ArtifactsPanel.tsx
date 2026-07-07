@@ -43,7 +43,7 @@ export const ArtifactsPanel = memo(({
     }
 
     return (
-        <div className="h-full overflow-y-auto p-8 scrollbar-hide">
+        <div className="h-full overflow-y-auto p-8">
             <div className="space-y-4">
             {artifacts.map((art) => {
                 const type = art.artifact_type || 'Document';

@@ -63,7 +63,7 @@ export const AssetsPanel = memo(({
     }
 
     return (
-        <div className="h-full overflow-y-auto p-5 scrollbar-hide">
+        <div className="h-full overflow-y-auto p-5">
             <div className="mb-4 flex items-center justify-between">
                 <div className="min-w-0">
                     <div className="type-caption-1 text-orange-300">{text.title}</div>

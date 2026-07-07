@@ -1,5 +1,12 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+
+const frontendReactPath = fileURLToPath(new URL('./node_modules/react/index.js', import.meta.url))
+const frontendReactJsxRuntimePath = fileURLToPath(new URL('./node_modules/react/jsx-runtime.js', import.meta.url))
+const frontendReactJsxDevRuntimePath = fileURLToPath(new URL('./node_modules/react/jsx-dev-runtime.js', import.meta.url))
+const frontendReactDomPath = fileURLToPath(new URL('./node_modules/react-dom/index.js', import.meta.url))
+const frontendReactDomClientPath = fileURLToPath(new URL('./node_modules/react-dom/client.js', import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -9,6 +16,21 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+
+    resolve: {
+      alias: [
+        { find: 'react/jsx-dev-runtime', replacement: frontendReactJsxDevRuntimePath },
+        { find: 'react/jsx-runtime', replacement: frontendReactJsxRuntimePath },
+        { find: 'react-dom/client', replacement: frontendReactDomClientPath },
+        { find: 'react-dom', replacement: frontendReactDomPath },
+        { find: 'react', replacement: frontendReactPath },
+      ],
+      dedupe: ['react', 'react-dom'],
+    },
+
+    ssr: {
+      noExternal: ['@shadcn/react'],
+    },
 
     // Server configuration for development
     server: {
@@ -111,6 +133,7 @@ export default defineConfig(({ mode }) => {
         'axios',
         'framer-motion',
         '@headlessui/react',
+        '@shadcn/react/message-scroller',
         'react-markdown',
       ],
     },
@@ -119,6 +142,14 @@ export default defineConfig(({ mode }) => {
     define: {
       __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
+
+    test: {
+      server: {
+        deps: {
+          inline: ['@shadcn/react'],
+        },
+      },
     },
   }
 })

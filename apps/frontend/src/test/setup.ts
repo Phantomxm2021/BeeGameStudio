@@ -28,6 +28,22 @@ beforeAll(() => {
     writable: true,
     configurable: true
   });
+
+  if (!HTMLElement.prototype.scrollTo) {
+    HTMLElement.prototype.scrollTo = function scrollTo(options?: ScrollToOptions | number, y?: number) {
+      if (typeof options === 'number') {
+        this.scrollTop = options;
+        return;
+      }
+      if (typeof y === 'number') {
+        this.scrollTop = y;
+        return;
+      }
+      if (typeof options?.top === 'number') {
+        this.scrollTop = options.top;
+      }
+    };
+  }
 });
 
 // Cleanup after each test case

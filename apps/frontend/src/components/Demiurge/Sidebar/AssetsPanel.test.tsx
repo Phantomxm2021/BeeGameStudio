@@ -40,6 +40,9 @@ describe('AssetsPanel', () => {
         );
 
         expect(screen.getByText('Player model')).toBeInTheDocument();
+        const scrollRegion = screen.getByText('Player model').closest('.overflow-y-auto');
+        expect(scrollRegion).toHaveClass('overflow-y-auto');
+        expect(scrollRegion).not.toHaveClass('scrollbar-hide');
         expect(screen.getByText('Playable character model')).toBeInTheDocument();
         expect(screen.getAllByText('MCP integration').length).toBeGreaterThan(0);
         expect(screen.getByText('model_3d')).toBeInTheDocument();

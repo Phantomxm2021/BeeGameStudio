@@ -22,4 +22,13 @@ describe('vite production build config', () => {
     expect(cssSource).toContain('@supports (backdrop-filter: blur(1px))');
     expect(cssSource).toContain('backdrop-filter: blur(14px) saturate(120%);');
   });
+
+  it('dedupes React for peer dependency UI packages', () => {
+    const configSource = readFileSync(configPath, 'utf8');
+
+    expect(configSource).toContain("dedupe: ['react', 'react-dom']");
+    expect(configSource).toContain('@shadcn/react/message-scroller');
+    expect(configSource).toContain("noExternal: ['@shadcn/react']");
+    expect(configSource).toContain("inline: ['@shadcn/react']");
+  });
 });
