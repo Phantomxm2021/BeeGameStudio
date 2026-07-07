@@ -93,6 +93,52 @@ describe('RightSidebar tabs', () => {
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
+    it('defaults chat thinking off and sends the selected chat thinking mode', async () => {
+        const user = userEvent.setup();
+        const onSendMessage = vi.fn();
+
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
+        expect(thinkingSelect).toHaveValue('disabled');
+
+        await user.type(screen.getByPlaceholderText('Type...'), '先修复渲染问题');
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage).toHaveBeenLastCalledWith(
+            '先修复渲染问题',
+            undefined,
+            [],
+            'disabled',
+        );
+
+        await user.selectOptions(thinkingSelect, 'enabled');
+        await user.type(screen.getByPlaceholderText('Type...'), '深入分析性能问题');
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage).toHaveBeenLastCalledWith(
+            '深入分析性能问题',
+            undefined,
+            [],
+            'enabled',
+        );
+    });
+
     it('removes the minimize affordance in BeeGame mode', () => {
         render(
             <RightSidebar
@@ -152,7 +198,7 @@ describe('RightSidebar tabs', () => {
                 mediaType: 'image/png',
                 filename: 'screen.png',
             }),
-        ]);
+        ], 'disabled');
         expect(onSendMessage.mock.calls[0][2][0].data).toEqual(expect.any(String));
     });
 
@@ -227,7 +273,7 @@ describe('RightSidebar tabs', () => {
                 mediaType: 'image/png',
                 filename: 'clipboard-screen.png',
             }),
-        ]);
+        ], 'disabled');
     });
 
     it('deduplicates pasted screenshots exposed through both clipboard files and items', async () => {

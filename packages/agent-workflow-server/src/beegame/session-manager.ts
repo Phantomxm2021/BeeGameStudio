@@ -49,6 +49,8 @@ export type BeeGameTurnStatus = 'idle' | 'running'
 
 export type BeeGameSessionLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko'
 
+export type BeeGameChatThinkingMode = 'enabled' | 'disabled'
+
 export type BeeGameEventType =
   | 'session.started'
   | 'turn.started'
@@ -134,6 +136,7 @@ export type BeeGameSessionRunnerStartInput = {
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
+  thinkingMode?: BeeGameChatThinkingMode
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
@@ -593,6 +596,7 @@ export class BeeGameSessionManager {
       clientMessageId?: string
       language?: BeeGameSessionLanguage
       attachments?: BeeGameImageAttachment[]
+      thinkingMode?: BeeGameChatThinkingMode
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -632,6 +636,7 @@ export class BeeGameSessionManager {
         language: record.language,
         attachments: display?.attachments,
       }),
+      display?.thinkingMode,
       creditReservation,
       creditPolicy,
     )
@@ -735,6 +740,7 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: BeeGamePromptInput,
+    thinkingMode: BeeGameChatThinkingMode | undefined,
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
   ): Promise<void> {
@@ -760,7 +766,7 @@ export class BeeGameSessionManager {
       try {
         const eventCountBeforeTurn = record.events.length
         const toolUseCountBeforeTurn = record.toolUses.size
-        await this.submitToRunner(record, runner, prompt, signal)
+        await this.submitToRunner(record, runner, prompt, thinkingMode, signal)
         const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
         const hadRuntimeActivity = hadToolUse || record.events
           .slice(eventCountBeforeTurn)
@@ -823,10 +829,12 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
+    thinkingMode: BeeGameChatThinkingMode | undefined,
     signal: AbortSignal,
   ): Promise<void> {
     await runner.submit({
       prompt,
+      thinkingMode: thinkingMode ?? 'disabled',
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)

@@ -151,20 +151,39 @@ async function fetchSupabaseUserContext(
   token: string,
   fetchImpl: BeeGameFetch,
 ): Promise<BeeGameUserContext | undefined> {
-  const response = await fetchImpl(
-    joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
-    {
-      method: 'POST',
-      headers: {
-        apikey: apiKey,
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: '{}',
-    },
+  const response = await fetchSupabaseUserContextResponse(
+    baseUrl,
+    apiKey,
+    token,
+    fetchImpl,
   )
+  if (!response) return undefined
   if (!response.ok) return undefined
   return toSupabaseUserContext(await response.json())
+}
+
+async function fetchSupabaseUserContextResponse(
+  baseUrl: string,
+  apiKey: string,
+  token: string,
+  fetchImpl: BeeGameFetch,
+): Promise<Response | undefined> {
+  try {
+    return await fetchImpl(
+      joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
+      {
+        method: 'POST',
+        headers: {
+          apikey: apiKey,
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      },
+    )
+  } catch {
+    return undefined
+  }
 }
 
 function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {

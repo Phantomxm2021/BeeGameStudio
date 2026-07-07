@@ -1755,6 +1755,10 @@ function normalizeBeeGameThinkingMode(value: unknown): BeeGameThinkingMode | und
   return value === 'auto' || value === 'enabled' || value === 'disabled' ? value : undefined
 }
 
+function isBeeGameChatThinkingMode(value: unknown): value is 'enabled' | 'disabled' {
+  return value === 'enabled' || value === 'disabled'
+}
+
 function toBeeGameThinkingRequest(value: BeeGameThinkingMode | undefined): JsonObject {
   if (value === 'enabled') return { enable_thinking: true }
   if (value === 'disabled') return { enable_thinking: false }
@@ -3527,6 +3531,9 @@ function registerBeeGameSessionRoutes(
           taskType,
           clientMessageId,
           attachments,
+          ...(isBeeGameChatThinkingMode(body.thinkingMode)
+            ? { thinkingMode: body.thinkingMode }
+            : {}),
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),

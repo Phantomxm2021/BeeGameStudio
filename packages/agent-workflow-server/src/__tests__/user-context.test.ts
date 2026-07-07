@@ -87,6 +87,24 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
+  test('treats Supabase user context fetch failures as unresolved auth', async () => {
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => {
+        throw new Error('unknown certificate verification error')
+      },
+    })
+
+    await expect(
+      resolver?.(
+        new Request('https://beegame.test/api/current-user', {
+          headers: { authorization: 'Bearer tls-failure-token' },
+        }),
+      ),
+    ).resolves.toBeUndefined()
+  })
+
   test('does not fall back to raw Supabase auth user when the BeeGame context RPC rejects access', async () => {
     const calls: string[] = []
     const resolver = createSupabaseUserResolver({

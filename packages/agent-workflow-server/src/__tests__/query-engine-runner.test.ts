@@ -3,6 +3,7 @@ import {
   ensureBeeGameMacroGlobals,
   type MutableAppState,
   stopRunningLocalShellTasks,
+  toQueryEngineThinkingConfig,
 } from '../beegame/query-engine-runner'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
@@ -63,5 +64,10 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
 
     expect(killedTaskIds).toEqual(['bash_running'])
     expect(killed).toEqual(['bash_running'])
+  })
+
+  test('maps BeeGame chat thinking mode to QueryEngine thinking config', () => {
+    expect(toQueryEngineThinkingConfig('disabled')).toEqual({ type: 'disabled' })
+    expect(toQueryEngineThinkingConfig('enabled')).toEqual({ type: 'adaptive' })
   })
 })

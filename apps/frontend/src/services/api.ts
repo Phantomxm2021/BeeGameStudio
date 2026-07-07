@@ -7,6 +7,7 @@ import apiClient, {
   setToastErrorCallback,
 } from './apiClient';
 import { beeGameAdapter, isBeeGameAdapterEnabled } from './beeGameAdapter';
+import type { BeeGameThinkingMode } from './beeGameAdapter';
 import {
   getCurrentUser as getBeeGameCurrentUser,
   type BeeGameCurrentUser,
@@ -762,6 +763,7 @@ export const api = {
     client_message_id?: string;
     taskType?: import('./creditsApi').BeeGameCreditTaskType;
     attachments?: ChatImageAttachmentPayload[];
+    thinkingMode?: BeeGameThinkingMode;
   }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.sendMessage(data)

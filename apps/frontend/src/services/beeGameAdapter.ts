@@ -435,6 +435,7 @@ export const beeGameAdapter = {
     client_message_id?: string;
     taskType?: BeeGameCreditTaskType;
     attachments?: ChatImageAttachmentPayload[];
+    thinkingMode?: BeeGameThinkingMode;
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
@@ -446,6 +447,7 @@ export const beeGameAdapter = {
       clientMessageId: data.client_message_id,
       language,
       attachments: data.attachments,
+      thinkingMode: data.thinkingMode,
     });
     return {
       command_id: session.id,
@@ -1104,6 +1106,7 @@ async function sendBeeGameInput(
     clientMessageId?: string;
     language?: BeeGameLanguage;
     attachments?: ChatImageAttachmentPayload[];
+    thinkingMode?: BeeGameThinkingMode;
   },
 ): Promise<BeeGameSession> {
   return postJson(`/api/beegame-sessions/${sessionId}/input`, {
@@ -1114,6 +1117,7 @@ async function sendBeeGameInput(
     ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
     ...(display?.language ? { language: display.language } : {}),
     ...(display?.attachments?.length ? { attachments: display.attachments } : {}),
+    ...(display?.thinkingMode ? { thinkingMode: display.thinkingMode } : {}),
   });
 }
 

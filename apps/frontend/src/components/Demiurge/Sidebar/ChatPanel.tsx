@@ -10,6 +10,7 @@ import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCar
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
+import type { BeeGameThinkingMode } from '../../../services/beeGameAdapter';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -19,6 +20,8 @@ interface ChatPanelProps {
     onSend: () => void;
     onSendMessage?: (message: string) => void;
     imageAttachments?: ChatImageAttachmentPayload[];
+    thinkingMode?: BeeGameThinkingMode;
+    onThinkingModeChange?: (mode: BeeGameThinkingMode) => void;
     onAddImageAttachments?: (attachments: ChatImageAttachmentPayload[]) => void;
     onRemoveImageAttachment?: (index: number) => void;
     onPreviewArtifact: (id: string, title: string, content?: string) => void;
@@ -123,6 +126,8 @@ export const ChatPanel = memo(({
     onSend,
     onSendMessage,
     imageAttachments = [],
+    thinkingMode = 'disabled',
+    onThinkingModeChange,
     onAddImageAttachments,
     onRemoveImageAttachment,
     onPreviewArtifact,
@@ -147,6 +152,9 @@ export const ChatPanel = memo(({
     currentUserAvatarUrl,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
+    const thinkingLabel = text.thinkingLabel || '思考';
+    const thinkingOff = text.thinkingOff || (lang === 'zh' || lang === 'zh-TW' ? '关闭思考' : 'Disable');
+    const thinkingOn = text.thinkingOn || (lang === 'zh' || lang === 'zh-TW' ? '启用思考' : 'Enable');
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
@@ -211,7 +219,7 @@ export const ChatPanel = memo(({
         ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
     const textareaClassName = isBeeGameVariant
-        ? 'type-input glass-control w-full rounded-3xl px-4 py-3 pr-14 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto backdrop-blur-2xl'
+        ? 'type-input glass-control w-full rounded-3xl px-4 py-3 pr-40 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto backdrop-blur-2xl'
         : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
     const sendButtonClassName = isBeeGameVariant
         ? 'primary-pill absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
@@ -472,6 +480,16 @@ export const ChatPanel = memo(({
                         >
                             <Send className="w-5 h-5 -ml-0.5" />
                         </button>
+                        <select
+                            aria-label={thinkingLabel}
+                            value={thinkingMode}
+                            onChange={(event) => onThinkingModeChange?.(event.target.value as BeeGameThinkingMode)}
+                            disabled={isComposerDisabled}
+                            className="type-footnote absolute bottom-3 right-16 z-10 h-8 rounded-full border border-white/10 bg-transparent px-2.5 text-zinc-300 outline-none transition-colors hover:bg-white/10 hover:text-zinc-100 disabled:opacity-40"
+                        >
+                            <option value="disabled">{thinkingOff}</option>
+                            <option value="enabled">{thinkingOn}</option>
+                        </select>
                         </div>
                     </div>
                 )}

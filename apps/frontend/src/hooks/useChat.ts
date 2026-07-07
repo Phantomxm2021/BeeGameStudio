@@ -23,6 +23,7 @@ import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
 import { isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
+import type { BeeGameThinkingMode } from '../services/beeGameAdapter';
 import {
   getCreditQuote,
   type BeeGameCreditQuote,
@@ -84,6 +85,7 @@ export interface UseChatReturn {
     terminationNode?: string,
     taskType?: BeeGameCreditTaskType,
     attachments?: ChatImageAttachmentPayload[],
+    thinkingMode?: BeeGameThinkingMode,
   ) => Promise<void>;
 
   /**
@@ -809,6 +811,7 @@ export const useChat = ({
     terminationNode?: string,
     taskType: BeeGameCreditTaskType = 'edit_turn',
     attachments?: ChatImageAttachmentPayload[],
+    thinkingMode: BeeGameThinkingMode = 'disabled',
   ) => {
     if (waitingApproval.isBlockingChat) {
       emitWaitingApprovalBlock(waitingApproval.message);
@@ -847,6 +850,7 @@ export const useChat = ({
         client_message_id: clientMessageId,
         taskType,
         attachments,
+        thinkingMode,
       }) as SendMessageResponse;
 
       setCurrentTaskId(response.task_id);

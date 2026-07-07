@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines'
 import type {
+  BeeGameChatThinkingMode,
   BeeGamePromptInput,
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -78,6 +79,7 @@ export function createQueryEngineRunner(): BeeGameSessionRunner {
 
 class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private engine: QueryEngineLike | null = null
+  private engineThinkingMode: BeeGameChatThinkingMode | null = null
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
 
@@ -86,11 +88,20 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     await serializeRuntimeTurn(async () => {
       await withRuntimeEnvironment(this.input.cwd, this.input.env, async () => {
+        const thinkingMode = input.thinkingMode ?? 'disabled'
+        if (this.engine && this.engineThinkingMode !== thinkingMode) {
+          this.engine.interrupt()
+          this.engine = null
+          this.engineThinkingMode = null
+        }
+        this.currentSubmitInput = input
         const engine = await this.ensureEngine()
-        if (input.signal.aborted) return
+        if (input.signal.aborted) {
+          this.currentSubmitInput = null
+          return
+        }
 
         engine.resetAbortController()
-        this.currentSubmitInput = input
         const abort = () => {
           engine.interrupt()
         }
@@ -281,15 +292,25 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         )
       },
       readFileCache: new FileStateCache(500, 50 * 1024 * 1024),
+      thinkingConfig: toQueryEngineThinkingConfig(
+        this.currentSubmitInput?.thinkingMode ?? 'disabled',
+      ),
       ...(resumedConversation.length > 0
         ? { initialMessages: resumedConversation }
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
     })
+    this.engineThinkingMode = this.currentSubmitInput?.thinkingMode ?? 'disabled'
 
     return this.engine
   }
+}
+
+export function toQueryEngineThinkingConfig(
+  mode: BeeGameChatThinkingMode,
+): { type: 'adaptive' } | { type: 'disabled' } {
+  return mode === 'enabled' ? { type: 'adaptive' } : { type: 'disabled' }
 }
 
 export function ensureBeeGameMacroGlobals(): void {

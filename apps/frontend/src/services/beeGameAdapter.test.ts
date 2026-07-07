@@ -1271,6 +1271,7 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.sendMessage({
       project_id: 'project_backend_ensure',
       content: '继续任务',
+      thinkingMode: 'disabled',
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
@@ -1281,8 +1282,12 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     const ensureBody = JSON.parse(String(ensureCall?.[1]?.body || '{}')) as { language?: string };
     expect(ensureBody.language).toBeTruthy();
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
+    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as {
+      text?: string;
+      thinkingMode?: string;
+    };
     expect(body.text).toBe('继续任务');
+    expect(body.thinkingMode).toBe('disabled');
     expect(fetchMock.mock.calls.some(([path, init]) => (
       String(path) === '/api/beegame-sessions' && init?.method === 'POST'
     ))).toBe(false);

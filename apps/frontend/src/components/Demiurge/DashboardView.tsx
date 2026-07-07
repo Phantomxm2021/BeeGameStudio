@@ -18,7 +18,7 @@ import { buildApiUrl } from '../../services/apiClient';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
-import { isBeeGameAdapterEnabled } from '../../services/beeGameAdapter';
+import { isBeeGameAdapterEnabled, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
 import { listModelConfigs, type ModelConfig } from '../../services/modelConfigApi';
 import {
     getCreditSummary,
@@ -566,8 +566,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 lang={lang}
                 messages={displayMessages}
                 progress={progressPercent}
-                onSendMessage={(message, taskType?: BeeGameCreditTaskType, attachments?: ChatImageAttachmentPayload[]) =>
-                    sendMessage(message, undefined, taskType, attachments)
+                onSendMessage={(
+                    message,
+                    taskType?: BeeGameCreditTaskType,
+                    attachments?: ChatImageAttachmentPayload[],
+                    thinkingMode?: BeeGameThinkingMode,
+                ) =>
+                    sendMessage(message, undefined, taskType, attachments, thinkingMode)
                 }
                 isLoading={isLoading}
                 isRuntimeBusy={currentStatus === 'running'}

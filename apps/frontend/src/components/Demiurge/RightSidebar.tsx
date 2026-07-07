@@ -4,7 +4,7 @@ import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
 import type { ChatImageAttachmentPayload } from '../../services/api';
-import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
+import { isBeeGameProjectPackageArtifactId, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
 import type { BeeGameCreditTaskType } from '../../services/creditsApi';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
@@ -35,7 +35,12 @@ interface RightSidebarProps {
     lang: Language;
     messages: ChatDisplayMessage[];
     progress: number;
-    onSendMessage: (msg: string, taskType?: BeeGameCreditTaskType, attachments?: ChatImageAttachmentPayload[]) => void;
+    onSendMessage: (
+        msg: string,
+        taskType?: BeeGameCreditTaskType,
+        attachments?: ChatImageAttachmentPayload[],
+        thinkingMode?: BeeGameThinkingMode
+    ) => void;
     isLoading: boolean;
     isRuntimeBusy?: boolean;
     onApprovePlan?: (
@@ -94,6 +99,7 @@ export function RightSidebar({
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
     const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [chatThinkingMode, setChatThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [imageAttachments, setImageAttachments] = useState<ChatImageAttachmentPayload[]>([]);
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
@@ -144,7 +150,7 @@ export function RightSidebar({
     // Handlers
     const handleSend = () => {
         if (!canSendMessage || (!chatInput.trim() && imageAttachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage(chatInput, undefined, imageAttachments);
+        onSendMessage(chatInput, undefined, imageAttachments, chatThinkingMode);
         setChatInput('');
         setImageAttachments([]);
     };
@@ -398,6 +404,8 @@ export function RightSidebar({
                                 onSend={handleSend}
                                 onSendMessage={onSendMessage}
                                 imageAttachments={imageAttachments}
+                                thinkingMode={chatThinkingMode}
+                                onThinkingModeChange={setChatThinkingMode}
                                 onAddImageAttachments={(attachments) => {
                                     setImageAttachments(current => dedupeImageAttachments([...current, ...attachments]));
                                 }}
