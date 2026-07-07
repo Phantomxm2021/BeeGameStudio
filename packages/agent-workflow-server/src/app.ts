@@ -3531,9 +3531,9 @@ function registerBeeGameSessionRoutes(
           taskType,
           clientMessageId,
           attachments,
-          ...(isBeeGameChatThinkingMode(body.thinkingMode)
-            ? { thinkingMode: body.thinkingMode }
-            : {}),
+          thinkingMode: isBeeGameChatThinkingMode(body.thinkingMode)
+            ? body.thinkingMode
+            : 'disabled',
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),

@@ -837,6 +837,32 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('defaults chat thinking mode to disabled when session input omits it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build the next feature.' }),
+      })
+
+      expect(inputRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      expect(fake.runtimes[0]?.submits[0]?.thinkingMode).toBe('disabled')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('scopes dashboard stores by current user', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const ownerAApp = createAgentWorkflowApp({

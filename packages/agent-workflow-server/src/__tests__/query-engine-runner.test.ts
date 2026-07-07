@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  createBeeGameThinkingFetch,
   ensureBeeGameMacroGlobals,
   type MutableAppState,
   stopRunningLocalShellTasks,
@@ -69,5 +70,73 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   test('maps BeeGame chat thinking mode to QueryEngine thinking config', () => {
     expect(toQueryEngineThinkingConfig('disabled')).toEqual({ type: 'disabled' })
     expect(toQueryEngineThinkingConfig('enabled')).toEqual({ type: 'adaptive' })
+  })
+
+  test('injects explicit thinking flag into matching OpenAI-compatible chat requests', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)),
+      })
+      return new Response('{}')
+    }) as typeof fetch
+    const wrapped = createBeeGameThinkingFetch(
+      baseFetch,
+      'https://llm.example.invalid/compatible/v1',
+      'disabled',
+    )
+
+    await wrapped('https://llm.example.invalid/compatible/v1/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'balanced-model', messages: [] }),
+    })
+
+    expect(calls[0]).toEqual({
+      url: 'https://llm.example.invalid/compatible/v1/chat/completions',
+      body: {
+        model: 'balanced-model',
+        messages: [],
+        enable_thinking: false,
+      },
+    })
+
+    const thinkingFetch = createBeeGameThinkingFetch(
+      baseFetch,
+      'https://llm.example.invalid/compatible/v1',
+      'enabled',
+    )
+    await thinkingFetch('https://llm.example.invalid/compatible/v1/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'balanced-model', messages: [] }),
+    })
+
+    expect(calls[1]?.body.enable_thinking).toBe(true)
+  })
+
+  test('does not modify requests outside the configured OpenAI-compatible base URL', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)),
+      })
+      return new Response('{}')
+    }) as typeof fetch
+    const wrapped = createBeeGameThinkingFetch(
+      baseFetch,
+      'https://llm.example.invalid/v1',
+      'enabled',
+    )
+
+    await wrapped('https://other.example.invalid/v1/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'balanced-model', messages: [] }),
+    })
+
+    expect(calls[0]?.body).toEqual({
+      model: 'balanced-model',
+      messages: [],
+    })
   })
 })

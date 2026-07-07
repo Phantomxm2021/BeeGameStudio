@@ -87,7 +87,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     await serializeRuntimeTurn(async () => {
-      await withRuntimeEnvironment(this.input.cwd, this.input.env, async () => {
+      await withRuntimeEnvironment(this.input.cwd, this.input.env, input.thinkingMode, async () => {
         const thinkingMode = input.thinkingMode ?? 'disabled'
         if (this.engine && this.engineThinkingMode !== thinkingMode) {
           this.engine.interrupt()
@@ -419,10 +419,12 @@ async function serializeRuntimeTurn(fn: () => Promise<void>): Promise<void> {
 async function withRuntimeEnvironment(
   cwd: string,
   env: Record<string, string>,
+  thinkingMode: BeeGameChatThinkingMode | undefined,
   fn: () => Promise<void>,
 ): Promise<void> {
   const previousCwd = process.cwd()
   const previousEnv = new Map<string, string | undefined>()
+  const previousFetch = globalThis.fetch
 
   const runtimeEnv = getBeeGameRuntimeEnvironment(env)
   for (const key of [
@@ -439,9 +441,15 @@ async function withRuntimeEnvironment(
 
   try {
     process.chdir(cwd)
+    globalThis.fetch = createBeeGameThinkingFetch(
+      previousFetch,
+      runtimeEnv.OPENAI_BASE_URL,
+      thinkingMode ?? 'disabled',
+    )
     await fn()
   } finally {
     process.chdir(previousCwd)
+    globalThis.fetch = previousFetch
     for (const [key, value] of previousEnv) {
       if (value === undefined) {
         delete process.env[key]
@@ -449,6 +457,70 @@ async function withRuntimeEnvironment(
         process.env[key] = value
       }
     }
+  }
+}
+
+export function createBeeGameThinkingFetch(
+  baseFetch: typeof fetch,
+  openAIBaseUrl: string | undefined,
+  thinkingMode: BeeGameChatThinkingMode,
+): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = getFetchRequestUrl(input)
+    if (!shouldInjectBeeGameThinking(requestUrl, openAIBaseUrl)) {
+      return baseFetch(input, init)
+    }
+
+    const body = init?.body
+    if (typeof body !== 'string') {
+      return baseFetch(input, init)
+    }
+
+    const parsed = parseJsonObject(body)
+    if (!parsed) {
+      return baseFetch(input, init)
+    }
+
+    return baseFetch(input, {
+      ...init,
+      body: JSON.stringify({
+        ...parsed,
+        enable_thinking: thinkingMode === 'enabled',
+      }),
+    })
+  }) as typeof fetch
+}
+
+function getFetchRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  return input.url
+}
+
+function shouldInjectBeeGameThinking(
+  requestUrl: string,
+  openAIBaseUrl: string | undefined,
+): boolean {
+  if (!openAIBaseUrl?.trim()) return false
+  try {
+    const request = new URL(requestUrl)
+    const base = new URL(openAIBaseUrl)
+    if (request.origin !== base.origin) return false
+    const basePath = base.pathname.replace(/\/+$/, '')
+    return request.pathname === `${basePath}/chat/completions`
+  } catch {
+    return false
+  }
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
   }
 }
 
