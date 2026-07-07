@@ -748,7 +748,7 @@ export class BeeGameSessionManager {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
-      const runner = await this.runner.start({
+      const runner = record.runner ?? await this.runner.start({
         sessionId: record.session.id,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
@@ -795,10 +795,11 @@ export class BeeGameSessionManager {
           )
         }
       } finally {
-        runner.stop()
-        if (record.runner === runner) record.runner = null
+        if (signal.aborted && record.runner === runner) record.runner = null
       }
     } catch (err) {
+      record.runner?.stop()
+      record.runner = null
       if (creditReservation) {
         shouldRefundReservation = !await this.settleTurnCredits(
           record,

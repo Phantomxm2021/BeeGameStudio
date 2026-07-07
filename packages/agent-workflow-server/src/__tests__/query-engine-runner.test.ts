@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createBeeGameThinkingFetch,
   ensureBeeGameMacroGlobals,
+  sanitizeBeeGameResumeMessages,
   type MutableAppState,
   stopRunningLocalShellTasks,
   toQueryEngineThinkingConfig,
@@ -138,5 +139,38 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       model: 'balanced-model',
       messages: [],
     })
+  })
+
+  test('removes Claude recovery continuation messages before BeeGame appends a real user prompt', () => {
+    const keepBefore = {
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Previous response.' }] },
+    }
+    const continuation = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Continue from where you left off.' }],
+      },
+    }
+    const sentinel = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+    }
+    const keepAfter = {
+      type: 'system',
+      message: { role: 'system', content: 'hook output' },
+    }
+
+    expect(sanitizeBeeGameResumeMessages({
+      messages: [keepBefore, continuation, sentinel, keepAfter],
+      turnInterruptionState: {
+        kind: 'interrupted_prompt',
+        message: continuation,
+      },
+    })).toEqual([keepBefore, keepAfter])
   })
 })

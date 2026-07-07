@@ -372,11 +372,33 @@ async function loadInitialMessagesForResume(
       'loadConversationForResume',
       sessionId,
       undefined,
-    ) as { messages?: unknown[] } | null
-    return Array.isArray(result?.messages) ? result.messages : []
+    ) as BeeGameResumeConversation | null
+    return sanitizeBeeGameResumeMessages(result)
   } catch {
     return []
   }
+}
+
+type BeeGameResumeConversation = {
+  messages?: unknown[]
+  turnInterruptionState?: {
+    kind?: unknown
+    message?: unknown
+  }
+}
+
+export function sanitizeBeeGameResumeMessages(
+  result: BeeGameResumeConversation | null | undefined,
+): unknown[] {
+  const messages = Array.isArray(result?.messages) ? [...result.messages] : []
+  const interruption = result?.turnInterruptionState
+  if (interruption?.kind !== 'interrupted_prompt') return messages
+
+  const messageIndex = messages.indexOf(interruption.message)
+  if (messageIndex === -1) return messages
+
+  messages.splice(messageIndex, 2)
+  return messages
 }
 
 async function canWriteBeeGameConfigDir(): Promise<boolean> {

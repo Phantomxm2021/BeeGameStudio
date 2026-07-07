@@ -863,6 +863,42 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('reuses the BeeGame runtime across chat turns while the server is alive', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const firstInputRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'First change.' }),
+      })
+      expect(firstInputRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+
+      const secondInputRes = await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Second change.' }),
+      })
+      expect(secondInputRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 2)
+
+      expect(fake.starts).toHaveLength(1)
+      expect(fake.runtimes).toHaveLength(1)
+      expect(fake.runtimes[0]?.stops).toEqual([])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('scopes dashboard stores by current user', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const ownerAApp = createAgentWorkflowApp({
