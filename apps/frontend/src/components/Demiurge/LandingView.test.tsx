@@ -1498,8 +1498,9 @@ describe('LandingView bootstrap submission', () => {
         expect(thinkingSelect).toHaveValue('disabled');
         expect(thinkingSelect).toHaveClass('type-button');
         expect(thinkingSelect).not.toHaveClass('type-caption-1');
-        expect(within(thinkingSelect).getByRole('option', { name: '关闭思考' })).toBeInTheDocument();
-        expect(within(thinkingSelect).getByRole('option', { name: '启用思考' })).toBeInTheDocument();
+        expect(thinkingSelect).toHaveClass('text-zinc-500');
+        expect(within(thinkingSelect).getByRole('option', { name: 'Default' })).toBeInTheDocument();
+        expect(within(thinkingSelect).getByRole('option', { name: 'Thinking' })).toBeInTheDocument();
         expect(within(thinkingSelect).queryByRole('option', { name: /自动/ })).not.toBeInTheDocument();
 
         thinkingSelect.focus();

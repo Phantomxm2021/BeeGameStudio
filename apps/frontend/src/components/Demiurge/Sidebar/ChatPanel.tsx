@@ -11,6 +11,7 @@ import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import type { BeeGameThinkingMode } from '../../../services/beeGameAdapter';
+import { ThinkingModeSelect } from '../ThinkingModeSelect';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -153,8 +154,8 @@ export const ChatPanel = memo(({
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
     const thinkingLabel = text.thinkingLabel || '思考';
-    const thinkingOff = text.thinkingOff || (lang === 'zh' || lang === 'zh-TW' ? '关闭思考' : 'Disable');
-    const thinkingOn = text.thinkingOn || (lang === 'zh' || lang === 'zh-TW' ? '启用思考' : 'Enable');
+    const thinkingOff = 'Default';
+    const thinkingOn = 'Thinking';
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
@@ -218,11 +219,15 @@ export const ChatPanel = memo(({
     const composerShellClassName = isBeeGameVariant
         ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
+    const normalComposerClassName = isBeeGameVariant
+        ? 'glass-control group flex min-h-[81px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl'
+        : 'relative group';
     const textareaClassName = isBeeGameVariant
-        ? 'type-input glass-control w-full rounded-3xl px-4 py-3 pr-40 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[52px] max-h-[150px] resize-none overflow-y-auto backdrop-blur-2xl'
+        ? 'type-input scrollbar-hide w-full bg-transparent px-5 py-4 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[72px] max-h-[150px] resize-none overflow-y-auto outline-none'
         : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
+    const textareaInsetClassName = isBeeGameVariant ? '' : 'pl-14';
     const sendButtonClassName = isBeeGameVariant
-        ? 'primary-pill absolute right-3 bottom-2.5 flex h-9 w-9 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
+        ? 'primary-pill flex h-8 w-8 shrink-0 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
         : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
 
     return (
@@ -403,9 +408,12 @@ export const ChatPanel = memo(({
                         />
                     </div>
                 ) : (
-                    <div className="relative group" data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
+                    <div className={normalComposerClassName} data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
                         {imageAttachments.length > 0 ? (
-                            <div className="mb-3 flex gap-2 overflow-x-auto">
+                            <div
+                                className={isBeeGameVariant ? 'flex gap-3 overflow-x-auto px-4 pt-4 pb-2' : 'mb-3 flex gap-2 overflow-x-auto'}
+                                data-testid={isBeeGameVariant ? 'beegame-chat-attachments' : undefined}
+                            >
                                 {imageAttachments.map((attachment, index) => (
                                     <div
                                         key={`${attachment.filename || 'image'}-${index}`}
@@ -428,69 +436,144 @@ export const ChatPanel = memo(({
                                 ))}
                             </div>
                         ) : null}
-                        <div className="relative flex items-end">
-                            <input
-                                id="beegame-chat-image-upload"
-                                type="file"
-                                accept="image/png,image/jpeg,image/gif,image/webp"
-                                multiple
-                                className="hidden"
-                                onChange={(event) => {
-                                    const files = Array.from(event.target.files || []);
-                                    event.target.value = '';
-                                    void handleImageFiles(files);
-                                }}
-                                disabled={isComposerDisabled}
-                            />
-                            <label
-                                htmlFor="beegame-chat-image-upload"
-                                aria-label="Attach image"
-                                title="Attach image"
-                                className={`absolute bottom-2.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
-                            >
-                                <ImagePlus className="h-5 w-5" />
-                            </label>
-                        <textarea
-                            ref={textareaRef}
-                            className={`${textareaClassName} pl-14`}
-                            placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
-                            value={chatInput}
-                            onChange={(e) => onChatInputChange(e.target.value)}
-                            onPaste={(e) => {
-                                const files = clipboardDataToImageFiles(e.clipboardData);
-                                if (files.length === 0) return;
-                                e.preventDefault();
-                                void handleImageFiles(files);
-                            }}
-                            onCompositionStart={() => setIsComposing(true)}
-                            onCompositionEnd={() => setIsComposing(false)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-                                    e.preventDefault();
-                                    if (!isComposerDisabled) onSend();
-                                }
-                            }}
-                            disabled={isComposerDisabled}
-                        />
-                        <button
-                            onClick={onSend}
-                            aria-label="Send message"
-                            disabled={!canSubmitComposer || isComposerDisabled}
-                            className={sendButtonClassName}
-                        >
-                            <Send className="w-5 h-5 -ml-0.5" />
-                        </button>
-                        <select
-                            aria-label={thinkingLabel}
-                            value={thinkingMode}
-                            onChange={(event) => onThinkingModeChange?.(event.target.value as BeeGameThinkingMode)}
-                            disabled={isComposerDisabled}
-                            className="type-footnote absolute bottom-3 right-16 z-10 h-8 rounded-full border border-white/10 bg-transparent px-2.5 text-zinc-300 outline-none transition-colors hover:bg-white/10 hover:text-zinc-100 disabled:opacity-40"
-                        >
-                            <option value="disabled">{thinkingOff}</option>
-                            <option value="enabled">{thinkingOn}</option>
-                        </select>
-                        </div>
+                        {isBeeGameVariant ? (
+                            <>
+                                <input
+                                    id="beegame-chat-image-upload"
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/gif,image/webp"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(event) => {
+                                        const files = Array.from(event.target.files || []);
+                                        event.target.value = '';
+                                        void handleImageFiles(files);
+                                    }}
+                                    disabled={isComposerDisabled}
+                                />
+                                <textarea
+                                    ref={textareaRef}
+                                    className={`${textareaClassName} ${textareaInsetClassName}`}
+                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
+                                    value={chatInput}
+                                    onChange={(e) => onChatInputChange(e.target.value)}
+                                    onPaste={(e) => {
+                                        const files = clipboardDataToImageFiles(e.clipboardData);
+                                        if (files.length === 0) return;
+                                        e.preventDefault();
+                                        void handleImageFiles(files);
+                                    }}
+                                    onCompositionStart={() => setIsComposing(true)}
+                                    onCompositionEnd={() => setIsComposing(false)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                                            e.preventDefault();
+                                            if (!isComposerDisabled) onSend();
+                                        }
+                                    }}
+                                    disabled={isComposerDisabled}
+                                />
+                                <div
+                                    className="flex items-center justify-between px-3 pb-3 pt-1"
+                                    data-testid="beegame-chat-toolbar"
+                                >
+                                    <label
+                                        htmlFor="beegame-chat-image-upload"
+                                        aria-label="Attach image"
+                                        title="Attach image"
+                                        className={`flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
+                                        data-testid="beegame-chat-attach-button"
+                                    >
+                                        <ImagePlus className="h-5 w-5" />
+                                    </label>
+                                    <div className="flex items-center gap-3">
+                                        <ThinkingModeSelect
+                                            label={thinkingLabel}
+                                            value={thinkingMode}
+                                            options={[
+                                                { value: 'disabled', label: thinkingOff },
+                                                { value: 'enabled', label: thinkingOn },
+                                            ]}
+                                            disabled={isComposerDisabled}
+                                            onChange={(mode) => onThinkingModeChange?.(mode)}
+                                        />
+                                        <button
+                                            onClick={onSend}
+                                            aria-label="Send message"
+                                            disabled={!canSubmitComposer || isComposerDisabled}
+                                            className={sendButtonClassName}
+                                        >
+                                            <Send className="h-4 w-4 -ml-0.5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="relative flex items-end">
+                                <input
+                                    id="beegame-chat-image-upload"
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/gif,image/webp"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(event) => {
+                                        const files = Array.from(event.target.files || []);
+                                        event.target.value = '';
+                                        void handleImageFiles(files);
+                                    }}
+                                    disabled={isComposerDisabled}
+                                />
+                                <label
+                                    htmlFor="beegame-chat-image-upload"
+                                    aria-label="Attach image"
+                                    title="Attach image"
+                                    className={`absolute bottom-3.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
+                                >
+                                    <ImagePlus className="h-5 w-5" />
+                                </label>
+                                <textarea
+                                    ref={textareaRef}
+                                    className={`${textareaClassName} ${textareaInsetClassName}`}
+                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
+                                    value={chatInput}
+                                    onChange={(e) => onChatInputChange(e.target.value)}
+                                    onPaste={(e) => {
+                                        const files = clipboardDataToImageFiles(e.clipboardData);
+                                        if (files.length === 0) return;
+                                        e.preventDefault();
+                                        void handleImageFiles(files);
+                                    }}
+                                    onCompositionStart={() => setIsComposing(true)}
+                                    onCompositionEnd={() => setIsComposing(false)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                                            e.preventDefault();
+                                            if (!isComposerDisabled) onSend();
+                                        }
+                                    }}
+                                    disabled={isComposerDisabled}
+                                />
+                                <button
+                                    onClick={onSend}
+                                    aria-label="Send message"
+                                    disabled={!canSubmitComposer || isComposerDisabled}
+                                    className={sendButtonClassName}
+                                >
+                                    <Send className="h-4 w-4 -ml-0.5" />
+                                </button>
+                                <ThinkingModeSelect
+                                    label={thinkingLabel}
+                                    value={thinkingMode}
+                                    options={[
+                                        { value: 'disabled', label: thinkingOff },
+                                        { value: 'enabled', label: thinkingOn },
+                                    ]}
+                                    disabled={isComposerDisabled}
+                                    onChange={(mode) => onThinkingModeChange?.(mode)}
+                                    className="absolute bottom-2.5 right-14 z-10"
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

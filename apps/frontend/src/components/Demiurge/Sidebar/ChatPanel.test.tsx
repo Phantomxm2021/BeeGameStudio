@@ -168,7 +168,44 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByTestId('beegame-chat-panel')).toBeInTheDocument();
-        expect(screen.getByTestId('beegame-chat-composer')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-chat-composer')).toHaveClass(
+            'glass-control',
+            'flex',
+            'flex-col',
+            'min-h-[81px]',
+            'overflow-hidden',
+            'rounded-3xl',
+        );
+        expect(screen.getByPlaceholderText(/ask team/i)).toHaveClass(
+            'bg-transparent',
+            'px-5',
+            'py-4',
+            'scrollbar-hide',
+        );
+        expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('pb-14');
+        expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('glass-control');
+        expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('pl-14', 'pr-40');
+
+        expect(screen.getByTestId('beegame-chat-toolbar')).toHaveClass('px-3', 'pb-3');
+        expect(screen.getByTestId('beegame-chat-attach-button')).not.toHaveClass('absolute');
+        expect(screen.getByRole('button', { name: 'Send message' })).toHaveClass('h-8', 'w-8');
+    });
+
+    it('keeps BeeGame image attachments in a padded preview strip', () => {
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            imageAttachments: [{
+                type: 'image',
+                mediaType: 'image/png',
+                data: 'iVBORw0KGgo=',
+                filename: 'preview.png',
+            }],
+        });
+
+        expect(screen.getByTestId('beegame-chat-attachments')).toHaveClass('px-4', 'pt-4', 'pb-2');
+        expect(screen.getByAltText('preview.png')).toBeInTheDocument();
     });
 
     it('renders BeeGame messages as a compact feed with tools after their message', () => {

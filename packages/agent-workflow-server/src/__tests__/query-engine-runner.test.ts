@@ -115,6 +115,44 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(calls[1]?.body.enable_thinking).toBe(true)
   })
 
+  test('overrides stale OpenAI-compatible extra body thinking flags when chat thinking is disabled', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)),
+      })
+      return new Response('{}')
+    }) as typeof fetch
+    const wrapped = createBeeGameThinkingFetch(
+      baseFetch,
+      'https://llm.example.invalid/compatible/v1',
+      'disabled',
+    )
+
+    await wrapped('https://llm.example.invalid/compatible/v1/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'balanced-model',
+        messages: [],
+        extra_body: {
+          enable_thinking: true,
+          retained_provider_option: 'keep',
+        },
+      }),
+    })
+
+    expect(calls[0]?.body).toEqual({
+      model: 'balanced-model',
+      messages: [],
+      enable_thinking: false,
+      extra_body: {
+        enable_thinking: false,
+        retained_provider_option: 'keep',
+      },
+    })
+  })
+
   test('does not modify requests outside the configured OpenAI-compatible base URL', async () => {
     const calls: Array<{ url: string; body: Record<string, unknown> }> = []
     const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -172,5 +210,92 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         message: continuation,
       },
     })).toEqual([keepBefore, keepAfter])
+  })
+
+  test('removes descendants of an interrupted recovery prompt before appending a new BeeGame prompt', () => {
+    const cleanAssistant = {
+      uuid: 'assistant-clean',
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Clean checkpoint.' }] },
+    }
+    const apiError = {
+      uuid: 'assistant-error',
+      parentUuid: 'assistant-clean',
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Provider error.' }] },
+    }
+    const continuation = {
+      uuid: 'synthetic-continuation',
+      parentUuid: 'assistant-error',
+      type: 'user',
+      isMeta: true,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Continue from where you left off.' }],
+      },
+    }
+    const sentinel = {
+      uuid: 'synthetic-sentinel',
+      parentUuid: 'synthetic-continuation',
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+    }
+    const staleUserPrompt = {
+      uuid: 'stale-user-prompt',
+      parentUuid: 'synthetic-sentinel',
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Fix the current rendering issue.' }],
+      },
+    }
+    const staleImageMeta = {
+      uuid: 'stale-image-meta',
+      parentUuid: 'stale-user-prompt',
+      type: 'user',
+      isMeta: true,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '[Image metadata]' }],
+      },
+    }
+    const laterSyntheticSentinel = {
+      uuid: 'later-synthetic-sentinel',
+      parentUuid: 'synthetic-continuation',
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+    }
+    const laterStaleUserPrompt = {
+      uuid: 'later-stale-user-prompt',
+      parentUuid: 'later-synthetic-sentinel',
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Fix the current rendering issue again.' }],
+      },
+    }
+
+    expect(sanitizeBeeGameResumeMessages({
+      messages: [
+        cleanAssistant,
+        apiError,
+        continuation,
+        sentinel,
+        staleUserPrompt,
+        staleImageMeta,
+        laterSyntheticSentinel,
+        laterStaleUserPrompt,
+      ],
+      turnInterruptionState: {
+        kind: 'interrupted_prompt',
+        message: continuation,
+      },
+    })).toEqual([cleanAssistant, apiError])
   })
 })

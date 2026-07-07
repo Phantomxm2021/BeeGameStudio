@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
@@ -118,6 +118,10 @@ describe('RightSidebar tabs', () => {
 
         const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
         expect(thinkingSelect).toHaveValue('disabled');
+        expect(thinkingSelect).toHaveClass('text-zinc-500');
+        expect(within(thinkingSelect).getByRole('option', { name: 'Default' })).toBeInTheDocument();
+        expect(within(thinkingSelect).getByRole('option', { name: 'Thinking' })).toBeInTheDocument();
+        await waitFor(() => expect(screen.getByPlaceholderText('Type...')).toHaveStyle({ height: '81px' }));
 
         await user.type(screen.getByPlaceholderText('Type...'), '先修复渲染问题');
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));

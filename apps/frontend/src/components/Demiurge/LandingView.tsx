@@ -1842,8 +1842,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     thinkingMode={thinkingMode}
                     thinkingLabel={t.thinkingLabel || 'Thinking'}
                     thinkingOptions={[
-                        { value: 'disabled', label: t.thinkingOff || 'Disable Thinking' },
-                        { value: 'enabled', label: t.thinkingOn || 'Enable Thinking' },
+                        { value: 'disabled', label: 'Default' },
+                        { value: 'enabled', label: 'Thinking' },
                     ]}
                     isTransitioning={isTransitioning || isPreparing}
                     onChange={handleProjectNameChange}

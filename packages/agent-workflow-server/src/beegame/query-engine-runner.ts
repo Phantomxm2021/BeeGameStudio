@@ -397,8 +397,47 @@ export function sanitizeBeeGameResumeMessages(
   const messageIndex = messages.indexOf(interruption.message)
   if (messageIndex === -1) return messages
 
-  messages.splice(messageIndex, 2)
-  return messages
+  const interruptionUuid = getResumeMessageUuid(interruption.message)
+  if (!interruptionUuid) {
+    messages.splice(messageIndex, 2)
+    return messages
+  }
+
+  const removedUuids = new Set<string>([interruptionUuid])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const message of messages) {
+      const uuid = getResumeMessageUuid(message)
+      if (!uuid || removedUuids.has(uuid)) continue
+      const parentUuid = getResumeMessageParentUuid(message)
+      if (parentUuid && removedUuids.has(parentUuid)) {
+        removedUuids.add(uuid)
+        changed = true
+      }
+    }
+  }
+
+  return messages.filter(message => {
+    const uuid = getResumeMessageUuid(message)
+    return !uuid || !removedUuids.has(uuid)
+  })
+}
+
+function getResumeMessageUuid(message: unknown): string | undefined {
+  if (!isRecord(message)) return undefined
+  const uuid = message.uuid
+  return typeof uuid === 'string' && uuid ? uuid : undefined
+}
+
+function getResumeMessageParentUuid(message: unknown): string | undefined {
+  if (!isRecord(message)) return undefined
+  const parentUuid = message.parentUuid
+  return typeof parentUuid === 'string' && parentUuid ? parentUuid : undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 async function canWriteBeeGameConfigDir(): Promise<boolean> {
@@ -505,12 +544,29 @@ export function createBeeGameThinkingFetch(
 
     return baseFetch(input, {
       ...init,
-      body: JSON.stringify({
-        ...parsed,
-        enable_thinking: thinkingMode === 'enabled',
-      }),
+      body: JSON.stringify(withBeeGameThinkingBody(parsed, thinkingMode)),
     })
   }) as typeof fetch
+}
+
+function withBeeGameThinkingBody(
+  body: Record<string, unknown>,
+  thinkingMode: BeeGameChatThinkingMode,
+): Record<string, unknown> {
+  const enableThinking = thinkingMode === 'enabled'
+  const extraBody = body.extra_body
+  return {
+    ...body,
+    enable_thinking: enableThinking,
+    ...(isRecord(extraBody)
+      ? {
+          extra_body: {
+            ...extraBody,
+            enable_thinking: enableThinking,
+          },
+        }
+      : {}),
+  }
 }
 
 function getFetchRequestUrl(input: RequestInfo | URL): string {
