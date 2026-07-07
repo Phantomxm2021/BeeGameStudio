@@ -583,7 +583,7 @@ describe('DashboardView runtime loading', () => {
         expect(stopTask).not.toHaveBeenCalled();
     });
 
-    it('publishes the project and switches the preview to the deployed URL', async () => {
+    it('publishes the project without switching the managed preview to the deployed URL', async () => {
         const user = userEvent.setup();
         mockedProjectStatus = {
             ...mockedProjectStatus,
@@ -597,11 +597,13 @@ describe('DashboardView runtime loading', () => {
         await user.click(within(deploymentDialog).getByRole('button', { name: '发布游戏' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
-        const frame = await screen.findByTestId('beegame-live-preview-frame');
-        expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/');
+        await waitFor(() => {
+            expect(within(deploymentDialog).getAllByText('https://games.example.com/project-one/').length).toBeGreaterThan(0);
+        });
+        expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });
 
-    it('loads deployment history and supports redeploy from the preview surface', async () => {
+    it('loads deployment history without using it as the managed preview URL', async () => {
         const user = userEvent.setup();
         apiMocks.listProjectDeployments.mockResolvedValueOnce([
             {
@@ -625,12 +627,12 @@ describe('DashboardView runtime loading', () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await waitFor(() => expect(apiMocks.listProjectDeployments).toHaveBeenCalledWith('proj_1'));
-        const frame = await screen.findByTestId('beegame-live-preview-frame');
-        expect(frame).toHaveAttribute('src', 'https://games.example.com/project-one/previous/');
+        expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '发布游戏' }));
         const deploymentDialog = await screen.findByRole('dialog', { name: '发布游戏' });
         expect(within(deploymentDialog).getByText('历史版本')).toBeInTheDocument();
+        expect(within(deploymentDialog).getAllByText('https://games.example.com/project-one/previous/').length).toBeGreaterThan(0);
 
         await user.click(within(deploymentDialog).getByRole('button', { name: '重新发布' }));
 
@@ -705,8 +707,7 @@ describe('DashboardView runtime loading', () => {
         await user.click(within(deploymentDialog).getByRole('button', { name: '发布游戏' }));
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
-        await waitFor(() => expect(screen.getAllByText('预览不可用').length).toBeGreaterThan(0));
-        expect(screen.getByText(/lastPoint/)).toBeInTheDocument();
+        await waitFor(() => expect(within(deploymentDialog).getAllByText(/lastPoint/).length).toBeGreaterThan(0));
         expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });
 

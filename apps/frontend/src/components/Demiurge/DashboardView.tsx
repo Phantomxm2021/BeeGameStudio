@@ -12,9 +12,8 @@ import { SideMenu } from './SideMenu';
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
-import type { BeeGameDeploymentPayload, BuildReportPayload, ChatImageAttachmentPayload, PendingUserReviewItem } from '../../services/api';
+import type { BeeGameDeploymentPayload, ChatImageAttachmentPayload, PendingUserReviewItem } from '../../services/api';
 import { api } from '../../services/api';
-import { buildApiUrl } from '../../services/apiClient';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
@@ -56,25 +55,13 @@ const getModelDisplayName = (config?: ModelConfig): string => {
     return config.models.balanced || config.models.strong || config.models.fast || config.name || '';
 };
 
-const deploymentToBuildReport = (deployment: BeeGameDeploymentPayload): BuildReportPayload => {
-    const isSucceeded = deployment.status === 'succeeded' && Boolean(deployment.url);
-    const failureDetail = deployment.buildLog || deployment.message || 'Deployment failed';
-    return {
-        status: isSucceeded ? 'passed' : 'failed',
-        entrypoint: deployment.entrypoint || '',
-        build_url: isSucceeded ? buildApiUrl(deployment.url) : '',
-        agents: ['beegame-deployment'],
-        checks: [{
-            name: deployment.buildCommand || 'deploy',
-            status: isSucceeded ? 'passed' : 'failed',
-            detail: deployment.message || deployment.buildLog || '',
-            path: deployment.outputDir,
-        }],
-        summary: deployment.message || '',
-        failure_reason: isSucceeded ? undefined : failureDetail,
-        created_at: deployment.deployedAt || deployment.updatedAt,
-    };
-};
+const upsertDeploymentHistory = (
+    current: BeeGameDeploymentPayload[],
+    deployment: BeeGameDeploymentPayload,
+): BeeGameDeploymentPayload[] => [
+    deployment,
+    ...current.filter((item) => item.id !== deployment.id),
+];
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
@@ -82,7 +69,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
     const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
-    const [deploymentBuildReport, setDeploymentBuildReport] = useState<BuildReportPayload | null>(null);
     const [isDeployingProject, setDeployingProject] = useState(false);
     const hasSentInitialPrompt = useRef(false);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
@@ -136,12 +122,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     }, [isBeeGameMode, projectId]);
 
-    const refreshDeploymentHistory = useCallback(async () => {
-        if (!isBeeGameMode) return;
+    const refreshDeploymentHistory = useCallback(async (): Promise<BeeGameDeploymentPayload[]> => {
+        if (!isBeeGameMode) return [];
         try {
-            setDeploymentHistory(await api.listProjectDeployments(projectId));
+            const deployments = await api.listProjectDeployments(projectId);
+            setDeploymentHistory(deployments);
+            return deployments;
         } catch (error) {
             console.error('Failed to load deployment history:', error);
+            return [];
         }
     }, [isBeeGameMode, projectId]);
 
@@ -197,7 +186,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         setInitialGateStateReady(false);
         setCreditSummary(null);
         setDeploymentHistory([]);
-        setDeploymentBuildReport(null);
         void refreshCreditSummary();
         void refreshDeploymentHistory();
     }, [projectId, refreshCreditSummary, refreshDeploymentHistory]);
@@ -334,12 +322,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         setDeployingProject(true);
         try {
             const deployment = await api.deployProject(projectId);
-            setDeploymentBuildReport(deploymentToBuildReport(deployment));
-            setDeploymentHistory((current) => [
-                deployment,
-                ...current.filter((item) => item.id !== deployment.id),
-            ]);
-            await refreshDeploymentHistory();
+            setDeploymentHistory((current) => upsertDeploymentHistory(current, deployment));
+            const refreshed = await refreshDeploymentHistory();
+            if (!refreshed.some((item) => item.id === deployment.id)) {
+                setDeploymentHistory((current) => upsertDeploymentHistory(current, deployment));
+            }
             if (deployment.status !== 'succeeded' || !deployment.url) {
                 throw new Error(deployment.message || 'Deployment failed');
             }
@@ -355,12 +342,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         setDeployingProject(true);
         try {
             const deployment = await api.rollbackProjectDeployment(projectId, deploymentId);
-            setDeploymentBuildReport(deploymentToBuildReport(deployment));
-            setDeploymentHistory((current) => [
-                deployment,
-                ...current.filter((item) => item.id !== deployment.id),
-            ]);
-            await refreshDeploymentHistory();
+            setDeploymentHistory((current) => upsertDeploymentHistory(current, deployment));
+            const refreshed = await refreshDeploymentHistory();
+            if (!refreshed.some((item) => item.id === deployment.id)) {
+                setDeploymentHistory((current) => upsertDeploymentHistory(current, deployment));
+            }
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
         } finally {
@@ -475,11 +461,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         ) || savedRuntimeSnapshot?.model_name || '';
     }, [modelConfigs, projectStatus?.model_config_id, savedRuntimeSnapshot?.model_name]);
 
-    const latestDeploymentBuildReport = useMemo(() => {
-        const latest = deploymentHistory[0];
-        return latest ? deploymentToBuildReport(latest) : null;
-    }, [deploymentHistory]);
-
     // Logging Token Usage and Progress
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -548,7 +529,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 credits={creditSummary}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
-                buildReport={deploymentBuildReport || latestDeploymentBuildReport || projectStatus?.build_report || null}
+                buildReport={projectStatus?.build_report || null}
                 deployments={deploymentHistory}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
