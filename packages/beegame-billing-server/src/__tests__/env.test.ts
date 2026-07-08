@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   loadBeeGameBillingEnvFile,
   resolveBeeGameBillingEnvFile,
+  resolveBeeGameBillingListenOptions,
   summarizeBeeGameBillingEnv,
 } from '../env'
 
@@ -71,5 +72,23 @@ describe('BeeGame billing env', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  test('does not inherit runtime host listen port', () => {
+    expect(resolveBeeGameBillingListenOptions({
+      AGENT_WORKFLOW_HOST: '0.0.0.0',
+      AGENT_WORKFLOW_PORT: '62174',
+    })).toEqual({
+      host: '127.0.0.1',
+      port: 62175,
+    })
+    expect(resolveBeeGameBillingListenOptions({
+      BEEGAME_BILLING_HOST: '0.0.0.0',
+      BEEGAME_BILLING_PORT: '62176',
+      AGENT_WORKFLOW_PORT: '62174',
+    })).toEqual({
+      host: '0.0.0.0',
+      port: 62176,
+    })
   })
 })

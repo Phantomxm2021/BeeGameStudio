@@ -49,6 +49,8 @@ The billing server automatically loads `docker/.env.billing` when it starts and
 prints only configured or missing environment variable names, never secret
 values. Override the env file path with `BEEGAME_BILLING_ENV_FILE` only when
 you deliberately need a different local file.
+Billing listens on `BEEGAME_BILLING_PORT` or defaults to `62175`; it does not
+inherit the runtime host's `AGENT_WORKFLOW_PORT`.
 
 ## Start
 

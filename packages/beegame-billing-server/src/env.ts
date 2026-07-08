@@ -15,6 +15,11 @@ export type BillingEnvSummary = {
   missing: string[]
 }
 
+export type BillingListenOptions = {
+  host: string
+  port: number
+}
+
 const REQUIRED_BILLING_ENV_KEYS = [
   'BEEGAME_SUPABASE_URL',
   'BEEGAME_SUPABASE_ANON_KEY',
@@ -84,6 +89,18 @@ export function summarizeBeeGameBillingEnv(
     }
   }
   return { configured, missing }
+}
+
+export function resolveBeeGameBillingListenOptions(
+  env: BillingEnv = process.env,
+): BillingListenOptions {
+  const configuredPort = Number.parseInt(env.BEEGAME_BILLING_PORT ?? '', 10)
+  return {
+    host: normalizeOptional(env.BEEGAME_BILLING_HOST) ?? '127.0.0.1',
+    port: Number.isFinite(configuredPort) && configuredPort >= 0
+      ? configuredPort
+      : 62175,
+  }
 }
 
 function parseEnvLine(line: string): { key: string; value: string } | undefined {
