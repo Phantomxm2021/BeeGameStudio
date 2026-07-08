@@ -110,6 +110,10 @@ import {
   loadStripePriceCreditMap,
   verifyStripeWebhookEvent,
 } from './stripe-payments'
+import {
+  type BeeGameBillingConfig,
+  resolveBeeGameBillingConfig,
+} from './billing-config'
 
 type JsonObject = Record<string, unknown>
 
@@ -239,6 +243,7 @@ export function createAgentWorkflowApp(
     getUserDataRoot: getCurrentUserDataRoot,
     modelConfigStore,
   })
+  const billingConfig = resolveBeeGameBillingConfig()
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
@@ -297,6 +302,12 @@ export function createAgentWorkflowApp(
   app.all('/previews/:sessionId/*', handlePreviewProxy)
   app.use('/api/*', cors())
   app.post('/api/payments/stripe/webhook', async c => {
+    if (billingConfig.mode !== 'server') {
+      return c.json({
+        error: 'Billing webhook disabled',
+        message: 'Stripe webhook is only enabled in server billing mode',
+      }, 503)
+    }
     let stripeEventId = ''
     let stripeEventType = ''
     try {
@@ -382,6 +393,16 @@ export function createAgentWorkflowApp(
 
   app.get('/api/payments/stripe/credit-packs', c => {
     try {
+      if (billingConfig.mode === 'remote') {
+        return proxyBeeGameBillingRequest(
+          c.req.raw,
+          billingConfig,
+          '/api/payments/stripe/credit-packs',
+        )
+      }
+      if (billingConfig.mode === 'disabled') {
+        return c.json({ packs: [] })
+      }
       const priceCredits = loadStripePriceCreditMap()
       return c.json({
         packs: Object.entries(priceCredits)
@@ -405,6 +426,19 @@ export function createAgentWorkflowApp(
   app.post('/api/payments/stripe/checkout-session', async c => {
     const user = getCurrentUser(c.req.raw)
     try {
+      if (billingConfig.mode === 'remote') {
+        return proxyBeeGameBillingRequest(
+          c.req.raw,
+          billingConfig,
+          '/api/payments/stripe/checkout-session',
+        )
+      }
+      if (billingConfig.mode === 'disabled') {
+        return c.json({
+          error: 'Billing disabled',
+          message: 'Billing is not configured',
+        }, 503)
+      }
       const body = await readJson(c.req.raw)
       const priceId = isObject(body) && typeof body.priceId === 'string'
         ? body.priceId.trim()
@@ -4386,6 +4420,47 @@ async function appendAuditEventBestEffort(
   } catch (err) {
     console.warn(`[BeeGame] Failed to append ${action} audit event:`, toErrorMessage(err))
   }
+}
+
+async function proxyBeeGameBillingRequest(
+  request: Request,
+  billingConfig: BeeGameBillingConfig,
+  path: string,
+): Promise<Response> {
+  if (!billingConfig.remoteApiBaseUrl) {
+    return Response.json({
+      error: 'Remote billing failed',
+      message: 'BEEGAME_BILLING_API_BASE_URL is required for remote billing mode',
+    }, { status: 503 })
+  }
+  const headers = new Headers()
+  const authorization = request.headers.get('authorization')
+  if (authorization) headers.set('authorization', authorization)
+  const origin = request.headers.get('origin')
+  if (origin) headers.set('origin', origin)
+  const accept = request.headers.get('accept')
+  if (accept) headers.set('accept', accept)
+  const method = request.method.toUpperCase()
+  const init: RequestInit = { method, headers }
+  if (method !== 'GET' && method !== 'HEAD') {
+    const contentType = request.headers.get('content-type')
+    if (contentType) headers.set('content-type', contentType)
+    init.body = await request.text()
+  }
+  const response = await fetch(buildBeeGameBillingUrl(billingConfig.remoteApiBaseUrl, path), init)
+  const responseHeaders = new Headers()
+  const contentType = response.headers.get('content-type')
+  if (contentType) responseHeaders.set('content-type', contentType)
+  return new Response(await response.text(), {
+    status: response.status,
+    headers: responseHeaders,
+  })
+}
+
+function buildBeeGameBillingUrl(baseUrl: string, path: string): string {
+  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path
+  return new URL(normalizedPath, normalizedBaseUrl).toString()
 }
 
 class HttpError extends Error {

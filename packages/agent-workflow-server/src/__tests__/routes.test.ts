@@ -769,6 +769,126 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('proxies Stripe credit store requests in remote billing mode without enabling local webhook grants', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-remote-billing-'))
+    const originalMode = process.env.BEEGAME_BILLING_MODE
+    const originalBillingUrl = process.env.BEEGAME_BILLING_API_BASE_URL
+    const originalMapping = process.env.BEEGAME_STRIPE_PRICE_CREDITS
+    const originalFetch = globalThis.fetch
+    const remoteRequests: Array<{
+      url: string
+      method: string
+      authorization: string | null
+      origin: string | null
+      body: string
+    }> = []
+    try {
+      process.env.BEEGAME_BILLING_MODE = 'remote'
+      process.env.BEEGAME_BILLING_API_BASE_URL = 'https://billing.beegame.example/base/'
+      delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      globalThis.fetch = (async (input, init) => {
+        remoteRequests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          authorization: init?.headers instanceof Headers
+            ? init.headers.get('authorization')
+            : new Headers(init?.headers).get('authorization'),
+          origin: init?.headers instanceof Headers
+            ? init.headers.get('origin')
+            : new Headers(init?.headers).get('origin'),
+          body: String(init?.body ?? ''),
+        })
+        if (String(input).endsWith('/api/payments/stripe/credit-packs')) {
+          return Response.json({
+            packs: [{ priceId: 'price_remote_500', credits: 500 }],
+          })
+        }
+        return Response.json({
+          id: 'cs_remote_checkout',
+          url: 'https://checkout.stripe.com/c/pay/cs_remote_checkout',
+          credits: 500,
+          priceId: 'price_remote_500',
+        }, { status: 201 })
+      }) as typeof fetch
+
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'customer-a',
+          role: 'developer',
+        },
+      })
+      const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs', {
+        headers: { authorization: 'Bearer local-client-token' },
+      })
+      expect(packsRes.status).toBe(200)
+      expect(await packsRes.json()).toEqual({
+        packs: [{ priceId: 'price_remote_500', credits: 500 }],
+      })
+
+      const checkoutRes = await stripeApp.request('/api/payments/stripe/checkout-session', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer local-client-token',
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:62173',
+        },
+        body: JSON.stringify({ priceId: 'price_remote_500' }),
+      })
+      expect(checkoutRes.status).toBe(201)
+      expect(await checkoutRes.json()).toEqual({
+        id: 'cs_remote_checkout',
+        url: 'https://checkout.stripe.com/c/pay/cs_remote_checkout',
+        credits: 500,
+        priceId: 'price_remote_500',
+      })
+
+      const webhookRes = await stripeApp.request('/api/payments/stripe/webhook', {
+        method: 'POST',
+        body: '{}',
+      })
+      expect(webhookRes.status).toBe(503)
+      expect(await webhookRes.json()).toEqual({
+        error: 'Billing webhook disabled',
+        message: 'Stripe webhook is only enabled in server billing mode',
+      })
+      expect(remoteRequests).toEqual([
+        {
+          url: 'https://billing.beegame.example/base/api/payments/stripe/credit-packs',
+          method: 'GET',
+          authorization: 'Bearer local-client-token',
+          origin: null,
+          body: '',
+        },
+        {
+          url: 'https://billing.beegame.example/base/api/payments/stripe/checkout-session',
+          method: 'POST',
+          authorization: 'Bearer local-client-token',
+          origin: 'http://127.0.0.1:62173',
+          body: JSON.stringify({ priceId: 'price_remote_500' }),
+        },
+      ])
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env.BEEGAME_BILLING_MODE
+      } else {
+        process.env.BEEGAME_BILLING_MODE = originalMode
+      }
+      if (originalBillingUrl === undefined) {
+        delete process.env.BEEGAME_BILLING_API_BASE_URL
+      } else {
+        process.env.BEEGAME_BILLING_API_BASE_URL = originalBillingUrl
+      }
+      if (originalMapping === undefined) {
+        delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      } else {
+        process.env.BEEGAME_STRIPE_PRICE_CREDITS = originalMapping
+      }
+      globalThis.fetch = originalFetch
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('resolves current user from bearer auth tokens when configured', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     try {

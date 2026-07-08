@@ -39,7 +39,7 @@ permission where the product supports delegated administration.
 | Workspace directory browser | `workspace.manage` | `GET /api/filesystem/directories` requires `workspace.manage`. |
 | Default workspace path | platform owner UI | `GET /api/filesystem/default-workspace` requires `workspace.read`; it returns a path used by normal project flows and does not mutate settings. |
 | Invitation settings and codes | platform owner only | Frontend calls Supabase RPCs directly. Admin RPCs use authenticated calls and are guarded by `beegame_is_platform_owner()`. |
-| Stripe Checkout webhook | not user-facing admin UI | `POST /api/payments/stripe/webhook` is intentionally unauthenticated but requires Stripe signature verification and a configured webhook secret; credit grants go through provider-neutral grant logic. |
+| Stripe Checkout webhook | trusted billing backend only | `POST /api/payments/stripe/webhook` is enabled only in `BEEGAME_BILLING_MODE=server`; it is intentionally unauthenticated but requires Stripe signature verification and a configured webhook secret. User-run local clients should use `BEEGAME_BILLING_MODE=remote` and must not receive Stripe webhooks. |
 
 ## Findings
 
@@ -58,6 +58,6 @@ permission where the product supports delegated administration.
 - If BeeGame later supports non-owner platform administrators, the current
   `currentUser.role === 'owner'` Platform entry gate should be replaced with an
   explicit platform-admin capability model.
-- Stripe price-to-credit policy is environment-driven. Operators should keep
-  `BEEGAME_STRIPE_PRICE_CREDITS` in source-controlled deployment notes without
-  committing Stripe secrets.
+- Stripe price-to-credit policy is environment-driven on the trusted billing
+  backend. Operators should keep `BEEGAME_STRIPE_PRICE_CREDITS` in
+  source-controlled deployment notes without committing Stripe secrets.

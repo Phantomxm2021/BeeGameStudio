@@ -60,9 +60,10 @@ Rules:
 
 ## Runtime Host Environment
 
-Required production values:
+Trusted SaaS runtime or dedicated billing backend values:
 
 ```env
+BEEGAME_BILLING_MODE=server
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
 BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
@@ -76,20 +77,53 @@ BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
 BEEGAME_STRIPE_PRICE_CREDITS=price_...=100
 ```
 
+Local client runtime values when the web UI and runtime host are packaged
+together for users to run on their own machine:
+
+```env
+BEEGAME_BILLING_MODE=remote
+BEEGAME_BILLING_API_BASE_URL=https://billing.your-domain.com
+BEEGAME_SUPABASE_URL=https://your-project.supabase.co
+BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_ACCESS_TOKEN=the-current-user-token
+BEEGAME_WORKSPACE_ROOT=/local/user/projects
+```
+
 Rules:
 
 - Normal user requests use the current user's Supabase access token and RLS/RPC.
-- Stripe webhook credit grants use the server-only Supabase service-role key after
-  the runtime host verifies the Stripe signature.
-- Never expose `BEEGAME_SUPABASE_SERVICE_ROLE_KEY` to frontend builds or generated
-  game runtimes.
+- Stripe webhook credit grants use the server-only Supabase service-role key
+  only inside `BEEGAME_BILLING_MODE=server`.
+- Never expose `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`, `BEEGAME_STRIPE_SECRET_KEY`,
+  or `BEEGAME_STRIPE_WEBHOOK_SECRET` to frontend builds, generated game runtimes,
+  or user-run local clients.
 - The workspace root is a platform deployment setting, not a normal user setting.
 - Preview ports must not conflict with the frontend, runtime host, or reverse proxy.
 - Generated projects should live outside the source repository.
 
+## Billing Topology
+
+BeeGame supports three billing modes:
+
+- `server`: trusted deployment mode. This process creates Stripe Checkout
+  Sessions, receives Stripe webhooks, verifies `Stripe-Signature`, and grants
+  credits through the Supabase service-role RPC.
+- `remote`: local-client mode. This process does not hold Stripe or service-role
+  secrets. It proxies Credit Store pack and checkout requests to
+  `BEEGAME_BILLING_API_BASE_URL`, forwarding the signed-in user's authorization.
+  The remote billing backend must run in `server` mode.
+- `disabled`: no billing. The Credit Store has no packs and checkout creation
+  returns a clear unavailable response.
+
+For packaged local clients, use `remote`. The local runtime host and web UI can
+ship together, but purchases and provider credit grants remain centralized in a
+trusted backend or Docker service.
+
 ## Stripe Credits
 
-BeeGame creates Stripe Checkout Sessions from the signed-in user store:
+BeeGame creates Stripe Checkout Sessions from the signed-in user store. In
+`server` mode these routes talk to Stripe directly. In `remote` mode they proxy
+to the billing backend:
 
 ```text
 GET  https://runtime.your-domain.com/api/payments/stripe/credit-packs
@@ -105,6 +139,9 @@ Credit grants are completed from Stripe Checkout webhooks at:
 POST https://runtime.your-domain.com/api/payments/stripe/webhook
 ```
 
+This webhook route is enabled only in `server` mode. Do not point Stripe
+webhooks at a user-run local client.
+
 Configure the Stripe endpoint to send `checkout.session.completed` events. The
 Checkout Session created by BeeGame includes:
 
@@ -112,9 +149,10 @@ Checkout Session created by BeeGame includes:
 - `metadata.beeGamePriceId`: Stripe Price ID to map to credits.
 - `metadata.beeGameCredits`: mapped BeeGame credit amount for operator audit.
 
-Runtime host variables:
+Trusted billing backend variables:
 
 ```env
+BEEGAME_BILLING_MODE=server
 BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 BEEGAME_STRIPE_SECRET_KEY=sk_live_...
 BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
