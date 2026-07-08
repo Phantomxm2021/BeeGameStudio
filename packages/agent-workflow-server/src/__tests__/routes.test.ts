@@ -889,6 +889,50 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('returns a service error when remote billing is unreachable', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-remote-billing-down-'))
+    const originalMode = process.env.BEEGAME_BILLING_MODE
+    const originalBillingUrl = process.env.BEEGAME_BILLING_API_BASE_URL
+    const originalFetch = globalThis.fetch
+    try {
+      process.env.BEEGAME_BILLING_MODE = 'remote'
+      process.env.BEEGAME_BILLING_API_BASE_URL = 'http://127.0.0.1:62175'
+      globalThis.fetch = (async () => {
+        throw new Error('socket closed')
+      }) as typeof fetch
+
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'customer-a',
+          role: 'developer',
+        },
+      })
+      const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs', {
+        headers: { authorization: 'Bearer local-client-token' },
+      })
+
+      expect(packsRes.status).toBe(503)
+      expect(await packsRes.json()).toEqual({
+        error: 'Remote billing failed',
+        message: 'Billing service is unavailable',
+      })
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env.BEEGAME_BILLING_MODE
+      } else {
+        process.env.BEEGAME_BILLING_MODE = originalMode
+      }
+      if (originalBillingUrl === undefined) {
+        delete process.env.BEEGAME_BILLING_API_BASE_URL
+      } else {
+        process.env.BEEGAME_BILLING_API_BASE_URL = originalBillingUrl
+      }
+      globalThis.fetch = originalFetch
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('resolves current user from bearer auth tokens when configured', async () => {
     const originalTokens = process.env.BEEGAME_AUTH_TOKENS
     try {

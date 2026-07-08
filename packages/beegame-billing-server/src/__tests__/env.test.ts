@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  getBeeGameBillingEnvDiagnostics,
   loadBeeGameBillingEnvFile,
   resolveBeeGameBillingEnvFile,
   resolveBeeGameBillingListenOptions,
@@ -30,6 +31,7 @@ describe('BeeGame billing env', () => {
 
       const result = await loadBeeGameBillingEnvFile(envPath, env)
       const summary = summarizeBeeGameBillingEnv(env)
+      const diagnostics = getBeeGameBillingEnvDiagnostics(result, env)
 
       expect(result.loadedPath).toBe(envPath)
       expect(result.loadedKeys).toEqual([
@@ -52,6 +54,18 @@ describe('BeeGame billing env', () => {
       ])
       expect(JSON.stringify(summary)).not.toContain('secret')
       expect(JSON.stringify(summary)).not.toContain('anon-key')
+      expect(diagnostics).toContainEqual({
+        key: 'BEEGAME_STRIPE_SECRET_KEY',
+        configured: true,
+        source: 'process-env',
+        length: 'existing-secret'.length,
+      })
+      expect(diagnostics).toContainEqual({
+        key: 'BEEGAME_STRIPE_WEBHOOK_SECRET',
+        configured: true,
+        source: 'env-file',
+        length: 'whsec_test_secret'.length,
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

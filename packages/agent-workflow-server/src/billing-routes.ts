@@ -216,7 +216,15 @@ async function proxyBeeGameBillingRequest(
     if (contentType) headers.set('content-type', contentType)
     init.body = await request.text()
   }
-  const response = await fetch(buildBeeGameBillingUrl(billingConfig.remoteApiBaseUrl, path), init)
+  let response: Response
+  try {
+    response = await fetch(buildBeeGameBillingUrl(billingConfig.remoteApiBaseUrl, path), init)
+  } catch {
+    return Response.json({
+      error: 'Remote billing failed',
+      message: 'Billing service is unavailable',
+    }, { status: 503 })
+  }
   const responseHeaders = new Headers()
   const contentType = response.headers.get('content-type')
   if (contentType) responseHeaders.set('content-type', contentType)

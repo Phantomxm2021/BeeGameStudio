@@ -15,6 +15,13 @@ export type BillingEnvSummary = {
   missing: string[]
 }
 
+export type BillingEnvDiagnostic = {
+  key: string
+  configured: boolean
+  source: 'env-file' | 'process-env' | 'missing'
+  length: number
+}
+
 export type BillingListenOptions = {
   host: string
   port: number
@@ -27,6 +34,15 @@ const REQUIRED_BILLING_ENV_KEYS = [
   'BEEGAME_STRIPE_SECRET_KEY',
   'BEEGAME_STRIPE_WEBHOOK_SECRET',
   'BEEGAME_STRIPE_PRICE_CREDITS',
+] as const
+
+const DIAGNOSTIC_BILLING_ENV_KEYS = [
+  ...REQUIRED_BILLING_ENV_KEYS,
+  'BEEGAME_BILLING_HOST',
+  'BEEGAME_BILLING_PORT',
+  'BEEGAME_AUTH_RESOLVE_TIMEOUT_MS',
+  'BEEGAME_AUTH_TOKENS',
+  'BEEGAME_ALLOW_DEV_AUTH_TOKENS',
 ] as const
 
 export function resolveBeeGameBillingEnvFile(input: {
@@ -89,6 +105,27 @@ export function summarizeBeeGameBillingEnv(
     }
   }
   return { configured, missing }
+}
+
+export function getBeeGameBillingEnvDiagnostics(
+  loadResult: BillingEnvLoadResult,
+  env: BillingEnv = process.env,
+): BillingEnvDiagnostic[] {
+  const loadedKeys = new Set(loadResult.loadedKeys)
+  const skippedKeys = new Set(loadResult.skippedExistingKeys)
+  return DIAGNOSTIC_BILLING_ENV_KEYS.map(key => {
+    const value = normalizeOptional(env[key])
+    return {
+      key,
+      configured: Boolean(value),
+      source: loadedKeys.has(key)
+        ? 'env-file'
+        : skippedKeys.has(key) || value
+          ? 'process-env'
+          : 'missing',
+      length: value?.length ?? 0,
+    }
+  })
 }
 
 export function resolveBeeGameBillingListenOptions(

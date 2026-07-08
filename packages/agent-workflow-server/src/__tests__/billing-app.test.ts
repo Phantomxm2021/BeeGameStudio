@@ -5,6 +5,36 @@ import { join } from 'node:path'
 import { createBeeGameBillingApp } from '../billing-app'
 
 describe('BeeGame billing app', () => {
+  test('fails fast when request user resolution stalls', async () => {
+    const originalTimeout = process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS
+    try {
+      process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS = '5'
+      const billingApp = createBeeGameBillingApp({
+        currentUserResolver: () => new Promise(() => {}),
+      })
+
+      const result = await Promise.race([
+        billingApp.request('/api/payments/stripe/credit-packs', {
+          headers: { authorization: 'Bearer stalled-token' },
+        }),
+        new Promise<'timed-out'>(resolve => setTimeout(() => resolve('timed-out'), 100)),
+      ])
+
+      expect(result).not.toBe('timed-out')
+      expect((result as Response).status).toBe(401)
+      expect(await (result as Response).json()).toEqual({
+        error: 'Unauthorized',
+        message: 'authentication required',
+      })
+    } finally {
+      if (originalTimeout === undefined) {
+        delete process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS
+      } else {
+        process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS = originalTimeout
+      }
+    }
+  })
+
   test('serves Stripe credit packs and checkout without project runtime routes', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-billing-app-'))
     const originalSecretKey = process.env.BEEGAME_STRIPE_SECRET_KEY
