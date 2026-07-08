@@ -1,16 +1,17 @@
 # BeeGame Product TODO
 
-Last updated: 2026-07-02
+Last audited: 2026-07-08
 
 This document tracks product and deployment gaps that are not covered by the
-current `web-dashboard-replacement` implementation. It is intentionally focused
-on system-level work, not individual generated game fixes.
+current BeeGame implementation. It is intentionally focused on system-level
+work, not individual generated game fixes.
 
 ## Current State
 
 - BeeGame dashboard, Supabase Auth/RLS data access, credit quote/reserve/settle
   flow, runtime host, and Docker deployment scaffolding are implemented.
-- The Docker stack deploys the BeeGame application and local runtime host.
+- The Docker stack deploys the BeeGame application and local runtime host, but
+  a real Docker smoke pass still needs to be run on a machine with Docker.
 - Generated game projects are stored in the runtime workspace volume.
 - Static Web deployments can be published by the runtime host under
   `/deployments/*` for local/dev use, or to Supabase Storage when
@@ -18,94 +19,112 @@ on system-level work, not individual generated game fixes.
 - Deployment records are mirrored to Supabase so published URLs and statuses can
   survive runtime host replacement.
 
+## Completed
+
+- [x] Production Web game deployment lifecycle
+  - Evidence:
+    - Runtime deploy/list/rollback routes exist for project-scoped and
+      session-scoped APIs.
+    - Deployment records include build command, build log, output directory,
+      artifact path/hash, status, message, URL, and timestamps.
+    - Supabase Storage publishing is implemented with the current user's bearer
+      token, not a service-role key.
+    - Deployment records are mirrored to Supabase.
+    - Dashboard UI shows latest deployment, history, failed build logs,
+      redeploy, open-live, and rollback actions.
+  - Verified:
+    - `bun test packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts`
+    - `bun test packages/agent-workflow-server/src/__tests__/supabase-dashboard-store.test.ts`
+    - `bun test packages/agent-workflow-server/src/__tests__/beegame-routes.test.ts`
+    - `bunx vitest --config vitest.config.ts run src/components/Demiurge/DashboardView.test.tsx`
+
+- [x] MCP administration verification and cleanup
+  - Evidence:
+    - Settings UI exposes MCP management only through privileged platform
+      settings.
+    - Add/edit/import/discovery flows are covered by frontend tests.
+    - Backend stores MCP servers owner-scoped in local or Supabase-backed stores.
+    - Runtime sessions receive persisted runtime and MCP-related settings.
+  - Verified:
+    - `bunx vitest --config vitest.config.ts run src/components/Demiurge/Landing/SettingsMenu.test.tsx`
+    - `bun test packages/agent-workflow-server/src/__tests__/beegame-routes.test.ts`
+
+- [x] Account deletion production flow
+  - Evidence:
+    - `/api/current-user` DELETE calls `beegame_delete_current_user()` through
+      authenticated Supabase RPC when Supabase is configured.
+    - Local/dev mode refuses account deletion instead of pretending to delete.
+    - The SQL RPC writes an audit event and deletes only `auth.uid()`.
+    - Frontend confirms the destructive action before clearing the signed-in
+      session.
+  - Remaining storage-object cleanup policy is tracked under generated project
+    lifecycle controls.
+
+- [x] Production launch checklist
+  - Evidence:
+    - `docs/beegame-saas-preflight.md` covers Supabase SQL/RLS/RPC, Auth/OAuth,
+      Storage buckets, platform owner bootstrap, default model config, runtime
+      env, smoke checks, and repository hygiene.
+  - Note:
+    - The checklist exists, but reverse-proxy copy-paste examples are still a
+      separate P0.
+
 ## P0
 
-- [ ] Production Web game deployment lifecycle
-  - Problem: generated Web games can now be published by the runtime host, but
-    deployment metadata and lifecycle controls are still minimal.
-  - Scope:
-    - Verify Supabase Storage deployment in a production-like environment.
-    - Extend Supabase deployment records with explicit version labels and richer
-      deployment logs.
-    - Add deployment logs/history UI.
-    - Add redeploy and rollback actions.
-  - Acceptance:
-    - A generated static Web game can be deployed from the dashboard and opened
-      from a public persistent URL backed by durable storage.
-    - Deployment history survives runtime host replacement.
-    - Failed deployments show actionable logs and do not mark the project as
-      delivered.
-
 - [ ] Production Docker smoke test
-  - Problem: Docker files exist, but the stack has not been verified locally
-    because Docker is unavailable in this environment.
+  - Problem: Docker files exist, but the stack has not been verified locally in
+    this environment because `docker` is unavailable.
   - Scope:
     - Run `docker compose config`.
     - Run `docker compose up -d --build`.
     - Verify frontend, runtime host, Supabase Auth, credit quote, project
-      generation, preview, and volume persistence.
+      generation, preview, deployment, and volume persistence.
   - Acceptance:
     - A clean server can start BeeGame from the Docker instructions.
     - Restarting containers does not lose user/session/project state.
+    - Docker deployment env includes the Supabase deployment storage variables
+      required for persistent public game publishing.
 
 - [ ] Reverse proxy and TLS deployment example
-  - Problem: current Docker setup exposes ports directly.
+  - Problem: current docs say a reverse proxy is required, but they do not give a
+    deployer a complete Caddy/Nginx/Traefik example.
   - Scope:
     - Add production examples for Caddy, Nginx, or Traefik.
     - Document WebSocket/proxy headers for runtime host and preview routes.
-    - Document recommended domains, HTTPS, and port boundaries.
+    - Document recommended domains, HTTPS, port boundaries, and deployment
+      storage public URL settings.
   - Acceptance:
     - A deployer can run BeeGame behind HTTPS without guessing proxy settings.
 
 ## P1
 
-- [ ] MCP administration verification and cleanup
-  - Problem: frontend copy still says safe MCP backend routes are incomplete,
-    while backend route tests exist. The product state needs verification.
-  - Scope:
-    - Test add/edit/delete MCP server flows.
-    - Test discovery/import flows.
-    - Test permission boundaries for ordinary users vs platform owners.
-    - Remove stale UI copy if backend support is complete.
-  - Acceptance:
-    - MCP management works only where the current user's permissions allow it.
-    - Runtime sessions receive the expected MCP configuration.
-    - UI no longer displays stale "not yet implemented" wording.
-
-- [ ] Account deletion production flow
-  - Problem: account deletion requires Supabase RPC and is not available in
-    dev/offline mode.
-  - Scope:
-    - Confirm production SQL/RPC exists.
-    - Delete or anonymize user profile, credits, settings, project metadata, and
-      storage objects according to the product policy.
-    - Keep audit records required for billing/security.
-  - Acceptance:
-    - A signed-in user can request account deletion.
-    - Deletion cannot remove another user's data.
-    - The UI clearly reports completed, pending, or failed deletion state.
-
 - [ ] Credit billing hardening
-  - Problem: quote/reserve/settle exists, but production billing needs
-    reconciliation.
+  - Problem: quote/reserve/settle/refund exists and interrupted runtime tasks are
+    refunded or settled in tested paths, but production billing still needs
+    stuck-reservation expiry and payment-provider preparation.
   - Scope:
-    - Expire stuck reservations.
-    - Add reconciliation for failed runtime tasks.
+    - Expire or reconcile stale reservations that survive process crashes.
+    - Add reconciliation for failed runtime tasks outside the normal request
+      lifecycle.
     - Add admin-visible credit audit details.
     - Prepare payment provider integration.
   - Acceptance:
     - Interrupted tasks do not leave credits permanently frozen.
     - Ledger entries show task type, phase, project, reservation, settlement,
       refund, and actual usage.
+    - Operators can reconcile credit state without direct database surgery.
 
 - [ ] Generated project lifecycle controls
-  - Problem: generated projects live in the runtime workspace volume without a
-    complete retention/quota/backup policy.
+  - Problem: project/session deletion can remove local workspace artifacts, but
+    the product still needs a full retention, quota, backup, and cloud artifact
+    cleanup policy.
   - Scope:
     - Per-user project quotas.
-    - Project deletion cleanup for workspace files, previews, deployments, and
-      uploaded assets.
+    - Project deletion cleanup for workspace files, previews, deployments,
+      uploaded assets, and Supabase Storage objects.
     - Backup and restore guidance for `/srv/beegame/projects`.
+    - Retention policy for generated projects, deployment artifacts, previews,
+      and transcripts.
   - Acceptance:
     - Deleting a project removes the expected physical and cloud artifacts.
     - Storage growth is bounded by documented quota and retention rules.
@@ -113,11 +132,15 @@ on system-level work, not individual generated game fixes.
 ## P2
 
 - [ ] Admin Console boundary audit
-  - Problem: platform-level settings must stay out of ordinary user settings.
+  - Problem: platform-level settings mostly sit behind permission-gated UI and
+    route checks, but the full admin surface still needs a final product audit,
+    especially audit and credit policy views.
   - Scope:
     - Verify model configuration, Web Search, MCP, Runtime, Audit, and Credit
       policy are only visible to users with the correct permissions.
     - Verify route-level permission checks match UI visibility.
+    - Confirm owner/admin users can operate platform settings from a coherent
+      admin UI.
   - Acceptance:
     - Ordinary users cannot see or call platform admin operations.
     - Owner/admin users can operate platform settings from a coherent admin UI.
@@ -132,21 +155,6 @@ on system-level work, not individual generated game fixes.
   - Acceptance:
     - A future local connector can be implemented without changing the SaaS
       product model.
-
-- [ ] Production launch checklist
-  - Problem: deployment steps are spread across docs and environment files.
-  - Scope:
-    - Supabase SQL/RLS/RPC.
-    - OAuth providers and redirect URLs.
-    - Storage buckets.
-    - Platform owner bootstrap.
-    - Default model configuration.
-    - Runtime host environment.
-    - Docker and reverse proxy setup.
-    - Credit policy.
-  - Acceptance:
-    - A new deployer can launch a clean BeeGame instance by following one
-      checklist.
 
 ## Explicit Non-Goals For Now
 
