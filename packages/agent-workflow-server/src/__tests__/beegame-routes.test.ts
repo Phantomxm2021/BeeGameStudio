@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
@@ -5993,6 +5994,83 @@ describe('beegame session routes', () => {
       expect(starts[0].env.PORT).toBe('63100')
       expect(kills).toHaveLength(1)
     } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns a public preview URL and proxies preview traffic to the internal loopback server', async () => {
+    const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-public-preview-'))
+    const internalServer = createServer((req, res) => {
+      res.setHeader('content-type', 'text/plain')
+      res.end(`proxied ${req.url || '/'}`)
+    })
+    await new Promise<void>((resolveReady, rejectReady) => {
+      internalServer.once('error', rejectReady)
+      internalServer.listen(0, '127.0.0.1', () => resolveReady())
+    })
+    const address = internalServer.address()
+    const internalPort = typeof address === 'object' && address ? address.port : 0
+    const starts: Array<{ command: string[]; cwd: string; env: Record<string, string> }> = []
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      starts.push({ command, cwd: options.cwd, env: options.env })
+      options.onOutput(`Local: http://127.0.0.1:${internalPort}/\n`)
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL = 'https://bgs.phantomsxr.com/previews'
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => internalPort,
+      previewReadinessProbe: async url => url === `http://127.0.0.1:${internalPort}/`,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_public_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+      const proxiedRootRes = await app.request('/previews/beegame_public_preview/')
+      const proxiedRootText = await proxiedRootRes.text()
+      const proxiedRes = await app.request('/previews/beegame_public_preview/assets/main.js?cache=1')
+      const proxiedText = await proxiedRes.text()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'running',
+        url: 'https://bgs.phantomsxr.com/previews/beegame_public_preview/',
+      }))
+      expect(starts[0].env.PORT).toBe(String(internalPort))
+      expect(starts[0].command).toContain('--base')
+      expect(starts[0].command).toContain('/previews/beegame_public_preview/')
+      expect(proxiedRootRes.status).toBe(200)
+      expect(proxiedRootText).toBe('proxied /')
+      expect(proxiedRes.status).toBe(200)
+      expect(proxiedText).toBe('proxied /assets/main.js?cache=1')
+    } finally {
+      if (originalPreviewPublicBaseUrl === undefined) {
+        delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+      } else {
+        process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL = originalPreviewPublicBaseUrl
+      }
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
+      })
       await rm(workspace, { recursive: true, force: true })
     }
   })

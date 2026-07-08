@@ -46,6 +46,51 @@ balancer:
 
 The runtime domain must support WebSocket upgrades.
 
+Managed live previews are exposed through the runtime host under `/previews/*`.
+Set `BEEGAME_PREVIEW_PUBLIC_BASE_URL` to the public runtime preview base, for
+example `https://runtime.your-domain.com/previews`. If frontend and runtime
+share one public domain, route `/previews/` to the runtime host port `62174`,
+not the frontend container.
+
+Single-domain Nginx example:
+
+```nginx
+location /api/ {
+  proxy_pass http://127.0.0.1:62174;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+location /ws {
+  proxy_pass http://127.0.0.1:62174;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+}
+
+location /deployments/ {
+  proxy_pass http://127.0.0.1:62174;
+  proxy_set_header Host $host;
+}
+
+location /previews/ {
+  proxy_pass http://127.0.0.1:62174;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+location / {
+  proxy_pass http://127.0.0.1:18080;
+  proxy_set_header Host $host;
+}
+```
+
 ## Data
 
 Generated projects are stored in the `beegame-projects` Docker volume at

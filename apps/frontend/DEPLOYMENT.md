@@ -44,6 +44,7 @@ BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
 BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
 BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
+BEEGAME_PREVIEW_PUBLIC_BASE_URL=https://runtime.your-domain.com/previews
 ```
 
 Do not configure Supabase service-role keys in the frontend or runtime host for SaaS mode.
@@ -85,6 +86,7 @@ BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
 BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
+BEEGAME_PREVIEW_PUBLIC_BASE_URL=https://runtime.your-domain.com/previews
 ```
 
 Start the stack:
@@ -104,6 +106,10 @@ For production, put a TLS reverse proxy in front of those services:
 - `https://runtime.your-domain.com` -> `beegame-runtime:62174`
 
 The runtime domain must proxy WebSocket upgrade headers.
+
+Live previews use the runtime host under `/previews/*`. Route that path to
+`beegame-runtime:62174` and keep `BEEGAME_PREVIEW_PUBLIC_BASE_URL` aligned with
+the public URL, for example `https://runtime.your-domain.com/previews`.
 
 ## Runtime Host
 

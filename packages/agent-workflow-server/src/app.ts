@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
@@ -243,6 +243,7 @@ export function createAgentWorkflowApp(
     undefined,
     options.previewPortAllocator,
     options.previewReadinessProbe,
+    process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
   )
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
@@ -260,6 +261,25 @@ export function createAgentWorkflowApp(
       headers: { 'content-type': deployedFile.contentType },
     })
   })
+  const handlePreviewProxy = async (c: Context) => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionId = c.req.param('sessionId')
+    if (!sessionId) return c.text('Preview not found', 404)
+    const sessionForbidden = requireBeeGameSessionOwner(
+      c.req.raw,
+      sessionId,
+      beeGameSessions,
+      getCurrentUser,
+    )
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const internalUrl = beeGamePreviews.internalUrl(sessionId)
+    if (!internalUrl) return c.text('Preview not found', 404)
+    return proxyBeeGamePreviewRequest(c.req.raw, sessionId, internalUrl)
+  }
+  app.all('/previews/:sessionId', handlePreviewProxy)
+  app.all('/previews/:sessionId/*', handlePreviewProxy)
   app.use('/api/*', cors())
   app.use('/api/*', async (c, next) => {
     if (options.currentUser) {
@@ -2862,6 +2882,38 @@ function previewSnapshotToProjectBuildReport(preview: BeeGamePreviewSnapshot): J
     failure_reason: unavailable ? preview.message || 'Preview unavailable' : '',
     created_at: preview.updatedAt,
   }
+}
+
+async function proxyBeeGamePreviewRequest(
+  request: Request,
+  sessionId: string,
+  internalBaseUrl: string,
+): Promise<Response> {
+  const requestUrl = new URL(request.url)
+  const prefix = `/previews/${encodeURIComponent(sessionId)}`
+  const restPath = requestUrl.pathname.startsWith(prefix)
+    ? requestUrl.pathname.slice(prefix.length) || '/'
+    : '/'
+  const target = new URL(restPath, ensureTrailingSlash(internalBaseUrl))
+  target.search = requestUrl.search
+  const headers = new Headers(request.headers)
+  headers.delete('host')
+  const method = request.method.toUpperCase()
+  const upstream = await fetch(target, {
+    method,
+    headers,
+    body: method === 'GET' || method === 'HEAD' ? undefined : request.body,
+    redirect: 'manual',
+  })
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: upstream.headers,
+  })
+}
+
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value : `${value}/`
 }
 
 function getBeeGamePayloadString(

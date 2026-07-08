@@ -48,6 +48,7 @@ export type BeeGamePreviewReadinessProbe = (url: string) => Promise<boolean>
 
 type PreviewRecord = {
   snapshot: BeeGamePreviewSnapshot
+  internalUrl?: string
   processes?: BeeGamePreviewProcess[]
 }
 
@@ -89,6 +90,7 @@ export class BeeGamePreviewManager {
       DEFAULT_PREVIEW_PORT_START,
     private readonly allocatePort: BeeGamePreviewPortAllocator = findAvailablePort,
     private readonly readinessProbe: BeeGamePreviewReadinessProbe = waitForPreviewReady,
+    private readonly publicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL || '',
   ) {}
 
   status(sessionId: string, workspacePath: string): BeeGamePreviewSnapshot {
@@ -118,6 +120,7 @@ export class BeeGamePreviewManager {
       workspacePath,
       this.portStart,
       this.allocatePort,
+      this.publicPath(options.sessionId),
     )
     if (!plan.supported) {
       const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
@@ -143,12 +146,13 @@ export class BeeGamePreviewManager {
       onOutput: text => {
         const record = this.records.get(options.sessionId)
         if (!record) return
-        const url = processPlan.role === 'client'
-          ? extractPreviewUrl(text) || record.snapshot.url
-          : record.snapshot.url
+        const internalUrl = processPlan.role === 'client'
+          ? extractPreviewUrl(text) || record.internalUrl || ''
+          : record.internalUrl || ''
+        if (internalUrl) record.internalUrl = internalUrl
         record.snapshot = {
           ...record.snapshot,
-          url,
+          url: this.publicUrl(options.sessionId, internalUrl) || record.snapshot.url,
           status: record.snapshot.status === 'running' ? 'running' : 'starting',
           message: text.trim().slice(0, 500) || record.snapshot.message,
           updatedAt: new Date().toISOString(),
@@ -175,10 +179,11 @@ export class BeeGamePreviewManager {
     record.snapshot = {
       ...record.snapshot,
       status: 'running',
-      url: plan.url,
-      message: `Preview running at ${plan.url}`,
+      url: this.publicUrl(options.sessionId, plan.url) || plan.url,
+      message: `Preview running at ${this.publicUrl(options.sessionId, plan.url) || plan.url}`,
       updatedAt: new Date().toISOString(),
     }
+    record.internalUrl = plan.url
     return { ...record.snapshot }
   }
 
@@ -209,6 +214,12 @@ export class BeeGamePreviewManager {
     return { ...record.snapshot }
   }
 
+  internalUrl(sessionId: string): string | undefined {
+    const record = this.records.get(sessionId)
+    if (!record || record.snapshot.status !== 'running') return undefined
+    return record.internalUrl
+  }
+
   private createSnapshot(
     sessionId: string,
     workspacePath: string,
@@ -222,6 +233,22 @@ export class BeeGamePreviewManager {
       url: '',
       updatedAt: new Date().toISOString(),
       ...fields,
+    }
+  }
+
+  private publicUrl(sessionId: string, internalUrl: string): string {
+    if (!internalUrl || !this.publicBaseUrl.trim()) return ''
+    const base = this.publicBaseUrl.trim().replace(/\/+$/, '')
+    return `${base}/${encodeURIComponent(sessionId)}/`
+  }
+
+  private publicPath(sessionId: string): string {
+    if (!this.publicBaseUrl.trim()) return ''
+    try {
+      const url = new URL(this.publicUrl(sessionId, DEFAULT_HOST))
+      return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`
+    } catch {
+      return ''
     }
   }
 
@@ -268,6 +295,7 @@ async function createPreviewPlan(
   workspacePath: string,
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
+  publicPath: string,
 ): Promise<
   | { supported: false; message: string }
   | SupportedPreviewPlan
@@ -285,6 +313,7 @@ async function createPreviewPlan(
     manifest,
     portStart,
     allocatePort,
+    publicPath,
   )
   if (splitPlan) return splitPlan
 
@@ -296,7 +325,7 @@ async function createPreviewPlan(
     }
   }
   const port = await allocatePort(portStart)
-  const command = buildRunCommand(workspacePath, manifest, script, port)
+  const command = buildRunCommand(workspacePath, manifest, script, port, publicPath)
   const url = `http://${DEFAULT_HOST}:${port}/`
   return {
     supported: true,
@@ -322,6 +351,7 @@ async function createSplitClientServerPreviewPlan(
   rootManifest: PackageManifest,
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
+  publicPath: string,
 ): Promise<SupportedPreviewPlan | undefined> {
   const clientCwd = join(workspacePath, 'client')
   const clientManifestPath = join(clientCwd, 'package.json')
@@ -338,7 +368,7 @@ async function createSplitClientServerPreviewPlan(
   const clientScript = chooseScript(clientManifest, ['dev', 'preview', 'start'])
   if (!clientScript) return undefined
   const clientPort = await allocatePort(portStart)
-  const clientCommand = buildRunCommand(clientCwd, clientManifest, clientScript, clientPort)
+  const clientCommand = buildRunCommand(clientCwd, clientManifest, clientScript, clientPort, publicPath)
   const clientUrl = `http://${DEFAULT_HOST}:${clientPort}/`
   const clientPlan: PreviewProcessPlan = {
     role: 'client',
@@ -427,12 +457,16 @@ function buildRunCommand(
   manifest: PackageManifest,
   script: string,
   port: number,
+  publicPath = '',
 ): string[] {
   const manager = detectPackageManager(workspacePath)
   const base = manager === 'npm'
     ? ['npm', 'run', script]
     : [manager, 'run', script]
-  return usesVite(manifest, script) ? [...base, '--', '--host', DEFAULT_HOST, '--port', String(port)] : base
+  if (!usesVite(manifest, script)) return base
+  const viteArgs = ['--host', DEFAULT_HOST, '--port', String(port)]
+  if (publicPath) viteArgs.push('--base', publicPath)
+  return [...base, '--', ...viteArgs]
 }
 
 function detectPackageManager(workspacePath: string): 'npm' | 'pnpm' | 'yarn' | 'bun' {
