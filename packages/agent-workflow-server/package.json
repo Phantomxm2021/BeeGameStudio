@@ -8,6 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./billing": "./src/billing-app.ts",
+    "./billing-app-factory": "./src/billing-app-factory.ts",
+    "./billing-runtime": "./src/billing-runtime-deps.ts",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -17,6 +19,7 @@
   },
   "dependencies": {
     "@claude-code-best/agent-workflow": "workspace:*",
+    "@claude-code-best/beegame-billing-core": "workspace:*",
     "@claude-code-best/workflow-engine": "workspace:*",
     "hono": "^4.12.15"
   }

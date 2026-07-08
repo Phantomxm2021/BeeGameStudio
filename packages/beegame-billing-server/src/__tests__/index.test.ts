@@ -1,7 +1,20 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createBeeGameBillingServerApp } from '../index'
 
 describe('BeeGame billing server package', () => {
+  test('does not depend on the runtime host package', async () => {
+    const packageJson = JSON.parse(
+      await readFile(join(import.meta.dir, '../../package.json'), 'utf8'),
+    ) as {
+      dependencies?: Record<string, string>
+    }
+    expect(packageJson.dependencies).not.toHaveProperty(
+      '@claude-code-best/agent-workflow-server',
+    )
+  })
+
   test('exports a standalone billing app factory', async () => {
     const app = createBeeGameBillingServerApp({
       currentUser: {

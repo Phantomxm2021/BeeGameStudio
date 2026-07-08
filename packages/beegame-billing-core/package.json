@@ -1,0 +1,34 @@
+{
+  "name": "@claude-code-best/beegame-billing-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./billing-app-factory": "./src/billing-app-factory.ts",
+    "./billing-config": "./src/billing-config.ts",
+    "./billing-ports": "./src/billing-ports.ts",
+    "./billing-route-groups": "./src/billing-route-groups.ts",
+    "./billing-route-helpers": "./src/billing-route-helpers.ts",
+    "./billing-route-types": "./src/billing-route-types.ts",
+    "./credit-pack-helpers": "./src/credit-pack-helpers.ts",
+    "./credit-control-client": "./src/credit-control-client.ts",
+    "./credit-control-routes": "./src/credit-control-routes.ts",
+    "./credit-control-request-helpers": "./src/credit-control-request-helpers.ts",
+    "./http-helpers": "./src/http-helpers.ts",
+    "./remote-billing-proxy": "./src/remote-billing-proxy.ts",
+    "./stripe-store-admin-routes": "./src/stripe-store-admin-routes.ts",
+    "./stripe-webhook-routes": "./src/stripe-webhook-routes.ts",
+    "./stripe-payments": "./src/stripe-payments.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test src/__tests__",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.12.15"
+  }
+}

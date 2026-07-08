@@ -105,10 +105,13 @@ import {
 } from './supabase-runtime-env-client'
 import {
   resolveBeeGameBillingConfig,
-} from './billing-config'
+} from '@claude-code-best/beegame-billing-core/billing-config'
 import {
-  registerBeeGameStripeStoreRoutes,
-  registerBeeGameStripeWebhookRoute,
+  createRemoteCreditControlClient,
+} from '@claude-code-best/beegame-billing-core/credit-control-client'
+import {
+  registerBeeGameBillingPublicRoutes,
+  registerBeeGameBillingStoreRoutes,
 } from './billing-routes'
 
 type JsonObject = Record<string, unknown>
@@ -231,15 +234,16 @@ export function createAgentWorkflowApp(
   if (modelConfigStore !== false && modelConfigStore !== undefined) {
     loadModelConfigsFromStore(modelConfigStore)
   }
+  const billingConfig = resolveBeeGameBillingConfig()
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
     supabasePaymentProviderStore,
     supabaseRuntimeEnvClient,
+    remoteCreditControl: createRemoteCreditControlClient(billingConfig),
     getUserDataRoot: getCurrentUserDataRoot,
     modelConfigStore,
   })
-  const billingConfig = resolveBeeGameBillingConfig()
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
@@ -297,7 +301,7 @@ export function createAgentWorkflowApp(
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
   app.use('/api/*', cors())
-  registerBeeGameStripeWebhookRoute(app, {
+  registerBeeGameBillingPublicRoutes(app, {
     billingConfig,
     dashboardRepository,
   })
@@ -318,10 +322,12 @@ export function createAgentWorkflowApp(
 
   app.get('/health', c => c.json({ status: 'ok' }))
 
-  registerBeeGameStripeStoreRoutes(app, {
+  registerBeeGameBillingStoreRoutes(app, {
     billingConfig,
     dashboardRepository,
     getCurrentUser,
+    hasPermission: (user, permission) =>
+      hasBeeGamePermission(user as BeeGameUserContext, permission),
   })
 
   app.get('/api/current-user', c => {
@@ -422,39 +428,6 @@ export function createAgentWorkflowApp(
       ...(ledgerKind ? { kind: ledgerKind } : {}),
       ...(reservationId ? { reservationId } : {}),
     }))
-  })
-
-  app.post('/api/admin/credits/grants', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'audit.read')
-    if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    const targetUserId = isObject(body) && typeof body.userId === 'string'
-      ? body.userId.trim()
-      : ''
-    const credits = isObject(body) && typeof body.credits === 'number'
-      ? Math.floor(body.credits)
-      : 0
-    if (!targetUserId || credits <= 0) {
-      return c.json({
-        error: 'Invalid request',
-        message: 'userId and positive credits are required.',
-      }, 400)
-    }
-    const metadata = isObject(body) && isObject(body.metadata)
-      ? body.metadata
-      : {}
-    return c.json(await dashboardRepository.grantCredits(
-      c.req.raw,
-      targetUserId,
-      {
-        credits,
-        metadata: {
-          ...metadata,
-          grantedBy: user.id,
-        },
-      },
-    ))
   })
 
   app.get('/api/credits', async c => {
@@ -1431,15 +1404,23 @@ export function createAgentWorkflowApp(
     )
     const policy = getCreditTaskPolicy('idea_intake')
     const reservedCredits = policy.reservedCredits
+    const clientRequestId = getBeeGameClientRequestId(body)
+    const idempotencyPrefix = clientRequestId
+      ? `idea_intake:${user.id}:${clientRequestId}`
+      : undefined
     let reservation: { id: string } | undefined
     try {
       reservation = await dashboardRepository.reserveCredits(request, user, {
         credits: reservedCredits,
         kind: policy.taskType,
+        ...(idempotencyPrefix
+          ? { idempotencyKey: `${idempotencyPrefix}:reserve` }
+          : {}),
         metadata: {
           taskType: policy.taskType,
           displayName: policy.displayName,
           language: typeof body.language === 'string' ? body.language : undefined,
+          ...(clientRequestId ? { clientRequestId } : {}),
         },
       })
       const intake = await generateBeeGameIntakeOptions({
@@ -1459,10 +1440,14 @@ export function createAgentWorkflowApp(
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
         weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+        ...(idempotencyPrefix
+          ? { idempotencyKey: `${idempotencyPrefix}:settle:${reservation.id}` }
+          : {}),
         metadata: {
           kind: policy.taskType,
           taskType: policy.taskType,
           displayName: policy.displayName,
+          ...(clientRequestId ? { clientRequestId } : {}),
         },
       })
       return intake
@@ -1471,7 +1456,13 @@ export function createAgentWorkflowApp(
         try {
           await dashboardRepository.refundCreditReservation(request, user, {
             reservationId: reservation.id,
-            metadata: { reason: 'idea_intake_failed' },
+            ...(idempotencyPrefix
+              ? { idempotencyKey: `${idempotencyPrefix}:refund:${reservation.id}` }
+              : {}),
+            metadata: {
+              reason: 'idea_intake_failed',
+              ...(clientRequestId ? { clientRequestId } : {}),
+            },
           })
         } catch {
           // Keep the original intake failure visible to the caller.
@@ -4107,6 +4098,15 @@ function getWorkspacePathHint(
   return typeof body.workspacePath === 'string'
     ? body.workspacePath
     : undefined
+}
+
+function getBeeGameClientRequestId(body: JsonObject): string | undefined {
+  const value = typeof body.clientRequestId === 'string'
+    ? body.clientRequestId.trim()
+    : typeof body.idempotencyKey === 'string'
+      ? body.idempotencyKey.trim()
+      : ''
+  return value || undefined
 }
 
 function requireFields(body: JsonObject, fields: string[]): string | null {

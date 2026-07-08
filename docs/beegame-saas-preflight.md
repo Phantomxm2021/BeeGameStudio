@@ -75,6 +75,7 @@ BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 BEEGAME_STRIPE_SECRET_KEY=sk_live_...
 BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
 BEEGAME_STRIPE_PRICE_CREDITS=price_...=100
+BEEGAME_CREDIT_CONTROL_TOKEN=shared-runtime-to-billing-secret
 ```
 
 Local client runtime values when the web UI and runtime host are packaged
@@ -94,9 +95,14 @@ Rules:
 - Normal user requests use the current user's Supabase access token and RLS/RPC.
 - Stripe webhook credit grants use the server-only Supabase service-role key
   only inside `BEEGAME_BILLING_MODE=server`.
+- Trusted runtime hosts in `BEEGAME_BILLING_MODE=remote` must send
+  `BEEGAME_CREDIT_CONTROL_TOKEN` to the billing backend for reserve, settle, and
+  refund mutations. User-run local clients must not receive this token; they
+  should use offline/BYO-key credits or route metered work through trusted
+  infrastructure.
 - Never expose `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`, `BEEGAME_STRIPE_SECRET_KEY`,
-  or `BEEGAME_STRIPE_WEBHOOK_SECRET` to frontend builds, generated game runtimes,
-  or user-run local clients.
+  `BEEGAME_STRIPE_WEBHOOK_SECRET`, or `BEEGAME_CREDIT_CONTROL_TOKEN` to frontend
+  builds, generated game runtimes, or user-run local clients.
 - The workspace root is a platform deployment setting, not a normal user setting.
 - Preview ports must not conflict with the frontend, runtime host, or reverse proxy.
 - Generated projects should live outside the source repository.
@@ -109,7 +115,7 @@ BeeGame supports three billing modes:
   Sessions, receives Stripe webhooks, verifies `Stripe-Signature`, and grants
   credits through the Supabase service-role RPC.
 - `remote`: local-client mode. This process does not hold Stripe or service-role
-  secrets. It proxies Credit Store pack and checkout requests to
+  secrets. It proxies Credit Store pack, checkout, and operator grant requests to
   `BEEGAME_BILLING_API_BASE_URL`, forwarding the signed-in user's authorization.
   The remote billing backend must run in `server` mode.
 - `disabled`: no billing. The Credit Store has no packs and checkout creation
@@ -134,6 +140,15 @@ to the billing backend:
 GET  https://runtime.your-domain.com/api/payments/stripe/credit-packs
 POST https://runtime.your-domain.com/api/payments/stripe/checkout-session
 ```
+
+Operator credit grants also belong to the billing backend boundary:
+
+```text
+POST https://runtime.your-domain.com/api/admin/credits/grants
+```
+
+In `remote` mode the runtime host only checks the operator permission and proxies
+the request. The billing backend performs the ledger write.
 
 The user-facing entry is the account menu `Credit Store`, not Settings.
 Settings > Platform > Credit remains an operator audit view.
@@ -165,11 +180,17 @@ BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 BEEGAME_STRIPE_SECRET_KEY=sk_live_...
 BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
 BEEGAME_STRIPE_PRICE_CREDITS=price_123=100,price_456=500
+BEEGAME_CREDIT_CONTROL_TOKEN=shared-runtime-to-billing-secret
 ```
 
 The billing backend uses the Supabase anon key to resolve the signed-in user
 from the forwarded Bearer token. It uses the service-role key only for
 provider credit grants after Stripe signature verification.
+
+Trusted runtime hosts and the billing backend should share
+`BEEGAME_CREDIT_CONTROL_TOKEN` when `BEEGAME_BILLING_MODE=remote`. Runtime credit
+mutations use this internal service token to call the trusted billing backend;
+browsers and user-run local clients must never receive this value.
 
 `BEEGAME_STRIPE_PRICE_CREDITS` also accepts strict JSON object syntax, for
 example `{"price_123":100,"price_456":500}`.

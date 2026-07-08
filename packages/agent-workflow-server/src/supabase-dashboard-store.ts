@@ -733,6 +733,7 @@ export class SupabaseDashboardStore {
       credits: number
       kind?: string
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditReservation> {
@@ -744,7 +745,7 @@ export class SupabaseDashboardStore {
         p_credits: credits,
         p_kind: options.kind ?? null,
         p_project_id: options.projectId ?? null,
-        p_metadata: options.metadata ?? {},
+        p_metadata: mergeCreditMutationMetadata(options.metadata, options.idempotencyKey),
       },
     )
     const account = normalizeCreditAccountRow(ownerId, result.account)
@@ -761,6 +762,7 @@ export class SupabaseDashboardStore {
       reservationId: string
       weightedTokens: number
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditSettlement> {
@@ -772,7 +774,7 @@ export class SupabaseDashboardStore {
         p_weighted_tokens: normalizeNonNegativeInteger(options.weightedTokens),
         p_credit_unit_weighted_tokens: CREDIT_UNIT_WEIGHTED_TOKENS,
         p_project_id: options.projectId ?? null,
-        p_metadata: options.metadata ?? {},
+        p_metadata: mergeCreditMutationMetadata(options.metadata, options.idempotencyKey),
       },
     )
     const account = normalizeCreditAccountRow(ownerId, result.account)
@@ -790,6 +792,7 @@ export class SupabaseDashboardStore {
     options: {
       reservationId: string
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
     },
   ): Promise<CreditSettlement> {
@@ -799,7 +802,10 @@ export class SupabaseDashboardStore {
         p_user_id: ownerId,
         p_reservation_id: options.reservationId,
         p_project_id: options.projectId ?? null,
-        p_metadata: options.metadata ?? { reason: 'reservation_refunded' },
+        p_metadata: mergeCreditMutationMetadata(
+          options.metadata ?? { reason: 'reservation_refunded' },
+          options.idempotencyKey,
+        ),
       },
     )
     const account = normalizeCreditAccountRow(ownerId, result.account)
@@ -1898,6 +1904,16 @@ function sumCreditSummaryKind(
   return rows
     .filter(row => row.kind === kind)
     .reduce((sum, row) => sum + normalizeNonNegativeInteger(row.credits), 0)
+}
+
+function mergeCreditMutationMetadata(
+  metadata: Record<string, unknown> | undefined,
+  idempotencyKey: string | undefined,
+): JsonObject {
+  return {
+    ...(metadata ?? {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  }
 }
 
 function normalizeNonNegativeInteger(value: unknown, fallback = 0): number {

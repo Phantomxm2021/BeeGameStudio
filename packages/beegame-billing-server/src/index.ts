@@ -1,7 +1,7 @@
 import {
-  createBeeGameBillingApp,
-  type BeeGameBillingAppOptions,
-} from '@claude-code-best/agent-workflow-server/billing'
+  createBeeGameBillingServerApp,
+  type BeeGameBillingServerAppOptions,
+} from './app'
 import {
   getBeeGameBillingEnvDiagnostics,
   loadBeeGameBillingEnv,
@@ -9,11 +9,8 @@ import {
   summarizeBeeGameBillingEnv,
 } from './env'
 
-export function createBeeGameBillingServerApp(
-  options: BeeGameBillingAppOptions = {},
-): ReturnType<typeof createBeeGameBillingApp> {
-  return createBeeGameBillingApp(options)
-}
+export { createBeeGameBillingServerApp }
+export type { BeeGameBillingServerAppOptions }
 
 if (import.meta.main) {
   const envLoad = await loadBeeGameBillingEnv()

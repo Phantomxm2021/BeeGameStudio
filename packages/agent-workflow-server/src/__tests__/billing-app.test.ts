@@ -118,6 +118,233 @@ describe('BeeGame billing app', () => {
     }
   })
 
+  test('protects internal credit-control mutations with a service token', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-control-'))
+    const originalToken = process.env.BEEGAME_CREDIT_CONTROL_TOKEN
+    try {
+      process.env.BEEGAME_CREDIT_CONTROL_TOKEN = 'control-token-test'
+      const billingApp = createBeeGameBillingApp({
+        dashboardDataRoot: projectsRoot,
+      })
+
+      const forbiddenRes = await billingApp.request('/api/internal/credits/reservations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'customer-a', credits: 10 }),
+      })
+      expect(forbiddenRes.status).toBe(401)
+
+      const reserveRes = await billingApp.request('/api/internal/credits/reservations', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-beegame-credit-control-token': 'control-token-test',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 10,
+          kind: 'edit_turn',
+          projectId: 'project-a',
+          idempotencyKey: 'reserve-once',
+          metadata: { source: 'runtime-host' },
+        }),
+      })
+      expect(reserveRes.status).toBe(200)
+      const reservation = await reserveRes.json() as {
+        id: string
+        reservedCredits: number
+        balance: { reservedCredits: number }
+      }
+      expect(reservation.id).toBeTruthy()
+      expect(reservation.reservedCredits).toBe(10)
+      expect(reservation.balance.reservedCredits).toBe(10)
+
+      const replayReserveRes = await billingApp.request('/api/internal/credits/reservations', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-beegame-credit-control-token': 'control-token-test',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 10,
+          kind: 'edit_turn',
+          projectId: 'project-a',
+          idempotencyKey: 'reserve-once',
+        }),
+      })
+      expect(replayReserveRes.status).toBe(200)
+      expect(await replayReserveRes.json()).toEqual(expect.objectContaining({
+        id: reservation.id,
+        reservedCredits: 10,
+        balance: expect.objectContaining({ reservedCredits: 10 }),
+      }))
+
+      const refundRes = await billingApp.request(
+        `/api/internal/credits/reservations/${reservation.id}/refund`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-beegame-credit-control-token': 'control-token-test',
+          },
+          body: JSON.stringify({
+            userId: 'customer-a',
+            projectId: 'project-a',
+            idempotencyKey: 'refund-once',
+            metadata: { reason: 'test_refund' },
+          }),
+        },
+      )
+      expect(refundRes.status).toBe(200)
+      expect(await refundRes.json()).toEqual(expect.objectContaining({
+        reservationId: reservation.id,
+        refundedCredits: 10,
+        balance: expect.objectContaining({ reservedCredits: 0 }),
+      }))
+
+      const replayRefundRes = await billingApp.request(
+        `/api/internal/credits/reservations/${reservation.id}/refund`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-beegame-credit-control-token': 'control-token-test',
+          },
+          body: JSON.stringify({
+            userId: 'customer-a',
+            projectId: 'project-a',
+            idempotencyKey: 'refund-once',
+          }),
+        },
+      )
+      expect(replayRefundRes.status).toBe(200)
+      expect(await replayRefundRes.json()).toEqual(expect.objectContaining({
+        reservationId: reservation.id,
+        refundedCredits: 10,
+        balance: expect.objectContaining({ reservedCredits: 0 }),
+      }))
+    } finally {
+      if (originalToken === undefined) {
+        delete process.env.BEEGAME_CREDIT_CONTROL_TOKEN
+      } else {
+        process.env.BEEGAME_CREDIT_CONTROL_TOKEN = originalToken
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('handles admin credit grants inside the billing service', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-billing-admin-grant-'))
+    try {
+      const billingApp = createBeeGameBillingApp({
+        dashboardDataRoot: projectsRoot,
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
+          if (header === 'Bearer developer-token') return { id: 'developer-user', role: 'developer' }
+          return undefined
+        },
+      })
+
+      const forbiddenRes = await billingApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer developer-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ userId: 'customer-a', credits: 50 }),
+      })
+      expect(forbiddenRes.status).toBe(403)
+
+      const grantRes = await billingApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 50,
+          metadata: { source: 'operator_adjustment' },
+        }),
+      })
+      expect(grantRes.status).toBe(200)
+      expect(await grantRes.json()).toEqual(expect.objectContaining({
+        grantedCredits: 50,
+        balance: expect.objectContaining({
+          userId: 'customer-a',
+          includedCredits: 350,
+          balanceCredits: 350,
+        }),
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('proxies admin credit grants in remote billing mode', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-billing-admin-grant-proxy-'))
+    const originalFetch = globalThis.fetch
+    try {
+      const proxiedRequests: Array<{ url: string; method: string; body: unknown }> = []
+      globalThis.fetch = (async (input, init) => {
+        const bodyText = typeof init?.body === 'string' ? init.body : ''
+        proxiedRequests.push({
+          url: String(input),
+          method: String(init?.method ?? 'GET'),
+          body: bodyText ? JSON.parse(bodyText) : undefined,
+        })
+        return Response.json({
+          grantedCredits: 25,
+          balance: { userId: 'customer-a', balanceCredits: 325 },
+        })
+      }) as typeof fetch
+      const billingApp = createBeeGameBillingApp({
+        dashboardDataRoot: projectsRoot,
+        billingConfig: {
+          mode: 'remote',
+          remoteApiBaseUrl: 'https://billing.beegame.test',
+        },
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
+          return undefined
+        },
+      })
+
+      const grantRes = await billingApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 25,
+          metadata: { source: 'operator_adjustment' },
+        }),
+      })
+
+      expect(grantRes.status).toBe(200)
+      expect(await grantRes.json()).toEqual(expect.objectContaining({
+        grantedCredits: 25,
+      }))
+      expect(proxiedRequests).toEqual([{
+        url: 'https://billing.beegame.test/api/admin/credits/grants',
+        method: 'POST',
+        body: {
+          userId: 'customer-a',
+          credits: 25,
+          metadata: { source: 'operator_adjustment' },
+        },
+      }])
+    } finally {
+      globalThis.fetch = originalFetch
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('prefers Supabase billing credit packs and records checkout audit events', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-billing-db-packs-'))
     const originalSupabaseUrl = process.env.BEEGAME_SUPABASE_URL

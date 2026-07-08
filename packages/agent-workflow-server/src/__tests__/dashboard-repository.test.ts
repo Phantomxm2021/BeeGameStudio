@@ -6,6 +6,127 @@ import { DashboardRepository } from '../dashboard-repository'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('delegates credit mutations to remote credit control when configured', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: Array<{ operation: string; userId: string; input: unknown }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      remoteCreditControl: {
+        reserveCredits: async (userId, input) => {
+          calls.push({ operation: 'reserve', userId, input })
+          return {
+            id: 'reservation-remote',
+            reservedCredits: input.credits,
+            balance: {
+              userId,
+              plan: 'free',
+              balanceCredits: 290,
+              includedCredits: 300,
+              consumedCredits: 0,
+              reservedCredits: input.credits,
+              creditUnitWeightedTokens: 10000,
+              estimates: {},
+            } as any,
+          }
+        },
+        settleCreditReservation: async (userId, input) => {
+          calls.push({ operation: 'settle', userId, input })
+          return {
+            reservationId: input.reservationId,
+            reservedCredits: 10,
+            settledCredits: 1,
+            refundedCredits: 9,
+            balance: {
+              userId,
+              plan: 'free',
+              balanceCredits: 299,
+              includedCredits: 300,
+              consumedCredits: 1,
+              reservedCredits: 0,
+              creditUnitWeightedTokens: 10000,
+              estimates: {},
+            } as any,
+          }
+        },
+        refundCreditReservation: async (userId, input) => {
+          calls.push({ operation: 'refund', userId, input })
+          return {
+            reservationId: input.reservationId,
+            reservedCredits: 10,
+            settledCredits: 0,
+            refundedCredits: 10,
+            balance: {
+              userId,
+              plan: 'free',
+              balanceCredits: 300,
+              includedCredits: 300,
+              consumedCredits: 0,
+              reservedCredits: 0,
+              creditUnitWeightedTokens: 10000,
+              estimates: {},
+            } as any,
+          }
+        },
+        expireStaleCreditReservations: async (userId, input) => {
+          calls.push({ operation: 'expire', userId, input })
+          return {
+            expiredReservations: [],
+            refundedCredits: 0,
+            balance: {
+              userId,
+              plan: 'free',
+              balanceCredits: 300,
+              includedCredits: 300,
+              consumedCredits: 0,
+              reservedCredits: 0,
+              creditUnitWeightedTokens: 10000,
+              estimates: {},
+            } as any,
+          }
+        },
+      },
+    })
+    const request = new Request('http://beegame.test/api/credits')
+    const user = {
+      id: 'oauth-provider-user',
+      accountId: 'canonical-user',
+      role: 'developer' as const,
+    }
+
+    try {
+      await repository.reserveCredits(request, user, {
+        credits: 10,
+        kind: 'edit_turn',
+      })
+      const backend = repository.createSessionCreditBackend()
+      await backend.settleCreditReservation('canonical-user', {
+        dataDir: dataRoot,
+        reservationId: 'reservation-remote',
+        weightedTokens: 1000,
+      })
+
+      expect(calls).toEqual([
+        {
+          operation: 'reserve',
+          userId: 'canonical-user',
+          input: { credits: 10, kind: 'edit_turn' },
+        },
+        {
+          operation: 'settle',
+          userId: 'canonical-user',
+          input: {
+            dataDir: dataRoot,
+            reservationId: 'reservation-remote',
+            weightedTokens: 1000,
+          },
+        },
+      ])
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('requires a user bearer token instead of falling back to anonymous Supabase or local storage', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     let fetchCalls = 0

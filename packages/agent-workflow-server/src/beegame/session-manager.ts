@@ -241,6 +241,7 @@ export type BeeGameSessionCreditBackend = {
       credits: number
       kind?: string
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
       authToken?: string
     },
@@ -252,6 +253,7 @@ export type BeeGameSessionCreditBackend = {
       reservationId: string
       weightedTokens: number
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
       authToken?: string
     },
@@ -262,6 +264,7 @@ export type BeeGameSessionCreditBackend = {
       dataDir: string
       reservationId: string
       projectId?: string
+      idempotencyKey?: string
       metadata?: Record<string, unknown>
       authToken?: string
     },
@@ -410,12 +413,15 @@ export class BeeGameSessionManager {
     const operation = record.pendingCreditOperation
     try {
       if (operation.kind === 'settle') {
+        const idempotencyKey = `turn:${record.session.id}:retry:settle:${operation.reservation.id}`
         const settlement = await this.creditBackend.settleCreditReservation(record.userId, {
           dataDir: record.userDataRoot ?? this.dashboardDataRoot,
           reservationId: operation.reservation.id,
           weightedTokens: operation.weightedTokens,
           projectId: getCreditProjectId(record),
+          idempotencyKey,
           metadata: {
+            idempotencyKey,
             taskType: operation.policy.taskType,
             displayName: operation.policy.displayName,
             sessionId: record.session.id,
@@ -443,11 +449,14 @@ export class BeeGameSessionManager {
         })
         return true
       }
+      const idempotencyKey = `turn:${record.session.id}:retry:refund:${operation.reservation.id}`
       const refund = await this.creditBackend.refundCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: operation.reservation.id,
         projectId: getCreditProjectId(record),
+        idempotencyKey,
         metadata: {
+          idempotencyKey,
           sessionId: record.session.id,
           ...(record.projectId ? { projectId: record.projectId } : {}),
           reason: 'turn_finished_without_billable_usage',
@@ -644,10 +653,10 @@ export class BeeGameSessionManager {
     if (display?.authToken) record.authToken = display.authToken
     if (display?.language) record.language = display.language
 
-    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
-    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     record.nextTurnIndex += 1
+    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
+    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
     record.session.turnStatus = 'running'
     record.abortController = new AbortController()
     this.append(record, 'turn.started', text)
@@ -1190,13 +1199,18 @@ export class BeeGameSessionManager {
     display?: { displayText?: string; displayKind?: string },
   ): Promise<CreditReservation | undefined> {
     const dataDir = record.userDataRoot ?? this.dashboardDataRoot
+    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+    const idempotencyKey = `turn:${record.session.id}:${turnId}:reserve`
     try {
       return await this.creditBackend.reserveCredits(record.userId, {
         dataDir,
         credits: policy.reservedCredits,
         kind: policy.taskType,
         projectId: getCreditProjectId(record),
+        idempotencyKey,
         metadata: {
+          idempotencyKey,
+          turnId,
           taskType: policy.taskType,
           displayName: policy.displayName,
           sessionId: record.session.id,
@@ -1227,13 +1241,18 @@ export class BeeGameSessionManager {
     )
     if (tokenDelta <= 0) return false
     let settlement: CreditSettlement
+    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}`
+    const idempotencyKey = `turn:${record.session.id}:${turnId}:settle:${reservation.id}`
     try {
       settlement = await this.creditBackend.settleCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: reservation.id,
         weightedTokens: tokenDelta,
         projectId: getCreditProjectId(record),
+        idempotencyKey,
         metadata: {
+          idempotencyKey,
+          turnId,
           taskType: policy.taskType,
           displayName: policy.displayName,
           sessionId: record.session.id,
@@ -1277,12 +1296,17 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     reservation: CreditReservation,
   ): Promise<void> {
+    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}`
+    const idempotencyKey = `turn:${record.session.id}:${turnId}:refund:${reservation.id}`
     try {
       const refund = await this.creditBackend.refundCreditReservation(record.userId, {
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
         reservationId: reservation.id,
         projectId: getCreditProjectId(record),
+        idempotencyKey,
         metadata: {
+          idempotencyKey,
+          turnId,
           sessionId: record.session.id,
           ...(record.projectId ? { projectId: record.projectId } : {}),
           reason: 'turn_finished_without_billable_usage',

@@ -21,6 +21,7 @@ describe('credit-store', () => {
         credits: 5,
         kind: 'generation',
         projectId: 'project-a',
+        idempotencyKey: 'intake-request-reserve',
         metadata: { phase: 'intake' },
       })
 
@@ -36,6 +37,7 @@ describe('credit-store', () => {
         reservationId: reservation.id,
         weightedTokens: 23_001,
         projectId: 'project-a',
+        idempotencyKey: 'intake-request-settle',
         metadata: { phase: 'intake' },
       })
 
@@ -51,24 +53,35 @@ describe('credit-store', () => {
         credits: entry.credits,
         weightedTokens: entry.weightedTokens,
         projectId: entry.projectId,
+        metadata: entry.metadata,
       }))).toEqual([
         {
           kind: 'reserve',
           credits: 5,
           weightedTokens: undefined,
           projectId: 'project-a',
+          metadata: {
+            kind: 'generation',
+            phase: 'intake',
+            idempotencyKey: 'intake-request-reserve',
+          },
         },
         {
           kind: 'settle',
           credits: 3,
           weightedTokens: 23_001,
           projectId: 'project-a',
+          metadata: {
+            phase: 'intake',
+            idempotencyKey: 'intake-request-settle',
+          },
         },
         {
           kind: 'refund',
           credits: 2,
           weightedTokens: undefined,
           projectId: 'project-a',
+          metadata: { reason: 'unused_reservation' },
         },
       ])
     } finally {

@@ -201,6 +201,7 @@ export function reserveCredits(
     credits: number
     kind?: string
     projectId?: string
+    idempotencyKey?: string
     metadata?: Record<string, unknown>
     now?: Date
   },
@@ -224,6 +225,7 @@ export function reserveCredits(
     metadata: {
       ...(options.kind ? { kind: options.kind } : {}),
       ...(options.metadata ?? {}),
+      ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
     },
     ...(options.now ? { createdAt: options.now.toISOString() } : {}),
   })
@@ -241,6 +243,7 @@ export function settleCreditReservation(
     reservationId: string
     weightedTokens: number
     projectId?: string
+    idempotencyKey?: string
     metadata?: Record<string, unknown>
   },
 ): CreditSettlement {
@@ -281,7 +284,10 @@ export function settleCreditReservation(
       : {}),
     reservationId,
     weightedTokens,
-    metadata: options.metadata ?? {},
+    metadata: {
+      ...(options.metadata ?? {}),
+      ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+    },
   })
   if (refundedCredits > 0) {
     appendLedgerRecord(payload, {
@@ -310,6 +316,7 @@ export function refundCreditReservation(
   options: CreditStoreOptions & {
     reservationId: string
     projectId?: string
+    idempotencyKey?: string
     metadata?: Record<string, unknown>
   },
 ): CreditSettlement {
@@ -339,7 +346,10 @@ export function refundCreditReservation(
       ? { projectId: options.projectId ?? reservation.projectId }
       : {}),
     reservationId,
-    metadata: options.metadata ?? { reason: 'reservation_refunded' },
+    metadata: {
+      ...(options.metadata ?? { reason: 'reservation_refunded' }),
+      ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+    },
   })
   saveCreditStore(payload, options)
   return {

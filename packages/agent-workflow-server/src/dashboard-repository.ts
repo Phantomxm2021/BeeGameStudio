@@ -30,6 +30,7 @@ import {
   type CreditLedgerEntry,
   type CreditLedgerSummary,
   type CreditReservation,
+  type CreditSettlement,
   type StaleCreditReservationExpiry,
 } from './credit-store'
 import {
@@ -81,12 +82,19 @@ import {
   type WebToolsConfig,
 } from './web-tools-store'
 import { getUserDashboardDataRoot } from './local-runtime-service'
+import type { BeeGameCreditControlClient } from '@claude-code-best/beegame-billing-core/credit-control-client'
+import type {
+  BeeGameBillingCreditPack,
+  BeeGameBillingCreditPackInput,
+  BeeGameBillingEventInput,
+} from '@claude-code-best/beegame-billing-core/billing-ports'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
   supabasePaymentProviderStore?: SupabaseDashboardStore
   supabaseRuntimeEnvClient?: SupabaseRuntimeEnvClient
+  remoteCreditControl?: BeeGameCreditControlClient
   getUserDataRoot: (request?: Request) => string
   modelConfigStore?: ModelConfigStoreOptions | false
 }
@@ -153,36 +161,11 @@ type CreditGrantInput = Omit<
   Parameters<typeof grantCredits>[1],
   'dataDir'
 >
-export type BeeGameBillingCreditPack = {
-  provider: 'stripe'
-  priceId: string
-  credits: number
-  displayName?: string
-  enabled: boolean
-  sortOrder: number
-  metadata: Record<string, unknown>
-}
-export type BeeGameBillingCreditPackInput = {
-  provider?: 'stripe'
-  priceId: string
-  credits: number
-  displayName?: string
-  enabled?: boolean
-  sortOrder?: number
-  metadata?: Record<string, unknown>
-}
-export type BeeGameBillingEventInput = {
-  provider: 'stripe'
-  eventType: string
-  status: 'received' | 'ignored' | 'succeeded' | 'failed'
-  userId?: string
-  priceId?: string
-  credits?: number
-  providerEventId?: string
-  checkoutSessionId?: string
-  metadata?: Record<string, unknown>
-  errorMessage?: string
-}
+export type {
+  BeeGameBillingCreditPack,
+  BeeGameBillingCreditPackInput,
+  BeeGameBillingEventInput,
+} from '@claude-code-best/beegame-billing-core/billing-ports'
 type CreateModelConfigInput = {
   name: string
   provider: ModelProviderKind
@@ -623,8 +606,11 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditReserveInput,
   ): Promise<CreditReservation> {
-    const supabase = this.supabaseForRequest(request)
     const creditOwnerId = getCreditOwnerId(user)
+    if (this.options.remoteCreditControl) {
+      return this.options.remoteCreditControl.reserveCredits(creditOwnerId, input)
+    }
+    const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.reserveCredits(creditOwnerId, input)
       : reserveCredits(creditOwnerId, {
@@ -638,8 +624,11 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditSettleInput,
   ): Promise<ReturnType<typeof settleCreditReservation>> {
-    const supabase = this.supabaseForRequest(request)
     const creditOwnerId = getCreditOwnerId(user)
+    if (this.options.remoteCreditControl) {
+      return this.options.remoteCreditControl.settleCreditReservation(creditOwnerId, input)
+    }
+    const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.settleCreditReservation(creditOwnerId, input)
       : settleCreditReservation(creditOwnerId, {
@@ -653,8 +642,11 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: CreditRefundInput,
   ): Promise<ReturnType<typeof refundCreditReservation>> {
-    const supabase = this.supabaseForRequest(request)
     const creditOwnerId = getCreditOwnerId(user)
+    if (this.options.remoteCreditControl) {
+      return this.options.remoteCreditControl.refundCreditReservation(creditOwnerId, input)
+    }
+    const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.refundCreditReservation(creditOwnerId, input)
       : refundCreditReservation(creditOwnerId, {
@@ -668,14 +660,135 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: StaleCreditReservationExpiryInput,
   ): Promise<StaleCreditReservationExpiry> {
-    const supabase = this.supabaseForRequest(request)
     const creditOwnerId = getCreditOwnerId(user)
+    if (this.options.remoteCreditControl) {
+      return this.options.remoteCreditControl.expireStaleCreditReservations(creditOwnerId, input)
+    }
+    const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.expireStaleCreditReservations(creditOwnerId, input)
       : expireStaleCreditReservations(creditOwnerId, {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  async reserveCreditsForUser(
+    userId: string,
+    input: CreditReserveInput,
+  ): Promise<CreditReservation> {
+    return this.options.supabasePaymentProviderStore
+      ? this.options.supabasePaymentProviderStore.reserveCredits(userId, input)
+      : reserveCredits(userId, {
+          ...input,
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+        })
+  }
+
+  async getCreditBalanceForUser(userId: string): Promise<CreditBalance> {
+    return this.options.supabasePaymentProviderStore
+      ? this.options.supabasePaymentProviderStore.getCreditBalance(userId)
+      : getCreditBalance(userId, {
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+        })
+  }
+
+  async findCreditReservationByIdempotencyKeyForUser(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<CreditReservation | undefined> {
+    const key = idempotencyKey.trim()
+    if (!key) return undefined
+    const entries = await this.listCreditLedgerEntriesForUser(userId, {
+      userId,
+      kind: 'reserve',
+    })
+    const reservation = entries.find(entry => (
+      entry.kind === 'reserve' &&
+      entry.metadata.idempotencyKey === key &&
+      entry.reservationId
+    ))
+    if (!reservation?.reservationId) return undefined
+    return {
+      id: reservation.reservationId,
+      reservedCredits: reservation.credits,
+      balance: await this.getCreditBalanceForUser(userId),
+    }
+  }
+
+  async getCreditSettlementForUser(
+    userId: string,
+    reservationId: string,
+  ): Promise<CreditSettlement | undefined> {
+    const normalizedReservationId = reservationId.trim()
+    if (!normalizedReservationId) return undefined
+    const entries = await this.listCreditLedgerEntriesForUser(userId, {
+      userId,
+      reservationId: normalizedReservationId,
+    })
+    const reservation = entries.find(entry => entry.kind === 'reserve')
+    if (!reservation) return undefined
+    const completed = entries.filter(entry => entry.kind === 'settle' || entry.kind === 'refund')
+    if (!completed.length) return undefined
+    return {
+      reservationId: normalizedReservationId,
+      reservedCredits: reservation.credits,
+      settledCredits: completed
+        .filter(entry => entry.kind === 'settle')
+        .reduce((sum, entry) => sum + entry.credits, 0),
+      refundedCredits: completed
+        .filter(entry => entry.kind === 'refund')
+        .reduce((sum, entry) => sum + entry.credits, 0),
+      balance: await this.getCreditBalanceForUser(userId),
+    }
+  }
+
+  async settleCreditReservationForUser(
+    userId: string,
+    input: CreditSettleInput,
+  ): Promise<ReturnType<typeof settleCreditReservation>> {
+    return this.options.supabasePaymentProviderStore
+      ? this.options.supabasePaymentProviderStore.settleCreditReservation(userId, input)
+      : settleCreditReservation(userId, {
+          ...input,
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+        })
+  }
+
+  async refundCreditReservationForUser(
+    userId: string,
+    input: CreditRefundInput,
+  ): Promise<ReturnType<typeof refundCreditReservation>> {
+    return this.options.supabasePaymentProviderStore
+      ? this.options.supabasePaymentProviderStore.refundCreditReservation(userId, input)
+      : refundCreditReservation(userId, {
+          ...input,
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+        })
+  }
+
+  async expireStaleCreditReservationsForUser(
+    userId: string,
+    input: StaleCreditReservationExpiryInput,
+  ): Promise<StaleCreditReservationExpiry> {
+    return this.options.supabasePaymentProviderStore
+      ? this.options.supabasePaymentProviderStore.expireStaleCreditReservations(userId, input)
+      : expireStaleCreditReservations(userId, {
+          ...input,
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, userId),
+        })
+  }
+
+  private async listCreditLedgerEntriesForUser(
+    userId: string,
+    filters: CreditLedgerFilters,
+  ): Promise<CreditLedgerEntry[]> {
+    return this.options.supabasePaymentProviderStore
+      ? (await this.options.supabasePaymentProviderStore.listCreditAuditLedger(filters)).entries
+      : listCreditAuditLedger({
+          dashboardDataRoot: this.options.dashboardDataRoot,
+          filters: { ...filters, userId },
+        }).entries
   }
 
   async grantCredits(
@@ -774,6 +887,16 @@ export class DashboardRepository {
   }
 
   createSessionCreditBackend(): BeeGameSessionCreditBackend {
+    if (this.options.remoteCreditControl) {
+      return {
+        reserveCredits: (userId, input) =>
+          this.options.remoteCreditControl!.reserveCredits(userId, input),
+        settleCreditReservation: (userId, input) =>
+          this.options.remoteCreditControl!.settleCreditReservation(userId, input),
+        refundCreditReservation: (userId, input) =>
+          this.options.remoteCreditControl!.refundCreditReservation(userId, input),
+      }
+    }
     if (this.hasSupabaseProductionStore()) {
       return {
         reserveCredits: (userId, input) =>

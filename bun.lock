@@ -290,6 +290,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@claude-code-best/agent-workflow": "workspace:*",
+        "@claude-code-best/beegame-billing-core": "workspace:*",
         "@claude-code-best/workflow-engine": "workspace:*",
         "hono": "^4.12.15",
       },
@@ -298,11 +299,18 @@
       "name": "audio-capture-napi",
       "version": "1.0.0",
     },
+    "packages/beegame-billing-core": {
+      "name": "@claude-code-best/beegame-billing-core",
+      "version": "0.1.0",
+      "dependencies": {
+        "hono": "^4.12.15",
+      },
+    },
     "packages/beegame-billing-server": {
       "name": "@claude-code-best/beegame-billing-server",
       "version": "0.1.0",
       "dependencies": {
-        "@claude-code-best/agent-workflow-server": "workspace:*",
+        "@claude-code-best/beegame-billing-core": "workspace:*",
       },
     },
     "packages/builtin-tools": {
@@ -692,6 +700,8 @@
     "@claude-code-best/agent-workflow": ["@claude-code-best/agent-workflow@workspace:packages/agent-workflow"],
 
     "@claude-code-best/agent-workflow-server": ["@claude-code-best/agent-workflow-server@workspace:packages/agent-workflow-server"],
+
+    "@claude-code-best/beegame-billing-core": ["@claude-code-best/beegame-billing-core@workspace:packages/beegame-billing-core"],
 
     "@claude-code-best/beegame-billing-server": ["@claude-code-best/beegame-billing-server@workspace:packages/beegame-billing-server"],
 

@@ -1222,7 +1222,9 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
     raise exception 'Forbidden';
   end if;
   if p_credits is null or p_credits <= 0 then
@@ -1315,7 +1317,9 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
     raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
@@ -1444,7 +1448,9 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
     raise exception 'Forbidden';
   end if;
   if nullif(trim(coalesce(p_reservation_id, '')), '') is null then
@@ -1540,7 +1546,9 @@ begin
   if p_user_id is null then
     raise exception 'User id is required';
   end if;
-  if auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id then
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
+  ) then
     raise exception 'Forbidden';
   end if;
   if p_older_than is null then

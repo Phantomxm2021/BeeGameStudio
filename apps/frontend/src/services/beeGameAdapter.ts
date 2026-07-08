@@ -131,6 +131,7 @@ type BeeGameIdeaIntakeRequest = {
   idea: string;
   language?: BeeGameLanguage | string;
   thinkingMode?: BeeGameThinkingMode;
+  clientRequestId?: string;
 };
 
 export type BeeGameIntakeOption = {
@@ -291,9 +292,10 @@ export const beeGameAdapter = {
   },
 
   async runIdeaIntake(data: BeeGameIdeaIntakeRequest): Promise<BeeGameIdeaIntakeResult> {
-    const response = await runIdeaIntakeJob(data) ?? await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
+    const requestBody = buildIdeaIntakeRequestBody(data);
+    const response = await runIdeaIntakeJob(requestBody) ?? await postJson<Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }>(
       '/api/beegame-intake/options',
-      buildIdeaIntakeRequestBody(data),
+      requestBody,
     );
     const intake = normalizeIdeaIntakeResult(response);
     if (intake.options.length === 0) {
@@ -2501,14 +2503,21 @@ function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdea
     idea: data.idea,
     ...(data.language ? { language: data.language } : {}),
     ...(data.thinkingMode ? { thinkingMode: data.thinkingMode } : {}),
+    clientRequestId: data.clientRequestId ?? createClientRequestId(),
   };
 }
 
-async function runIdeaIntakeJob(data: BeeGameIdeaIntakeRequest): Promise<(Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }) | undefined> {
+function createClientRequestId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function runIdeaIntakeJob(requestBody: BeeGameIdeaIntakeRequest): Promise<(Partial<BeeGameIdeaIntakeResult> & { options?: BeeGameIntakeOption[] }) | undefined> {
   const createResponse = await authenticatedFetch('/api/beegame-intake/jobs', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(buildIdeaIntakeRequestBody(data)),
+    body: JSON.stringify(requestBody),
   });
   if (createResponse.status === 404) return undefined;
   const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);
