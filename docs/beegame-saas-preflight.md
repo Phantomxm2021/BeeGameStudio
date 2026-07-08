@@ -159,11 +159,17 @@ Trusted billing backend variables:
 
 ```env
 BEEGAME_BILLING_MODE=server
+BEEGAME_SUPABASE_URL=https://your-project.supabase.co
+BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
 BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 BEEGAME_STRIPE_SECRET_KEY=sk_live_...
 BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
 BEEGAME_STRIPE_PRICE_CREDITS=price_123=100,price_456=500
 ```
+
+The billing backend uses the Supabase anon key to resolve the signed-in user
+from the forwarded Bearer token. It uses the service-role key only for
+provider credit grants after Stripe signature verification.
 
 `BEEGAME_STRIPE_PRICE_CREDITS` also accepts strict JSON object syntax, for
 example `{"price_123":100,"price_456":500}`.

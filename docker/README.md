@@ -21,12 +21,21 @@ cp docker/.env.billing.example docker/.env.billing
 
 Fill the Supabase and public runtime URLs in `docker/.env.production`.
 
-Fill Stripe and Supabase service-role values in `docker/.env.billing`.
+Fill Stripe, Supabase anon, and Supabase service-role values in
+`docker/.env.billing`. The billing backend uses the anon key to verify the
+signed-in user's Bearer token on Credit Store requests, and uses the
+service-role key only for provider credit grants after Stripe webhook
+verification.
 
 Do not put Supabase service-role keys or Stripe secrets in
 `docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
 and calls the billing backend through the internal Compose URL
 `http://beegame-billing:62175`.
+
+`http://127.0.0.1:62175/health` is public. Billing API routes under
+`/api/payments/*` require the same signed-in user Authorization header that the
+frontend sends to the runtime host; direct browser visits to those API routes
+return `401 Unauthorized`.
 
 ## Start
 
