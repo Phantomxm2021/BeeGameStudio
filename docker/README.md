@@ -37,6 +37,19 @@ and calls the billing backend through the internal Compose URL
 frontend sends to the runtime host; direct browser visits to those API routes
 return `401 Unauthorized`.
 
+## Local Billing Backend
+
+For local development without Docker, create `docker/.env.billing` and run:
+
+```bash
+npm run billing:dev
+```
+
+The billing server automatically loads `docker/.env.billing` when it starts and
+prints only configured or missing environment variable names, never secret
+values. Override the env file path with `BEEGAME_BILLING_ENV_FILE` only when
+you deliberately need a different local file.
+
 ## Start
 
 ```bash
