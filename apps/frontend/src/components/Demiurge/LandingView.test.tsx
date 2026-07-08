@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { LandingView } from './LandingView';
@@ -14,18 +14,24 @@ const { runIdeaIntake } = vi.hoisted(() => ({
 }));
 const {
     createStripeCheckoutSession,
+    getBillingCreditPacks,
+    getBillingEvents,
     getCreditAuditLedger,
     getCreditBalance,
     getCreditLedger,
     getCreditQuote,
     getStripeCreditPacks,
+    upsertBillingCreditPack,
 } = vi.hoisted(() => ({
     createStripeCheckoutSession: vi.fn(),
+    getBillingCreditPacks: vi.fn(),
+    getBillingEvents: vi.fn(),
     getCreditAuditLedger: vi.fn(),
     getCreditBalance: vi.fn(),
     getCreditLedger: vi.fn(),
     getCreditQuote: vi.fn(),
     getStripeCreditPacks: vi.fn(),
+    upsertBillingCreditPack: vi.fn(),
 }));
 const { getProjectLifecycleOverview } = vi.hoisted(() => ({
     getProjectLifecycleOverview: vi.fn(),
@@ -170,11 +176,14 @@ vi.mock('../../services/modelConfigApi', () => ({
 
 vi.mock('../../services/creditsApi', () => ({
     createStripeCheckoutSession,
+    getBillingCreditPacks,
+    getBillingEvents,
     getCreditAuditLedger,
     getCreditBalance,
     getCreditLedger,
     getCreditQuote,
     getStripeCreditPacks,
+    upsertBillingCreditPack,
 }));
 
 vi.mock('../../services/projectLifecycleApi', () => ({
@@ -401,6 +410,49 @@ beforeEach(() => {
             refundedCredits: 0,
             outstandingReservedCredits: 0,
             weightedTokens: 0,
+        },
+    });
+    getBillingCreditPacks.mockReset();
+    getBillingCreditPacks.mockResolvedValue({
+        packs: [
+            {
+                provider: 'stripe',
+                priceId: 'price_db_500',
+                credits: 500,
+                displayName: '500 credits',
+                enabled: true,
+                sortOrder: 1,
+                metadata: {},
+            },
+        ],
+    });
+    getBillingEvents.mockReset();
+    getBillingEvents.mockResolvedValue({
+        events: [
+            {
+                id: 'billing-event-1',
+                provider: 'stripe',
+                eventType: 'checkout.session.created',
+                status: 'succeeded',
+                userId: 'customer-a',
+                priceId: 'price_db_500',
+                credits: 500,
+                checkoutSessionId: 'cs_db_500',
+                metadata: {},
+                createdAt: '2026-07-08T00:00:00.000Z',
+            },
+        ],
+    });
+    upsertBillingCreditPack.mockReset();
+    upsertBillingCreditPack.mockResolvedValue({
+        pack: {
+            provider: 'stripe',
+            priceId: 'price_db_1200',
+            credits: 1200,
+            displayName: '1,200 credits',
+            enabled: true,
+            sortOrder: 2,
+            metadata: {},
         },
     });
     getProjectLifecycleOverview.mockReset();
@@ -791,7 +843,49 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('tab', { name: '信用' }));
 
         await waitFor(() => expect(getCreditAuditLedger).toHaveBeenCalledWith());
-        expect(screen.getAllByText('Credit audit').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Credit 审计').length).toBeGreaterThan(0);
+    });
+
+    it('manages billing credit packs from credit audit settings', async () => {
+        mockCurrentUser = {
+            id: 'owner-user',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete', 'audit.read'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
+        fireEvent.click(await screen.findByRole('tab', { name: '平台' }));
+        fireEvent.click(screen.getByRole('tab', { name: '信用' }));
+
+        await waitFor(() => expect(getBillingCreditPacks).toHaveBeenCalledWith());
+        await waitFor(() => expect(getBillingEvents).toHaveBeenCalledWith());
+        expect(screen.getAllByText('500 credits').length).toBeGreaterThan(0);
+        expect(screen.getByText('checkout.session.created')).toBeInTheDocument();
+
+        fireEvent.change(screen.getByPlaceholderText('Stripe price id'), {
+            target: { value: 'price_db_1200' },
+        });
+        fireEvent.change(screen.getByPlaceholderText('Credits'), {
+            target: { value: '1200' },
+        });
+        fireEvent.change(screen.getByPlaceholderText('显示名称'), {
+            target: { value: '1,200 credits' },
+        });
+        fireEvent.change(screen.getByPlaceholderText('排序'), {
+            target: { value: '2' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: '保存套餐' }));
+
+        await waitFor(() => expect(upsertBillingCreditPack).toHaveBeenCalledWith({
+            priceId: 'price_db_1200',
+            credits: 1200,
+            displayName: '1,200 credits',
+            enabled: true,
+            sortOrder: 2,
+        }));
+        expect(await screen.findByText('1,200 credits')).toBeInTheDocument();
     });
 
     it('opens project lifecycle settings only when the owner has audit permission', async () => {
@@ -808,7 +902,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('tab', { name: '项目' }));
 
         await waitFor(() => expect(getProjectLifecycleOverview).toHaveBeenCalledWith());
-        expect(screen.getAllByText('Project lifecycle').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('项目生命周期').length).toBeGreaterThan(0);
     });
 
     it('opens account actions from a circular signed-in user avatar', async () => {
@@ -846,14 +940,15 @@ describe('LandingView bootstrap submission', () => {
         renderLanding();
 
         fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
-        fireEvent.click(await screen.findByRole('menuitem', { name: 'Credit Store' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Credit 商店' }));
 
-        expect(await screen.findByRole('dialog', { name: 'Credit Store' })).toBeInTheDocument();
+        expect(await screen.findByRole('dialog', { name: 'Credit 商店' })).toBeInTheDocument();
         await waitFor(() => expect(getStripeCreditPacks).toHaveBeenCalledWith());
         expect(screen.getByText('500 credits')).toBeInTheDocument();
         expect(screen.getByText('1,200 credits')).toBeInTheDocument();
+        expect(screen.queryByText(/price_/i)).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Buy 500 credits' }));
+        fireEvent.click(screen.getByRole('button', { name: '购买 500 credits' }));
 
         await waitFor(() => expect(createStripeCheckoutSession).toHaveBeenCalledWith('price_beegame_500'));
         expect(openSpy).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_beegame_store', '_self');

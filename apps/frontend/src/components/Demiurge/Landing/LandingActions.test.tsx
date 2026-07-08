@@ -34,7 +34,7 @@ describe('LandingActions user menu', () => {
         expect(screen.getByText('Bee User')).toBeInTheDocument();
         expect(screen.getByText('bee@example.com')).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
-        expect(screen.getByRole('menuitem', { name: 'Credit Store' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: 'Credit 商店' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });

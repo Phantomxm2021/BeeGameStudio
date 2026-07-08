@@ -714,7 +714,7 @@ describe('agent workflow server routes', () => {
         defaultWorkspacePath: projectsRoot,
         currentUser: {
           id: 'customer-a',
-          role: 'developer',
+          role: 'owner',
         },
       })
       const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs')
@@ -750,7 +750,7 @@ describe('agent workflow server routes', () => {
         defaultWorkspacePath: projectsRoot,
         currentUser: {
           id: 'customer-a',
-          role: 'developer',
+          role: 'owner',
         },
       })
       const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs')
@@ -803,6 +803,19 @@ describe('agent workflow server routes', () => {
             packs: [{ priceId: 'price_remote_500', credits: 500 }],
           })
         }
+        if (String(input).endsWith('/api/admin/billing/credit-packs')) {
+          return Response.json({
+            pack: {
+              provider: 'stripe',
+              priceId: 'price_remote_1200',
+              credits: 1200,
+              displayName: '1,200 credits',
+              enabled: true,
+              sortOrder: 2,
+              metadata: {},
+            },
+          })
+        }
         return Response.json({
           id: 'cs_remote_checkout',
           url: 'https://checkout.stripe.com/c/pay/cs_remote_checkout',
@@ -815,7 +828,7 @@ describe('agent workflow server routes', () => {
         defaultWorkspacePath: projectsRoot,
         currentUser: {
           id: 'customer-a',
-          role: 'developer',
+          role: 'owner',
         },
       })
       const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs', {
@@ -843,6 +856,33 @@ describe('agent workflow server routes', () => {
         priceId: 'price_remote_500',
       })
 
+      const adminPackRes = await stripeApp.request('/api/admin/billing/credit-packs', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer local-client-token',
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:62173',
+        },
+        body: JSON.stringify({
+          priceId: 'price_remote_1200',
+          credits: 1200,
+          displayName: '1,200 credits',
+          sortOrder: 2,
+        }),
+      })
+      expect(adminPackRes.status).toBe(200)
+      expect(await adminPackRes.json()).toEqual({
+        pack: {
+          provider: 'stripe',
+          priceId: 'price_remote_1200',
+          credits: 1200,
+          displayName: '1,200 credits',
+          enabled: true,
+          sortOrder: 2,
+          metadata: {},
+        },
+      })
+
       const webhookRes = await stripeApp.request('/api/payments/stripe/webhook', {
         method: 'POST',
         body: '{}',
@@ -866,6 +906,18 @@ describe('agent workflow server routes', () => {
           authorization: 'Bearer local-client-token',
           origin: 'http://127.0.0.1:62173',
           body: JSON.stringify({ priceId: 'price_remote_500' }),
+        },
+        {
+          url: 'https://billing.beegame.example/base/api/admin/billing/credit-packs',
+          method: 'POST',
+          authorization: 'Bearer local-client-token',
+          origin: 'http://127.0.0.1:62173',
+          body: JSON.stringify({
+            priceId: 'price_remote_1200',
+            credits: 1200,
+            displayName: '1,200 credits',
+            sortOrder: 2,
+          }),
         },
       ])
     } finally {
@@ -899,7 +951,7 @@ describe('agent workflow server routes', () => {
       process.env.BEEGAME_BILLING_API_BASE_URL = 'http://127.0.0.1:62175'
       globalThis.fetch = (async () => {
         throw new Error('socket closed')
-      }) as typeof fetch
+      }) as unknown as typeof fetch
 
       const stripeApp = createAgentWorkflowApp({
         defaultWorkspacePath: projectsRoot,

@@ -52,7 +52,7 @@ export function LandingActions({
         },
         {
             key: 'credit-store',
-            label: 'Credit Store',
+            label: t.creditStore,
             icon: <ShoppingCart className="h-4 w-4" />,
             onClick: onOpenCreditStore,
         },

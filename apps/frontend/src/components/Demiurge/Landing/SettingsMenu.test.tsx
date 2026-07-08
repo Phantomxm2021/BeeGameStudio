@@ -30,6 +30,9 @@ const {
     updateMcpServer,
     updateModelConfig,
     getCreditAuditLedger,
+    getBillingCreditPacks,
+    getBillingEvents,
+    upsertBillingCreditPack,
     getProjectLifecycleOverview,
     planProjectRetention,
     runProjectRetention,
@@ -58,6 +61,9 @@ const {
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
     getCreditAuditLedger: vi.fn(),
+    getBillingCreditPacks: vi.fn(),
+    getBillingEvents: vi.fn(),
+    upsertBillingCreditPack: vi.fn(),
     getProjectLifecycleOverview: vi.fn(),
     planProjectRetention: vi.fn(),
     runProjectRetention: vi.fn(),
@@ -110,6 +116,9 @@ vi.mock('../../../services/mcpServersApi', () => ({
 
 vi.mock('../../../services/creditsApi', () => ({
     getCreditAuditLedger,
+    getBillingCreditPacks,
+    getBillingEvents,
+    upsertBillingCreditPack,
 }));
 
 vi.mock('../../../services/projectLifecycleApi', () => ({
@@ -193,6 +202,11 @@ describe('SettingsMenu model settings', () => {
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
         getCreditAuditLedger.mockReset();
+        getBillingCreditPacks.mockReset();
+        getBillingCreditPacks.mockResolvedValue({ packs: [] });
+        getBillingEvents.mockReset();
+        getBillingEvents.mockResolvedValue({ events: [] });
+        upsertBillingCreditPack.mockReset();
         getCreditAuditLedger.mockResolvedValue({
             entries: [
                 {
@@ -371,6 +385,23 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
+    it('wraps long deployment workspace paths within the settings panel', async () => {
+        const longWorkspacePath = '/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/Projects';
+        getBeeGameWorkspaceSettings.mockResolvedValue({
+            workspacePath: longWorkspacePath,
+            isDefault: false,
+        });
+
+        renderSettings();
+
+        await userEvent.click(screen.getByRole('tab', { name: '平台' }));
+        const pathDisplay = await screen.findByText(longWorkspacePath);
+
+        expect(pathDisplay).toHaveClass('max-w-full');
+        expect(pathDisplay).toHaveClass('break-all');
+        expect(pathDisplay).toHaveClass('whitespace-normal');
+    });
+
     it('shows the actual invitation code separately from the invite note', async () => {
         listInvitations.mockResolvedValue([
             {
@@ -398,10 +429,10 @@ describe('SettingsMenu model settings', () => {
 
         await openPlatformSettingsTab('信用');
 
-        await waitFor(() => expect(screen.getAllByText('Credit audit')).toHaveLength(2));
-        expect(screen.getByText('Outstanding reserved')).toBeInTheDocument();
+        await waitFor(() => expect(screen.getAllByText('Credit 审计')).toHaveLength(2));
+        expect(screen.getByText('冻结未结算')).toBeInTheDocument();
         expect(screen.getByText('0 credits')).toBeInTheDocument();
-        expect(screen.getByText('Settled')).toBeInTheDocument();
+        expect(screen.getByText('已结算')).toBeInTheDocument();
         expect(screen.getAllByText('2 credits').length).toBeGreaterThan(0);
         expect(screen.getAllByText('customer-a').length).toBeGreaterThan(0);
         expect(screen.getAllByText('project_1').length).toBeGreaterThan(0);
@@ -429,22 +460,22 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('项目');
 
         await waitFor(() => expect(getProjectLifecycleOverview).toHaveBeenCalledWith());
-        expect(screen.getAllByText('Project lifecycle').length).toBeGreaterThan(0);
-        expect(screen.getByText('1 / 2 projects')).toBeInTheDocument();
+        expect(screen.getAllByText('项目生命周期').length).toBeGreaterThan(0);
+        expect(screen.getByText('1 / 2 个项目')).toBeInTheDocument();
         expect(screen.getByText('Lifecycle One')).toBeInTheDocument();
         expect(screen.getByText('/srv/beegame/projects/lifecycle-one')).toBeInTheDocument();
         expect(screen.getByText('project_deleted_one')).toBeInTheDocument();
         expect(screen.getByText('workspace_deleted')).toBeInTheDocument();
-        expect(screen.getByText('Last retention run')).toBeInTheDocument();
-        expect(screen.getByText('Deleted 1 deployment records')).toBeInTheDocument();
+        expect(screen.getByText('最近保留任务')).toBeInTheDocument();
+        expect(screen.getByText('已删除 1 条部署记录')).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole('button', { name: 'Retention dry run' }));
+        await userEvent.click(screen.getByRole('button', { name: '试算清理' }));
         await waitFor(() => expect(planProjectRetention).toHaveBeenCalledWith());
-        expect(screen.getByText('Dry run: 1 deployment records would be deleted.')).toBeInTheDocument();
+        expect(screen.getByText('Dry run：1 条部署记录将被删除。')).toBeInTheDocument();
 
-        await userEvent.click(screen.getByRole('button', { name: 'Run retention' }));
+        await userEvent.click(screen.getByRole('button', { name: '执行清理' }));
         await waitFor(() => expect(runProjectRetention).toHaveBeenCalledWith());
-        expect(screen.getByText('Retention run deleted 1 deployment records.')).toBeInTheDocument();
+        expect(screen.getByText('Retention 已删除 1 条部署记录。')).toBeInTheDocument();
         expect(getProjectLifecycleOverview).toHaveBeenCalledTimes(2);
     });
 

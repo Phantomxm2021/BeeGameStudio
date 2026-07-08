@@ -315,6 +315,71 @@
         "deleteFailed": "Failed to delete invite code."
       }
     },
+    "billing": {
+      "tab": "Credit",
+      "title": "Credit audit",
+      "description": "Operator ledger for reservations, settlements, refunds, grants, and usage.",
+      "packsTitle": "Credit packs",
+      "packsDescription": "Stripe price mappings used by Credit Store.",
+      "savePack": "Save pack",
+      "saving": "Saving...",
+      "priceId": "Stripe price id",
+      "credits": "Credits",
+      "displayName": "Display name",
+      "sortOrder": "Order",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "edit": "Edit",
+      "noPacks": "No billing credit packs configured.",
+      "noEvents": "No billing events yet.",
+      "noLedger": "No credit ledger entries yet.",
+      "noReference": "No reference",
+      "positiveCreditsRequired": "Stripe price id and positive credits are required.",
+      "packSaved": "Credit pack saved.",
+      "packSaveFailed": "Credit pack save failed.",
+      "auditUnavailable": "Credit audit unavailable",
+      "billingUnavailable": "Billing audit unavailable",
+      "metrics": {
+        "outstandingReserved": "Outstanding reserved",
+        "settled": "Settled",
+        "refunded": "Refunded",
+        "weightedTokens": "Weighted tokens"
+      }
+    },
+    "projectLifecycle": {
+      "tab": "Projects",
+      "title": "Project lifecycle",
+      "description": "Review project quota, workspace paths, runtime snapshots, and recent cleanup outcomes.",
+      "quotaUsage": "Quota usage",
+      "quotaRemaining": "Quota remaining",
+      "storageCleanup": "Storage cleanup",
+      "projectsValue": "{{count}} projects",
+      "projectsLimitValue": "{{used}} / {{limit}} projects",
+      "unlimited": "Unlimited",
+      "remainingValue": "{{count}} remaining",
+      "supabaseEnabled": "Supabase enabled",
+      "localOnly": "Local only",
+      "retentionTitle": "Retention jobs",
+      "retentionDescription": "Deployment rollback cleanup with dry-run first.",
+      "dryRun": "Retention dry run",
+      "runRetention": "Run retention",
+      "retentionSummary": "Planned {{planned}}, deleted {{deleted}}, retained {{retained}}.",
+      "lastRetentionRun": "Last retention run",
+      "dryRunLabel": "Dry run",
+      "deletedRunLabel": "Deleted {{count}} deployment records",
+      "activeProjects": "Active projects",
+      "recentCleanup": "Recent cleanup",
+      "noActiveProjects": "No active projects.",
+      "noRecentCleanup": "No recent project deletions.",
+      "noWorkspacePath": "No workspace path",
+      "snapshotSaved": "Snapshot saved",
+      "noSnapshot": "No snapshot",
+      "dryRunStatus": "Dry run: {{count}} deployment records would be deleted.",
+      "runStatus": "Retention run deleted {{count}} deployment records.",
+      "dryRunFailed": "Retention dry run failed",
+      "runFailed": "Retention run failed",
+      "unavailable": "Project lifecycle unavailable"
+    },
     "runtime": {
       "autoMemory": "Auto Memory",
       "autoDream": "Auto Dream"
@@ -474,6 +539,7 @@
     "signOut": "Sign out",
     "signInRegister": "Sign in / Register",
     "profile": "Profile",
+    "creditStore": "Credit Store",
     "account": "Account"
   },
   "beegame": {
@@ -483,6 +549,36 @@
     "deliverables": "Deliverables",
     "you": "You",
     "expandMessage": "Expand BeeGame message",
+    "creditStore": {
+      "title": "Credit Store",
+      "description": "Choose a credit pack for generation, preview, and iteration.",
+      "close": "Close credit store",
+      "loading": "Loading credit packs...",
+      "notConfigured": "Credit purchases are not configured.",
+      "unavailable": "Credit store unavailable.",
+      "checkoutUnavailable": "Checkout unavailable.",
+      "buy": "Buy",
+      "buyAria": "Buy {{credits}} credits",
+      "creditAmount": "{{credits}} credits",
+      "tiers": {
+        "starter": {
+          "title": "Starter",
+          "description": "For quick prototypes and small edits."
+        },
+        "builder": {
+          "title": "Builder",
+          "description": "For standard game builds and several iteration rounds."
+        },
+        "pro": {
+          "title": "Pro",
+          "description": "For larger projects, richer assets, and longer sessions."
+        },
+        "studio": {
+          "title": "Studio",
+          "description": "For frequent production work and high-volume iteration."
+        }
+      }
+    },
     "collapseMessage": "Collapse BeeGame message",
     "viewSummaryDetails": "View summary details",
     "hideSummaryDetails": "Hide summary details",

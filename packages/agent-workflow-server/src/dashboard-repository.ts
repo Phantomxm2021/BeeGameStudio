@@ -153,6 +153,36 @@ type CreditGrantInput = Omit<
   Parameters<typeof grantCredits>[1],
   'dataDir'
 >
+export type BeeGameBillingCreditPack = {
+  provider: 'stripe'
+  priceId: string
+  credits: number
+  displayName?: string
+  enabled: boolean
+  sortOrder: number
+  metadata: Record<string, unknown>
+}
+export type BeeGameBillingCreditPackInput = {
+  provider?: 'stripe'
+  priceId: string
+  credits: number
+  displayName?: string
+  enabled?: boolean
+  sortOrder?: number
+  metadata?: Record<string, unknown>
+}
+export type BeeGameBillingEventInput = {
+  provider: 'stripe'
+  eventType: string
+  status: 'received' | 'ignored' | 'succeeded' | 'failed'
+  userId?: string
+  priceId?: string
+  credits?: number
+  providerEventId?: string
+  checkoutSessionId?: string
+  metadata?: Record<string, unknown>
+  errorMessage?: string
+}
 type CreateModelConfigInput = {
   name: string
   provider: ModelProviderKind
@@ -678,6 +708,41 @@ export class DashboardRepository {
           credits: input.credits,
           metadata,
         })
+  }
+
+  async listBillingCreditPacks(
+    _request?: Request,
+    options: { enabledOnly?: boolean } = {},
+  ): Promise<BeeGameBillingCreditPack[]> {
+    const store = this.options.supabasePaymentProviderStore
+    return store ? store.listBillingCreditPacks(options) : []
+  }
+
+  async upsertBillingCreditPack(
+    _request: Request,
+    input: BeeGameBillingCreditPackInput,
+  ): Promise<BeeGameBillingCreditPack> {
+    const store = this.options.supabasePaymentProviderStore
+    if (!store) {
+      throw new Error('Supabase service role key is required for billing credit pack management')
+    }
+    return store.upsertBillingCreditPack(input)
+  }
+
+  async appendBillingEvent(
+    _request: Request | undefined,
+    input: BeeGameBillingEventInput,
+  ): Promise<void> {
+    const store = this.options.supabasePaymentProviderStore
+    if (!store) return
+    await store.appendBillingEvent(input)
+  }
+
+  async listBillingEvents(
+    _request?: Request,
+  ): Promise<BeeGameBillingEventInput[]> {
+    const store = this.options.supabasePaymentProviderStore
+    return store ? store.listBillingEvents() : []
   }
 
   private grantLocalPaymentProviderCredits(

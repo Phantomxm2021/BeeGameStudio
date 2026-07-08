@@ -1,6 +1,13 @@
 import type { Hono } from 'hono'
-import type { BeeGameUserContext } from './auth/user-context'
-import type { DashboardRepository } from './dashboard-repository'
+import {
+  hasBeeGamePermission,
+  type BeeGameUserContext,
+} from './auth/user-context'
+import type {
+  BeeGameBillingCreditPack,
+  BeeGameBillingEventInput,
+  DashboardRepository,
+} from './dashboard-repository'
 import type { BeeGameBillingConfig } from './billing-config'
 import {
   StripeWebhookError,
@@ -40,8 +47,24 @@ export function registerBeeGameStripeWebhookRoute(
       })
       stripeEventId = event.id
       stripeEventType = event.type
-      const grant = extractStripeCheckoutCreditGrant(event, loadStripePriceCreditMap())
+      await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+        provider: 'stripe',
+        eventType: event.type,
+        status: 'received',
+        providerEventId: event.id,
+      })
+      const grant = extractStripeCheckoutCreditGrant(
+        event,
+        packsToCreditMap(await loadAvailableStripeCreditPacks(c.req.raw, deps.dashboardRepository)),
+      )
       if (!grant) {
+        await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+          provider: 'stripe',
+          eventType: event.type,
+          status: 'ignored',
+          providerEventId: event.id,
+          metadata: { reason: 'ignored_event' },
+        })
         return c.json({
           received: true,
           processed: false,
@@ -64,6 +87,17 @@ export function registerBeeGameStripeWebhookRoute(
         },
       )
       if (result.grantedCredits <= 0) {
+        await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+          provider: 'stripe',
+          eventType: event.type,
+          status: 'ignored',
+          userId: grant.userId,
+          priceId: grant.priceId,
+          credits: grant.credits,
+          providerEventId: grant.eventId,
+          checkoutSessionId: grant.checkoutSessionId,
+          metadata: { reason: 'duplicate_event' },
+        })
         return c.json({
           received: true,
           processed: false,
@@ -71,6 +105,16 @@ export function registerBeeGameStripeWebhookRoute(
           reason: 'duplicate_event',
         })
       }
+      await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+        provider: 'stripe',
+        eventType: event.type,
+        status: 'succeeded',
+        userId: grant.userId,
+        priceId: grant.priceId,
+        credits: grant.credits,
+        providerEventId: grant.eventId,
+        checkoutSessionId: grant.checkoutSessionId,
+      })
       return c.json({
         received: true,
         processed: true,
@@ -82,6 +126,13 @@ export function registerBeeGameStripeWebhookRoute(
         eventId: stripeEventId || undefined,
         eventType: stripeEventType || undefined,
         message: toErrorMessage(error),
+      })
+      await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+        provider: 'stripe',
+        eventType: stripeEventType || 'stripe.webhook',
+        status: 'failed',
+        providerEventId: stripeEventId || undefined,
+        errorMessage: toErrorMessage(error),
       })
       if (error instanceof StripeWebhookError) {
         return c.json({
@@ -101,7 +152,7 @@ export function registerBeeGameStripeStoreRoutes(
   app: Hono,
   deps: BillingRouteDeps,
 ): void {
-  app.get('/api/payments/stripe/credit-packs', c => {
+  app.get('/api/payments/stripe/credit-packs', async c => {
     try {
       if (deps.billingConfig.mode === 'remote') {
         return proxyBeeGameBillingRequest(
@@ -113,11 +164,9 @@ export function registerBeeGameStripeStoreRoutes(
       if (deps.billingConfig.mode === 'disabled') {
         return c.json({ packs: [] })
       }
-      const priceCredits = loadStripePriceCreditMap()
       return c.json({
-        packs: Object.entries(priceCredits)
-          .map(([priceId, credits]) => ({ priceId, credits }))
-          .sort((left, right) => left.credits - right.credits),
+        packs: (await loadAvailableStripeCreditPacks(c.req.raw, deps.dashboardRepository))
+          .map(toPublicCreditPack),
       })
     } catch (error) {
       if (error instanceof StripeWebhookError) {
@@ -153,9 +202,19 @@ export function registerBeeGameStripeStoreRoutes(
       const priceId = isObject(body) && typeof body.priceId === 'string'
         ? body.priceId.trim()
         : ''
-      const priceCredits = loadStripePriceCreditMap()
+      const priceCredits = packsToCreditMap(
+        await loadAvailableStripeCreditPacks(c.req.raw, deps.dashboardRepository),
+      )
       const credits = priceCredits[priceId]
       if (!priceId || !credits) {
+        await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+          provider: 'stripe',
+          eventType: 'checkout.session.create_requested',
+          status: 'failed',
+          userId: user.id,
+          priceId,
+          errorMessage: 'Stripe price is not available for BeeGame credits',
+        })
         return c.json({
           error: 'Invalid request',
           message: 'Stripe price is not available for BeeGame credits',
@@ -171,6 +230,15 @@ export function registerBeeGameStripeStoreRoutes(
         successUrl: `${origin}/?payment=success`,
         cancelUrl: `${origin}/?payment=cancelled`,
       })
+      await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+        provider: 'stripe',
+        eventType: 'checkout.session.created',
+        status: 'succeeded',
+        userId: user.id,
+        priceId,
+        credits,
+        checkoutSessionId: session.id,
+      })
       return c.json({
         ...session,
         credits,
@@ -178,17 +246,143 @@ export function registerBeeGameStripeStoreRoutes(
       })
     } catch (error) {
       if (error instanceof StripeWebhookError) {
+        await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+          provider: 'stripe',
+          eventType: 'checkout.session.create_requested',
+          status: 'failed',
+          userId: user.id,
+          errorMessage: error.message,
+        })
         return c.json({
           error: 'Stripe checkout failed',
           message: error.message,
         }, error.status as 400 | 503)
       }
+      await safeAppendBillingEvent(c.req.raw, deps.dashboardRepository, {
+        provider: 'stripe',
+        eventType: 'checkout.session.create_requested',
+        status: 'failed',
+        userId: user.id,
+        errorMessage: toErrorMessage(error),
+      })
       return c.json({
         error: 'Stripe checkout failed',
         message: toErrorMessage(error),
       }, 400)
     }
   })
+
+  app.get('/api/admin/billing/events', async c => {
+    const user = deps.getCurrentUser(c.req.raw)
+    if (!hasBeeGamePermission(user, 'audit.read')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+    if (deps.billingConfig.mode === 'remote') {
+      return proxyBeeGameBillingRequest(
+        c.req.raw,
+        deps.billingConfig,
+        '/api/admin/billing/events',
+      )
+    }
+    return c.json({ events: await deps.dashboardRepository.listBillingEvents(c.req.raw) })
+  })
+
+  app.get('/api/admin/billing/credit-packs', async c => {
+    const user = deps.getCurrentUser(c.req.raw)
+    if (!hasBeeGamePermission(user, 'audit.read')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+    if (deps.billingConfig.mode === 'remote') {
+      return proxyBeeGameBillingRequest(
+        c.req.raw,
+        deps.billingConfig,
+        '/api/admin/billing/credit-packs',
+      )
+    }
+    return c.json({ packs: await deps.dashboardRepository.listBillingCreditPacks(c.req.raw) })
+  })
+
+  app.post('/api/admin/billing/credit-packs', async c => {
+    const user = deps.getCurrentUser(c.req.raw)
+    if (!hasBeeGamePermission(user, 'audit.read')) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+    if (deps.billingConfig.mode === 'remote') {
+      return proxyBeeGameBillingRequest(
+        c.req.raw,
+        deps.billingConfig,
+        '/api/admin/billing/credit-packs',
+      )
+    }
+    const body = await readJson(c.req.raw)
+    const pack = await deps.dashboardRepository.upsertBillingCreditPack(c.req.raw, {
+      priceId: stringValue(body.priceId),
+      credits: numberValue(body.credits),
+      displayName: stringValue(body.displayName) || undefined,
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+      sortOrder: numberValue(body.sortOrder),
+      metadata: isObject(body.metadata) ? body.metadata : undefined,
+    })
+    return c.json({ pack })
+  })
+}
+
+async function loadAvailableStripeCreditPacks(
+  request: Request,
+  dashboardRepository: DashboardRepository,
+): Promise<BeeGameBillingCreditPack[]> {
+  const storedPacks = await dashboardRepository.listBillingCreditPacks(request, {
+    enabledOnly: true,
+  })
+  if (storedPacks.length) return storedPacks
+  const priceCredits = loadStripePriceCreditMap()
+  return Object.entries(priceCredits)
+    .map(([priceId, credits], index) => ({
+      provider: 'stripe' as const,
+      priceId,
+      credits,
+      enabled: true,
+      sortOrder: index,
+      metadata: {},
+    }))
+    .sort((left, right) => left.credits - right.credits)
+}
+
+function packsToCreditMap(packs: BeeGameBillingCreditPack[]): Record<string, number> {
+  const mapping: Record<string, number> = {}
+  for (const pack of packs) {
+    if (pack.enabled && pack.priceId && pack.credits > 0) {
+      mapping[pack.priceId] = pack.credits
+    }
+  }
+  return mapping
+}
+
+function toPublicCreditPack(pack: BeeGameBillingCreditPack): {
+  priceId: string
+  credits: number
+  displayName?: string
+} {
+  return {
+    priceId: pack.priceId,
+    credits: pack.credits,
+    ...(pack.displayName ? { displayName: pack.displayName } : {}),
+  }
+}
+
+async function safeAppendBillingEvent(
+  request: Request | undefined,
+  dashboardRepository: DashboardRepository,
+  input: BeeGameBillingEventInput,
+): Promise<void> {
+  try {
+    await dashboardRepository.appendBillingEvent(request, input)
+  } catch (error) {
+    console.warn('[BeeGame] Billing audit event failed:', {
+      eventType: input.eventType,
+      message: toErrorMessage(error),
+    })
+  }
 }
 
 async function proxyBeeGameBillingRequest(
@@ -254,6 +448,16 @@ function getRequestOrigin(request: Request): string {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function numberValue(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') return Number(value.trim())
+  return Number.NaN
 }
 
 function toErrorMessage(err: unknown): string {

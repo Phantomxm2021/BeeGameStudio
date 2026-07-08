@@ -346,6 +346,44 @@ alter table public.beegame_credit_ledger
 alter table public.beegame_credit_ledger
   add column if not exists reservation_id text;
 
+create table if not exists public.beegame_billing_credit_packs (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null default 'stripe',
+  price_id text not null,
+  credits integer not null check (credits > 0),
+  display_name text,
+  enabled boolean not null default true,
+  sort_order integer not null default 0,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, price_id)
+);
+
+create index if not exists beegame_billing_credit_packs_enabled_idx
+  on public.beegame_billing_credit_packs (provider, enabled, sort_order, credits);
+
+create table if not exists public.beegame_billing_events (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null default 'stripe',
+  event_type text not null,
+  status text not null check (status in ('received', 'ignored', 'succeeded', 'failed')),
+  user_id uuid references auth.users(id) on delete set null,
+  price_id text,
+  credits integer check (credits is null or credits >= 0),
+  provider_event_id text,
+  checkout_session_id text,
+  metadata jsonb not null default '{}'::jsonb,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists beegame_billing_events_provider_created_idx
+  on public.beegame_billing_events (provider, created_at desc);
+
+create index if not exists beegame_billing_events_provider_event_idx
+  on public.beegame_billing_events (provider, provider_event_id);
+
 create table if not exists public.beegame_audit_events (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references auth.users(id) on delete set null,
@@ -1780,6 +1818,8 @@ alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
 alter table public.beegame_credit_accounts enable row level security;
 alter table public.beegame_credit_ledger enable row level security;
+alter table public.beegame_billing_credit_packs enable row level security;
+alter table public.beegame_billing_events enable row level security;
 alter table public.beegame_audit_events enable row level security;
 alter table public.beegame_platform_owner_invites enable row level security;
 
@@ -1892,6 +1932,19 @@ create policy "credit account owner access" on public.beegame_credit_accounts
 drop policy if exists "credit ledger owner access" on public.beegame_credit_ledger;
 create policy "credit ledger owner access" on public.beegame_credit_ledger
   for select using (user_id = public.beegame_account_id(auth.uid()));
+
+drop policy if exists "billing credit packs owner read" on public.beegame_billing_credit_packs;
+create policy "billing credit packs owner read" on public.beegame_billing_credit_packs
+  for select using (public.beegame_is_platform_owner());
+
+drop policy if exists "billing credit packs owner manage" on public.beegame_billing_credit_packs;
+create policy "billing credit packs owner manage" on public.beegame_billing_credit_packs
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "billing events owner read" on public.beegame_billing_events;
+create policy "billing events owner read" on public.beegame_billing_events
+  for select using (public.beegame_is_platform_owner());
 
 drop policy if exists "audit owner access" on public.beegame_audit_events;
 create policy "audit owner access" on public.beegame_audit_events

@@ -88,6 +88,7 @@ export type BeeGameCreditGrantInput = {
 export type BeeGameStripeCreditPack = {
   priceId: string;
   credits: number;
+  displayName?: string;
 };
 
 export type BeeGameStripeCreditPacks = {
@@ -99,6 +100,48 @@ export type BeeGameStripeCheckoutSession = {
   url: string;
   priceId: string;
   credits: number;
+};
+
+export type BeeGameBillingCreditPack = {
+  provider: 'stripe';
+  priceId: string;
+  credits: number;
+  displayName?: string;
+  enabled: boolean;
+  sortOrder: number;
+  metadata: Record<string, unknown>;
+};
+
+export type BeeGameBillingCreditPackInput = {
+  priceId: string;
+  credits: number;
+  displayName?: string;
+  enabled?: boolean;
+  sortOrder?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type BeeGameBillingCreditPacks = {
+  packs: BeeGameBillingCreditPack[];
+};
+
+export type BeeGameBillingEvent = {
+  id?: string;
+  provider: 'stripe';
+  eventType: string;
+  status: 'received' | 'ignored' | 'succeeded' | 'failed';
+  userId?: string;
+  priceId?: string;
+  credits?: number;
+  providerEventId?: string;
+  checkoutSessionId?: string;
+  metadata: Record<string, unknown>;
+  errorMessage?: string;
+  createdAt?: string;
+};
+
+export type BeeGameBillingEvents = {
+  events: BeeGameBillingEvent[];
 };
 
 export const getCreditBalance = (): Promise<BeeGameCreditBalance> => (
@@ -142,4 +185,18 @@ export const createStripeCheckoutSession = (
   priceId: string,
 ): Promise<BeeGameStripeCheckoutSession> => (
   apiClient.post('/api/payments/stripe/checkout-session', { priceId })
+);
+
+export const getBillingCreditPacks = (): Promise<BeeGameBillingCreditPacks> => (
+  apiClient.get('/api/admin/billing/credit-packs')
+);
+
+export const upsertBillingCreditPack = (
+  input: BeeGameBillingCreditPackInput,
+): Promise<{ pack: BeeGameBillingCreditPack }> => (
+  apiClient.post('/api/admin/billing/credit-packs', input)
+);
+
+export const getBillingEvents = (): Promise<BeeGameBillingEvents> => (
+  apiClient.get('/api/admin/billing/events')
 );

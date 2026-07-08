@@ -185,6 +185,73 @@ type SupabaseCreditGrantRow = {
   account: SupabaseCreditAccountRow
 }
 
+export type BeeGameBillingCreditPack = {
+  provider: 'stripe'
+  priceId: string
+  credits: number
+  displayName?: string
+  enabled: boolean
+  sortOrder: number
+  metadata: JsonObject
+}
+
+export type BeeGameBillingCreditPackInput = {
+  provider?: 'stripe'
+  priceId: string
+  credits: number
+  displayName?: string
+  enabled?: boolean
+  sortOrder?: number
+  metadata?: JsonObject
+}
+
+export type BeeGameBillingEvent = {
+  id?: string
+  provider: 'stripe'
+  eventType: string
+  status: 'received' | 'ignored' | 'succeeded' | 'failed'
+  userId?: string
+  priceId?: string
+  credits?: number
+  providerEventId?: string
+  checkoutSessionId?: string
+  metadata: JsonObject
+  errorMessage?: string
+  createdAt?: string
+}
+
+export type BeeGameBillingEventInput = Omit<BeeGameBillingEvent, 'id' | 'createdAt' | 'metadata'> & {
+  metadata?: JsonObject
+}
+
+type SupabaseBillingCreditPackRow = {
+  id: string
+  provider: string
+  price_id: string
+  credits: number
+  display_name: string | null
+  enabled: boolean
+  sort_order: number
+  metadata: JsonObject
+  created_at: string
+  updated_at: string
+}
+
+type SupabaseBillingEventRow = {
+  id: string
+  provider: string
+  event_type: string
+  status: string
+  user_id: string | null
+  price_id: string | null
+  credits: number | null
+  provider_event_id: string | null
+  checkout_session_id: string | null
+  metadata: JsonObject
+  error_message: string | null
+  created_at: string
+}
+
 type SupabaseAuditEventRow = {
   id: string
   actor_id: string | null
@@ -825,6 +892,65 @@ export class SupabaseDashboardStore {
         normalizeCreditAccountRow(ownerId, result.account),
       ),
     }
+  }
+
+  async listBillingCreditPacks(
+    options: { enabledOnly?: boolean } = {},
+  ): Promise<BeeGameBillingCreditPack[]> {
+    const enabledFilter = options.enabledOnly ? '&enabled=eq.true' : ''
+    const rows = await this.rest<SupabaseBillingCreditPackRow[]>(
+      `/rest/v1/beegame_billing_credit_packs?provider=eq.stripe${enabledFilter}&select=*&order=sort_order.asc,credits.asc`,
+    )
+    return rows.map(rowToBillingCreditPack)
+  }
+
+  async upsertBillingCreditPack(
+    input: BeeGameBillingCreditPackInput,
+  ): Promise<BeeGameBillingCreditPack> {
+    const priceId = trimString(input.priceId)
+    const credits = normalizePositiveInteger(input.credits)
+    if (!priceId) throw new Error('Stripe price id is required')
+    const row = await this.upsert<SupabaseBillingCreditPackRow>(
+      'beegame_billing_credit_packs',
+      {
+        provider: input.provider ?? 'stripe',
+        price_id: priceId,
+        credits,
+        display_name: trimString(input.displayName) || null,
+        enabled: input.enabled ?? true,
+        sort_order: normalizeNonNegativeInteger(input.sortOrder),
+        metadata: input.metadata ?? {},
+      },
+      'provider,price_id',
+    )
+    return rowToBillingCreditPack(row)
+  }
+
+  async appendBillingEvent(input: BeeGameBillingEventInput): Promise<void> {
+    await this.insert<SupabaseBillingEventRow>(
+      'beegame_billing_events',
+      {
+        provider: input.provider,
+        event_type: input.eventType,
+        status: input.status,
+        user_id: trimString(input.userId) || null,
+        price_id: trimString(input.priceId) || null,
+        credits: typeof input.credits === 'number'
+          ? normalizeNonNegativeInteger(input.credits)
+          : null,
+        provider_event_id: trimString(input.providerEventId) || null,
+        checkout_session_id: trimString(input.checkoutSessionId) || null,
+        metadata: input.metadata ?? {},
+        error_message: trimString(input.errorMessage) || null,
+      },
+    )
+  }
+
+  async listBillingEvents(): Promise<BeeGameBillingEvent[]> {
+    const rows = await this.rest<SupabaseBillingEventRow[]>(
+      '/rest/v1/beegame_billing_events?select=*&order=created_at.desc&limit=200',
+    )
+    return rows.map(rowToBillingEvent)
   }
 
   async listCreditLedger(ownerId: string): Promise<CreditLedgerEntry[]> {
@@ -1621,6 +1747,48 @@ function rowToCreditLedgerEntry(
     metadata: isObject(row.metadata) ? row.metadata : {},
     createdAt: row.created_at,
   }
+}
+
+function rowToBillingCreditPack(row: SupabaseBillingCreditPackRow): BeeGameBillingCreditPack {
+  const displayName = trimString(row.display_name)
+  return {
+    provider: 'stripe',
+    priceId: row.price_id,
+    credits: normalizePositiveInteger(row.credits),
+    ...(displayName ? { displayName } : {}),
+    enabled: row.enabled,
+    sortOrder: normalizeNonNegativeInteger(row.sort_order),
+    metadata: isObject(row.metadata) ? row.metadata : {},
+  }
+}
+
+function rowToBillingEvent(row: SupabaseBillingEventRow): BeeGameBillingEvent {
+  const userId = trimString(row.user_id)
+  const priceId = trimString(row.price_id)
+  const providerEventId = trimString(row.provider_event_id)
+  const checkoutSessionId = trimString(row.checkout_session_id)
+  const errorMessage = trimString(row.error_message)
+  return {
+    id: row.id,
+    provider: 'stripe',
+    eventType: row.event_type,
+    status: isBillingEventStatus(row.status) ? row.status : 'failed',
+    ...(userId ? { userId } : {}),
+    ...(priceId ? { priceId } : {}),
+    ...(typeof row.credits === 'number' ? { credits: normalizeNonNegativeInteger(row.credits) } : {}),
+    ...(providerEventId ? { providerEventId } : {}),
+    ...(checkoutSessionId ? { checkoutSessionId } : {}),
+    metadata: isObject(row.metadata) ? row.metadata : {},
+    ...(errorMessage ? { errorMessage } : {}),
+    createdAt: row.created_at,
+  }
+}
+
+function isBillingEventStatus(value: string): value is BeeGameBillingEvent['status'] {
+  return value === 'received' ||
+    value === 'ignored' ||
+    value === 'succeeded' ||
+    value === 'failed'
 }
 
 function rowToAuditEvent(row: SupabaseAuditEventRow): BeeGameAuditEvent {

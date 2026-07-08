@@ -51,7 +51,12 @@ import {
     type InvitationRecord,
 } from '../../../services/invitationApi';
 import {
+    getBillingCreditPacks,
+    getBillingEvents,
     getCreditAuditLedger,
+    upsertBillingCreditPack,
+    type BeeGameBillingCreditPack,
+    type BeeGameBillingEvent,
     type BeeGameCreditAuditLedger,
     type BeeGameCreditLedgerEntry,
 } from '../../../services/creditsApi';
@@ -106,6 +111,14 @@ type McpServerForm = {
     autoStart: boolean;
 };
 
+type BillingPackFormState = {
+    priceId: string;
+    credits: string;
+    displayName: string;
+    sortOrder: string;
+    enabled: boolean;
+};
+
 export function SettingsMenu({
     isOpen,
     lang,
@@ -129,6 +142,8 @@ export function SettingsMenu({
     );
     const t = useCommonText(lang);
     const text = useBeeGameText(lang);
+    const billingCopy = getBillingSettingsCopy(translateSettings);
+    const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
     const effectiveCanManageWorkspace = canManageWorkspace;
     const effectiveCanManageSecrets = canManageSecrets;
     const effectiveCanManageRuntimeSettings = canManageRuntimeSettings;
@@ -195,6 +210,10 @@ export function SettingsMenu({
     const [isProjectRetentionRunning, setIsProjectRetentionRunning] = useState(false);
     const [creditAuditLedger, setCreditAuditLedger] = useState<BeeGameCreditAuditLedger | null>(null);
     const [creditAuditStatus, setCreditAuditStatus] = useState('');
+    const [billingCreditPacks, setBillingCreditPacks] = useState<BeeGameBillingCreditPack[]>([]);
+    const [billingEvents, setBillingEvents] = useState<BeeGameBillingEvent[]>([]);
+    const [billingPackForm, setBillingPackForm] = useState(createEmptyBillingPackForm());
+    const [isSavingBillingPack, setIsSavingBillingPack] = useState(false);
     const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -313,7 +332,7 @@ export function SettingsMenu({
                 .catch((error) => {
                     if (!cancelled) {
                         setProjectLifecycleOverview(null);
-                        setProjectLifecycleStatus(error instanceof Error ? error.message : 'Project lifecycle unavailable');
+                        setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.unavailable);
                     }
                 });
             void getCreditAuditLedger()
@@ -325,7 +344,21 @@ export function SettingsMenu({
                 .catch((error) => {
                     if (!cancelled) {
                         setCreditAuditLedger(null);
-                        setCreditAuditStatus(error instanceof Error ? error.message : 'Credit audit unavailable');
+                        setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.auditUnavailable);
+                    }
+                });
+            void Promise.all([getBillingCreditPacks(), getBillingEvents()])
+                .then(([packs, events]) => {
+                    if (cancelled) return;
+                    setBillingCreditPacks(packs.packs);
+                    setBillingEvents(events.events);
+                    setBillingPackForm(createEmptyBillingPackForm());
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setBillingCreditPacks([]);
+                        setBillingEvents([]);
+                        setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.billingUnavailable);
                     }
                 });
         }
@@ -345,6 +378,9 @@ export function SettingsMenu({
         effectiveCanManageWorkspace,
         effectiveCanReadAudit,
         isOpen,
+        billingCopy.auditUnavailable,
+        billingCopy.billingUnavailable,
+        projectLifecycleCopy.unavailable,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
     ]);
@@ -513,9 +549,9 @@ export function SettingsMenu({
         try {
             const result = await planProjectRetention();
             setProjectRetentionResult(result);
-            setProjectLifecycleStatus(`Dry run: ${result.summary.deploymentRecordsPlannedForDeletion} deployment records would be deleted.`);
+            setProjectLifecycleStatus(projectLifecycleCopy.dryRunStatus(result.summary.deploymentRecordsPlannedForDeletion));
         } catch (error) {
-            setProjectLifecycleStatus(error instanceof Error ? error.message : 'Retention dry run failed');
+            setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.dryRunFailed);
         } finally {
             setIsProjectRetentionRunning(false);
         }
@@ -527,10 +563,10 @@ export function SettingsMenu({
         try {
             const result = await runProjectRetention();
             setProjectRetentionResult(result);
-            setProjectLifecycleStatus(`Retention run deleted ${result.summary.deploymentRecordsDeleted} deployment records.`);
+            setProjectLifecycleStatus(projectLifecycleCopy.runStatus(result.summary.deploymentRecordsDeleted));
             await refreshProjectLifecycleOverview();
         } catch (error) {
-            setProjectLifecycleStatus(error instanceof Error ? error.message : 'Retention run failed');
+            setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.runFailed);
         } finally {
             setIsProjectRetentionRunning(false);
         }
@@ -714,8 +750,8 @@ export function SettingsMenu({
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
-            ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: '项目', icon: FolderOpen }] : []),
-            ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: '信用', icon: ReceiptText }] : []),
+            ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
+            ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
         ];
     }, [
         effectiveCanManageWorkspace,
@@ -726,8 +762,10 @@ export function SettingsMenu({
         effectiveCanManageRuntimeSettings,
         effectiveCanReadAudit,
         adminCopy.deployment,
+        billingCopy.tab,
         capabilityCopy.title,
         mcpCopy.title,
+        projectLifecycleCopy.tab,
         text.settingsModel,
     ]);
     const activeTabLabel = activeSection === 'personal'
@@ -741,9 +779,9 @@ export function SettingsMenu({
             : activeTab === 'invitations'
                     ? adminCopy.invitation.tab
                     : activeTab === 'projects'
-                        ? 'Project lifecycle'
+                        ? projectLifecycleCopy.title
                     : activeTab === 'credit'
-                        ? 'Credit audit'
+                        ? billingCopy.title
                     : text.settingsModel;
     const isSavingCurrentTab = activeSection === 'platform' && activeTab === 'general'
         ? (effectiveCanManageSecrets && isSavingWebTools)
@@ -804,6 +842,35 @@ export function SettingsMenu({
             ...current,
             [key]: !current[key],
         }));
+    };
+
+    const handleSaveBillingPack = async () => {
+        const priceId = billingPackForm.priceId.trim();
+        const credits = Number(billingPackForm.credits);
+        if (!priceId || !Number.isFinite(credits) || credits <= 0) {
+            setCreditAuditStatus(billingCopy.positiveCreditsRequired);
+            return;
+        }
+        setIsSavingBillingPack(true);
+        try {
+            const result = await upsertBillingCreditPack({
+                priceId,
+                credits,
+                displayName: billingPackForm.displayName.trim() || undefined,
+                enabled: billingPackForm.enabled,
+                sortOrder: Number(billingPackForm.sortOrder) || 0,
+            });
+            setBillingCreditPacks((current) => [
+                ...current.filter((pack) => pack.priceId !== result.pack.priceId),
+                result.pack,
+            ].sort((left, right) => left.sortOrder - right.sortOrder || left.credits - right.credits));
+            setBillingPackForm(createEmptyBillingPackForm());
+            setCreditAuditStatus(billingCopy.packSaved);
+        } catch (error) {
+            setCreditAuditStatus(error instanceof Error ? error.message : billingCopy.packSaveFailed);
+        } finally {
+            setIsSavingBillingPack(false);
+        }
     };
     useEffect(() => {
         if (!hasPlatformSettings && activeSection === 'platform') {
@@ -1028,7 +1095,7 @@ export function SettingsMenu({
                                                 {text.workspacePath}
                                             </span>
                                             <div className="min-w-0 space-y-2">
-	                                                <div className="type-code-sm rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-zinc-100">
+	                                                <div className="type-code-sm max-w-full whitespace-normal break-all rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-zinc-100">
                                                     {workspacePath || adminCopy.workspaceManaged}
                                                 </div>
                                                 <div className="type-footnote text-zinc-500">
@@ -1112,6 +1179,7 @@ export function SettingsMenu({
                                         overview={projectLifecycleOverview}
                                         status={projectLifecycleStatus}
                                         retentionResult={projectRetentionResult}
+                                        copy={projectLifecycleCopy}
                                         isRetentionRunning={isProjectRetentionRunning}
                                         onPlanRetention={() => void handlePlanProjectRetention()}
                                         onRunRetention={() => void handleRunProjectRetention()}
@@ -1122,6 +1190,13 @@ export function SettingsMenu({
                                     <CreditAuditPanel
                                         ledger={creditAuditLedger}
                                         status={creditAuditStatus}
+                                        billingCreditPacks={billingCreditPacks}
+                                        billingEvents={billingEvents}
+                                        packForm={billingPackForm}
+                                        copy={billingCopy}
+                                        isSavingPack={isSavingBillingPack}
+                                        onPackFormChange={setBillingPackForm}
+                                        onSavePack={() => void handleSaveBillingPack()}
                                     />
                                 ) : null}
 
@@ -1353,6 +1428,79 @@ function getAdminSettingsCopy(translate: SettingsTranslate) {
     };
 }
 
+function getBillingSettingsCopy(translate: SettingsTranslate): BillingSettingsCopy {
+    return {
+        tab: translate('billing.tab'),
+        title: translate('billing.title'),
+        description: translate('billing.description'),
+        packsTitle: translate('billing.packsTitle'),
+        packsDescription: translate('billing.packsDescription'),
+        savePack: translate('billing.savePack'),
+        saving: translate('billing.saving'),
+        priceId: translate('billing.priceId'),
+        credits: translate('billing.credits'),
+        displayName: translate('billing.displayName'),
+        sortOrder: translate('billing.sortOrder'),
+        enabled: translate('billing.enabled'),
+        disabled: translate('billing.disabled'),
+        edit: translate('billing.edit'),
+        noPacks: translate('billing.noPacks'),
+        noEvents: translate('billing.noEvents'),
+        noLedger: translate('billing.noLedger'),
+        noReference: translate('billing.noReference'),
+        positiveCreditsRequired: translate('billing.positiveCreditsRequired'),
+        packSaved: translate('billing.packSaved'),
+        packSaveFailed: translate('billing.packSaveFailed'),
+        auditUnavailable: translate('billing.auditUnavailable'),
+        billingUnavailable: translate('billing.billingUnavailable'),
+        metrics: {
+            outstandingReserved: translate('billing.metrics.outstandingReserved'),
+            settled: translate('billing.metrics.settled'),
+            refunded: translate('billing.metrics.refunded'),
+            weightedTokens: translate('billing.metrics.weightedTokens'),
+        },
+    };
+}
+
+function getProjectLifecycleSettingsCopy(translate: SettingsTranslate): ProjectLifecycleSettingsCopy {
+    return {
+        tab: translate('projectLifecycle.tab'),
+        title: translate('projectLifecycle.title'),
+        description: translate('projectLifecycle.description'),
+        quotaUsage: translate('projectLifecycle.quotaUsage'),
+        quotaRemaining: translate('projectLifecycle.quotaRemaining'),
+        storageCleanup: translate('projectLifecycle.storageCleanup'),
+        projectsValue: (count: number) => translate('projectLifecycle.projectsValue', { count }),
+        projectsLimitValue: (used: number, limit: number) => translate('projectLifecycle.projectsLimitValue', { used, limit }),
+        unlimited: translate('projectLifecycle.unlimited'),
+        remainingValue: (count: number) => translate('projectLifecycle.remainingValue', { count }),
+        supabaseEnabled: translate('projectLifecycle.supabaseEnabled'),
+        localOnly: translate('projectLifecycle.localOnly'),
+        retentionTitle: translate('projectLifecycle.retentionTitle'),
+        retentionDescription: translate('projectLifecycle.retentionDescription'),
+        dryRun: translate('projectLifecycle.dryRun'),
+        runRetention: translate('projectLifecycle.runRetention'),
+        retentionSummary: (planned: number, deleted: number, retained: number) => (
+            translate('projectLifecycle.retentionSummary', { planned, deleted, retained })
+        ),
+        lastRetentionRun: translate('projectLifecycle.lastRetentionRun'),
+        dryRunLabel: translate('projectLifecycle.dryRunLabel'),
+        deletedRunLabel: (count: number) => translate('projectLifecycle.deletedRunLabel', { count }),
+        activeProjects: translate('projectLifecycle.activeProjects'),
+        recentCleanup: translate('projectLifecycle.recentCleanup'),
+        noActiveProjects: translate('projectLifecycle.noActiveProjects'),
+        noRecentCleanup: translate('projectLifecycle.noRecentCleanup'),
+        noWorkspacePath: translate('projectLifecycle.noWorkspacePath'),
+        snapshotSaved: translate('projectLifecycle.snapshotSaved'),
+        noSnapshot: translate('projectLifecycle.noSnapshot'),
+        dryRunStatus: (count: number) => translate('projectLifecycle.dryRunStatus', { count }),
+        runStatus: (count: number) => translate('projectLifecycle.runStatus', { count }),
+        dryRunFailed: translate('projectLifecycle.dryRunFailed'),
+        runFailed: translate('projectLifecycle.runFailed'),
+        unavailable: translate('projectLifecycle.unavailable'),
+    };
+}
+
 function parsePositiveInteger(value: string): number | null {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -1386,6 +1534,16 @@ function createEmptyMcpForm(): McpServerForm {
         cwd: '',
         envText: '',
         autoStart: true,
+    };
+}
+
+function createEmptyBillingPackForm(): BillingPackFormState {
+    return {
+        priceId: '',
+        credits: '',
+        displayName: '',
+        sortOrder: '0',
+        enabled: true,
     };
 }
 
@@ -1488,6 +1646,73 @@ type RuntimeCapabilityCopy = {
         note: string;
         scope: 'immediate' | 'newSession' | 'restart';
     }>;
+};
+
+type BillingSettingsCopy = {
+    tab: string;
+    title: string;
+    description: string;
+    packsTitle: string;
+    packsDescription: string;
+    savePack: string;
+    saving: string;
+    priceId: string;
+    credits: string;
+    displayName: string;
+    sortOrder: string;
+    enabled: string;
+    disabled: string;
+    edit: string;
+    noPacks: string;
+    noEvents: string;
+    noLedger: string;
+    noReference: string;
+    positiveCreditsRequired: string;
+    packSaved: string;
+    packSaveFailed: string;
+    auditUnavailable: string;
+    billingUnavailable: string;
+    metrics: {
+        outstandingReserved: string;
+        settled: string;
+        refunded: string;
+        weightedTokens: string;
+    };
+};
+
+type ProjectLifecycleSettingsCopy = {
+    tab: string;
+    title: string;
+    description: string;
+    quotaUsage: string;
+    quotaRemaining: string;
+    storageCleanup: string;
+    projectsValue: (count: number) => string;
+    projectsLimitValue: (used: number, limit: number) => string;
+    unlimited: string;
+    remainingValue: (count: number) => string;
+    supabaseEnabled: string;
+    localOnly: string;
+    retentionTitle: string;
+    retentionDescription: string;
+    dryRun: string;
+    runRetention: string;
+    retentionSummary: (planned: number, deleted: number, retained: number) => string;
+    lastRetentionRun: string;
+    dryRunLabel: string;
+    deletedRunLabel: (count: number) => string;
+    activeProjects: string;
+    recentCleanup: string;
+    noActiveProjects: string;
+    noRecentCleanup: string;
+    noWorkspacePath: string;
+    snapshotSaved: string;
+    noSnapshot: string;
+    dryRunStatus: (count: number) => string;
+    runStatus: (count: number) => string;
+    dryRunFailed: string;
+    runFailed: string;
+    unavailable: string;
 };
 
 type RuntimeCapabilityItem = {
@@ -2260,6 +2485,7 @@ function ProjectLifecyclePanel({
     overview,
     status,
     retentionResult,
+    copy,
     isRetentionRunning,
     onPlanRetention,
     onRunRetention,
@@ -2267,6 +2493,7 @@ function ProjectLifecyclePanel({
     overview: BeeGameProjectLifecycleOverview | null;
     status: string;
     retentionResult: BeeGameProjectRetentionResult | null;
+    copy: ProjectLifecycleSettingsCopy;
     isRetentionRunning: boolean;
     onPlanRetention: () => void;
     onRunRetention: () => void;
@@ -2274,28 +2501,28 @@ function ProjectLifecyclePanel({
     const quota = overview?.quota;
     const projectLimit = quota?.limit ?? null;
     const quotaValue = projectLimit === null
-        ? `${quota?.used ?? 0} projects`
-        : `${quota?.used ?? 0} / ${projectLimit} projects`;
+        ? copy.projectsValue(quota?.used ?? 0)
+        : copy.projectsLimitValue(quota?.used ?? 0, projectLimit);
     const remainingValue = projectLimit === null
-        ? 'Unlimited'
-        : `${quota?.remaining ?? 0} remaining`;
-    const projects = overview?.projects.slice(0, 8) ?? [];
-    const deletions = overview?.recentDeletions.slice(0, 5) ?? [];
-    const retentionRuns = overview?.recentRetentionRuns.slice(0, 3) ?? [];
+        ? copy.unlimited
+        : copy.remainingValue(quota?.remaining ?? 0);
+    const projects = overview?.projects ?? [];
+    const deletions = overview?.recentDeletions ?? [];
+    const retentionRuns = overview?.recentRetentionRuns ?? [];
     return (
         <div className="space-y-4 py-3">
             <div>
-                <h3 className="type-subheadline text-zinc-100">Project lifecycle</h3>
+                <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
                 <p className="type-footnote mt-1 text-zinc-500">
-                    Quota, workspace roots, runtime snapshots, and recent cleanup outcomes.
+                    {copy.description}
                 </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
-                <CreditMetric label="Quota usage" value={quotaValue} />
-                <CreditMetric label="Quota remaining" value={remainingValue} />
+                <CreditMetric label={copy.quotaUsage} value={quotaValue} />
+                <CreditMetric label={copy.quotaRemaining} value={remainingValue} />
                 <CreditMetric
-                    label="Storage cleanup"
-                    value={overview?.storage.supabaseStorageConfigured ? 'Supabase enabled' : 'Local only'}
+                    label={copy.storageCleanup}
+                    value={overview?.storage.supabaseStorageConfigured ? copy.supabaseEnabled : copy.localOnly}
                 />
             </div>
             {status ? (
@@ -2304,19 +2531,19 @@ function ProjectLifecyclePanel({
                 </div>
             ) : null}
             <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <div className="type-caption-1 text-zinc-500">Retention jobs</div>
-                        <div className="type-footnote text-zinc-300">Deployment rollback cleanup with dry-run first.</div>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                        <div className="type-caption-1 text-zinc-500">{copy.retentionTitle}</div>
+                        <div className="type-footnote text-zinc-300">{copy.retentionDescription}</div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <button
                             type="button"
                             disabled={isRetentionRunning}
                             onClick={onPlanRetention}
                             className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
                         >
-                            Retention dry run
+                            {copy.dryRun}
                         </button>
                         <button
                             type="button"
@@ -2324,51 +2551,61 @@ function ProjectLifecyclePanel({
                             onClick={onRunRetention}
                             className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
                         >
-                            Run retention
+                            {copy.runRetention}
                         </button>
                     </div>
                 </div>
                 {retentionResult ? (
                     <div className="type-caption-1 text-zinc-500">
-                        Planned {retentionResult.summary.deploymentRecordsPlannedForDeletion}, deleted {retentionResult.summary.deploymentRecordsDeleted}, retained {retentionResult.summary.deploymentRecordsRetained}.
+                        {copy.retentionSummary(
+                            retentionResult.summary.deploymentRecordsPlannedForDeletion,
+                            retentionResult.summary.deploymentRecordsDeleted,
+                            retentionResult.summary.deploymentRecordsRetained,
+                        )}
                     </div>
                 ) : null}
                 {retentionRuns.length ? (
                     <div className="space-y-1">
-                        <div className="type-caption-1 text-zinc-500">Last retention run</div>
-                        {retentionRuns.map((run) => (
-                            <div key={`${run.ranAt}-${run.deploymentRecordsDeleted}`} className="type-footnote text-zinc-300">
-                                {run.dryRun ? 'Dry run' : `Deleted ${run.deploymentRecordsDeleted} deployment records`}
-                            </div>
-                        ))}
+                        <div className="type-caption-1 text-zinc-500">{copy.lastRetentionRun}</div>
+                        <div className="max-h-24 space-y-1 overflow-y-auto pr-1">
+                            {retentionRuns.map((run) => (
+                                <div key={`${run.ranAt}-${run.deploymentRecordsDeleted}`} className="type-footnote text-zinc-300">
+                                    {run.dryRun ? copy.dryRunLabel : copy.deletedRunLabel(run.deploymentRecordsDeleted)}
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 ) : null}
             </div>
             <div className="space-y-2">
-                <div className="type-caption-1 text-zinc-500">Active projects</div>
+                <div className="type-caption-1 text-zinc-500">{copy.activeProjects}</div>
                 <div className="overflow-hidden rounded-2xl border border-white/10">
                     {projects.length ? (
-                        <div className="divide-y divide-white/10">
+                        <div className="max-h-80 divide-y divide-white/10 overflow-y-auto">
                             {projects.map((project) => (
-                                <ProjectLifecycleRow key={project.id} project={project} />
+                                <ProjectLifecycleRow key={project.id} project={project} copy={copy} />
                             ))}
                         </div>
                     ) : (
-                        <div className="type-footnote px-3 py-4 text-zinc-500">No active projects.</div>
+                        <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noActiveProjects}</div>
                     )}
                 </div>
             </div>
             <div className="space-y-2">
-                <div className="type-caption-1 text-zinc-500">Recent cleanup</div>
+                <div className="type-caption-1 text-zinc-500">{copy.recentCleanup}</div>
                 <div className="overflow-hidden rounded-2xl border border-white/10">
                     {deletions.length ? (
-                        <div className="divide-y divide-white/10">
+                        <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
                             {deletions.map((deletion) => (
-                                <ProjectLifecycleDeletionRow key={`${deletion.projectId}-${deletion.deletedAt}`} deletion={deletion} />
+                                <ProjectLifecycleDeletionRow
+                                    key={`${deletion.projectId}-${deletion.deletedAt}`}
+                                    deletion={deletion}
+                                    copy={copy}
+                                />
                             ))}
                         </div>
                     ) : (
-                        <div className="type-footnote px-3 py-4 text-zinc-500">No recent project deletions.</div>
+                        <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noRecentCleanup}</div>
                     )}
                 </div>
             </div>
@@ -2376,28 +2613,42 @@ function ProjectLifecyclePanel({
     );
 }
 
-function ProjectLifecycleRow({ project }: { project: BeeGameProjectLifecycleProject }) {
+function ProjectLifecycleRow({
+    project,
+    copy,
+}: {
+    project: BeeGameProjectLifecycleProject;
+    copy: ProjectLifecycleSettingsCopy;
+}) {
     return (
-        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <div className="min-w-0">
-                <div className="type-footnote truncate text-zinc-100">{project.name}</div>
-                <div className="type-caption-1 truncate text-zinc-500">{project.rootPath || 'No workspace path'}</div>
+                <div className="type-footnote break-all text-zinc-100">{project.name}</div>
+                <div className="type-caption-1 break-all text-zinc-500">{project.rootPath || copy.noWorkspacePath}</div>
             </div>
-            <div className="type-caption-1 text-zinc-500">
-                {project.lifecycle.phaseName || (project.lifecycle.hasRuntimeSnapshot ? 'Snapshot saved' : 'No snapshot')}
+            <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
+                {project.lifecycle.phaseName || (project.lifecycle.hasRuntimeSnapshot ? copy.snapshotSaved : copy.noSnapshot)}
             </div>
         </div>
     );
 }
 
-function ProjectLifecycleDeletionRow({ deletion }: { deletion: BeeGameProjectLifecycleDeletion }) {
+function ProjectLifecycleDeletionRow({
+    deletion,
+    copy,
+}: {
+    deletion: BeeGameProjectLifecycleDeletion;
+    copy: ProjectLifecycleSettingsCopy;
+}) {
     return (
-        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <div className="min-w-0">
-                <div className="type-footnote truncate text-zinc-100">{deletion.projectId}</div>
-                <div className="type-caption-1 truncate text-zinc-500">{deletion.deletedWorkspacePath || 'No workspace path'}</div>
+                <div className="type-footnote break-all text-zinc-100">{deletion.projectId}</div>
+                <div className="type-caption-1 break-all text-zinc-500">
+                    {deletion.deletedWorkspacePath || copy.noWorkspacePath}
+                </div>
             </div>
-            <div className="type-caption-1 text-zinc-500">
+            <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
                 {deletion.cleanupOutcome}
             </div>
         </div>
@@ -2407,25 +2658,116 @@ function ProjectLifecycleDeletionRow({ deletion }: { deletion: BeeGameProjectLif
 function CreditAuditPanel({
     ledger,
     status,
+    billingCreditPacks,
+    billingEvents,
+    packForm,
+    copy,
+    isSavingPack,
+    onPackFormChange,
+    onSavePack,
 }: {
     ledger: BeeGameCreditAuditLedger | null;
     status: string;
+    billingCreditPacks: BeeGameBillingCreditPack[];
+    billingEvents: BeeGameBillingEvent[];
+    packForm: BillingPackFormState;
+    copy: BillingSettingsCopy;
+    isSavingPack: boolean;
+    onPackFormChange: (form: BillingPackFormState) => void;
+    onSavePack: () => void;
 }) {
     const summary = ledger?.summary;
     const entries = ledger?.entries.slice(0, 8) ?? [];
+    const recentBillingEvents = billingEvents.slice(0, 8);
     return (
         <div className="space-y-4 py-3">
             <div>
-                <h3 className="type-subheadline text-zinc-100">Credit audit</h3>
+                <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
                 <p className="type-footnote mt-1 text-zinc-500">
-                    Operator ledger for reservations, settlements, refunds, grants, and usage.
+                    {copy.description}
                 </p>
             </div>
+            <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.025] p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <h4 className="type-footnote text-zinc-100">{copy.packsTitle}</h4>
+                        <p className="type-caption-1 mt-1 text-zinc-500">{copy.packsDescription}</p>
+                    </div>
+                    <button
+                        type="button"
+                        className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-300/40 hover:text-amber-100 disabled:opacity-50"
+                        disabled={isSavingPack}
+                        onClick={onSavePack}
+                    >
+                        {isSavingPack ? copy.saving : copy.savePack}
+                    </button>
+                </div>
+                <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
+                    <input
+                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        placeholder={copy.priceId}
+                        value={packForm.priceId}
+                        onChange={(event) => onPackFormChange({ ...packForm, priceId: event.target.value })}
+                    />
+                    <input
+                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        placeholder={copy.credits}
+                        inputMode="numeric"
+                        value={packForm.credits}
+                        onChange={(event) => onPackFormChange({ ...packForm, credits: event.target.value })}
+                    />
+                    <input
+                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50 sm:col-span-2 xl:col-span-1"
+                        placeholder={copy.displayName}
+                        value={packForm.displayName}
+                        onChange={(event) => onPackFormChange({ ...packForm, displayName: event.target.value })}
+                    />
+                </div>
+                <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,10rem)_auto] sm:items-center">
+                    <input
+                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        placeholder={copy.sortOrder}
+                        inputMode="numeric"
+                        value={packForm.sortOrder}
+                        onChange={(event) => onPackFormChange({ ...packForm, sortOrder: event.target.value })}
+                    />
+                    <label className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-zinc-300">
+                        <input
+                            type="checkbox"
+                            checked={packForm.enabled}
+                            onChange={(event) => onPackFormChange({ ...packForm, enabled: event.target.checked })}
+                        />
+                        {copy.enabled}
+                    </label>
+                </div>
+                <div className="overflow-hidden rounded-2xl border border-white/10">
+                    {billingCreditPacks.length ? (
+                        <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
+                            {billingCreditPacks.map((pack) => (
+                                <BillingCreditPackRow
+                                    key={pack.priceId}
+                                    pack={pack}
+                                    copy={copy}
+                                    onEdit={() => onPackFormChange({
+                                        priceId: pack.priceId,
+                                        credits: String(pack.credits),
+                                        displayName: pack.displayName ?? '',
+                                        sortOrder: String(pack.sortOrder),
+                                        enabled: pack.enabled,
+                                    })}
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noPacks}</div>
+                    )}
+                </div>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
-                <CreditMetric label="Outstanding reserved" value={`${summary?.outstandingReservedCredits ?? 0} credits`} />
-                <CreditMetric label="Settled" value={`${summary?.settledCredits ?? 0} credits`} />
-                <CreditMetric label="Refunded" value={`${summary?.refundedCredits ?? 0} credits`} />
-                <CreditMetric label="Weighted tokens" value={String(summary?.weightedTokens ?? 0)} />
+                <CreditMetric label={copy.metrics.outstandingReserved} value={`${summary?.outstandingReservedCredits ?? 0} credits`} />
+                <CreditMetric label={copy.metrics.settled} value={`${summary?.settledCredits ?? 0} credits`} />
+                <CreditMetric label={copy.metrics.refunded} value={`${summary?.refundedCredits ?? 0} credits`} />
+                <CreditMetric label={copy.metrics.weightedTokens} value={String(summary?.weightedTokens ?? 0)} />
             </div>
             {status ? (
                 <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
@@ -2434,17 +2776,81 @@ function CreditAuditPanel({
             ) : null}
             <div className="overflow-hidden rounded-2xl border border-white/10">
                 {entries.length ? (
-                    <div className="divide-y divide-white/10">
+                    <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
                         {entries.map((entry) => (
-                            <CreditAuditEntryRow key={entry.id} entry={entry} />
+                            <CreditAuditEntryRow key={entry.id} entry={entry} copy={copy} />
                         ))}
                     </div>
                 ) : (
                     <div className="type-footnote px-3 py-4 text-zinc-500">
-                        No credit ledger entries yet.
+                        {copy.noLedger}
                     </div>
                 )}
             </div>
+            <div className="overflow-hidden rounded-2xl border border-white/10">
+                {recentBillingEvents.length ? (
+                    <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
+                        {recentBillingEvents.map((event, index) => (
+                            <BillingEventRow key={event.id ?? `${event.eventType}-${index}`} event={event} copy={copy} />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="type-footnote px-3 py-4 text-zinc-500">
+                        {copy.noEvents}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function BillingCreditPackRow({
+    pack,
+    copy,
+    onEdit,
+}: {
+    pack: BeeGameBillingCreditPack;
+    copy: BillingSettingsCopy;
+    onEdit: () => void;
+}) {
+    return (
+        <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+            <div className="min-w-0">
+                <div className="type-footnote truncate text-zinc-100">{pack.displayName || `${pack.credits} credits`}</div>
+                <div className="type-caption-1 break-all text-zinc-500">{pack.priceId}</div>
+            </div>
+            <div className="type-caption-1 text-zinc-400">{pack.enabled ? copy.enabled : copy.disabled}</div>
+            <button
+                type="button"
+                className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-300/40 hover:text-amber-100"
+                onClick={onEdit}
+            >
+                {copy.edit}
+            </button>
+        </div>
+    );
+}
+
+function BillingEventRow({
+    event,
+    copy,
+}: {
+    event: BeeGameBillingEvent;
+    copy: BillingSettingsCopy;
+}) {
+    return (
+        <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+            <div>
+                <div className="type-footnote text-zinc-100">{event.status}</div>
+                <div className="type-caption-1 text-zinc-500">{event.credits ?? 0} credits</div>
+            </div>
+            <div className="min-w-0">
+                <div className="type-footnote truncate text-zinc-300">{event.eventType}</div>
+                <div className="type-caption-1 break-all text-zinc-500">
+                    {event.priceId || event.providerEventId || event.errorMessage || copy.noReference}
+                </div>
+            </div>
+            <div className="type-caption-1 text-zinc-500">{event.createdAt ? formatCreditAuditTime(event.createdAt) : ''}</div>
         </div>
     );
 }
@@ -2464,17 +2870,23 @@ function CreditMetric({
     );
 }
 
-function CreditAuditEntryRow({ entry }: { entry: BeeGameCreditLedgerEntry }) {
+function CreditAuditEntryRow({
+    entry,
+    copy,
+}: {
+    entry: BeeGameCreditLedgerEntry;
+    copy: BillingSettingsCopy;
+}) {
     return (
-        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[7rem_1fr_auto] sm:items-center">
+        <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
             <div>
                 <div className="type-footnote text-zinc-100">{entry.kind}</div>
                 <div className="type-caption-1 text-zinc-500">{entry.credits} credits</div>
             </div>
             <div className="min-w-0">
-                <div className="type-footnote truncate text-zinc-300">{entry.userId}</div>
-                <div className="type-caption-1 truncate text-zinc-500">
-                    {entry.projectId || entry.reservationId || 'No project'}
+                <div className="type-footnote break-all text-zinc-300">{entry.userId}</div>
+                <div className="type-caption-1 break-all text-zinc-500">
+                    {entry.projectId || entry.reservationId || copy.noReference}
                 </div>
             </div>
             <div className="type-caption-1 text-zinc-500">

@@ -1388,6 +1388,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                 <CreditStoreModal
                     isOpen={isCreditStoreOpen}
+                    lang={lang}
                     onClose={() => setIsCreditStoreOpen(false)}
                 />
 

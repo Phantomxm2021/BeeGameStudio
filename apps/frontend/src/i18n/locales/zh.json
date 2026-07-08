@@ -315,6 +315,71 @@
         "deleteFailed": "邀请码删除失败。"
       }
     },
+    "billing": {
+      "tab": "信用",
+      "title": "Credit 审计",
+      "description": "查看预扣、结算、退回、发放和购买相关记录。",
+      "packsTitle": "Credit 套餐",
+      "packsDescription": "Credit Store 使用的 Stripe 价格映射。",
+      "savePack": "保存套餐",
+      "saving": "保存中...",
+      "priceId": "Stripe price id",
+      "credits": "Credits",
+      "displayName": "显示名称",
+      "sortOrder": "排序",
+      "enabled": "启用",
+      "disabled": "停用",
+      "edit": "编辑",
+      "noPacks": "还没有配置 Credit 套餐。",
+      "noEvents": "还没有 billing 事件。",
+      "noLedger": "还没有 Credit 账本记录。",
+      "noReference": "无引用",
+      "positiveCreditsRequired": "请输入 Stripe price id 和正数 credits。",
+      "packSaved": "Credit 套餐已保存。",
+      "packSaveFailed": "Credit 套餐保存失败。",
+      "auditUnavailable": "Credit 审计不可用",
+      "billingUnavailable": "Billing 审计不可用",
+      "metrics": {
+        "outstandingReserved": "冻结未结算",
+        "settled": "已结算",
+        "refunded": "已退回",
+        "weightedTokens": "加权 tokens"
+      }
+    },
+    "projectLifecycle": {
+      "tab": "项目",
+      "title": "项目生命周期",
+      "description": "查看项目配额、工作区路径、runtime snapshot 和最近清理结果。",
+      "quotaUsage": "项目用量",
+      "quotaRemaining": "剩余额度",
+      "storageCleanup": "存储清理",
+      "projectsValue": "{{count}} 个项目",
+      "projectsLimitValue": "{{used}} / {{limit}} 个项目",
+      "unlimited": "不限",
+      "remainingValue": "剩余 {{count}} 个",
+      "supabaseEnabled": "Supabase 已启用",
+      "localOnly": "仅本地",
+      "retentionTitle": "保留任务",
+      "retentionDescription": "部署回滚清理，先 dry run 再执行。",
+      "dryRun": "试算清理",
+      "runRetention": "执行清理",
+      "retentionSummary": "计划 {{planned}}，已删除 {{deleted}}，保留 {{retained}}。",
+      "lastRetentionRun": "最近保留任务",
+      "dryRunLabel": "Dry run",
+      "deletedRunLabel": "已删除 {{count}} 条部署记录",
+      "activeProjects": "活跃项目",
+      "recentCleanup": "最近清理",
+      "noActiveProjects": "暂无活跃项目。",
+      "noRecentCleanup": "暂无最近项目删除。",
+      "noWorkspacePath": "无工作区路径",
+      "snapshotSaved": "Snapshot 已保存",
+      "noSnapshot": "无 snapshot",
+      "dryRunStatus": "Dry run：{{count}} 条部署记录将被删除。",
+      "runStatus": "Retention 已删除 {{count}} 条部署记录。",
+      "dryRunFailed": "Retention dry run 失败",
+      "runFailed": "Retention 执行失败",
+      "unavailable": "项目生命周期不可用"
+    },
     "runtime": {
       "autoMemory": "自动记忆",
       "autoDream": "自动整理"
@@ -474,6 +539,7 @@
     "signOut": "退出登录",
     "signInRegister": "登录 / 注册",
     "profile": "个人主页",
+    "creditStore": "Credit 商店",
     "account": "账号"
   },
   "beegame": {
@@ -483,6 +549,36 @@
     "deliverables": "交付物",
     "you": "你",
     "expandMessage": "展开 BeeGame 消息",
+    "creditStore": {
+      "title": "Credit 商店",
+      "description": "选择适合生成、预览和迭代的 Credit 套餐。",
+      "close": "关闭 Credit 商店",
+      "loading": "正在加载 Credit 套餐...",
+      "notConfigured": "暂未配置 Credit 购买。",
+      "unavailable": "Credit 商店不可用。",
+      "checkoutUnavailable": "暂时无法打开支付。",
+      "buy": "购买",
+      "buyAria": "购买 {{credits}} credits",
+      "creditAmount": "{{credits}} credits",
+      "tiers": {
+        "starter": {
+          "title": "Starter",
+          "description": "适合快速原型和少量修改。"
+        },
+        "builder": {
+          "title": "Builder",
+          "description": "适合标准游戏构建和多轮迭代。"
+        },
+        "pro": {
+          "title": "Pro",
+          "description": "适合更大项目、更丰富资源和更长会话。"
+        },
+        "studio": {
+          "title": "Studio",
+          "description": "适合高频生产和大量迭代。"
+        }
+      }
+    },
     "collapseMessage": "折叠 BeeGame 消息",
     "viewSummaryDetails": "查看详情",
     "hideSummaryDetails": "收起详情",
