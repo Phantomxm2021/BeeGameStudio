@@ -59,13 +59,22 @@ inherit the runtime host's `AGENT_WORKFLOW_PORT`.
 ## Start
 
 ```bash
-bun run dashboard:docker
+npm run docker:up
 ```
 
 Equivalent command:
 
 ```bash
 docker compose -f docker/docker-compose.yml --env-file docker/.env.production up -d --build
+```
+
+Useful wrappers:
+
+```bash
+npm run docker:ps
+npm run docker:logs
+npm run docker:restart
+npm run docker:down
 ```
 
 Default local ports:
