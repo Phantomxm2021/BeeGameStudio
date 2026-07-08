@@ -1,23 +1,32 @@
 # BeeGame Docker Deployment
 
-This stack runs BeeGame as a static frontend plus a runtime host.
+This stack runs BeeGame as a static frontend, a local runtime host, and a
+dedicated billing backend.
 
 ## Services
 
 - `beegame-frontend`: Nginx serving the built React/Vite app.
 - `beegame-runtime`: Bun runtime host for sessions, workspace files, previews,
   transcripts, permissions, and Supabase RLS/RPC access.
+- `beegame-billing`: trusted Stripe/Supabase service-role backend for Credit
+  Store packs, Checkout Session creation, Stripe webhooks, and provider credit
+  grants.
 
 ## Prepare
 
 ```bash
 cp docker/.env.production.example docker/.env.production
+cp docker/.env.billing.example docker/.env.billing
 ```
 
 Fill the Supabase and public runtime URLs in `docker/.env.production`.
 
-Do not put Supabase service-role keys in this file. Service-role keys are only
-for one-time setup commands from a trusted admin machine.
+Fill Stripe and Supabase service-role values in `docker/.env.billing`.
+
+Do not put Supabase service-role keys or Stripe secrets in
+`docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
+and calls the billing backend through the internal Compose URL
+`http://beegame-billing:62175`.
 
 ## Start
 
@@ -35,6 +44,7 @@ Default local ports:
 
 - Frontend: `http://127.0.0.1:18080`
 - Runtime host: `http://127.0.0.1:62174`
+- Billing backend: `http://127.0.0.1:62175`
 
 ## Reverse Proxy
 
@@ -43,8 +53,11 @@ balancer:
 
 - `https://app.your-domain.com` -> frontend port `18080`
 - `https://runtime.your-domain.com` -> runtime host port `62174`
+- `https://billing.your-domain.com` -> billing backend port `62175`
 
 The runtime domain must support WebSocket upgrades.
+The billing domain does not need WebSocket upgrades. Configure Stripe webhooks
+to call `https://billing.your-domain.com/api/payments/stripe/webhook`.
 
 Managed live previews are exposed through the runtime host under `/previews/*`.
 Set `BEEGAME_PREVIEW_PUBLIC_BASE_URL` to the public runtime preview base, for
@@ -85,6 +98,13 @@ location /previews/ {
   proxy_set_header X-Forwarded-Host $host;
 }
 
+location /api/payments/stripe/ {
+  proxy_pass http://127.0.0.1:62175;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
 location / {
   proxy_pass http://127.0.0.1:18080;
   proxy_set_header Host $host;
@@ -104,7 +124,10 @@ first start if the volume does not already contain a `skills` directory.
 
 ## Current Scope
 
-This deploys the BeeGame SaaS application and runtime host.
+This deploys the BeeGame SaaS application, runtime host, and dedicated billing
+backend. The billing backend is intentionally narrow and should be the only
+long-running service that receives Stripe secrets and the Supabase service-role
+key.
 
 The runtime host can publish generated static Web builds under `/deployments/*`.
 Deployment artifacts and deployment metadata are stored in the same

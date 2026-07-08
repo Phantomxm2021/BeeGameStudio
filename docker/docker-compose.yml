@@ -1,4 +1,24 @@
 services:
+  beegame-billing:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.billing
+    env_file:
+      - ./.env.billing
+    environment:
+      BEEGAME_BILLING_MODE: server
+      BEEGAME_BILLING_HOST: 0.0.0.0
+      BEEGAME_BILLING_PORT: 62175
+    ports:
+      - "${BEEGAME_BILLING_PUBLIC_PORT:-62175}:62175"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62175/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   beegame-runtime:
     build:
       context: ..
@@ -11,11 +31,16 @@ services:
       AGENT_WORKFLOW_WORKSPACE_PATH: /srv/beegame/projects
       BEEGAME_WORKSPACE_ROOT: /srv/beegame/projects
       BEEGAME_CONFIG_DIR: /home/bun/.beegame
+      BEEGAME_BILLING_MODE: remote
+      BEEGAME_BILLING_API_BASE_URL: http://beegame-billing:62175
     ports:
       - "62174:62174"
     volumes:
       - ../.beegame/projects:/srv/beegame/projects
       - beegame-config:/home/bun/.beegame
+    depends_on:
+      beegame-billing:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62174/health"]

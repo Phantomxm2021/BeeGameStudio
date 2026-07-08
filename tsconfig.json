@@ -39,6 +39,12 @@
       ],
       "@claude-code-best/agent-workflow-server": [
         "./packages/agent-workflow-server/src/index.ts"
+      ],
+      "@claude-code-best/beegame-billing-server/*": [
+        "./packages/beegame-billing-server/src/*"
+      ],
+      "@claude-code-best/beegame-billing-server": [
+        "./packages/beegame-billing-server/src/index.ts"
       ]
     }
   },

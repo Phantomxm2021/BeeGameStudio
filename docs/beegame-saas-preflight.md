@@ -119,6 +119,11 @@ For packaged local clients, use `remote`. The local runtime host and web UI can
 ship together, but purchases and provider credit grants remain centralized in a
 trusted backend or Docker service.
 
+The dedicated backend entrypoint is
+`packages/beegame-billing-server/src/index.ts`. Docker deployments should run
+the `beegame-billing` service from `docker/Dockerfile.billing` and keep its
+secret environment in `docker/.env.billing`.
+
 ## Stripe Credits
 
 BeeGame creates Stripe Checkout Sessions from the signed-in user store. In
@@ -133,10 +138,11 @@ POST https://runtime.your-domain.com/api/payments/stripe/checkout-session
 The user-facing entry is the account menu `Credit Store`, not Settings.
 Settings > Platform > Credit remains an operator audit view.
 
-Credit grants are completed from Stripe Checkout webhooks at:
+Credit grants are completed from Stripe Checkout webhooks at the trusted billing
+backend:
 
 ```text
-POST https://runtime.your-domain.com/api/payments/stripe/webhook
+POST https://billing.your-domain.com/api/payments/stripe/webhook
 ```
 
 This webhook route is enabled only in `server` mode. Do not point Stripe

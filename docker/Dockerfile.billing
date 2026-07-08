@@ -42,25 +42,22 @@ ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
 RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=8 --no-progress
 
-COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
 COPY src ./src
 COPY vendor ./vendor
-COPY .beegame /opt/beegame/default-config
-COPY docker/runtime-entrypoint.sh /usr/local/bin/beegame-runtime-entrypoint.sh
 
-RUN mkdir -p /srv/beegame/projects /home/bun/.beegame && \
-    chmod +x /usr/local/bin/beegame-runtime-entrypoint.sh && \
-    chown -R bun:bun /srv/beegame /home/bun/.beegame /app /opt/beegame/default-config
+RUN mkdir -p /srv/beegame/billing /home/bun/.beegame && \
+    chown -R bun:bun /srv/beegame /home/bun/.beegame /app
+
+USER bun
 
 ENV NODE_ENV=production
-ENV AGENT_WORKFLOW_HOST=0.0.0.0
-ENV AGENT_WORKFLOW_PORT=62174
-ENV BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
+ENV BEEGAME_BILLING_MODE=server
+ENV BEEGAME_BILLING_HOST=0.0.0.0
+ENV BEEGAME_BILLING_PORT=62175
 ENV BEEGAME_CONFIG_DIR=/home/bun/.beegame
 
-EXPOSE 62174
+EXPOSE 62175
 
-ENTRYPOINT ["beegame-runtime-entrypoint.sh"]
-CMD ["bun", "packages/agent-workflow-server/src/index.ts"]
+CMD ["bun", "packages/beegame-billing-server/src/index.ts"]
