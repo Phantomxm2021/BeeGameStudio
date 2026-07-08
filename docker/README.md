@@ -27,6 +27,10 @@ signed-in user's Bearer token on Credit Store requests, and uses the
 service-role key only for provider credit grants after Stripe webhook
 verification.
 
+Set `BEEGAME_CREDIT_CONTROL_TOKEN` in both files to the same high-entropy
+random value. The runtime host uses it only for internal reserve, settle, and
+refund requests to `beegame-billing`; it is not passed to the frontend image.
+
 Do not put Supabase service-role keys or Stripe secrets in
 `docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
 and calls the billing backend through the internal Compose URL
@@ -69,6 +73,55 @@ Default local ports:
 - Frontend: `http://127.0.0.1:18080`
 - Runtime host: `http://127.0.0.1:62174`
 - Billing backend: `http://127.0.0.1:62175`
+
+## Billing Flow
+
+The Docker topology is intentionally split:
+
+```text
+browser -> beegame-runtime -> beegame-billing -> Stripe/Supabase service-role RPC
+```
+
+`beegame-runtime` runs with `BEEGAME_BILLING_MODE=remote`. It proxies Credit
+Store and checkout requests to `beegame-billing`, forwarding the signed-in
+user's Authorization header. It also sends `BEEGAME_CREDIT_CONTROL_TOKEN` for
+internal credit-control mutations.
+
+`beegame-billing` runs with `BEEGAME_BILLING_MODE=server`. It is the only
+container that should receive:
+
+- `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`
+- `BEEGAME_STRIPE_SECRET_KEY`
+- `BEEGAME_STRIPE_WEBHOOK_SECRET`
+
+Configure Stripe webhooks to call:
+
+```text
+https://billing.your-domain.com/api/payments/stripe/webhook
+```
+
+Local Stripe CLI example:
+
+```bash
+stripe listen --forward-to http://127.0.0.1:62175/api/payments/stripe/webhook
+```
+
+Use the `whsec_...` printed by that running `stripe listen` process in
+`docker/.env.billing`, then restart `beegame-billing`.
+
+## Smoke Test
+
+After `docker compose` is healthy:
+
+1. Open the frontend and sign in.
+2. Open the account menu and select Credit Store.
+3. Confirm credit packs load from `beegame-billing`.
+4. Buy a Stripe test pack and return to BeeGame.
+5. Confirm the user's credit balance increases after the webhook is delivered.
+6. Generate or edit a project and confirm the runtime host can reserve and
+   settle credits through the billing backend.
+7. Restart `beegame-runtime` and `beegame-billing`, then confirm Credit Store
+   and credit balance still work.
 
 ## Reverse Proxy
 

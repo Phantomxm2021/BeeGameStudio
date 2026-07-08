@@ -26,6 +26,7 @@ COPY packages/agent-tools/package.json ./packages/agent-tools/package.json
 COPY packages/agent-workflow-server/package.json ./packages/agent-workflow-server/package.json
 COPY packages/agent-workflow/package.json ./packages/agent-workflow/package.json
 COPY packages/audio-capture-napi/package.json ./packages/audio-capture-napi/package.json
+COPY packages/beegame-billing-core/package.json ./packages/beegame-billing-core/package.json
 COPY packages/beegame-billing-server/package.json ./packages/beegame-billing-server/package.json
 COPY packages/builtin-tools/package.json ./packages/builtin-tools/package.json
 COPY packages/cloud-artifacts/package.json ./packages/cloud-artifacts/package.json

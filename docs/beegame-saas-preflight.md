@@ -60,7 +60,7 @@ Rules:
 
 ## Runtime Host Environment
 
-Trusted SaaS runtime or dedicated billing backend values:
+Dedicated billing backend values:
 
 ```env
 BEEGAME_BILLING_MODE=server
@@ -76,6 +76,21 @@ BEEGAME_STRIPE_SECRET_KEY=sk_live_...
 BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
 BEEGAME_STRIPE_PRICE_CREDITS=price_...=100
 BEEGAME_CREDIT_CONTROL_TOKEN=shared-runtime-to-billing-secret
+```
+
+Trusted SaaS runtime host values:
+
+```env
+BEEGAME_BILLING_MODE=remote
+BEEGAME_BILLING_API_BASE_URL=https://billing.your-domain.com
+BEEGAME_CREDIT_CONTROL_TOKEN=shared-runtime-to-billing-secret
+BEEGAME_SUPABASE_URL=https://your-project.supabase.co
+BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
+BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
+BEEGAME_DEPLOYMENT_STORAGE_BUCKET=beegame-deployments
+BEEGAME_DEPLOYMENT_STORAGE_PREFIX=deployments
+BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 ```
 
 Local client runtime values when the web UI and runtime host are packaged
@@ -94,7 +109,7 @@ Rules:
 
 - Normal user requests use the current user's Supabase access token and RLS/RPC.
 - Stripe webhook credit grants use the server-only Supabase service-role key
-  only inside `BEEGAME_BILLING_MODE=server`.
+  only inside the dedicated billing backend running `BEEGAME_BILLING_MODE=server`.
 - Trusted runtime hosts in `BEEGAME_BILLING_MODE=remote` must send
   `BEEGAME_CREDIT_CONTROL_TOKEN` to the billing backend for reserve, settle, and
   refund mutations. User-run local clients must not receive this token; they
@@ -129,6 +144,10 @@ The dedicated backend entrypoint is
 `packages/beegame-billing-server/src/index.ts`. Docker deployments should run
 the `beegame-billing` service from `docker/Dockerfile.billing` and keep its
 secret environment in `docker/.env.billing`.
+
+The dedicated billing package must not depend on the runtime host package.
+`packages/beegame-billing-server` owns its own auth resolver and Supabase
+billing repository; shared route logic lives in `packages/beegame-billing-core`.
 
 ## Stripe Credits
 
