@@ -13,7 +13,7 @@ import {
   type AgentWorkflowAppOptions,
 } from '../app'
 import { DEFAULT_LOCAL_USER_ID } from '../auth/user-context'
-import { listCreditLedger } from '../credit-store'
+import { listCreditLedger, reserveCredits } from '../credit-store'
 import type {
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -3918,6 +3918,100 @@ describe('beegame session routes', () => {
         phaseStatus: 'idle',
         usage: expect.objectContaining({ total_tokens: 15 }),
       }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('reconciles pending session credit refunds for the current user', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-pending-credit-'))
+    const projectDir = join(workspace, 'project-one')
+    const sessionId = 'beegame_pending_credit_refund'
+    const turnId = `${sessionId}-turn-1`
+    const transcriptPath = getTestTranscriptPath(workspace, projectDir, sessionId)
+    const app = createAgentWorkflowApp({
+      dashboardDataRoot: workspace,
+      defaultWorkspacePath: workspace,
+    })
+    try {
+      const reservation = reserveCredits(DEFAULT_LOCAL_USER_ID, {
+        dataDir: workspace,
+        credits: 8,
+        kind: 'edit_turn',
+        projectId: sessionId,
+      })
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const now = new Date().toISOString()
+      await writeFile(
+        transcriptPath,
+        [
+          {
+            id: 1,
+            sessionId,
+            type: 'session.started',
+            text: 'Created BeeGame session',
+            createdAt: now,
+          },
+          {
+            id: 2,
+            sessionId,
+            turnId,
+            type: 'turn.started',
+            text: 'Turn started',
+            createdAt: now,
+          },
+          {
+            id: 3,
+            sessionId,
+            turnId,
+            type: 'system.status',
+            text: 'Credit refund is pending',
+            payload: {
+              type: 'credit.refund_pending',
+              reservationId: reservation.id,
+              pendingCreditOperation: {
+                kind: 'refund',
+                reservation,
+              },
+            },
+            createdAt: now,
+          },
+        ].map(event => JSON.stringify(event)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: projectDir,
+          transcriptSessionId: sessionId,
+        }),
+      })
+      expect(sessionRes.status).toBe(200)
+
+      const reconcileRes = await app.request(
+        '/api/credits/reconcile-pending-session-operations',
+        { method: 'POST' },
+      )
+
+      expect(reconcileRes.status).toBe(200)
+      expect(await reconcileRes.json()).toEqual({
+        attempted: 1,
+        succeeded: [sessionId],
+        failed: [],
+      })
+      expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: workspace }))
+        .toContainEqual(expect.objectContaining({
+          kind: 'refund',
+          credits: 8,
+          reservationId: reservation.id,
+          metadata: expect.objectContaining({
+            reason: 'turn_finished_without_billable_usage',
+            retry: true,
+          }),
+        }))
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

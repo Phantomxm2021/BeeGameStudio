@@ -1,4 +1,4 @@
-import { History, Settings, UserCircle } from 'lucide-react';
+import { History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { UserAccountMenu, type UserAccountMenuItem } from './UserAccountMenu';
@@ -15,6 +15,7 @@ interface LandingActionsProps {
     creditBalance?: number;
     onToggleSettings: () => void;
     onToggleHistory: () => void;
+    onOpenCreditStore: () => void;
     onOpenProfile: () => void;
     onOpenLogin: () => void;
     onSignOut?: () => void;
@@ -32,6 +33,7 @@ export function LandingActions({
     creditBalance,
     onToggleSettings,
     onToggleHistory,
+    onOpenCreditStore,
     onOpenProfile,
     onOpenLogin,
     onSignOut,
@@ -47,6 +49,12 @@ export function LandingActions({
             label: profileLabel,
             icon: <UserCircle className="h-4 w-4" />,
             onClick: onOpenProfile,
+        },
+        {
+            key: 'credit-store',
+            label: 'Credit Store',
+            icon: <ShoppingCart className="h-4 w-4" />,
+            onClick: onOpenCreditStore,
         },
         {
             key: 'settings',

@@ -29,6 +29,10 @@ const {
     updateInvitation,
     updateMcpServer,
     updateModelConfig,
+    getCreditAuditLedger,
+    getProjectLifecycleOverview,
+    planProjectRetention,
+    runProjectRetention,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
     createInvitation: vi.fn(),
@@ -53,6 +57,10 @@ const {
     updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
+    getCreditAuditLedger: vi.fn(),
+    getProjectLifecycleOverview: vi.fn(),
+    planProjectRetention: vi.fn(),
+    runProjectRetention: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -98,6 +106,16 @@ vi.mock('../../../services/mcpServersApi', () => ({
     listMcpServers,
     testMcpServer,
     updateMcpServer,
+}));
+
+vi.mock('../../../services/creditsApi', () => ({
+    getCreditAuditLedger,
+}));
+
+vi.mock('../../../services/projectLifecycleApi', () => ({
+    getProjectLifecycleOverview,
+    planProjectRetention,
+    runProjectRetention,
 }));
 
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
@@ -174,6 +192,126 @@ describe('SettingsMenu model settings', () => {
         setBeeGameSubagentsEnabled.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
+        getCreditAuditLedger.mockReset();
+        getCreditAuditLedger.mockResolvedValue({
+            entries: [
+                {
+                    id: 'ledger_1',
+                    userId: 'customer-a',
+                    kind: 'reserve',
+                    credits: 5,
+                    projectId: 'project_1',
+                    reservationId: 'reservation_1',
+                    weightedTokens: 0,
+                    metadata: { taskType: 'edit_turn', phase: 'build' },
+                    createdAt: '2026-07-08T10:00:00.000Z',
+                },
+                {
+                    id: 'ledger_2',
+                    userId: 'customer-a',
+                    kind: 'settle',
+                    credits: 2,
+                    projectId: 'project_1',
+                    reservationId: 'reservation_1',
+                    weightedTokens: 12_000,
+                    metadata: { taskType: 'edit_turn', phase: 'build' },
+                    createdAt: '2026-07-08T10:01:00.000Z',
+                },
+            ],
+            summary: {
+                entriesCount: 2,
+                reservedCredits: 5,
+                settledCredits: 2,
+                refundedCredits: 3,
+                outstandingReservedCredits: 0,
+                weightedTokens: 12_000,
+            },
+        });
+        getProjectLifecycleOverview.mockReset();
+        getProjectLifecycleOverview.mockResolvedValue({
+            quota: {
+                limit: 2,
+                used: 1,
+                remaining: 1,
+            },
+            storage: {
+                supabaseStorageConfigured: true,
+            },
+            projects: [
+                {
+                    id: 'project_lifecycle_one',
+                    name: 'Lifecycle One',
+                    createdAt: 1720000000000,
+                    rootPath: '/srv/beegame/projects/lifecycle-one',
+                    lifecycle: {
+                        hasWorkspacePath: true,
+                        hasRuntimeSnapshot: true,
+                        phaseName: 'polish',
+                        updatedAt: 1720000001000,
+                    },
+                },
+            ],
+            recentDeletions: [
+                {
+                    projectId: 'project_deleted_one',
+                    deletedAt: '2026-07-08T10:00:00.000Z',
+                    cleanupOutcome: 'workspace_deleted',
+                    deletedWorkspacePath: '/srv/beegame/projects/deleted-one',
+                    storageCleanupOutcome: 'storage_prefix_cleanup_requested',
+                },
+            ],
+            recentRetentionRuns: [
+                {
+                    dryRun: false,
+                    ranAt: '2026-07-08T10:05:00.000Z',
+                    deploymentRecordsDeleted: 1,
+                    deploymentRecordsRetained: 6,
+                    deploymentRecordsPlannedForDeletion: 1,
+                    previewRecordsSkipped: 1,
+                    logRecordsSkipped: 1,
+                },
+            ],
+        });
+        planProjectRetention.mockReset();
+        planProjectRetention.mockResolvedValue({
+            dryRun: true,
+            summary: {
+                deploymentRecordsRetained: 6,
+                deploymentRecordsPlannedForDeletion: 1,
+                deploymentRecordsDeleted: 0,
+                deploymentArtifactsSkipped: 0,
+                previewRecordsSkipped: 1,
+                logRecordsSkipped: 1,
+            },
+            deploymentRecords: {
+                retained: [],
+                plannedForDeletion: [{ id: 'deploy_old', sessionId: 'session_1', status: 'succeeded', createdAt: '', updatedAt: '', reason: 'older_than_rollback_retention_window' }],
+                deleted: [],
+                skipped: [],
+            },
+            previewRecords: { skipped: [{ reason: 'local_preview_snapshots_are_in_memory_only' }] },
+            logs: { skipped: [{ reason: 'log_retention_requires_persisted_log_index' }] },
+        });
+        runProjectRetention.mockReset();
+        runProjectRetention.mockResolvedValue({
+            dryRun: false,
+            summary: {
+                deploymentRecordsRetained: 6,
+                deploymentRecordsPlannedForDeletion: 1,
+                deploymentRecordsDeleted: 1,
+                deploymentArtifactsSkipped: 0,
+                previewRecordsSkipped: 1,
+                logRecordsSkipped: 1,
+            },
+            deploymentRecords: {
+                retained: [],
+                plannedForDeletion: [{ id: 'deploy_old', sessionId: 'session_1', status: 'succeeded', createdAt: '', updatedAt: '', reason: 'older_than_rollback_retention_window' }],
+                deleted: [{ id: 'deploy_old', sessionId: 'session_1', status: 'succeeded', createdAt: '', updatedAt: '', reason: 'older_than_rollback_retention_window' }],
+                skipped: [],
+            },
+            previewRecords: { skipped: [{ reason: 'local_preview_snapshots_are_in_memory_only' }] },
+            logs: { skipped: [{ reason: 'log_retention_requires_persisted_log_index' }] },
+        });
     });
 
     it('renders the settings panel as a centered modal overlay', async () => {
@@ -253,6 +391,61 @@ describe('SettingsMenu model settings', () => {
         await expect(screen.findByText('内部测试名额')).resolves.toBeInTheDocument();
         expect(screen.getByText('邀请码 BEE-ALPHA')).toBeInTheDocument();
         expect(screen.getByText('已用 0 / 100')).toBeInTheDocument();
+    });
+
+    it('shows credit audit details only for audit readers', async () => {
+        const { unmount } = renderSettings({ canReadAudit: true });
+
+        await openPlatformSettingsTab('信用');
+
+        await waitFor(() => expect(screen.getAllByText('Credit audit')).toHaveLength(2));
+        expect(screen.getByText('Outstanding reserved')).toBeInTheDocument();
+        expect(screen.getByText('0 credits')).toBeInTheDocument();
+        expect(screen.getByText('Settled')).toBeInTheDocument();
+        expect(screen.getAllByText('2 credits').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('customer-a').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('project_1').length).toBeGreaterThan(0);
+        expect(getCreditAuditLedger).toHaveBeenCalledWith();
+
+        unmount();
+        getCreditAuditLedger.mockClear();
+        renderSettings({
+            canManageWorkspace: false,
+            canManageSecrets: false,
+            canManageRuntimeSettings: false,
+            canManageMcp: false,
+            canManageModelConfig: false,
+            canReadAudit: false,
+        });
+
+        expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '信用' })).not.toBeInTheDocument();
+        expect(getCreditAuditLedger).not.toHaveBeenCalled();
+    });
+
+    it('shows project lifecycle quota and cleanup details only for audit readers', async () => {
+        renderSettings({ canReadAudit: true });
+
+        await openPlatformSettingsTab('项目');
+
+        await waitFor(() => expect(getProjectLifecycleOverview).toHaveBeenCalledWith());
+        expect(screen.getAllByText('Project lifecycle').length).toBeGreaterThan(0);
+        expect(screen.getByText('1 / 2 projects')).toBeInTheDocument();
+        expect(screen.getByText('Lifecycle One')).toBeInTheDocument();
+        expect(screen.getByText('/srv/beegame/projects/lifecycle-one')).toBeInTheDocument();
+        expect(screen.getByText('project_deleted_one')).toBeInTheDocument();
+        expect(screen.getByText('workspace_deleted')).toBeInTheDocument();
+        expect(screen.getByText('Last retention run')).toBeInTheDocument();
+        expect(screen.getByText('Deleted 1 deployment records')).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('button', { name: 'Retention dry run' }));
+        await waitFor(() => expect(planProjectRetention).toHaveBeenCalledWith());
+        expect(screen.getByText('Dry run: 1 deployment records would be deleted.')).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('button', { name: 'Run retention' }));
+        await waitFor(() => expect(runProjectRetention).toHaveBeenCalledWith());
+        expect(screen.getByText('Retention run deleted 1 deployment records.')).toBeInTheDocument();
+        expect(getProjectLifecycleOverview).toHaveBeenCalledTimes(2);
     });
 
     it('hides privileged settings sections when the user lacks management permissions', () => {

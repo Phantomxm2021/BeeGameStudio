@@ -9,12 +9,17 @@ import {
   CREDIT_UNIT_WEIGHTED_TOKENS,
   getCreditEstimates,
   getDefaultFreeCredits,
+  summarizeCreditLedgerEntries,
   type CreditBalance,
+  type CreditAuditLedger,
+  type CreditGrant,
+  type CreditLedgerFilters,
   type CreditLedgerEntry,
   type CreditLedgerKind,
   type CreditLedgerSummary,
   type CreditReservation,
   type CreditSettlement,
+  type StaleCreditReservationExpiry,
 } from './credit-store'
 import type {
   McpServerConfig,
@@ -169,6 +174,17 @@ type SupabaseCreditMutationRow = {
   account: SupabaseCreditAccountRow
 }
 
+type SupabaseStaleCreditExpiryRow = {
+  expired_reservation_ids?: string[]
+  refunded_credits?: number
+  account: SupabaseCreditAccountRow
+}
+
+type SupabaseCreditGrantRow = {
+  granted_credits?: number
+  account: SupabaseCreditAccountRow
+}
+
 type SupabaseAuditEventRow = {
   id: string
   actor_id: string | null
@@ -238,6 +254,32 @@ export function createSupabaseDashboardStoreFromEnv(
   return new SupabaseDashboardStore({
     url,
     anonKey,
+    assetBucket: (
+      env.BEEGAME_SUPABASE_ASSET_BUCKET ??
+      env.SUPABASE_ASSET_BUCKET ??
+      ''
+    ).trim() || undefined,
+  })
+}
+
+export function createSupabasePaymentProviderGrantStoreFromEnv(
+  env: Env = process.env,
+): SupabaseDashboardStore | undefined {
+  const url = (
+    env.BEEGAME_SUPABASE_URL ??
+    env.SUPABASE_URL ??
+    env.VITE_SUPABASE_URL ??
+    ''
+  ).trim()
+  const serviceRoleKey = (
+    env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ??
+    env.SUPABASE_SERVICE_ROLE_KEY ??
+    ''
+  ).trim()
+  if (!url || !serviceRoleKey) return undefined
+  return new SupabaseDashboardStore({
+    url,
+    anonKey: serviceRoleKey,
     assetBucket: (
       env.BEEGAME_SUPABASE_ASSET_BUCKET ??
       env.SUPABASE_ASSET_BUCKET ??
@@ -537,6 +579,32 @@ export class SupabaseDashboardStore {
   }
 
   async deleteProject(ownerId: string, id: string): Promise<boolean> {
+    const deploymentStoragePrefixes = await this.listProjectDeploymentStoragePrefixes(
+      ownerId,
+      id,
+    )
+    await this.deleteStoragePrefixes(this.assetBucket, [
+      [
+        'projects',
+        safeStoragePathSegment(ownerId),
+        safeStoragePathSegment(id),
+      ].join('/'),
+    ])
+    for (const [bucket, prefixes] of deploymentStoragePrefixes) {
+      await this.deleteStoragePrefixes(bucket, prefixes)
+    }
+    await this.deleteWhere('beegame_assets', {
+      owner_id: ownerId,
+      project_id: id,
+    })
+    await this.deleteWhere('beegame_previews', {
+      owner_id: ownerId,
+      project_id: id,
+    })
+    await this.deleteWhere('beegame_deployments', {
+      owner_id: ownerId,
+      project_id: id,
+    })
     await this.deleteProjectSessions(ownerId, id)
     return this.deleteWhere('beegame_projects', {
       owner_id: ownerId,
@@ -680,11 +748,109 @@ export class SupabaseDashboardStore {
     }
   }
 
+  async expireStaleCreditReservations(
+    ownerId: string,
+    options: {
+      olderThan: Date
+      projectId?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Promise<StaleCreditReservationExpiry> {
+    const result = await this.rpc<SupabaseStaleCreditExpiryRow>(
+      'beegame_expire_stale_credit_reservations',
+      {
+        p_user_id: ownerId,
+        p_older_than: options.olderThan.toISOString(),
+        p_project_id: options.projectId ?? null,
+        p_metadata: options.metadata ?? { reason: 'stale_reservation_expired' },
+      },
+    )
+    return {
+      expiredReservations: Array.isArray(result.expired_reservation_ids)
+        ? result.expired_reservation_ids.filter(id => typeof id === 'string')
+        : [],
+      refundedCredits: normalizeNonNegativeInteger(result.refunded_credits),
+      balance: toCreditBalance(
+        ownerId,
+        normalizeCreditAccountRow(ownerId, result.account),
+      ),
+    }
+  }
+
+  async grantCredits(
+    ownerId: string,
+    options: {
+      credits: number
+      metadata?: Record<string, unknown>
+    },
+  ): Promise<CreditGrant> {
+    const credits = normalizePositiveInteger(options.credits)
+    const result = await this.rpc<SupabaseCreditGrantRow>(
+      'beegame_admin_grant_credits',
+      {
+        p_target_user_id: ownerId,
+        p_credits: credits,
+        p_metadata: options.metadata ?? { source: 'manual' },
+      },
+    )
+    return {
+      grantedCredits: normalizeNonNegativeInteger(result.granted_credits),
+      balance: toCreditBalance(
+        ownerId,
+        normalizeCreditAccountRow(ownerId, result.account),
+      ),
+    }
+  }
+
+  async grantPaymentProviderCredits(
+    ownerId: string,
+    options: {
+      credits: number
+      metadata?: Record<string, unknown>
+    },
+  ): Promise<CreditGrant> {
+    const credits = normalizePositiveInteger(options.credits)
+    const result = await this.rpc<SupabaseCreditGrantRow>(
+      'beegame_payment_provider_grant_credits',
+      {
+        p_target_user_id: ownerId,
+        p_credits: credits,
+        p_metadata: options.metadata ?? { source: 'payment_provider' },
+      },
+    )
+    return {
+      grantedCredits: normalizeNonNegativeInteger(result.granted_credits),
+      balance: toCreditBalance(
+        ownerId,
+        normalizeCreditAccountRow(ownerId, result.account),
+      ),
+    }
+  }
+
   async listCreditLedger(ownerId: string): Promise<CreditLedgerEntry[]> {
     const rows = await this.rest<SupabaseCreditLedgerRow[]>(
       `/rest/v1/beegame_credit_ledger?user_id=eq.${q(ownerId)}&select=*&order=created_at.asc&limit=100`,
     )
     return rows.map(rowToCreditLedgerEntry)
+  }
+
+  async listCreditAuditLedger(
+    filters: CreditLedgerFilters = {},
+  ): Promise<CreditAuditLedger> {
+    const userFilter = filters.userId ? `&user_id=eq.${q(filters.userId)}` : ''
+    const projectFilter = filters.projectId ? `&project_id=eq.${q(filters.projectId)}` : ''
+    const kindFilter = filters.kind ? `&kind=eq.${q(filters.kind)}` : ''
+    const reservationFilter = filters.reservationId
+      ? `&reservation_id=eq.${q(filters.reservationId)}`
+      : ''
+    const rows = await this.rest<SupabaseCreditLedgerRow[]>(
+      `/rest/v1/beegame_credit_ledger?select=*&order=created_at.asc${userFilter}${projectFilter}${kindFilter}${reservationFilter}&limit=500`,
+    )
+    const entries = rows.map(rowToCreditLedgerEntry)
+    return {
+      entries,
+      summary: summarizeCreditLedgerEntries(entries),
+    }
   }
 
   async summarizeCreditLedger(
@@ -1008,6 +1174,53 @@ export class SupabaseDashboardStore {
     return rows.length > 0
   }
 
+  private async listProjectDeploymentStoragePrefixes(
+    ownerId: string,
+    projectId: string,
+  ): Promise<Map<string, string[]>> {
+    const rows = await this.rest<Array<{ artifact_path: string | null }>>(
+      `/rest/v1/beegame_deployments?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&select=artifact_path`,
+    )
+    const byBucket = new Map<string, Set<string>>()
+    for (const row of rows) {
+      const parsed = parseSupabaseStorageUri(row.artifact_path)
+      if (!parsed) continue
+      const prefixes = byBucket.get(parsed.bucket) ?? new Set<string>()
+      prefixes.add(parsed.path)
+      byBucket.set(parsed.bucket, prefixes)
+    }
+    return new Map(
+      Array.from(byBucket.entries())
+        .map(([bucket, prefixes]) => [bucket, Array.from(prefixes)]),
+    )
+  }
+
+  private async deleteStoragePrefixes(
+    bucket: string,
+    prefixes: string[],
+  ): Promise<void> {
+    const uniquePrefixes = Array.from(new Set(prefixes.map(trimString).filter(Boolean)))
+    if (!uniquePrefixes.length) return
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          apikey: this.anonKey,
+          authorization: `Bearer ${this.authToken ?? this.anonKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ prefixes: uniquePrefixes }),
+      },
+    )
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(
+        `Supabase storage delete failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
+      )
+    }
+  }
+
   private async rest<T>(
     path: string,
     init: RequestInit = {},
@@ -1044,6 +1257,25 @@ function safeStoragePathSegment(value: string): string {
 function safeStorageFileName(value: string): string {
   const filename = value.trim().split(/[\\/]/).pop() || 'asset'
   return filename.replace(/[^A-Za-z0-9_.-]+/g, '_') || 'asset'
+}
+
+function parseSupabaseStorageUri(
+  value: string | null | undefined,
+): { bucket: string; path: string } | undefined {
+  const trimmed = trimString(value)
+  if (!trimmed) return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'supabase:') return undefined
+  const bucket = trimString(parsed.hostname)
+  let path = decodeURIComponent(parsed.pathname)
+  while (path.startsWith('/')) path = path.slice(1)
+  if (!bucket || !path) return undefined
+  return { bucket, path }
 }
 
 function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {

@@ -62,6 +62,45 @@ export type BeeGameCreditSummary = {
   weightedTokens: number;
 };
 
+export type BeeGameCreditAuditLedger = {
+  entries: BeeGameCreditLedgerEntry[];
+  summary: BeeGameCreditSummary;
+};
+
+export type BeeGameCreditAuditLedgerFilters = {
+  userId?: string;
+  projectId?: string;
+  kind?: BeeGameCreditLedgerEntry['kind'];
+  reservationId?: string;
+};
+
+export type BeeGameCreditGrant = {
+  grantedCredits: number;
+  balance: BeeGameCreditBalance;
+};
+
+export type BeeGameCreditGrantInput = {
+  userId: string;
+  credits: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type BeeGameStripeCreditPack = {
+  priceId: string;
+  credits: number;
+};
+
+export type BeeGameStripeCreditPacks = {
+  packs: BeeGameStripeCreditPack[];
+};
+
+export type BeeGameStripeCheckoutSession = {
+  id: string;
+  url: string;
+  priceId: string;
+  credits: number;
+};
+
 export const getCreditBalance = (): Promise<BeeGameCreditBalance> => (
   apiClient.get('/api/credits')
 );
@@ -82,3 +121,25 @@ export const getCreditSummary = (
   const params = projectId ? { projectId } : undefined;
   return apiClient.get('/api/credits/summary', { params });
 };
+
+export const getCreditAuditLedger = (
+  filters?: BeeGameCreditAuditLedgerFilters,
+): Promise<BeeGameCreditAuditLedger> => (
+  apiClient.get('/api/admin/credits/ledger', { params: filters })
+);
+
+export const grantCredits = (
+  input: BeeGameCreditGrantInput,
+): Promise<BeeGameCreditGrant> => (
+  apiClient.post('/api/admin/credits/grants', input)
+);
+
+export const getStripeCreditPacks = (): Promise<BeeGameStripeCreditPacks> => (
+  apiClient.get('/api/payments/stripe/credit-packs')
+);
+
+export const createStripeCheckoutSession = (
+  priceId: string,
+): Promise<BeeGameStripeCheckoutSession> => (
+  apiClient.post('/api/payments/stripe/checkout-session', { priceId })
+);

@@ -12,10 +12,23 @@ const { generateIntakeOptions } = vi.hoisted(() => ({
 const { runIdeaIntake } = vi.hoisted(() => ({
     runIdeaIntake: vi.fn(),
 }));
-const { getCreditBalance, getCreditLedger, getCreditQuote } = vi.hoisted(() => ({
+const {
+    createStripeCheckoutSession,
+    getCreditAuditLedger,
+    getCreditBalance,
+    getCreditLedger,
+    getCreditQuote,
+    getStripeCreditPacks,
+} = vi.hoisted(() => ({
+    createStripeCheckoutSession: vi.fn(),
+    getCreditAuditLedger: vi.fn(),
     getCreditBalance: vi.fn(),
     getCreditLedger: vi.fn(),
     getCreditQuote: vi.fn(),
+    getStripeCreditPacks: vi.fn(),
+}));
+const { getProjectLifecycleOverview } = vi.hoisted(() => ({
+    getProjectLifecycleOverview: vi.fn(),
 }));
 const { listModelConfigs } = vi.hoisted(() => ({
     listModelConfigs: vi.fn(),
@@ -156,9 +169,16 @@ vi.mock('../../services/modelConfigApi', () => ({
 }));
 
 vi.mock('../../services/creditsApi', () => ({
+    createStripeCheckoutSession,
+    getCreditAuditLedger,
     getCreditBalance,
     getCreditLedger,
     getCreditQuote,
+    getStripeCreditPacks,
+}));
+
+vi.mock('../../services/projectLifecycleApi', () => ({
+    getProjectLifecycleOverview,
 }));
 
 vi.mock('../../services/currentUserApi', () => ({
@@ -357,6 +377,45 @@ beforeEach(() => {
     });
     getCreditLedger.mockReset();
     getCreditLedger.mockResolvedValue([]);
+    getStripeCreditPacks.mockReset();
+    getStripeCreditPacks.mockResolvedValue({
+        packs: [
+            { priceId: 'price_beegame_500', credits: 500 },
+            { priceId: 'price_beegame_1200', credits: 1200 },
+        ],
+    });
+    createStripeCheckoutSession.mockReset();
+    createStripeCheckoutSession.mockResolvedValue({
+        id: 'cs_beegame_store',
+        url: 'https://checkout.stripe.com/c/pay/cs_beegame_store',
+        priceId: 'price_beegame_500',
+        credits: 500,
+    });
+    getCreditAuditLedger.mockReset();
+    getCreditAuditLedger.mockResolvedValue({
+        entries: [],
+        summary: {
+            entriesCount: 0,
+            reservedCredits: 0,
+            settledCredits: 0,
+            refundedCredits: 0,
+            outstandingReservedCredits: 0,
+            weightedTokens: 0,
+        },
+    });
+    getProjectLifecycleOverview.mockReset();
+    getProjectLifecycleOverview.mockResolvedValue({
+        quota: {
+            limit: 100,
+            used: 0,
+            remaining: 100,
+        },
+        storage: {
+            supabaseStorageConfigured: false,
+        },
+        projects: [],
+        recentDeletions: [],
+    });
     listModelConfigs.mockReset();
     listModelConfigs.mockResolvedValue([
         {
@@ -718,6 +777,40 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
     });
 
+    it('opens credit audit settings only when the owner has audit permission', async () => {
+        mockCurrentUser = {
+            id: 'owner-user',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete', 'audit.read'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
+        fireEvent.click(await screen.findByRole('tab', { name: '平台' }));
+        fireEvent.click(screen.getByRole('tab', { name: '信用' }));
+
+        await waitFor(() => expect(getCreditAuditLedger).toHaveBeenCalledWith());
+        expect(screen.getAllByText('Credit audit').length).toBeGreaterThan(0);
+    });
+
+    it('opens project lifecycle settings only when the owner has audit permission', async () => {
+        mockCurrentUser = {
+            id: 'owner-user',
+            role: 'owner',
+            permissions: ['project.create', 'project.delete', 'audit.read'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
+        fireEvent.click(await screen.findByRole('tab', { name: '平台' }));
+        fireEvent.click(screen.getByRole('tab', { name: '项目' }));
+
+        await waitFor(() => expect(getProjectLifecycleOverview).toHaveBeenCalledWith());
+        expect(screen.getAllByText('Project lifecycle').length).toBeGreaterThan(0);
+    });
+
     it('opens account actions from a circular signed-in user avatar', async () => {
         mockCurrentUser = {
             id: 'alice',
@@ -739,6 +832,32 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
+    });
+
+    it('opens the credit store from the user menu and starts Stripe checkout', async () => {
+        const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+        mockCurrentUser = {
+            id: 'alice',
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            role: 'developer',
+            permissions: ['project.create'],
+        };
+        renderLanding();
+
+        fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Credit Store' }));
+
+        expect(await screen.findByRole('dialog', { name: 'Credit Store' })).toBeInTheDocument();
+        await waitFor(() => expect(getStripeCreditPacks).toHaveBeenCalledWith());
+        expect(screen.getByText('500 credits')).toBeInTheDocument();
+        expect(screen.getByText('1,200 credits')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Buy 500 credits' }));
+
+        await waitFor(() => expect(createStripeCheckoutSession).toHaveBeenCalledWith('price_beegame_500'));
+        expect(openSpy).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_beegame_store', '_self');
+        openSpy.mockRestore();
     });
 
     it('does not display the raw user id as the signed-in nickname fallback', async () => {

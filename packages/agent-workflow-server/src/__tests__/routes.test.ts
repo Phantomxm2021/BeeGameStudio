@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHmac } from 'node:crypto'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
+import {
+  getCreditBalance,
+  reserveCredits,
+  settleCreditReservation,
+} from '../credit-store'
 
 describe('agent workflow server routes', () => {
   const testOwner = { id: 'owner-user', role: 'owner' } as const
@@ -266,6 +272,499 @@ describe('agent workflow server routes', () => {
         balanceCredits: 300,
       }))
     } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('reconciles stale credit reservations for the current user', async () => {
+    const dataDir = join(testRoot, 'users', 'owner-user')
+    const staleReservation = reserveCredits('owner-user', {
+      dataDir,
+      credits: 6,
+      kind: 'edit_turn',
+      projectId: 'project-a',
+      now: new Date('2026-07-08T08:00:00.000Z'),
+    })
+    reserveCredits('owner-user', {
+      dataDir,
+      credits: 4,
+      kind: 'edit_turn',
+      projectId: 'project-a',
+      now: new Date('2026-07-08T10:00:00.000Z'),
+    })
+
+    const res = await app.request('/api/credits/reconcile-stale-reservations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        olderThan: '2026-07-08T09:00:00.000Z',
+        projectId: 'project-a',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      expiredReservations: [staleReservation.id],
+      refundedCredits: 6,
+      balance: expect.objectContaining({
+        reservedCredits: 4,
+        balanceCredits: 296,
+      }),
+    })
+    expect(getCreditBalance('owner-user', { dataDir })).toEqual(expect.objectContaining({
+      reservedCredits: 4,
+      balanceCredits: 296,
+    }))
+  })
+
+  test('exposes permission-gated credit audit ledger details', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-audit-'))
+    try {
+      const authApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
+          if (header === 'Bearer developer-token') return { id: 'developer-user', role: 'developer' }
+          return undefined
+        },
+      })
+      const ownerADataDir = join(projectsRoot, 'users', 'owner-a')
+      const ownerBDataDir = join(projectsRoot, 'users', 'owner-b')
+      const ownerAReservation = reserveCredits('owner-a', {
+        dataDir: ownerADataDir,
+        credits: 5,
+        kind: 'edit_turn',
+        projectId: 'project-a',
+        metadata: { taskType: 'edit_turn', phase: 'build' },
+      })
+      settleCreditReservation('owner-a', {
+        dataDir: ownerADataDir,
+        reservationId: ownerAReservation.id,
+        weightedTokens: 12_000,
+        projectId: 'project-a',
+        metadata: { taskType: 'edit_turn', phase: 'build' },
+      })
+      reserveCredits('owner-b', {
+        dataDir: ownerBDataDir,
+        credits: 3,
+        kind: 'idea_intake',
+        projectId: 'project-b',
+        metadata: { taskType: 'idea_intake', phase: 'intake' },
+      })
+
+      const forbiddenRes = await authApp.request('/api/admin/credits/ledger', {
+        headers: { authorization: 'Bearer developer-token' },
+      })
+      expect(forbiddenRes.status).toBe(403)
+
+      const allRes = await authApp.request('/api/admin/credits/ledger', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(allRes.status).toBe(200)
+      const allLedger = await allRes.json()
+      expect(allLedger.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          userId: 'owner-a',
+          kind: 'reserve',
+          credits: 5,
+          projectId: 'project-a',
+          reservationId: ownerAReservation.id,
+          metadata: expect.objectContaining({ taskType: 'edit_turn', phase: 'build' }),
+        }),
+        expect.objectContaining({
+          userId: 'owner-a',
+          kind: 'settle',
+          credits: 2,
+          weightedTokens: 12_000,
+          projectId: 'project-a',
+          reservationId: ownerAReservation.id,
+        }),
+        expect.objectContaining({
+          userId: 'owner-a',
+          kind: 'refund',
+          credits: 3,
+          projectId: 'project-a',
+          reservationId: ownerAReservation.id,
+        }),
+        expect.objectContaining({
+          userId: 'owner-b',
+          kind: 'reserve',
+          credits: 3,
+          projectId: 'project-b',
+        }),
+      ]))
+      expect(allLedger.entries).toHaveLength(4)
+      expect(allLedger.summary).toEqual({
+        entriesCount: 4,
+        reservedCredits: 8,
+        settledCredits: 2,
+        refundedCredits: 3,
+        outstandingReservedCredits: 3,
+        weightedTokens: 12_000,
+      })
+
+      const filteredRes = await authApp.request('/api/admin/credits/ledger?userId=owner-a&kind=settle', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(filteredRes.status).toBe(200)
+      expect(await filteredRes.json()).toEqual({
+        entries: [
+          expect.objectContaining({
+            userId: 'owner-a',
+            kind: 'settle',
+            credits: 2,
+            reservationId: ownerAReservation.id,
+          }),
+        ],
+        summary: {
+          entriesCount: 1,
+          reservedCredits: 0,
+          settledCredits: 2,
+          refundedCredits: 0,
+          outstandingReservedCredits: 0,
+          weightedTokens: 12_000,
+        },
+      })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('grants credits through a permission-gated provider-neutral admin route', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-credit-grant-'))
+    try {
+      const authApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => {
+          const header = request.headers.get('authorization')
+          if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
+          if (header === 'Bearer developer-token') return { id: 'developer-user', role: 'developer' }
+          return undefined
+        },
+      })
+
+      const forbiddenRes = await authApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer developer-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 40,
+        }),
+      })
+      expect(forbiddenRes.status).toBe(403)
+
+      const grantRes = await authApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: 'customer-a',
+          credits: 40,
+          metadata: {
+            source: 'payment_provider',
+            provider: 'manual',
+            providerReference: 'manual-topup-3',
+          },
+        }),
+      })
+
+      expect(grantRes.status).toBe(200)
+      expect(await grantRes.json()).toEqual({
+        grantedCredits: 40,
+        balance: expect.objectContaining({
+          userId: 'customer-a',
+          includedCredits: 340,
+          balanceCredits: 340,
+        }),
+      })
+
+      const auditRes = await authApp.request('/api/admin/credits/ledger?userId=customer-a&kind=grant', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(auditRes.status).toBe(200)
+      expect(await auditRes.json()).toEqual({
+        entries: [
+          expect.objectContaining({
+            userId: 'customer-a',
+            kind: 'grant',
+            credits: 40,
+            metadata: expect.objectContaining({
+              source: 'payment_provider',
+              provider: 'manual',
+              providerReference: 'manual-topup-3',
+              grantedBy: 'owner-user',
+            }),
+          }),
+        ],
+        summary: {
+          entriesCount: 1,
+          reservedCredits: 0,
+          settledCredits: 0,
+          refundedCredits: 0,
+          outstandingReservedCredits: 0,
+          weightedTokens: 0,
+        },
+      })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('grants mapped credits from a signed Stripe checkout webhook idempotently', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-webhook-'))
+    const originalSecret = process.env.BEEGAME_STRIPE_WEBHOOK_SECRET
+    const originalMapping = process.env.BEEGAME_STRIPE_PRICE_CREDITS
+    try {
+      process.env.BEEGAME_STRIPE_WEBHOOK_SECRET = 'whsec_test_secret'
+      process.env.BEEGAME_STRIPE_PRICE_CREDITS = JSON.stringify({
+        price_beegame_100: 100,
+      })
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUserResolver: request => (
+          request.headers.get('authorization') === 'Bearer owner-token'
+            ? { id: 'owner-user', role: 'owner' }
+            : undefined
+        ),
+      })
+      const payload = JSON.stringify({
+        id: 'evt_beegame_checkout_1',
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: 'cs_beegame_1',
+            object: 'checkout.session',
+            client_reference_id: 'customer-a',
+            metadata: {
+              beeGameUserId: 'customer-a',
+              beeGamePriceId: 'price_beegame_100',
+            },
+            payment_status: 'paid',
+          },
+        },
+      })
+      const signature = signStripePayload(payload, 'whsec_test_secret')
+
+      const firstRes = await stripeApp.request('/api/payments/stripe/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'stripe-signature': signature,
+        },
+        body: payload,
+      })
+      expect(firstRes.status).toBe(200)
+      expect(await firstRes.json()).toEqual({
+        received: true,
+        processed: true,
+        eventId: 'evt_beegame_checkout_1',
+        grantedCredits: 100,
+      })
+
+      const replayRes = await stripeApp.request('/api/payments/stripe/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'stripe-signature': signature,
+        },
+        body: payload,
+      })
+      expect(replayRes.status).toBe(200)
+      expect(await replayRes.json()).toEqual({
+        received: true,
+        processed: false,
+        eventId: 'evt_beegame_checkout_1',
+        reason: 'duplicate_event',
+      })
+
+      const auditRes = await stripeApp.request('/api/admin/credits/ledger?userId=customer-a&kind=grant', {
+        headers: { authorization: 'Bearer owner-token' },
+      })
+      expect(auditRes.status).toBe(200)
+      const audit = await auditRes.json()
+      expect(audit.entries).toHaveLength(1)
+      expect(audit.entries[0]).toEqual(expect.objectContaining({
+        userId: 'customer-a',
+        kind: 'grant',
+        credits: 100,
+        metadata: expect.objectContaining({
+          source: 'payment_provider',
+          provider: 'stripe',
+          providerReference: 'evt_beegame_checkout_1',
+          stripeCheckoutSessionId: 'cs_beegame_1',
+          stripePriceId: 'price_beegame_100',
+        }),
+      }))
+    } finally {
+      if (originalSecret === undefined) {
+        delete process.env.BEEGAME_STRIPE_WEBHOOK_SECRET
+      } else {
+        process.env.BEEGAME_STRIPE_WEBHOOK_SECRET = originalSecret
+      }
+      if (originalMapping === undefined) {
+        delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      } else {
+        process.env.BEEGAME_STRIPE_PRICE_CREDITS = originalMapping
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('creates a Stripe checkout session only for mapped credit prices', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-checkout-'))
+    const originalSecretKey = process.env.BEEGAME_STRIPE_SECRET_KEY
+    const originalMapping = process.env.BEEGAME_STRIPE_PRICE_CREDITS
+    const originalFetch = globalThis.fetch
+    const stripeRequests: Array<{ url: string; body: string }> = []
+    try {
+      process.env.BEEGAME_STRIPE_SECRET_KEY = 'sk_test_checkout'
+      process.env.BEEGAME_STRIPE_PRICE_CREDITS = JSON.stringify({
+        price_beegame_500: '500',
+      })
+      globalThis.fetch = (async (input, init) => {
+        stripeRequests.push({
+          url: String(input),
+          body: String(init?.body ?? ''),
+        })
+        return Response.json({
+          id: 'cs_beegame_checkout',
+          url: 'https://checkout.stripe.com/c/pay/cs_beegame_checkout',
+        })
+      }) as typeof fetch
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'customer-a',
+          email: 'customer@example.com',
+          role: 'developer',
+        },
+      })
+      const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs')
+      expect(packsRes.status).toBe(200)
+      expect(await packsRes.json()).toEqual({
+        packs: [
+          {
+            priceId: 'price_beegame_500',
+            credits: 500,
+          },
+        ],
+      })
+
+      const res = await stripeApp.request('/api/payments/stripe/checkout-session', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'https://app.beegame.example',
+        },
+        body: JSON.stringify({ priceId: 'price_beegame_500' }),
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        id: 'cs_beegame_checkout',
+        url: 'https://checkout.stripe.com/c/pay/cs_beegame_checkout',
+        credits: 500,
+        priceId: 'price_beegame_500',
+      })
+      expect(stripeRequests).toHaveLength(1)
+      expect(stripeRequests[0].url).toBe('https://api.stripe.com/v1/checkout/sessions')
+      expect(stripeRequests[0].body).toContain('mode=payment')
+      expect(stripeRequests[0].body).toContain('line_items%5B0%5D%5Bprice%5D=price_beegame_500')
+      expect(stripeRequests[0].body).toContain('metadata%5BbeeGameUserId%5D=customer-a')
+      expect(stripeRequests[0].body).toContain('metadata%5BbeeGamePriceId%5D=price_beegame_500')
+      expect(stripeRequests[0].body).toContain('customer_email=customer%40example.com')
+
+      const invalidRes = await stripeApp.request('/api/payments/stripe/checkout-session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ priceId: 'price_not_mapped' }),
+      })
+      expect(invalidRes.status).toBe(400)
+      expect(await invalidRes.json()).toEqual({
+        error: 'Invalid request',
+        message: 'Stripe price is not available for BeeGame credits',
+      })
+    } finally {
+      if (originalSecretKey === undefined) {
+        delete process.env.BEEGAME_STRIPE_SECRET_KEY
+      } else {
+        process.env.BEEGAME_STRIPE_SECRET_KEY = originalSecretKey
+      }
+      if (originalMapping === undefined) {
+        delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      } else {
+        process.env.BEEGAME_STRIPE_PRICE_CREDITS = originalMapping
+      }
+      globalThis.fetch = originalFetch
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('lists Stripe credit packs from comma-separated env mapping', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-pack-mapping-'))
+    const originalMapping = process.env.BEEGAME_STRIPE_PRICE_CREDITS
+    try {
+      process.env.BEEGAME_STRIPE_PRICE_CREDITS = 'price_beegame_100=100,price_beegame_500:500'
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'customer-a',
+          role: 'developer',
+        },
+      })
+      const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs')
+      expect(packsRes.status).toBe(200)
+      expect(await packsRes.json()).toEqual({
+        packs: [
+          {
+            priceId: 'price_beegame_100',
+            credits: 100,
+          },
+          {
+            priceId: 'price_beegame_500',
+            credits: 500,
+          },
+        ],
+      })
+    } finally {
+      if (originalMapping === undefined) {
+        delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      } else {
+        process.env.BEEGAME_STRIPE_PRICE_CREDITS = originalMapping
+      }
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('returns a clear error for invalid Stripe credit pack env mapping', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-stripe-pack-invalid-'))
+    const originalMapping = process.env.BEEGAME_STRIPE_PRICE_CREDITS
+    try {
+      process.env.BEEGAME_STRIPE_PRICE_CREDITS = '{price_beegame_100:100}'
+      const stripeApp = createAgentWorkflowApp({
+        defaultWorkspacePath: projectsRoot,
+        currentUser: {
+          id: 'customer-a',
+          role: 'developer',
+        },
+      })
+      const packsRes = await stripeApp.request('/api/payments/stripe/credit-packs')
+      expect(packsRes.status).toBe(503)
+      expect(await packsRes.json()).toEqual({
+        error: 'Stripe credit packs failed',
+        message: 'BEEGAME_STRIPE_PRICE_CREDITS must be valid JSON when it starts with "{"',
+      })
+    } finally {
+      if (originalMapping === undefined) {
+        delete process.env.BEEGAME_STRIPE_PRICE_CREDITS
+      } else {
+        process.env.BEEGAME_STRIPE_PRICE_CREDITS = originalMapping
+      }
       await rm(projectsRoot, { recursive: true, force: true })
     }
   })
@@ -1159,6 +1658,293 @@ describe('agent workflow server routes', () => {
           },
         },
       ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects new BeeGame projects after the configured per-user quota', async () => {
+    const originalLimit = process.env.BEEGAME_MAX_PROJECTS_PER_USER
+    try {
+      process.env.BEEGAME_MAX_PROJECTS_PER_USER = '1'
+      const quotaApp = createAgentWorkflowApp({
+        defaultWorkspacePath: testRoot,
+        currentUser: testOwner,
+      })
+      const firstRes = await quotaApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_quota_one',
+          name: 'Quota One',
+          root_path: join(testRoot, 'quota-one'),
+          created_at: 1710000000000,
+        }),
+      })
+      expect(firstRes.status).toBe(200)
+
+      const updateRes = await quotaApp.request('/api/projects/project_quota_one', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Quota One Updated' }),
+      })
+      expect(updateRes.status).toBe(200)
+
+      const secondRes = await quotaApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_quota_two',
+          name: 'Quota Two',
+          root_path: join(testRoot, 'quota-two'),
+          created_at: 1710000001000,
+        }),
+      })
+      expect(secondRes.status).toBe(429)
+      expect(await secondRes.json()).toEqual(expect.objectContaining({
+        error: 'Project quota exceeded',
+        limit: 1,
+      }))
+    } finally {
+      if (originalLimit === undefined) {
+        delete process.env.BEEGAME_MAX_PROJECTS_PER_USER
+      } else {
+        process.env.BEEGAME_MAX_PROJECTS_PER_USER = originalLimit
+      }
+    }
+  })
+
+  test('returns project lifecycle admin overview only to audit readers', async () => {
+    const originalLimit = process.env.BEEGAME_MAX_PROJECTS_PER_USER
+    try {
+      process.env.BEEGAME_MAX_PROJECTS_PER_USER = '2'
+      const forbiddenApp = createAgentWorkflowApp({
+        defaultWorkspacePath: testRoot,
+        currentUser: {
+          id: 'viewer-user',
+          role: 'viewer',
+          permissions: ['project.read'],
+        },
+      })
+      const forbiddenRes = await forbiddenApp.request('/api/admin/projects/lifecycle')
+      expect(forbiddenRes.status).toBe(403)
+
+      const managedRoot = join(testRoot, 'lifecycle-project')
+      await mkdir(managedRoot, { recursive: true })
+      await writeFile(join(managedRoot, 'manifest.json'), '{}', 'utf8')
+      const managedRootRealpath = await realpath(managedRoot)
+      const lifecycleApp = createAgentWorkflowApp({
+        defaultWorkspacePath: testRoot,
+        currentUser: testOwner,
+      })
+      const createRes = await lifecycleApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_lifecycle_one',
+          name: 'Lifecycle One',
+          created_at: 1720000000000,
+          root_path: managedRoot,
+          runtime_snapshot: {
+            phase_name: 'polish',
+            updated_at: 1720000001000,
+          },
+        }),
+      })
+      expect(createRes.status).toBe(200)
+
+      const overviewRes = await lifecycleApp.request('/api/admin/projects/lifecycle')
+      expect(overviewRes.status).toBe(200)
+      await expect(overviewRes.json()).resolves.toEqual({
+        quota: {
+          limit: 2,
+          used: 1,
+          remaining: 1,
+        },
+        storage: {
+          supabaseStorageConfigured: false,
+        },
+        projects: [
+          {
+            id: 'project_lifecycle_one',
+            name: 'Lifecycle One',
+            createdAt: 1720000000000,
+            rootPath: managedRoot,
+            lifecycle: {
+              hasWorkspacePath: true,
+              hasRuntimeSnapshot: true,
+              phaseName: 'polish',
+              updatedAt: 1720000001000,
+            },
+          },
+        ],
+        recentDeletions: [],
+        recentRetentionRuns: [],
+      })
+
+      const deleteRes = await lifecycleApp.request('/api/projects/project_lifecycle_one', {
+        method: 'DELETE',
+      })
+      expect(deleteRes.status).toBe(200)
+      await expect(deleteRes.json()).resolves.toEqual({
+        deleted: true,
+        deletedWorkspacePath: managedRootRealpath,
+      })
+
+      const afterDeleteRes = await lifecycleApp.request('/api/admin/projects/lifecycle')
+      expect(afterDeleteRes.status).toBe(200)
+      const afterDelete = await afterDeleteRes.json()
+      expect(afterDelete.projects).toEqual([])
+      expect(afterDelete.quota).toEqual({
+        limit: 2,
+        used: 0,
+        remaining: 2,
+      })
+      expect(afterDelete.recentDeletions).toEqual([
+        expect.objectContaining({
+          projectId: 'project_lifecycle_one',
+          deletedWorkspacePath: managedRootRealpath,
+          cleanupOutcome: 'workspace_deleted',
+        }),
+      ])
+    } finally {
+      if (originalLimit === undefined) {
+        delete process.env.BEEGAME_MAX_PROJECTS_PER_USER
+      } else {
+        process.env.BEEGAME_MAX_PROJECTS_PER_USER = originalLimit
+      }
+    }
+  })
+
+  test('plans and runs deployment retention only for audit readers', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-retention-'))
+    try {
+      const forbiddenApp = createAgentWorkflowApp({
+        defaultWorkspacePath: workspace,
+        currentUser: {
+          id: 'viewer-user',
+          role: 'viewer',
+          permissions: ['project.read'],
+        },
+      })
+      const forbiddenRes = await forbiddenApp.request('/api/admin/projects/retention/plan')
+      expect(forbiddenRes.status).toBe(403)
+
+      const projectRoot = join(workspace, 'owner-user', 'retention-project')
+      await mkdir(projectRoot, { recursive: true })
+      await writeFile(
+        join(projectRoot, 'package.json'),
+        JSON.stringify({ scripts: { build: 'build-static' } }),
+        'utf8',
+      )
+      const retentionApp = createAgentWorkflowApp({
+        defaultWorkspacePath: workspace,
+        currentUser: testOwner,
+        deploymentRunner: async (_command, options) => {
+          const outputDir = join(options.cwd, 'dist')
+          await mkdir(outputDir, { recursive: true })
+          await writeFile(join(outputDir, 'index.html'), '<html>retained</html>', 'utf8')
+          return { exitCode: 0, stdout: 'built', stderr: '' }
+        },
+      })
+      const createRes = await retentionApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_retention_one',
+          name: 'Retention One',
+          created_at: 1720000000000,
+          root_path: projectRoot,
+        }),
+      })
+      expect(createRes.status).toBe(200)
+
+      for (let index = 0; index < 7; index += 1) {
+        const deployRes = await retentionApp.request('/api/projects/project_retention_one/deployments', {
+          method: 'POST',
+        })
+        expect(deployRes.status).toBe(200)
+      }
+
+      const planRes = await retentionApp.request('/api/admin/projects/retention/plan')
+      expect(planRes.status).toBe(200)
+      const plan = await planRes.json()
+      expect(plan.dryRun).toBe(true)
+      expect(plan.summary).toEqual(expect.objectContaining({
+        deploymentRecordsDeleted: 0,
+        deploymentRecordsRetained: 6,
+        deploymentRecordsPlannedForDeletion: 1,
+      }))
+      expect(plan.deploymentRecords.deleted).toHaveLength(0)
+      expect(plan.deploymentRecords.plannedForDeletion).toHaveLength(1)
+
+      const beforeRunRes = await retentionApp.request('/api/projects/project_retention_one/deployments')
+      expect(beforeRunRes.status).toBe(200)
+      expect(await beforeRunRes.json()).toHaveLength(7)
+
+      const runRes = await retentionApp.request('/api/admin/projects/retention/run', {
+        method: 'POST',
+      })
+      expect(runRes.status).toBe(200)
+      const run = await runRes.json()
+      expect(run.dryRun).toBe(false)
+      expect(run.summary).toEqual(expect.objectContaining({
+        deploymentRecordsDeleted: 1,
+        deploymentRecordsRetained: 6,
+        deploymentRecordsPlannedForDeletion: 1,
+      }))
+      expect(run.deploymentRecords.deleted).toHaveLength(1)
+
+      const afterRunRes = await retentionApp.request('/api/projects/project_retention_one/deployments')
+      expect(afterRunRes.status).toBe(200)
+      expect(await afterRunRes.json()).toHaveLength(6)
+
+      const lifecycleRes = await retentionApp.request('/api/admin/projects/lifecycle')
+      expect(lifecycleRes.status).toBe(200)
+      const lifecycle = await lifecycleRes.json()
+      expect(lifecycle.recentRetentionRuns).toEqual([
+        expect.objectContaining({
+          dryRun: false,
+          deploymentRecordsDeleted: 1,
+        }),
+      ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('deletes generated local BeeGame project workspace with project metadata', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-project-delete-'))
+    try {
+      const projectRoot = join(workspace, 'owner-user', 'generated-project')
+      await mkdir(projectRoot, { recursive: true })
+      await writeFile(join(projectRoot, 'index.html'), '<html></html>', 'utf8')
+      const projectRootRealpath = await realpath(projectRoot)
+      const cleanupApp = createAgentWorkflowApp({
+        defaultWorkspacePath: workspace,
+        currentUser: testOwner,
+      })
+      const createRes = await cleanupApp.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'project_delete_generated',
+          name: 'Delete Generated',
+          root_path: projectRoot,
+          created_at: 1710000000000,
+        }),
+      })
+      expect(createRes.status).toBe(200)
+
+      const deleteRes = await cleanupApp.request('/api/projects/project_delete_generated', {
+        method: 'DELETE',
+      })
+      expect(deleteRes.status).toBe(200)
+      expect(await deleteRes.json()).toEqual({
+        deleted: true,
+        deletedWorkspacePath: projectRootRealpath,
+      })
+      await expect(access(projectRoot)).rejects.toThrow()
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -2413,3 +3199,10 @@ describe('agent workflow server routes', () => {
     }
   })
 })
+
+function signStripePayload(payload: string, secret: string, timestamp = 1720000000): string {
+  const signature = createHmac('sha256', secret)
+    .update(`${timestamp}.${payload}`)
+    .digest('hex')
+  return `t=${timestamp},v1=${signature}`
+}

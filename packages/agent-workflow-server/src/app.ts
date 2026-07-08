@@ -31,6 +31,7 @@ import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisherFromEnv,
   type BeeGameDeploymentRecord,
+  type BeeGameDeploymentRetentionResult,
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
@@ -66,6 +67,7 @@ import {
 } from './audit-events-store'
 import {
   hasEnoughCreditsForIdeaIntake,
+  isCreditLedgerKind,
 } from './credit-store'
 import {
   getCreditTaskPolicy,
@@ -82,7 +84,10 @@ import {
   listBeeGamePermissions,
 } from './auth/user-context'
 import { createBeeGameAuthContext } from './auth/auth-context'
-import { DashboardRepository } from './dashboard-repository'
+import {
+  DashboardRepository,
+  ProjectQuotaExceededError,
+} from './dashboard-repository'
 import {
   assertSessionWorkspaceIsProjectDirectory,
   createManagedProjectWorkspacePath,
@@ -93,10 +98,18 @@ import {
 } from './local-runtime-service'
 import {
   createSupabaseDashboardStoreFromEnv,
+  createSupabasePaymentProviderGrantStoreFromEnv,
 } from './supabase-dashboard-store'
 import {
   createSupabaseRuntimeEnvClientFromEnv,
 } from './supabase-runtime-env-client'
+import {
+  StripeWebhookError,
+  createStripeCheckoutSession,
+  extractStripeCheckoutCreditGrant,
+  loadStripePriceCreditMap,
+  verifyStripeWebhookEvent,
+} from './stripe-payments'
 
 type JsonObject = Record<string, unknown>
 
@@ -201,6 +214,7 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const supabaseStore = createSupabaseDashboardStoreFromEnv()
+  const supabasePaymentProviderStore = createSupabasePaymentProviderGrantStoreFromEnv()
   const supabaseRuntimeEnvClient = supabaseStore
     ? createSupabaseRuntimeEnvClientFromEnv()
     : undefined
@@ -220,6 +234,7 @@ export function createAgentWorkflowApp(
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
+    supabasePaymentProviderStore,
     supabaseRuntimeEnvClient,
     getUserDataRoot: getCurrentUserDataRoot,
     modelConfigStore,
@@ -281,6 +296,73 @@ export function createAgentWorkflowApp(
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
   app.use('/api/*', cors())
+  app.post('/api/payments/stripe/webhook', async c => {
+    let stripeEventId = ''
+    let stripeEventType = ''
+    try {
+      const payload = await c.req.raw.text()
+      const event = verifyStripeWebhookEvent({
+        payload,
+        signatureHeader: c.req.raw.headers.get('stripe-signature'),
+        secret: process.env.BEEGAME_STRIPE_WEBHOOK_SECRET,
+      })
+      stripeEventId = event.id
+      stripeEventType = event.type
+      const grant = extractStripeCheckoutCreditGrant(event, loadStripePriceCreditMap())
+      if (!grant) {
+        return c.json({
+          received: true,
+          processed: false,
+          eventId: event.id,
+          reason: 'ignored_event',
+        })
+      }
+      const result = await dashboardRepository.grantPaymentProviderCredits(
+        c.req.raw,
+        grant.userId,
+        {
+          credits: grant.credits,
+          metadata: {
+            source: 'payment_provider',
+            provider: 'stripe',
+            providerReference: grant.eventId,
+            stripeCheckoutSessionId: grant.checkoutSessionId,
+            stripePriceId: grant.priceId,
+          },
+        },
+      )
+      if (result.grantedCredits <= 0) {
+        return c.json({
+          received: true,
+          processed: false,
+          eventId: grant.eventId,
+          reason: 'duplicate_event',
+        })
+      }
+      return c.json({
+        received: true,
+        processed: true,
+        eventId: grant.eventId,
+        grantedCredits: result.grantedCredits,
+      })
+    } catch (error) {
+      console.warn('[BeeGame] Stripe webhook failed:', {
+        eventId: stripeEventId || undefined,
+        eventType: stripeEventType || undefined,
+        message: toErrorMessage(error),
+      })
+      if (error instanceof StripeWebhookError) {
+        return c.json({
+          error: 'Stripe webhook failed',
+          message: error.message,
+        }, error.status as 400 | 503)
+      }
+      return c.json({
+        error: 'Stripe webhook failed',
+        message: toErrorMessage(error),
+      }, 400)
+    }
+  })
   app.use('/api/*', async (c, next) => {
     if (options.currentUser) {
       await next()
@@ -297,6 +379,72 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/health', c => c.json({ status: 'ok' }))
+
+  app.get('/api/payments/stripe/credit-packs', c => {
+    try {
+      const priceCredits = loadStripePriceCreditMap()
+      return c.json({
+        packs: Object.entries(priceCredits)
+          .map(([priceId, credits]) => ({ priceId, credits }))
+          .sort((left, right) => left.credits - right.credits),
+      })
+    } catch (error) {
+      if (error instanceof StripeWebhookError) {
+        return c.json({
+          error: 'Stripe credit packs failed',
+          message: error.message,
+        }, error.status as 400 | 503)
+      }
+      return c.json({
+        error: 'Stripe credit packs failed',
+        message: toErrorMessage(error),
+      }, 400)
+    }
+  })
+
+  app.post('/api/payments/stripe/checkout-session', async c => {
+    const user = getCurrentUser(c.req.raw)
+    try {
+      const body = await readJson(c.req.raw)
+      const priceId = isObject(body) && typeof body.priceId === 'string'
+        ? body.priceId.trim()
+        : ''
+      const priceCredits = loadStripePriceCreditMap()
+      const credits = priceCredits[priceId]
+      if (!priceId || !credits) {
+        return c.json({
+          error: 'Invalid request',
+          message: 'Stripe price is not available for BeeGame credits',
+        }, 400)
+      }
+      const origin = getRequestOrigin(c.req.raw)
+      const session = await createStripeCheckoutSession({
+        secretKey: process.env.BEEGAME_STRIPE_SECRET_KEY,
+        priceId,
+        userId: user.id,
+        ...(user.email ? { userEmail: user.email } : {}),
+        credits,
+        successUrl: `${origin}/?payment=success`,
+        cancelUrl: `${origin}/?payment=cancelled`,
+      })
+      return c.json({
+        ...session,
+        credits,
+        priceId,
+      })
+    } catch (error) {
+      if (error instanceof StripeWebhookError) {
+        return c.json({
+          error: 'Stripe checkout failed',
+          message: error.message,
+        }, error.status as 400 | 503)
+      }
+      return c.json({
+        error: 'Stripe checkout failed',
+        message: toErrorMessage(error),
+      }, 400)
+    }
+  })
 
   app.get('/api/current-user', c => {
     const user = options.currentUser ?? authContext.getCurrentUser(c.req.raw)
@@ -339,6 +487,98 @@ export function createAgentWorkflowApp(
     return c.json(await dashboardRepository.listAuditEvents(c.req.raw, user))
   })
 
+  app.get('/api/admin/projects/lifecycle', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
+    if (forbidden) return c.json(forbidden, 403)
+    return c.json(await dashboardRepository.getProjectLifecycleOverview(c.req.raw, user))
+  })
+
+  app.get('/api/admin/projects/retention/plan', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
+    if (forbidden) return c.json(forbidden, 403)
+    return c.json(toProjectRetentionResponse(
+      await beeGameDeployments.applyRetention({ dryRun: true }),
+    ))
+  })
+
+  app.post('/api/admin/projects/retention/run', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const result = toProjectRetentionResponse(
+      await beeGameDeployments.applyRetention({ dryRun: false }),
+    )
+    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+      actorId: user.id,
+      action: 'project.retention_run',
+      targetType: 'project_retention',
+      targetId: 'local-deployments',
+      metadata: {
+        dryRun: result.dryRun,
+        ...result.summary,
+      },
+    })
+    return c.json(result)
+  })
+
+  app.get('/api/admin/credits/ledger', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const kind = c.req.query('kind')?.trim()
+    if (kind && !isCreditLedgerKind(kind)) {
+      return c.json({
+        error: 'Invalid request',
+        message: 'kind must be one of estimate, reserve, settle, grant, refund.',
+      }, 400)
+    }
+    const ledgerKind = kind && isCreditLedgerKind(kind) ? kind : undefined
+    const userId = c.req.query('userId')?.trim()
+    const projectId = c.req.query('projectId')?.trim()
+    const reservationId = c.req.query('reservationId')?.trim()
+    return c.json(await dashboardRepository.listCreditAuditLedger(c.req.raw, user, {
+      ...(userId ? { userId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(ledgerKind ? { kind: ledgerKind } : {}),
+      ...(reservationId ? { reservationId } : {}),
+    }))
+  })
+
+  app.post('/api/admin/credits/grants', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'audit.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const body = await readJson(c.req.raw)
+    const targetUserId = isObject(body) && typeof body.userId === 'string'
+      ? body.userId.trim()
+      : ''
+    const credits = isObject(body) && typeof body.credits === 'number'
+      ? Math.floor(body.credits)
+      : 0
+    if (!targetUserId || credits <= 0) {
+      return c.json({
+        error: 'Invalid request',
+        message: 'userId and positive credits are required.',
+      }, 400)
+    }
+    const metadata = isObject(body) && isObject(body.metadata)
+      ? body.metadata
+      : {}
+    return c.json(await dashboardRepository.grantCredits(
+      c.req.raw,
+      targetUserId,
+      {
+        credits,
+        metadata: {
+          ...metadata,
+          grantedBy: user.id,
+        },
+      },
+    ))
+  })
+
   app.get('/api/credits', async c => {
     const user = getCurrentUser(c.req.raw)
     return c.json(await dashboardRepository.getCreditBalance(c.req.raw, user))
@@ -356,6 +596,45 @@ export function createAgentWorkflowApp(
       c.req.raw,
       user,
       projectId || undefined,
+    ))
+  })
+
+  app.post('/api/credits/reconcile-stale-reservations', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const body = await readJson(c.req.raw)
+    const olderThanValue = isObject(body) ? body.olderThan : undefined
+    if (typeof olderThanValue !== 'string') {
+      return c.json({
+        error: 'Invalid request',
+        message: 'olderThan must be an ISO timestamp.',
+      }, 400)
+    }
+    const olderThan = new Date(olderThanValue)
+    if (!Number.isFinite(olderThan.getTime())) {
+      return c.json({
+        error: 'Invalid request',
+        message: 'olderThan must be an ISO timestamp.',
+      }, 400)
+    }
+    const projectId = isObject(body) && typeof body.projectId === 'string'
+      ? body.projectId.trim()
+      : ''
+    return c.json(await dashboardRepository.expireStaleCreditReservations(
+      c.req.raw,
+      user,
+      {
+        olderThan,
+        ...(projectId ? { projectId } : {}),
+        metadata: { reason: 'stale_reservation_expired' },
+      },
+    ))
+  })
+
+  app.post('/api/credits/reconcile-pending-session-operations', async c => {
+    const user = getCurrentUser(c.req.raw)
+    return c.json(await beeGameSessions.retryPendingCreditOperations(
+      user.id,
+      getBearerToken(c.req.raw),
     ))
   })
 
@@ -728,6 +1007,13 @@ export function createAgentWorkflowApp(
         toProjectMetadata(body),
       ))
     } catch (err) {
+      if (err instanceof ProjectQuotaExceededError) {
+        return c.json({
+          error: err.message,
+          limit: err.limit,
+          projectCount: err.projectCount,
+        }, 429)
+      }
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1201,11 +1487,25 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const project = await getOwnedProjectMetadata(
+      c.req.raw,
+      user,
+      c.req.param('id'),
+      dashboardRepository,
+    )
     const deleted = await dashboardRepository.deleteProject(
       c.req.raw,
       user,
       c.req.param('id'),
     )
+    const deletedWorkspacePath = deleted && project?.root_path
+      ? await deleteWorkspaceDirectoryIfSafe(project.root_path, dashboardDataRoot)
+      : undefined
+    const cleanupOutcome = deletedWorkspacePath
+      ? 'workspace_deleted'
+      : project?.root_path
+        ? 'workspace_retained'
+        : 'metadata_deleted'
     if (deleted) {
       await appendAuditEventBestEffort('project.deleted', () =>
         dashboardRepository.appendAuditEvent(c.req.raw, user, {
@@ -1213,10 +1513,20 @@ export function createAgentWorkflowApp(
           action: 'project.deleted',
           targetType: 'project',
           targetId: c.req.param('id'),
+          metadata: {
+            cleanupOutcome,
+            storageCleanupOutcome: dashboardRepository.hasSupabaseStorage()
+              ? 'storage_prefix_cleanup_requested'
+              : 'not_configured',
+            ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
+          },
         }),
       )
     }
-    return c.json({ deleted })
+    return c.json({
+      deleted,
+      ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
+    })
   })
 
   const runBeeGameIntake = async (
@@ -1620,6 +1930,47 @@ function requirePermission(
   return hasBeeGamePermission(user, permission)
     ? undefined
     : { error: 'Forbidden' }
+}
+
+function toProjectRetentionResponse(result: BeeGameDeploymentRetentionResult) {
+  return {
+    dryRun: result.dryRun,
+    summary: {
+      deploymentRecordsRetained: result.retained.length,
+      deploymentRecordsPlannedForDeletion: result.plannedForDeletion.length,
+      deploymentRecordsDeleted: result.deleted.length,
+      deploymentArtifactsSkipped: result.skipped.length,
+      previewRecordsSkipped: 1,
+      logRecordsSkipped: 1,
+    },
+    deploymentRecords: {
+      retained: result.retained,
+      plannedForDeletion: result.plannedForDeletion,
+      deleted: result.deleted,
+      skipped: result.skipped,
+    },
+    previewRecords: {
+      skipped: [
+        {
+          reason: 'local_preview_snapshots_are_in_memory_only',
+        },
+      ],
+    },
+    logs: {
+      skipped: [
+        {
+          reason: 'log_retention_requires_persisted_log_index',
+        },
+      ],
+    },
+  }
+}
+
+function getRequestOrigin(request: Request): string {
+  const origin = request.headers.get('origin')?.trim()
+  if (origin) return origin.replace(/\/+$/, '')
+  const url = new URL(request.url)
+  return `${url.protocol}//${url.host}`
 }
 
 function requireBeeGameSessionOwner(

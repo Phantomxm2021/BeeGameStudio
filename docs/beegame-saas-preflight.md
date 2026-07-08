@@ -36,6 +36,8 @@ Use this checklist before promoting a BeeGame deployment to production.
 - Verify project asset upload, manifest persistence, and delete.
 - Verify static Web deployment upload and public URL access.
 - Keep generated local workspace files out of Supabase unless they are durable product metadata or user assets.
+- Review `docs/beegame-project-lifecycle.md` for project quota, backup, restore,
+  deletion, and retention operations.
 
 ## Frontend Environment
 
@@ -63,21 +65,82 @@ Required production values:
 ```env
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
 BEEGAME_DEPLOYMENT_STORAGE_BUCKET=beegame-deployments
 BEEGAME_DEPLOYMENT_STORAGE_PREFIX=deployments
 BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
+BEEGAME_STRIPE_SECRET_KEY=sk_live_...
+BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
+BEEGAME_STRIPE_PRICE_CREDITS=price_...=100
 ```
 
 Rules:
 
-- The runtime host uses the current user's Supabase access token and RLS/RPC.
-- The runtime host must not use Supabase service-role credentials.
-- The local dev launcher filters known Supabase service-role variables before spawning the runtime host.
+- Normal user requests use the current user's Supabase access token and RLS/RPC.
+- Stripe webhook credit grants use the server-only Supabase service-role key after
+  the runtime host verifies the Stripe signature.
+- Never expose `BEEGAME_SUPABASE_SERVICE_ROLE_KEY` to frontend builds or generated
+  game runtimes.
 - The workspace root is a platform deployment setting, not a normal user setting.
 - Preview ports must not conflict with the frontend, runtime host, or reverse proxy.
 - Generated projects should live outside the source repository.
+
+## Stripe Credits
+
+BeeGame creates Stripe Checkout Sessions from the signed-in user store:
+
+```text
+GET  https://runtime.your-domain.com/api/payments/stripe/credit-packs
+POST https://runtime.your-domain.com/api/payments/stripe/checkout-session
+```
+
+The user-facing entry is the account menu `Credit Store`, not Settings.
+Settings > Platform > Credit remains an operator audit view.
+
+Credit grants are completed from Stripe Checkout webhooks at:
+
+```text
+POST https://runtime.your-domain.com/api/payments/stripe/webhook
+```
+
+Configure the Stripe endpoint to send `checkout.session.completed` events. The
+Checkout Session created by BeeGame includes:
+
+- `metadata.beeGameUserId`: BeeGame/Supabase account UUID to receive credits.
+- `metadata.beeGamePriceId`: Stripe Price ID to map to credits.
+- `metadata.beeGameCredits`: mapped BeeGame credit amount for operator audit.
+
+Runtime host variables:
+
+```env
+BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+BEEGAME_STRIPE_SECRET_KEY=sk_live_...
+BEEGAME_STRIPE_WEBHOOK_SECRET=whsec_...
+BEEGAME_STRIPE_PRICE_CREDITS=price_123=100,price_456=500
+```
+
+`BEEGAME_STRIPE_PRICE_CREDITS` also accepts strict JSON object syntax, for
+example `{"price_123":100,"price_456":500}`.
+
+When using `stripe listen` for local testing, use the `whsec_...` printed by
+that running CLI process and restart the runtime host after updating
+`BEEGAME_STRIPE_WEBHOOK_SECRET`.
+
+The runtime host verifies the Stripe signature before calling Supabase.
+Supabase then makes duplicate webhook deliveries idempotent by
+`providerReference`.
+
+Manual production smoke test:
+
+1. Sign in as a normal user.
+2. Open the account menu and click `Credit Store`.
+3. Confirm the packs match `BEEGAME_STRIPE_PRICE_CREDITS`.
+4. Buy a small test pack through Stripe Checkout.
+5. Return to BeeGame and confirm the credit balance increases.
+6. Open Settings > Platform > Credit as an audit-capable owner and confirm a
+   `grant` ledger entry with Stripe metadata.
 
 ## Settings Boundary
 

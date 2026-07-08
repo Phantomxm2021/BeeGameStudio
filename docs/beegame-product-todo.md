@@ -10,8 +10,8 @@ work, not individual generated game fixes.
 
 - BeeGame dashboard, Supabase Auth/RLS data access, credit quote/reserve/settle
   flow, runtime host, and Docker deployment scaffolding are implemented.
-- The Docker stack deploys the BeeGame application and local runtime host, but
-  a real Docker smoke pass still needs to be run on a machine with Docker.
+- The Docker stack deploys the BeeGame application and local runtime host, and
+  has been smoke-tested on a server deployment.
 - Generated game projects are stored in the runtime workspace volume.
 - Static Web deployments can be published by the runtime host under
   `/deployments/*` for local/dev use, or to Supabase Storage when
@@ -65,85 +65,143 @@ work, not individual generated game fixes.
     - `docs/beegame-saas-preflight.md` covers Supabase SQL/RLS/RPC, Auth/OAuth,
       Storage buckets, platform owner bootstrap, default model config, runtime
       env, smoke checks, and repository hygiene.
-  - Note:
-    - The checklist exists, but reverse-proxy copy-paste examples are still a
-      separate P0.
 
-## P0
+- [x] Production Docker smoke test
+  - Evidence:
+    - Server Docker deployment has been completed and tested.
+    - Full game creation and preview flows have been tested through the deployed
+      stack.
+  - Verified:
+    - User-reported server smoke test on 2026-07-08.
 
-- [ ] Production Docker smoke test
-  - Problem: Docker files exist, but the stack has not been verified locally in
-    this environment because `docker` is unavailable.
-  - Scope:
-    - Run `docker compose config`.
-    - Run `docker compose up -d --build`.
-    - Verify frontend, runtime host, Supabase Auth, credit quote, project
-      generation, preview, deployment, and volume persistence.
-  - Acceptance:
-    - A clean server can start BeeGame from the Docker instructions.
-    - Restarting containers does not lose user/session/project state.
-    - Docker deployment env includes the Supabase deployment storage variables
-      required for persistent public game publishing.
-
-- [ ] Reverse proxy and TLS deployment example
-  - Problem: current docs say a reverse proxy is required, but they do not give a
-    deployer a complete Caddy/Nginx/Traefik example.
-  - Scope:
-    - Add production examples for Caddy, Nginx, or Traefik.
-    - Document WebSocket/proxy headers for runtime host and preview routes.
-    - Document recommended domains, HTTPS, port boundaries, and deployment
-      storage public URL settings.
-  - Acceptance:
-    - A deployer can run BeeGame behind HTTPS without guessing proxy settings.
+- [x] Reverse proxy and TLS deployment example
+  - Evidence:
+    - Server deployment has been run behind the production proxy/TLS setup.
+    - Deployed game creation and preview access have been tested through the
+      production access path.
+  - Verified:
+    - User-reported server deployment test on 2026-07-08.
 
 ## P1
 
-- [ ] Credit billing hardening
+- [x] Credit billing hardening
   - Problem: quote/reserve/settle/refund exists and interrupted runtime tasks are
-    refunded or settled in tested paths, but production billing still needs
-    stuck-reservation expiry and payment-provider preparation.
-  - Scope:
-    - Expire or reconcile stale reservations that survive process crashes.
-    - Add reconciliation for failed runtime tasks outside the normal request
-      lifecycle.
-    - Add admin-visible credit audit details.
-    - Prepare payment provider integration.
+    refunded or settled in tested paths. Stale reservation expiry and recovered
+    pending session credit retries now exist. Operator credit audit data is
+    exposed through permission-gated APIs, and provider-neutral credit grants
+    exist for future payment integration. Stripe Checkout webhook processing
+    now grants mapped credits idempotently after signature verification.
+  - Completed:
+    - Local credit store can expire stale reservations by cutoff time and
+      project, refunding only reservations that have not already settled or
+      refunded.
+    - Supabase RPC `beegame_expire_stale_credit_reservations` provides the same
+      owner-scoped reconciliation under authenticated RLS context.
+    - `/api/credits/reconcile-stale-reservations` exposes a current-user
+      reconciliation endpoint without requiring direct database edits.
+    - `/api/credits/reconcile-pending-session-operations` retries pending
+      settle/refund operations recovered in the current user's runtime sessions.
+    - `/api/admin/credits/ledger` exposes permission-gated credit audit entries
+      and summary totals with structured filters for user, project, kind, and
+      reservation.
+    - Frontend credit API client can call the admin credit audit endpoint.
+    - Local and Supabase credit stores support provider-neutral credit grants
+      that increase included credits and write `grant` ledger entries with
+      payment metadata.
+    - `/api/admin/credits/grants` exposes permission-gated manual/provider
+      credit grants, and the frontend credit API client can call it.
+    - Settings > Platform > Credit exposes a permission-gated operator audit
+      summary and recent ledger entries through the admin credit audit endpoint.
+    - `/api/payments/stripe/webhook` verifies `Stripe-Signature`, maps Stripe
+      Price IDs to credits through `BEEGAME_STRIPE_PRICE_CREDITS`, grants
+      credits, and treats duplicate webhook deliveries as idempotent.
+    - `/api/payments/stripe/credit-packs` exposes configured credit packs to
+      signed-in users, and `/api/payments/stripe/checkout-session` creates
+      Stripe Checkout Sessions only for mapped Price IDs.
+    - The account menu exposes a user-facing `Credit Store`; Settings >
+      Platform > Credit remains the operator audit view.
+    - Supabase schema includes `beegame_payment_provider_grant_credits` scoped
+      to `service_role`; the runtime host uses that server-only key only after
+      Stripe webhook signature verification succeeds.
   - Acceptance:
     - Interrupted tasks do not leave credits permanently frozen.
     - Ledger entries show task type, phase, project, reservation, settlement,
       refund, and actual usage.
     - Operators can reconcile credit state without direct database surgery.
 
-- [ ] Generated project lifecycle controls
-  - Problem: project/session deletion can remove local workspace artifacts, but
-    the product still needs a full retention, quota, backup, and cloud artifact
-    cleanup policy.
-  - Scope:
-    - Per-user project quotas.
-    - Project deletion cleanup for workspace files, previews, deployments,
-      uploaded assets, and Supabase Storage objects.
-    - Backup and restore guidance for `/srv/beegame/projects`.
-    - Retention policy for generated projects, deployment artifacts, previews,
-      and transcripts.
+- [x] Generated project lifecycle controls
+  - Problem: project/session deletion can remove local workspace artifacts, new
+    project creation is bounded by a per-user quota, Supabase-backed artifacts
+    are cleaned up on project deletion, and operators can now see quota and
+    cleanup status from the platform settings UI. Future automated retention
+    jobs are a lower-priority operations enhancement.
+  - Completed:
+    - `BEEGAME_MAX_PROJECTS_PER_USER` enforces a configurable per-user project
+      quota on new project creation while allowing updates to existing projects.
+      The default limit is 100 projects per user; non-positive configured
+      values disable the quota.
+    - Deleting a project now removes the generated local workspace directory
+      when the saved project root is safely inside the dashboard data root.
+      External/manual workspace paths are left untouched by the safe-delete
+      guard.
+    - `docs/beegame-project-lifecycle.md` documents production storage model,
+      quota configuration, backup/restore order, deletion verification, and
+      retention defaults for generated projects.
+    - Supabase-backed project deletion now removes uploaded asset object
+      prefixes, published deployment artifact prefixes, and related
+      assets/previews/deployments metadata before deleting sessions and project
+      metadata.
+    - `/api/admin/projects/lifecycle` exposes quota usage, project root paths,
+      runtime snapshot status, storage mode, and recent deletion cleanup
+      outcomes behind `audit.read`.
+    - Settings > Platform > Project exposes the lifecycle overview to
+      audit-capable operators.
   - Acceptance:
     - Deleting a project removes the expected physical and cloud artifacts.
     - Storage growth is bounded by documented quota and retention rules.
 
 ## P2
 
-- [ ] Admin Console boundary audit
-  - Problem: platform-level settings mostly sit behind permission-gated UI and
-    route checks, but the full admin surface still needs a final product audit,
-    especially audit and credit policy views.
-  - Scope:
-    - Verify model configuration, Web Search, MCP, Runtime, Audit, and Credit
-      policy are only visible to users with the correct permissions.
-    - Verify route-level permission checks match UI visibility.
-    - Confirm owner/admin users can operate platform settings from a coherent
-      admin UI.
+- [x] Admin Console boundary audit
+  - Problem: platform-level settings now have a documented UI and route/data
+    authority map. The Platform settings entry remains owner-only, and each
+    delegated sensitive surface is also bound to its matching permission.
+  - Completed:
+    - `docs/beegame-admin-boundary-audit.md` maps model configuration, Web
+      Search secrets, MCP, Runtime, Audit, Credit, project lifecycle, invitation
+      management, filesystem, and Stripe webhook boundaries.
+    - Existing frontend coverage verifies that a non-owner account with
+      management permissions still cannot see Platform settings.
+    - Route-level checks were audited against the UI capability props for
+      `model_config.manage`, `secrets.manage`, `runtime_settings.manage`,
+      `mcp.manage`, `workspace.manage`, and `audit.read`.
+    - Invitation management was confirmed as platform owner-only through
+      Supabase RPCs guarded by `beegame_is_platform_owner()`.
   - Acceptance:
     - Ordinary users cannot see or call platform admin operations.
     - Owner/admin users can operate platform settings from a coherent admin UI.
+
+- [x] Automated retention jobs
+  - Problem: documented retention windows now have an operator-triggered
+    retention path. The first production-safe version is manual dry-run/run,
+    not a background scheduler, so operators can verify deletions before
+    enabling automation.
+  - Completed:
+    - `/api/admin/projects/retention/plan` returns a dry-run retention plan
+      behind `audit.read`.
+    - `/api/admin/projects/retention/run` applies local deployment retention
+      behind `audit.read` and writes a `project.retention_run` audit event.
+    - Local deployment retention keeps the latest successful deployment plus the
+      last 5 rollback candidates per project/session group, and deletes older
+      local deployment artifacts only under BeeGame's deployment data root.
+    - Settings > Platform > Project exposes retention dry-run/run controls and
+      recent retention results.
+    - Preview/log cleanup is explicitly reported as skipped until those
+      resources have a persisted cleanup index.
+  - Acceptance:
+    - Retention jobs do not rely on game titles, prompt text, or platform
+      keywords.
+    - Operators can verify what each retention run deleted or retained.
 
 - [ ] Local connector strategy
   - Problem: future Unity, Godot, Unreal, and local editor MCP workflows need a

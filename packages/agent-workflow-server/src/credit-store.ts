@@ -4,6 +4,7 @@ import {
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -72,6 +73,18 @@ export type CreditLedgerSummary = {
   weightedTokens: number
 }
 
+export type CreditLedgerFilters = {
+  userId?: string
+  projectId?: string
+  kind?: CreditLedgerKind
+  reservationId?: string
+}
+
+export type CreditAuditLedger = {
+  entries: CreditLedgerEntry[]
+  summary: CreditLedgerSummary
+}
+
 type CreditLedgerRecord = {
   id?: string
   userId?: string
@@ -98,6 +111,17 @@ export type CreditSettlement = {
   reservationId: string
   reservedCredits: number
   settledCredits: number
+  refundedCredits: number
+  balance: CreditBalance
+}
+
+export type CreditGrant = {
+  grantedCredits: number
+  balance: CreditBalance
+}
+
+export type StaleCreditReservationExpiry = {
+  expiredReservations: string[]
   refundedCredits: number
   balance: CreditBalance
 }
@@ -142,6 +166,35 @@ export function hasEnoughCreditsForIdeaIntake(
   return balance.balanceCredits >= balance.estimates.ideaIntake.minCredits
 }
 
+export function grantCredits(
+  userId: string,
+  options: CreditStoreOptions & {
+    credits: number
+    metadata?: Record<string, unknown>
+    now?: Date
+  },
+): CreditGrant {
+  const credits = normalizePositiveCreditAmount(options.credits)
+  const payload = loadCreditStore(options)
+  const account = ensureCreditAccount(payload, userId)
+  account.includedCredits = normalizeNonNegativeNumber(
+    account.includedCredits,
+    getDefaultFreeCredits(),
+  ) + credits
+  appendLedgerRecord(payload, {
+    userId,
+    kind: 'grant',
+    credits,
+    metadata: options.metadata ?? { source: 'manual' },
+    ...(options.now ? { createdAt: options.now.toISOString() } : {}),
+  })
+  saveCreditStore(payload, options)
+  return {
+    grantedCredits: credits,
+    balance: deriveCreditBalance(userId, account),
+  }
+}
+
 export function reserveCredits(
   userId: string,
   options: CreditStoreOptions & {
@@ -149,6 +202,7 @@ export function reserveCredits(
     kind?: string
     projectId?: string
     metadata?: Record<string, unknown>
+    now?: Date
   },
 ): CreditReservation {
   const credits = normalizePositiveCreditAmount(options.credits)
@@ -171,6 +225,7 @@ export function reserveCredits(
       ...(options.kind ? { kind: options.kind } : {}),
       ...(options.metadata ?? {}),
     },
+    ...(options.now ? { createdAt: options.now.toISOString() } : {}),
   })
   saveCreditStore(payload, options)
   return {
@@ -296,12 +351,89 @@ export function refundCreditReservation(
   }
 }
 
+export function expireStaleCreditReservations(
+  userId: string,
+  options: CreditStoreOptions & {
+    olderThan: Date
+    projectId?: string
+    metadata?: Record<string, unknown>
+    now?: Date
+  },
+): StaleCreditReservationExpiry {
+  const olderThan = options.olderThan.getTime()
+  if (!Number.isFinite(olderThan)) throw new Error('Expiry cutoff is required')
+  const payload = loadCreditStore(options)
+  const account = ensureCreditAccount(payload, userId)
+  const ledger = normalizeLedger(payload)
+  const completedReservationIds = new Set(
+    ledger
+      .filter(entry => (
+        entry.userId === userId &&
+        (entry.kind === 'settle' || entry.kind === 'refund') &&
+        entry.reservationId
+      ))
+      .map(entry => entry.reservationId!),
+  )
+  const staleReservations = ledger.filter(entry => (
+    entry.userId === userId &&
+    entry.kind === 'reserve' &&
+    Boolean(entry.reservationId) &&
+    !completedReservationIds.has(entry.reservationId!) &&
+    (!options.projectId || entry.projectId === options.projectId) &&
+    Date.parse(entry.createdAt) < olderThan
+  ))
+  const expiredReservations: string[] = []
+  let refundedCredits = 0
+  for (const reservation of staleReservations) {
+    const reservationId = reservation.reservationId!
+    expiredReservations.push(reservationId)
+    refundedCredits += reservation.credits
+    appendLedgerRecord(payload, {
+      userId,
+      kind: 'refund',
+      credits: reservation.credits,
+      ...(reservation.projectId ? { projectId: reservation.projectId } : {}),
+      reservationId,
+      metadata: options.metadata ?? { reason: 'stale_reservation_expired' },
+      ...(options.now ? { createdAt: options.now.toISOString() } : {}),
+    })
+  }
+  if (refundedCredits > 0) {
+    account.reservedCredits = Math.max(
+      0,
+      normalizeNonNegativeNumber(account.reservedCredits, 0) - refundedCredits,
+    )
+    saveCreditStore(payload, options)
+  }
+  return {
+    expiredReservations,
+    refundedCredits,
+    balance: deriveCreditBalance(userId, account),
+  }
+}
+
 export function listCreditLedger(
   userId: string,
   options: CreditStoreOptions,
 ): CreditLedgerEntry[] {
   return normalizeLedger(loadCreditStore(options))
     .filter(entry => entry.userId === userId)
+}
+
+export function listCreditAuditLedger(
+  options: {
+    dashboardDataRoot: string
+    filters?: CreditLedgerFilters
+  },
+): CreditAuditLedger {
+  const entries = listLocalCreditDataDirs(options.dashboardDataRoot)
+    .flatMap(dataDir => normalizeLedger(loadCreditStore({ dataDir })))
+    .filter(entry => matchesCreditLedgerFilters(entry, options.filters))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  return {
+    entries,
+    summary: summarizeCreditLedgerEntries(entries),
+  }
 }
 
 export function summarizeCreditLedger(
@@ -315,6 +447,21 @@ export function summarizeCreditLedger(
       entry.userId === userId &&
       (!options.projectId || entry.projectId === options.projectId)
     ))
+  return summarizeCreditLedgerEntries(entries)
+}
+
+function sumCreditKind(
+  entries: CreditLedgerEntry[],
+  kind: CreditLedgerKind,
+): number {
+  return entries
+    .filter(entry => entry.kind === kind)
+    .reduce((sum, entry) => sum + entry.credits, 0)
+}
+
+export function summarizeCreditLedgerEntries(
+  entries: CreditLedgerEntry[],
+): CreditLedgerSummary {
   const reservedCredits = sumCreditKind(entries, 'reserve')
   const settledCredits = sumCreditKind(entries, 'settle')
   const refundedCredits = sumCreditKind(entries, 'refund')
@@ -334,13 +481,29 @@ export function summarizeCreditLedger(
   }
 }
 
-function sumCreditKind(
-  entries: CreditLedgerEntry[],
-  kind: CreditLedgerKind,
-): number {
-  return entries
-    .filter(entry => entry.kind === kind)
-    .reduce((sum, entry) => sum + entry.credits, 0)
+function matchesCreditLedgerFilters(
+  entry: CreditLedgerEntry,
+  filters: CreditLedgerFilters | undefined,
+): boolean {
+  return (!filters?.userId || entry.userId === filters.userId) &&
+    (!filters?.projectId || entry.projectId === filters.projectId) &&
+    (!filters?.kind || entry.kind === filters.kind) &&
+    (!filters?.reservationId || entry.reservationId === filters.reservationId)
+}
+
+function listLocalCreditDataDirs(dashboardDataRoot: string): string[] {
+  const dataDirs: string[] = []
+  if (existsSync(getStoreFilePath({ dataDir: dashboardDataRoot }))) {
+    dataDirs.push(dashboardDataRoot)
+  }
+  const usersRoot = join(dashboardDataRoot, 'users')
+  if (!existsSync(usersRoot)) return dataDirs
+  for (const entry of readdirSync(usersRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const dataDir = join(usersRoot, entry.name)
+    if (existsSync(getStoreFilePath({ dataDir }))) dataDirs.push(dataDir)
+  }
+  return dataDirs
 }
 
 export function getCreditEstimates(): CreditBalance['estimates'] {
@@ -461,7 +624,7 @@ function hasSettledReservation(
   ))
 }
 
-function isCreditLedgerKind(value: unknown): value is CreditLedgerKind {
+export function isCreditLedgerKind(value: unknown): value is CreditLedgerKind {
   return value === 'estimate' ||
     value === 'reserve' ||
     value === 'settle' ||

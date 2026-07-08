@@ -153,7 +153,7 @@ apiClient.interceptors.response.use(
           errorMessage = '服务器内部错误';
           break;
         case 503:
-          errorMessage = '服务暂时不可用';
+          errorMessage = backendMessage || '服务暂时不可用';
           break;
         default:
           errorMessage = backendMessage || `请求失败 (${status})`;

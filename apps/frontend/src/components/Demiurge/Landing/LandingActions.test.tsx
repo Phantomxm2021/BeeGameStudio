@@ -15,6 +15,7 @@ const renderActions = (props: Partial<Parameters<typeof LandingActions>[0]> = {}
         currentUserEmail="bee@example.com"
         onToggleSettings={vi.fn()}
         onToggleHistory={vi.fn()}
+        onOpenCreditStore={vi.fn()}
         onOpenProfile={vi.fn()}
         onOpenLogin={vi.fn()}
         {...props}
@@ -33,6 +34,7 @@ describe('LandingActions user menu', () => {
         expect(screen.getByText('Bee User')).toBeInTheDocument();
         expect(screen.getByText('bee@example.com')).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: 'Credit Store' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     });

@@ -476,6 +476,37 @@ export class BeeGameSessionManager {
     }
   }
 
+  async retryPendingCreditOperations(
+    userId: string,
+    authToken?: string,
+  ): Promise<{
+    attempted: number
+    succeeded: string[]
+    failed: string[]
+  }> {
+    const pendingSessionIds = [...this.sessions.values()]
+      .filter(record => (
+        record.userId === userId &&
+        Boolean(record.pendingCreditOperation)
+      ))
+      .map(record => record.session.id)
+    const succeeded: string[] = []
+    const failed: string[] = []
+    for (const sessionId of pendingSessionIds) {
+      if (authToken) this.updateAuthToken(sessionId, authToken)
+      if (await this.retryPendingCreditOperation(sessionId)) {
+        succeeded.push(sessionId)
+      } else {
+        failed.push(sessionId)
+      }
+    }
+    return {
+      attempted: pendingSessionIds.length,
+      succeeded,
+      failed,
+    }
+  }
+
   metadata(sessionId: string): BeeGameSessionInternalMetadata | undefined {
     const record = this.sessions.get(sessionId)
     if (!record) return undefined

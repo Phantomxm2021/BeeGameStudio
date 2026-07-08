@@ -84,6 +84,106 @@ describe('SupabaseDashboardStore', () => {
     )).toBe(true)
   })
 
+  test('deletes project Supabase Storage artifacts and related metadata', async () => {
+    const ownerId = '00000000-0000-0000-0000-000000000001'
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    globalThis.fetch = (async (url, init) => {
+      const requestUrl = String(url)
+      const method = init?.method ?? 'GET'
+      const body = init?.body
+        ? JSON.parse(String(init.body)) as Record<string, unknown>
+        : undefined
+      calls.push({
+        url: requestUrl,
+        method,
+        ...(body ? { body } : {}),
+      })
+
+      if (
+        requestUrl.includes('/rest/v1/beegame_deployments') &&
+        method === 'GET'
+      ) {
+        return Response.json([
+          {
+            id: 'deploy_1',
+            session_id: 'session_1',
+            project_id: 'project_1',
+            owner_id: ownerId,
+            workspace_path: '/workspace/project_1',
+            status: 'succeeded',
+            url: 'https://games.example.com/deploy_1/index.html',
+            build_command: null,
+            build_log: null,
+            entrypoint: null,
+            output_dir: null,
+            artifact_path: 'supabase://beegame-deployments/deployments/user/deploy_1',
+            artifact_hash: null,
+            message: null,
+            created_at: '2026-07-04T00:00:00.000Z',
+            updated_at: '2026-07-04T00:01:00.000Z',
+            deployed_at: '2026-07-04T00:01:00.000Z',
+          },
+        ])
+      }
+      if (
+        requestUrl.includes('/storage/v1/object/beegame-assets') ||
+        requestUrl.includes('/storage/v1/object/beegame-deployments')
+      ) {
+        return Response.json([])
+      }
+      if (method === 'DELETE') return Response.json([{ id: 'deleted' }])
+      return Response.json([])
+    }) as typeof fetch
+
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+      assetBucket: 'beegame-assets',
+    })
+
+    expect(await store.deleteProject(ownerId, 'project_1')).toBe(true)
+
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://project.supabase.co/storage/v1/object/beegame-assets',
+        body: {
+          prefixes: [
+            'projects/00000000-0000-0000-0000-000000000001/project_1',
+          ],
+        },
+      }),
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://project.supabase.co/storage/v1/object/beegame-deployments',
+        body: {
+          prefixes: ['deployments/user/deploy_1'],
+        },
+      }),
+    ]))
+    for (const table of [
+      'beegame_assets',
+      'beegame_previews',
+      'beegame_deployments',
+      'beegame_sessions',
+      'beegame_projects',
+    ]) {
+      expect(calls.some(call =>
+        call.method === 'DELETE' &&
+        call.url.includes(`/rest/v1/${table}`) &&
+        call.url.includes('project_id=eq.project_1'),
+      ) || (
+        table === 'beegame_projects' &&
+        calls.some(call =>
+          call.method === 'DELETE' &&
+          call.url.includes('/rest/v1/beegame_projects') &&
+          call.url.includes('id=eq.project_1'),
+        )
+      )).toBe(true)
+    }
+  })
+
   test('accepts frontend Supabase env names for dashboard data access', async () => {
     const calls: string[] = []
     globalThis.fetch = (async (url, init) => {
@@ -220,7 +320,7 @@ describe('SupabaseDashboardStore', () => {
 
       if (requestUrl.includes('/rpc/beegame_reserve_credits')) {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>
-        const reservationId = '33333333-3333-3333-3333-333333333333'
+        const reservationId = `reservation-${creditLedger.length + 1}`
         const credits = Number(body.p_credits)
         creditAccount.reserved_credits += credits
         creditLedger.push({
@@ -296,6 +396,71 @@ describe('SupabaseDashboardStore', () => {
         })
       }
 
+      if (requestUrl.includes('/rpc/beegame_expire_stale_credit_reservations')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        const olderThan = Date.parse(String(body.p_older_than))
+        const projectId = body.p_project_id ? String(body.p_project_id) : undefined
+        const completedReservationIds = new Set(
+          creditLedger
+            .filter(row => row.kind === 'settle' || row.kind === 'refund')
+            .map(row => String(row.reservation_id)),
+        )
+        const staleReservations = creditLedger.filter(row => (
+          row.user_id === body.p_user_id &&
+          row.kind === 'reserve' &&
+          !completedReservationIds.has(String(row.reservation_id)) &&
+          (!projectId || row.project_id === projectId) &&
+          Date.parse(String(row.created_at)) < olderThan
+        ))
+        const refundedCredits = staleReservations.reduce(
+          (sum, row) => sum + Number(row.credits ?? 0),
+          0,
+        )
+        creditAccount.reserved_credits = Math.max(
+          0,
+          creditAccount.reserved_credits - refundedCredits,
+        )
+        for (const reservation of staleReservations) {
+          creditLedger.push({
+            id: '66666666-6666-6666-6666-666666666666',
+            user_id: body.p_user_id,
+            project_id: reservation.project_id,
+            reservation_id: reservation.reservation_id,
+            kind: 'refund',
+            credits: Number(reservation.credits ?? 0),
+            weighted_tokens: null,
+            metadata: body.p_metadata ?? { reason: 'stale_reservation_expired' },
+            created_at: '2026-07-08T09:00:00.000Z',
+          })
+        }
+        return Response.json({
+          expired_reservation_ids: staleReservations.map(row => row.reservation_id),
+          refunded_credits: refundedCredits,
+          account: creditAccount,
+        })
+      }
+
+      if (requestUrl.includes('/rpc/beegame_admin_grant_credits')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        const credits = Number(body.p_credits)
+        creditAccount.included_credits += credits
+        creditLedger.push({
+          id: '77777777-7777-7777-7777-777777777777',
+          user_id: body.p_target_user_id,
+          project_id: null,
+          reservation_id: null,
+          kind: 'grant',
+          credits,
+          weighted_tokens: null,
+          metadata: body.p_metadata ?? {},
+          created_at: '2026-07-08T12:00:00.000Z',
+        })
+        return Response.json({
+          granted_credits: credits,
+          account: creditAccount,
+        })
+      }
+
       if (requestUrl.includes('/beegame_credit_accounts')) {
         if (init?.method === 'POST') {
           Object.assign(creditAccount, JSON.parse(String(init.body)))
@@ -318,19 +483,22 @@ describe('SupabaseDashboardStore', () => {
           const reservationId = decodeURIComponent(
             requestUrl.split('reservation_id=eq.')[1]?.split('&')[0] ?? '',
           )
-          return Response.json(
-            creditLedger.filter(row => row.reservation_id === reservationId),
-          )
+          return Response.json(creditLedger.filter(row => row.reservation_id === reservationId))
         }
-        if (requestUrl.includes('project_id=eq.')) {
-          const projectId = decodeURIComponent(
-            requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
-          )
-          return Response.json(
-            creditLedger.filter(row => row.project_id === projectId),
-          )
-        }
-        return Response.json(creditLedger)
+        const projectId = requestUrl.includes('project_id=eq.')
+          ? decodeURIComponent(requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '')
+          : undefined
+        const kind = requestUrl.includes('kind=eq.')
+          ? decodeURIComponent(requestUrl.split('kind=eq.')[1]?.split('&')[0] ?? '')
+          : undefined
+        const userId = requestUrl.includes('user_id=eq.')
+          ? decodeURIComponent(requestUrl.split('user_id=eq.')[1]?.split('&')[0] ?? '')
+          : undefined
+        return Response.json(creditLedger.filter(row => (
+          (!projectId || row.project_id === projectId) &&
+          (!kind || row.kind === kind) &&
+          (!userId || row.user_id === userId)
+        )))
       }
 
       if (requestUrl.includes('/beegame_audit_events')) {
@@ -389,6 +557,17 @@ describe('SupabaseDashboardStore', () => {
           requestUrl.split('project_id=eq.')[1]?.split('&')[0] ?? '',
         )
         return Response.json(previewRows.filter(row => row.project_id === projectId))
+      }
+
+      if (requestUrl.includes('/beegame_deployments')) {
+        if (init?.method === 'DELETE') {
+          return Response.json([{ id: 'deploy_1' }])
+        }
+        return Response.json([])
+      }
+
+      if (requestUrl.includes('/storage/v1/object/')) {
+        return Response.json([])
       }
 
       if (requestUrl.includes('/beegame_workspaces')) {
@@ -551,6 +730,84 @@ describe('SupabaseDashboardStore', () => {
       refundedCredits: 3,
       outstandingReservedCredits: 0,
       weightedTokens: 12_500,
+    })
+    expect(await store.listCreditAuditLedger({
+      userId: ownerId,
+      projectId: 'session_1',
+      kind: 'settle',
+    })).toEqual({
+      entries: [
+        expect.objectContaining({
+          userId: ownerId,
+          projectId: 'session_1',
+          kind: 'settle',
+          credits: 2,
+          weightedTokens: 12_500,
+        }),
+      ],
+      summary: {
+        entriesCount: 1,
+        reservedCredits: 0,
+        settledCredits: 2,
+        refundedCredits: 0,
+        outstandingReservedCredits: 0,
+        weightedTokens: 12_500,
+      },
+    })
+    const staleReservation = await store.reserveCredits(ownerId, {
+      credits: 4,
+      kind: 'edit_turn',
+      projectId: 'session_1',
+      metadata: { taskType: 'edit_turn' },
+    })
+    expect(await store.expireStaleCreditReservations(ownerId, {
+      olderThan: new Date('2026-07-08T09:00:00.000Z'),
+      projectId: 'session_1',
+    })).toEqual({
+      expiredReservations: [staleReservation.id],
+      refundedCredits: 4,
+      balance: expect.objectContaining({
+        reservedCredits: 0,
+      }),
+    })
+    expect(await store.grantCredits(ownerId, {
+      credits: 20,
+      metadata: {
+        source: 'payment_provider',
+        provider: 'manual',
+        providerReference: 'manual-topup-2',
+      },
+    })).toEqual({
+      grantedCredits: 20,
+      balance: expect.objectContaining({
+        includedCredits: 320,
+        balanceCredits: 318,
+      }),
+    })
+    expect(await store.listCreditAuditLedger({
+      userId: ownerId,
+      kind: 'grant',
+    })).toEqual({
+      entries: [
+        expect.objectContaining({
+          userId: ownerId,
+          kind: 'grant',
+          credits: 20,
+          metadata: {
+            source: 'payment_provider',
+            provider: 'manual',
+            providerReference: 'manual-topup-2',
+          },
+        }),
+      ],
+      summary: {
+        entriesCount: 1,
+        reservedCredits: 0,
+        settledCredits: 0,
+        refundedCredits: 0,
+        outstandingReservedCredits: 0,
+        weightedTokens: 0,
+      },
     })
     expect(await store.appendAuditEvent(ownerId, {
       actorId: ownerId,

@@ -9,6 +9,7 @@ import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
 import { LandingActions } from './Landing/LandingActions';
+import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
@@ -594,6 +595,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
     const [intakePhase, setIntakePhase] = useState<IntakePhase>(restoredIntakeFlow?.phase || 'idle');
@@ -1349,10 +1351,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onToggleSettings={() => {
                         setIsSettingsOpen((value) => !value);
                         setIsHistoryOpen(false);
+                        setIsCreditStoreOpen(false);
                     }}
                     onToggleHistory={() => {
                         setIsHistoryOpen((value) => !value);
                         setIsSettingsOpen(false);
+                        setIsCreditStoreOpen(false);
+                    }}
+                    onOpenCreditStore={() => {
+                        setIsCreditStoreOpen(true);
+                        setIsSettingsOpen(false);
+                        setIsHistoryOpen(false);
                     }}
                 />
 
@@ -1367,6 +1376,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
                     canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
                     canManageInvitations={canOpenPlatformSettings}
+                    canReadAudit={canOpenPlatformSettings && hasPermission('audit.read')}
                 />
 
                 <ProjectHistoryModal
@@ -1374,6 +1384,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsHistoryOpen(false)}
                     onSelectProject={handleSelectProject}
+                />
+
+                <CreditStoreModal
+                    isOpen={isCreditStoreOpen}
+                    onClose={() => setIsCreditStoreOpen(false)}
                 />
 
                 {isProfileOpen && currentUser ? (

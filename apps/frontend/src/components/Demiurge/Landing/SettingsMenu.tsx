@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
+import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -50,6 +50,20 @@ import {
     updateInvitation,
     type InvitationRecord,
 } from '../../../services/invitationApi';
+import {
+    getCreditAuditLedger,
+    type BeeGameCreditAuditLedger,
+    type BeeGameCreditLedgerEntry,
+} from '../../../services/creditsApi';
+import {
+    getProjectLifecycleOverview,
+    planProjectRetention,
+    runProjectRetention,
+    type BeeGameProjectLifecycleDeletion,
+    type BeeGameProjectLifecycleOverview,
+    type BeeGameProjectLifecycleProject,
+    type BeeGameProjectRetentionResult,
+} from '../../../services/projectLifecycleApi';
 interface SettingsMenuProps {
     isOpen: boolean;
     lang: Language;
@@ -61,10 +75,11 @@ interface SettingsMenuProps {
     canManageMcp?: boolean;
     canManageModelConfig?: boolean;
     canManageInvitations?: boolean;
+    canReadAudit?: boolean;
 }
 
 type SettingsSection = 'personal' | 'platform';
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model' | 'invitations';
+type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model' | 'invitations' | 'projects' | 'credit';
 type PopoverAnchorRect = {
     top: number;
     right: number;
@@ -102,6 +117,7 @@ export function SettingsMenu({
     canManageMcp = false,
     canManageModelConfig = false,
     canManageInvitations = false,
+    canReadAudit = false,
 }: SettingsMenuProps) {
     const { i18n } = useTranslation('settings');
     const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
@@ -119,12 +135,14 @@ export function SettingsMenu({
     const effectiveCanManageMcp = canManageMcp;
     const effectiveCanManageModelConfig = canManageModelConfig;
     const effectiveCanManageInvitations = canManageInvitations;
+    const effectiveCanReadAudit = canReadAudit;
     const hasPlatformSettings = effectiveCanManageWorkspace ||
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||
         effectiveCanManageMcp ||
         effectiveCanManageModelConfig ||
-        effectiveCanManageInvitations;
+        effectiveCanManageInvitations ||
+        effectiveCanReadAudit;
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -171,6 +189,12 @@ export function SettingsMenu({
     const [newInvitationMaxUses, setNewInvitationMaxUses] = useState('');
     const [invitationStatus, setInvitationStatus] = useState('');
     const [isSavingInvitations, setIsSavingInvitations] = useState(false);
+    const [projectLifecycleOverview, setProjectLifecycleOverview] = useState<BeeGameProjectLifecycleOverview | null>(null);
+    const [projectLifecycleStatus, setProjectLifecycleStatus] = useState('');
+    const [projectRetentionResult, setProjectRetentionResult] = useState<BeeGameProjectRetentionResult | null>(null);
+    const [isProjectRetentionRunning, setIsProjectRetentionRunning] = useState(false);
+    const [creditAuditLedger, setCreditAuditLedger] = useState<BeeGameCreditAuditLedger | null>(null);
+    const [creditAuditStatus, setCreditAuditStatus] = useState('');
     const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -279,6 +303,32 @@ export function SettingsMenu({
                     }
                 });
         }
+        if (effectiveCanReadAudit) {
+            void getProjectLifecycleOverview()
+                .then((overview) => {
+                    if (cancelled) return;
+                    setProjectLifecycleOverview(overview);
+                    setProjectLifecycleStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setProjectLifecycleOverview(null);
+                        setProjectLifecycleStatus(error instanceof Error ? error.message : 'Project lifecycle unavailable');
+                    }
+                });
+            void getCreditAuditLedger()
+                .then((ledger) => {
+                    if (cancelled) return;
+                    setCreditAuditLedger(ledger);
+                    setCreditAuditStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setCreditAuditLedger(null);
+                        setCreditAuditStatus(error instanceof Error ? error.message : 'Credit audit unavailable');
+                    }
+                });
+        }
         return () => {
             cancelled = true;
             if (mcpAutoSaveTimerRef.current !== null) {
@@ -293,6 +343,7 @@ export function SettingsMenu({
         effectiveCanManageRuntimeSettings,
         effectiveCanManageSecrets,
         effectiveCanManageWorkspace,
+        effectiveCanReadAudit,
         isOpen,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
@@ -447,6 +498,41 @@ export function SettingsMenu({
             setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
         } finally {
             setIsSavingInvitations(false);
+        }
+    };
+
+    const refreshProjectLifecycleOverview = async () => {
+        const overview = await getProjectLifecycleOverview();
+        setProjectLifecycleOverview(overview);
+        return overview;
+    };
+
+    const handlePlanProjectRetention = async () => {
+        setProjectLifecycleStatus('');
+        setIsProjectRetentionRunning(true);
+        try {
+            const result = await planProjectRetention();
+            setProjectRetentionResult(result);
+            setProjectLifecycleStatus(`Dry run: ${result.summary.deploymentRecordsPlannedForDeletion} deployment records would be deleted.`);
+        } catch (error) {
+            setProjectLifecycleStatus(error instanceof Error ? error.message : 'Retention dry run failed');
+        } finally {
+            setIsProjectRetentionRunning(false);
+        }
+    };
+
+    const handleRunProjectRetention = async () => {
+        setProjectLifecycleStatus('');
+        setIsProjectRetentionRunning(true);
+        try {
+            const result = await runProjectRetention();
+            setProjectRetentionResult(result);
+            setProjectLifecycleStatus(`Retention run deleted ${result.summary.deploymentRecordsDeleted} deployment records.`);
+            await refreshProjectLifecycleOverview();
+        } catch (error) {
+            setProjectLifecycleStatus(error instanceof Error ? error.message : 'Retention run failed');
+        } finally {
+            setIsProjectRetentionRunning(false);
         }
     };
 
@@ -628,6 +714,8 @@ export function SettingsMenu({
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
+            ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: '项目', icon: FolderOpen }] : []),
+            ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: '信用', icon: ReceiptText }] : []),
         ];
     }, [
         effectiveCanManageWorkspace,
@@ -636,6 +724,7 @@ export function SettingsMenu({
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
         effectiveCanManageRuntimeSettings,
+        effectiveCanReadAudit,
         adminCopy.deployment,
         capabilityCopy.title,
         mcpCopy.title,
@@ -649,8 +738,12 @@ export function SettingsMenu({
             ? capabilityCopy.title
             : activeTab === 'mcp'
                 ? mcpCopy.title
-                : activeTab === 'invitations'
+            : activeTab === 'invitations'
                     ? adminCopy.invitation.tab
+                    : activeTab === 'projects'
+                        ? 'Project lifecycle'
+                    : activeTab === 'credit'
+                        ? 'Credit audit'
                     : text.settingsModel;
     const isSavingCurrentTab = activeSection === 'platform' && activeTab === 'general'
         ? (effectiveCanManageSecrets && isSavingWebTools)
@@ -660,6 +753,10 @@ export function SettingsMenu({
                 ? false
             : activeTab === 'invitations'
                     ? isSavingInvitations
+                    : activeTab === 'projects'
+                        ? false
+                    : activeTab === 'credit'
+                        ? false
                     : isSaving;
     const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
     const isSaveDisabled = activeSection === 'platform' && activeTab === 'general'
@@ -672,6 +769,10 @@ export function SettingsMenu({
                 ? false
             : activeTab === 'invitations'
                     ? isSavingCurrentTab
+                    : activeTab === 'projects'
+                        ? true
+                    : activeTab === 'credit'
+                        ? true
                     : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
 
     const handleSaveSettings = async () => {
@@ -692,6 +793,8 @@ export function SettingsMenu({
             return;
         }
         if (activeTab === 'mcp') return;
+        if (activeTab === 'projects') return;
+        if (activeTab === 'credit') return;
         const webToolsSaved = effectiveCanManageSecrets ? await handleSaveWebTools() : true;
         if (webToolsSaved) onClose();
     };
@@ -1004,6 +1107,24 @@ export function SettingsMenu({
                                     />
                                 ) : null}
 
+                                {activeSection === 'platform' && activeTab === 'projects' && effectiveCanReadAudit ? (
+                                    <ProjectLifecyclePanel
+                                        overview={projectLifecycleOverview}
+                                        status={projectLifecycleStatus}
+                                        retentionResult={projectRetentionResult}
+                                        isRetentionRunning={isProjectRetentionRunning}
+                                        onPlanRetention={() => void handlePlanProjectRetention()}
+                                        onRunRetention={() => void handleRunProjectRetention()}
+                                    />
+                                ) : null}
+
+                                {activeSection === 'platform' && activeTab === 'credit' && effectiveCanReadAudit ? (
+                                    <CreditAuditPanel
+                                        ledger={creditAuditLedger}
+                                        status={creditAuditStatus}
+                                    />
+                                ) : null}
+
                                 {activeSection === 'platform' && activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
                                     <div className="divide-y divide-white/10">
                                         <CapabilityToggleRow
@@ -1160,7 +1281,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
                                 </div>
-                                {activeSection === 'platform' && activeTab !== 'mcp' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
+                                {activeSection === 'platform' && activeTab !== 'mcp' && activeTab !== 'projects' && activeTab !== 'credit' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"
@@ -2133,4 +2254,238 @@ function CapabilityToggleRow({
             </button>
         </div>
     );
+}
+
+function ProjectLifecyclePanel({
+    overview,
+    status,
+    retentionResult,
+    isRetentionRunning,
+    onPlanRetention,
+    onRunRetention,
+}: {
+    overview: BeeGameProjectLifecycleOverview | null;
+    status: string;
+    retentionResult: BeeGameProjectRetentionResult | null;
+    isRetentionRunning: boolean;
+    onPlanRetention: () => void;
+    onRunRetention: () => void;
+}) {
+    const quota = overview?.quota;
+    const projectLimit = quota?.limit ?? null;
+    const quotaValue = projectLimit === null
+        ? `${quota?.used ?? 0} projects`
+        : `${quota?.used ?? 0} / ${projectLimit} projects`;
+    const remainingValue = projectLimit === null
+        ? 'Unlimited'
+        : `${quota?.remaining ?? 0} remaining`;
+    const projects = overview?.projects.slice(0, 8) ?? [];
+    const deletions = overview?.recentDeletions.slice(0, 5) ?? [];
+    const retentionRuns = overview?.recentRetentionRuns.slice(0, 3) ?? [];
+    return (
+        <div className="space-y-4 py-3">
+            <div>
+                <h3 className="type-subheadline text-zinc-100">Project lifecycle</h3>
+                <p className="type-footnote mt-1 text-zinc-500">
+                    Quota, workspace roots, runtime snapshots, and recent cleanup outcomes.
+                </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+                <CreditMetric label="Quota usage" value={quotaValue} />
+                <CreditMetric label="Quota remaining" value={remainingValue} />
+                <CreditMetric
+                    label="Storage cleanup"
+                    value={overview?.storage.supabaseStorageConfigured ? 'Supabase enabled' : 'Local only'}
+                />
+            </div>
+            {status ? (
+                <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
+                    {status}
+                </div>
+            ) : null}
+            <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div className="type-caption-1 text-zinc-500">Retention jobs</div>
+                        <div className="type-footnote text-zinc-300">Deployment rollback cleanup with dry-run first.</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            disabled={isRetentionRunning}
+                            onClick={onPlanRetention}
+                            className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
+                        >
+                            Retention dry run
+                        </button>
+                        <button
+                            type="button"
+                            disabled={isRetentionRunning}
+                            onClick={onRunRetention}
+                            className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
+                        >
+                            Run retention
+                        </button>
+                    </div>
+                </div>
+                {retentionResult ? (
+                    <div className="type-caption-1 text-zinc-500">
+                        Planned {retentionResult.summary.deploymentRecordsPlannedForDeletion}, deleted {retentionResult.summary.deploymentRecordsDeleted}, retained {retentionResult.summary.deploymentRecordsRetained}.
+                    </div>
+                ) : null}
+                {retentionRuns.length ? (
+                    <div className="space-y-1">
+                        <div className="type-caption-1 text-zinc-500">Last retention run</div>
+                        {retentionRuns.map((run) => (
+                            <div key={`${run.ranAt}-${run.deploymentRecordsDeleted}`} className="type-footnote text-zinc-300">
+                                {run.dryRun ? 'Dry run' : `Deleted ${run.deploymentRecordsDeleted} deployment records`}
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
+            <div className="space-y-2">
+                <div className="type-caption-1 text-zinc-500">Active projects</div>
+                <div className="overflow-hidden rounded-2xl border border-white/10">
+                    {projects.length ? (
+                        <div className="divide-y divide-white/10">
+                            {projects.map((project) => (
+                                <ProjectLifecycleRow key={project.id} project={project} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="type-footnote px-3 py-4 text-zinc-500">No active projects.</div>
+                    )}
+                </div>
+            </div>
+            <div className="space-y-2">
+                <div className="type-caption-1 text-zinc-500">Recent cleanup</div>
+                <div className="overflow-hidden rounded-2xl border border-white/10">
+                    {deletions.length ? (
+                        <div className="divide-y divide-white/10">
+                            {deletions.map((deletion) => (
+                                <ProjectLifecycleDeletionRow key={`${deletion.projectId}-${deletion.deletedAt}`} deletion={deletion} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="type-footnote px-3 py-4 text-zinc-500">No recent project deletions.</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ProjectLifecycleRow({ project }: { project: BeeGameProjectLifecycleProject }) {
+    return (
+        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div className="min-w-0">
+                <div className="type-footnote truncate text-zinc-100">{project.name}</div>
+                <div className="type-caption-1 truncate text-zinc-500">{project.rootPath || 'No workspace path'}</div>
+            </div>
+            <div className="type-caption-1 text-zinc-500">
+                {project.lifecycle.phaseName || (project.lifecycle.hasRuntimeSnapshot ? 'Snapshot saved' : 'No snapshot')}
+            </div>
+        </div>
+    );
+}
+
+function ProjectLifecycleDeletionRow({ deletion }: { deletion: BeeGameProjectLifecycleDeletion }) {
+    return (
+        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div className="min-w-0">
+                <div className="type-footnote truncate text-zinc-100">{deletion.projectId}</div>
+                <div className="type-caption-1 truncate text-zinc-500">{deletion.deletedWorkspacePath || 'No workspace path'}</div>
+            </div>
+            <div className="type-caption-1 text-zinc-500">
+                {deletion.cleanupOutcome}
+            </div>
+        </div>
+    );
+}
+
+function CreditAuditPanel({
+    ledger,
+    status,
+}: {
+    ledger: BeeGameCreditAuditLedger | null;
+    status: string;
+}) {
+    const summary = ledger?.summary;
+    const entries = ledger?.entries.slice(0, 8) ?? [];
+    return (
+        <div className="space-y-4 py-3">
+            <div>
+                <h3 className="type-subheadline text-zinc-100">Credit audit</h3>
+                <p className="type-footnote mt-1 text-zinc-500">
+                    Operator ledger for reservations, settlements, refunds, grants, and usage.
+                </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+                <CreditMetric label="Outstanding reserved" value={`${summary?.outstandingReservedCredits ?? 0} credits`} />
+                <CreditMetric label="Settled" value={`${summary?.settledCredits ?? 0} credits`} />
+                <CreditMetric label="Refunded" value={`${summary?.refundedCredits ?? 0} credits`} />
+                <CreditMetric label="Weighted tokens" value={String(summary?.weightedTokens ?? 0)} />
+            </div>
+            {status ? (
+                <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
+                    {status}
+                </div>
+            ) : null}
+            <div className="overflow-hidden rounded-2xl border border-white/10">
+                {entries.length ? (
+                    <div className="divide-y divide-white/10">
+                        {entries.map((entry) => (
+                            <CreditAuditEntryRow key={entry.id} entry={entry} />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="type-footnote px-3 py-4 text-zinc-500">
+                        No credit ledger entries yet.
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function CreditMetric({
+    label,
+    value,
+}: {
+    label: string;
+    value: string;
+}) {
+    return (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-3 py-2">
+            <div className="type-caption-1 text-zinc-500">{label}</div>
+            <div className="type-subheadline mt-1 text-zinc-100">{value}</div>
+        </div>
+    );
+}
+
+function CreditAuditEntryRow({ entry }: { entry: BeeGameCreditLedgerEntry }) {
+    return (
+        <div className="grid gap-2 px-3 py-3 sm:grid-cols-[7rem_1fr_auto] sm:items-center">
+            <div>
+                <div className="type-footnote text-zinc-100">{entry.kind}</div>
+                <div className="type-caption-1 text-zinc-500">{entry.credits} credits</div>
+            </div>
+            <div className="min-w-0">
+                <div className="type-footnote truncate text-zinc-300">{entry.userId}</div>
+                <div className="type-caption-1 truncate text-zinc-500">
+                    {entry.projectId || entry.reservationId || 'No project'}
+                </div>
+            </div>
+            <div className="type-caption-1 text-zinc-500">
+                {formatCreditAuditTime(entry.createdAt)}
+            </div>
+        </div>
+    );
+}
+
+function formatCreditAuditTime(value: string): string {
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return value;
+    return new Date(time).toLocaleString();
 }

@@ -37,6 +37,26 @@ export type BeeGameDeploymentRecord = {
   deployedAt?: string
 }
 
+export type BeeGameDeploymentRetentionItem = {
+  id: string
+  projectId?: string
+  sessionId: string
+  status: BeeGameDeploymentStatus
+  createdAt: string
+  updatedAt: string
+  deployedAt?: string
+  artifactPath?: string
+  reason: string
+}
+
+export type BeeGameDeploymentRetentionResult = {
+  dryRun: boolean
+  retained: BeeGameDeploymentRetentionItem[]
+  plannedForDeletion: BeeGameDeploymentRetentionItem[]
+  deleted: BeeGameDeploymentRetentionItem[]
+  skipped: BeeGameDeploymentRetentionItem[]
+}
+
 export type BeeGameDeploymentRunner = (
   command: string[],
   options: {
@@ -122,6 +142,72 @@ export class BeeGameDeploymentManager {
     return sessionId
       ? records.filter(record => record.sessionId === sessionId)
       : records
+  }
+
+  async applyRetention(input: {
+    dryRun: boolean
+    keepSuccessfulPerProject?: number
+  }): Promise<BeeGameDeploymentRetentionResult> {
+    const keepSuccessfulPerProject = Math.max(1, input.keepSuccessfulPerProject ?? 6)
+    const records = await this.loadRecords()
+    const retainedIds = new Set<string>()
+    const deleteIds = new Set<string>()
+    const byProject = new Map<string, BeeGameDeploymentRecord[]>()
+    for (const record of records) {
+      const groupId = record.projectId || record.sessionId
+      const group = byProject.get(groupId) ?? []
+      group.push(record)
+      byProject.set(groupId, group)
+    }
+
+    for (const group of byProject.values()) {
+      const successful = group
+        .filter(record => record.status === 'succeeded')
+        .sort(compareDeploymentRecordsNewestFirst)
+      for (const [index, record] of successful.entries()) {
+        if (index < keepSuccessfulPerProject) {
+          retainedIds.add(record.id)
+        } else {
+          deleteIds.add(record.id)
+        }
+      }
+      for (const record of group) {
+        if (!retainedIds.has(record.id) && !deleteIds.has(record.id)) {
+          retainedIds.add(record.id)
+        }
+      }
+    }
+
+    const retained = records
+      .filter(record => retainedIds.has(record.id))
+      .map(record => toRetentionItem(record, 'retention_policy_retained'))
+    const plannedForDeletion = records
+      .filter(record => deleteIds.has(record.id))
+      .map(record => toRetentionItem(record, 'older_than_rollback_retention_window'))
+    const deleted: BeeGameDeploymentRetentionItem[] = []
+    const skipped: BeeGameDeploymentRetentionItem[] = []
+    if (!input.dryRun) {
+      for (const record of records.filter(item => deleteIds.has(item.id))) {
+        const item = toRetentionItem(record, 'older_than_rollback_retention_window')
+        const deletedArtifact = await this.deleteLocalArtifact(record)
+        if (!deletedArtifact) {
+          skipped.push({
+            ...item,
+            reason: 'artifact_not_local_or_missing',
+          })
+        }
+        deleted.push(item)
+      }
+      await this.saveRecords(records.filter(record => !deleteIds.has(record.id)))
+    }
+
+    return {
+      dryRun: input.dryRun,
+      retained,
+      plannedForDeletion,
+      deleted,
+      skipped,
+    }
   }
 
   async deploy(input: {
@@ -346,7 +432,21 @@ export class BeeGameDeploymentManager {
     } else {
       records.unshift(record)
     }
+    await this.saveRecords(records)
+  }
+
+  private async saveRecords(records: BeeGameDeploymentRecord[]): Promise<void> {
+    await mkdir(this.deploymentsRoot, { recursive: true })
     await writeFile(this.recordsPath, `${JSON.stringify(records, null, 2)}\n`)
+  }
+
+  private async deleteLocalArtifact(record: BeeGameDeploymentRecord): Promise<boolean> {
+    const artifactPath = record.artifactPath ? resolve(record.artifactPath) : ''
+    if (!artifactPath || !isInsideOrEqual(artifactPath, this.deploymentsRoot)) {
+      return false
+    }
+    await rm(resolve(this.deploymentsRoot, record.id), { recursive: true, force: true })
+    return true
   }
 }
 
@@ -592,6 +692,34 @@ function contentTypeForPath(path: string): string {
 function isInsideOrEqual(candidate: string, root: string): boolean {
   const rel = relative(resolve(root), resolve(candidate))
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function compareDeploymentRecordsNewestFirst(
+  left: BeeGameDeploymentRecord,
+  right: BeeGameDeploymentRecord,
+): number {
+  return deploymentTime(right) - deploymentTime(left)
+}
+
+function deploymentTime(record: BeeGameDeploymentRecord): number {
+  return Date.parse(record.deployedAt || record.updatedAt || record.createdAt) || 0
+}
+
+function toRetentionItem(
+  record: BeeGameDeploymentRecord,
+  reason: string,
+): BeeGameDeploymentRetentionItem {
+  return {
+    id: record.id,
+    ...(record.projectId ? { projectId: record.projectId } : {}),
+    sessionId: record.sessionId,
+    status: record.status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    ...(record.deployedAt ? { deployedAt: record.deployedAt } : {}),
+    ...(record.artifactPath ? { artifactPath: record.artifactPath } : {}),
+    reason,
+  }
 }
 
 function safeSegment(value: string): string {

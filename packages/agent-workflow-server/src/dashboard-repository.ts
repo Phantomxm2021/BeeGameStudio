@@ -11,18 +11,26 @@ import {
   appendAuditEvent,
   listAuditEvents,
   type AppendAuditEventInput,
+  type BeeGameAuditEvent,
 } from './audit-events-store'
 import {
+  expireStaleCreditReservations,
   getCreditBalance,
+  grantCredits,
+  listCreditAuditLedger,
   listCreditLedger,
   refundCreditReservation,
   reserveCredits,
   settleCreditReservation,
   summarizeCreditLedger,
+  type CreditAuditLedger,
+  type CreditGrant,
+  type CreditLedgerFilters,
   type CreditBalance,
   type CreditLedgerEntry,
   type CreditLedgerSummary,
   type CreditReservation,
+  type StaleCreditReservationExpiry,
 } from './credit-store'
 import {
   deleteMcpServer,
@@ -72,13 +80,60 @@ import {
   toPublicWebToolsConfig,
   type WebToolsConfig,
 } from './web-tools-store'
+import { getUserDashboardDataRoot } from './local-runtime-service'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
   supabaseStore?: SupabaseDashboardStore
+  supabasePaymentProviderStore?: SupabaseDashboardStore
   supabaseRuntimeEnvClient?: SupabaseRuntimeEnvClient
   getUserDataRoot: (request?: Request) => string
   modelConfigStore?: ModelConfigStoreOptions | false
+}
+
+export type BeeGameProjectLifecycleOverview = {
+  quota: {
+    limit: number | null
+    used: number
+    remaining: number | null
+  }
+  storage: {
+    supabaseStorageConfigured: boolean
+  }
+  projects: BeeGameProjectLifecycleProject[]
+  recentDeletions: BeeGameProjectLifecycleDeletion[]
+  recentRetentionRuns: BeeGameProjectLifecycleRetentionRun[]
+}
+
+export type BeeGameProjectLifecycleProject = {
+  id: string
+  name: string
+  createdAt: number
+  rootPath?: string
+  lifecycle: {
+    hasWorkspacePath: boolean
+    hasRuntimeSnapshot: boolean
+    phaseName?: string
+    updatedAt?: number
+  }
+}
+
+export type BeeGameProjectLifecycleDeletion = {
+  projectId: string
+  deletedAt: string
+  cleanupOutcome: string
+  deletedWorkspacePath?: string
+  storageCleanupOutcome?: string
+}
+
+export type BeeGameProjectLifecycleRetentionRun = {
+  dryRun: boolean
+  ranAt: string
+  deploymentRecordsDeleted: number
+  deploymentRecordsRetained: number
+  deploymentRecordsPlannedForDeletion: number
+  previewRecordsSkipped: number
+  logRecordsSkipped: number
 }
 
 type CreditReserveInput = Omit<Parameters<typeof reserveCredits>[1], 'dataDir'>
@@ -88,6 +143,14 @@ type CreditSettleInput = Omit<
 >
 type CreditRefundInput = Omit<
   Parameters<typeof refundCreditReservation>[1],
+  'dataDir'
+>
+type StaleCreditReservationExpiryInput = Omit<
+  Parameters<typeof expireStaleCreditReservations>[1],
+  'dataDir'
+>
+type CreditGrantInput = Omit<
+  Parameters<typeof grantCredits>[1],
   'dataDir'
 >
 type CreateModelConfigInput = {
@@ -103,6 +166,19 @@ type CreateModelConfigInput = {
   isDefault?: boolean
 }
 type UpdateModelConfigInput = Partial<CreateModelConfigInput>
+
+const DEFAULT_MAX_PROJECTS_PER_USER = 100
+
+export class ProjectQuotaExceededError extends Error {
+  constructor(
+    readonly limit: number,
+    readonly projectCount: number,
+  ) {
+    super('Project quota exceeded')
+    this.name = 'ProjectQuotaExceededError'
+    Object.setPrototypeOf(this, ProjectQuotaExceededError.prototype)
+  }
+}
 
 export class DashboardRepository {
   readonly supabaseStore?: SupabaseDashboardStore
@@ -156,6 +232,34 @@ export class DashboardRepository {
       : this.getProjectStore(request).listProjects()
   }
 
+  async getProjectLifecycleOverview(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<BeeGameProjectLifecycleOverview> {
+    const projects = await this.listProjects(request, user)
+    const limit = getMaxProjectsPerUser()
+    const auditEvents = await this.listAuditEvents(request, user)
+    return {
+      quota: {
+        limit: limit ?? null,
+        used: projects.length,
+        remaining: limit ? Math.max(0, limit - projects.length) : null,
+      },
+      storage: {
+        supabaseStorageConfigured: this.hasSupabaseStorage(),
+      },
+      projects: projects.map(toProjectLifecycleProject),
+      recentDeletions: auditEvents
+        .filter(event => event.action === 'project.deleted')
+        .map(toProjectLifecycleDeletion)
+        .slice(0, 10),
+      recentRetentionRuns: auditEvents
+        .filter(event => event.action === 'project.retention_run')
+        .map(toProjectLifecycleRetentionRun)
+        .slice(0, 10),
+    }
+  }
+
   async ownsProjectWorkspacePath(
     request: Request,
     user: BeeGameUserContext,
@@ -177,6 +281,7 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     project: BeeGameProjectMetadata,
   ): Promise<BeeGameProjectMetadata> {
+    await this.assertProjectQuotaAllowsUpsert(request, user, project.id)
     const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.upsertProject(user.id, project)
@@ -469,6 +574,20 @@ export class DashboardRepository {
         })
   }
 
+  async listCreditAuditLedger(
+    request: Request,
+    _user: BeeGameUserContext,
+    filters: CreditLedgerFilters = {},
+  ): Promise<CreditAuditLedger> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listCreditAuditLedger(filters)
+      : listCreditAuditLedger({
+          dashboardDataRoot: this.options.dashboardDataRoot,
+          filters,
+        })
+  }
+
   async reserveCredits(
     request: Request,
     user: BeeGameUserContext,
@@ -512,6 +631,81 @@ export class DashboardRepository {
           ...input,
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  async expireStaleCreditReservations(
+    request: Request,
+    user: BeeGameUserContext,
+    input: StaleCreditReservationExpiryInput,
+  ): Promise<StaleCreditReservationExpiry> {
+    const supabase = this.supabaseForRequest(request)
+    const creditOwnerId = getCreditOwnerId(user)
+    return supabase
+      ? supabase.expireStaleCreditReservations(creditOwnerId, input)
+      : expireStaleCreditReservations(creditOwnerId, {
+          ...input,
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async grantCredits(
+    request: Request,
+    targetUserId: string,
+    input: CreditGrantInput,
+  ): Promise<CreditGrant> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.grantCredits(targetUserId, input)
+      : grantCredits(targetUserId, {
+          ...input,
+          dataDir: getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId),
+        })
+  }
+
+  async grantPaymentProviderCredits(
+    request: Request,
+    targetUserId: string,
+    input: CreditGrantInput,
+  ): Promise<CreditGrant> {
+    const metadata = input.metadata ?? {}
+    const paymentProviderStore = this.options.supabasePaymentProviderStore
+    if (this.supabaseStore && !paymentProviderStore) {
+      throw new Error('Supabase service role key is required for payment provider credit grants')
+    }
+    return paymentProviderStore
+      ? paymentProviderStore.grantPaymentProviderCredits(targetUserId, input)
+      : this.grantLocalPaymentProviderCredits(targetUserId, {
+          credits: input.credits,
+          metadata,
+        })
+  }
+
+  private grantLocalPaymentProviderCredits(
+    targetUserId: string,
+    input: CreditGrantInput,
+  ): CreditGrant {
+    const dataDir = getUserDashboardDataRoot(this.options.dashboardDataRoot, targetUserId)
+    const provider = metadataString(input.metadata, 'provider')
+    const providerReference = metadataString(input.metadata, 'providerReference')
+    if (provider && providerReference) {
+      const existing = listCreditLedger(targetUserId, { dataDir })
+        .some(entry => (
+          entry.kind === 'grant' &&
+          entry.metadata.provider === provider &&
+          entry.metadata.providerReference === providerReference
+        ))
+      if (existing) {
+        return {
+          grantedCredits: 0,
+          balance: getCreditBalance(targetUserId, { dataDir }),
+        }
+      }
+    }
+    return grantCredits(targetUserId, {
+      credits: input.credits,
+      metadata: input.metadata,
+      dataDir,
+    })
   }
 
   createSessionCreditBackend(): BeeGameSessionCreditBackend {
@@ -635,6 +829,20 @@ export class DashboardRepository {
     return created
   }
 
+  private async assertProjectQuotaAllowsUpsert(
+    request: Request,
+    user: BeeGameUserContext,
+    projectId: string,
+  ): Promise<void> {
+    const limit = getMaxProjectsPerUser()
+    if (!limit) return
+    const projects = await this.listProjects(request, user)
+    if (projects.some(project => project.id === projectId)) return
+    if (projects.length >= limit) {
+      throw new ProjectQuotaExceededError(limit, projects.length)
+    }
+  }
+
   private supabaseForRequest(request?: Request): SupabaseDashboardStore | undefined {
     if (!this.supabaseStore) return undefined
     return this.supabaseStore.withAuthToken(
@@ -662,6 +870,84 @@ export class DashboardRepository {
 
 function getCreditOwnerId(user: BeeGameUserContext): string {
   return user.accountId || user.id
+}
+
+function getMaxProjectsPerUser(): number | undefined {
+  const raw = process.env.BEEGAME_MAX_PROJECTS_PER_USER?.trim()
+  if (!raw) return DEFAULT_MAX_PROJECTS_PER_USER
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) return DEFAULT_MAX_PROJECTS_PER_USER
+  const limit = Math.floor(parsed)
+  return limit > 0 ? limit : undefined
+}
+
+function toProjectLifecycleProject(
+  project: BeeGameProjectMetadata,
+): BeeGameProjectLifecycleProject {
+  const snapshot = project.runtime_snapshot
+  return {
+    id: project.id,
+    name: project.name,
+    createdAt: project.created_at,
+    ...(project.root_path ? { rootPath: project.root_path } : {}),
+    lifecycle: {
+      hasWorkspacePath: Boolean(project.root_path),
+      hasRuntimeSnapshot: Boolean(snapshot),
+      ...(snapshot?.phase_name ? { phaseName: snapshot.phase_name } : {}),
+      ...(typeof snapshot?.updated_at === 'number' ? { updatedAt: snapshot.updated_at } : {}),
+    },
+  }
+}
+
+function toProjectLifecycleDeletion(
+  event: BeeGameAuditEvent,
+): BeeGameProjectLifecycleDeletion {
+  const metadata = event.metadata ?? {}
+  const deletedWorkspacePath = typeof metadata.deletedWorkspacePath === 'string'
+    ? metadata.deletedWorkspacePath
+    : undefined
+  const cleanupOutcome = typeof metadata.cleanupOutcome === 'string'
+    ? metadata.cleanupOutcome
+    : deletedWorkspacePath
+      ? 'workspace_deleted'
+      : 'metadata_deleted'
+  const storageCleanupOutcome = typeof metadata.storageCleanupOutcome === 'string'
+    ? metadata.storageCleanupOutcome
+    : undefined
+  return {
+    projectId: event.targetId,
+    deletedAt: event.createdAt,
+    cleanupOutcome,
+    ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
+    ...(storageCleanupOutcome ? { storageCleanupOutcome } : {}),
+  }
+}
+
+function toProjectLifecycleRetentionRun(
+  event: BeeGameAuditEvent,
+): BeeGameProjectLifecycleRetentionRun {
+  const metadata = event.metadata ?? {}
+  return {
+    dryRun: metadata.dryRun === true,
+    ranAt: event.createdAt,
+    deploymentRecordsDeleted: numberFromMetadata(metadata.deploymentRecordsDeleted),
+    deploymentRecordsRetained: numberFromMetadata(metadata.deploymentRecordsRetained),
+    deploymentRecordsPlannedForDeletion: numberFromMetadata(metadata.deploymentRecordsPlannedForDeletion),
+    previewRecordsSkipped: numberFromMetadata(metadata.previewRecordsSkipped),
+    logRecordsSkipped: numberFromMetadata(metadata.logRecordsSkipped),
+  }
+}
+
+function numberFromMetadata(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function metadataString(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string {
+  const value = metadata?.[key]
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 async function normalizeWorkspaceIdentity(workspacePath: string): Promise<string> {
