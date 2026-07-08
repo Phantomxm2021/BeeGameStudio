@@ -74,6 +74,24 @@ describe('BeeGame billing env', () => {
     }
   })
 
+  test('prefers root env file before docker env file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-billing-env-root-'))
+    try {
+      const rootEnvPath = join(root, '.env.billing')
+      const dockerEnvPath = join(root, 'docker', '.env.billing')
+      await writeFile(rootEnvPath, 'BEEGAME_BILLING_MODE=server\n')
+      await mkdir(join(root, 'docker'), { recursive: true })
+      await writeFile(dockerEnvPath, 'BEEGAME_BILLING_MODE=docker\n')
+
+      expect(resolveBeeGameBillingEnvFile({
+        cwd: root,
+        env: {},
+      })).toBe(rootEnvPath)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('does not inherit runtime host listen port', () => {
     expect(resolveBeeGameBillingListenOptions({
       AGENT_WORKFLOW_HOST: '0.0.0.0',

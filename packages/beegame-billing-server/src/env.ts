@@ -38,10 +38,10 @@ export function resolveBeeGameBillingEnvFile(input: {
   const explicit = normalizeOptional(env.BEEGAME_BILLING_ENV_FILE)
   const candidates = [
     explicit,
-    resolve(cwd, 'docker/.env.billing'),
     resolve(cwd, '.env.billing'),
-    resolve(cwd, '../../docker/.env.billing'),
+    resolve(cwd, 'docker/.env.billing'),
     resolve(cwd, '../../.env.billing'),
+    resolve(cwd, '../../docker/.env.billing'),
   ].filter((item): item is string => Boolean(item))
   return candidates.find(candidate => existsSync(candidate))
 }
