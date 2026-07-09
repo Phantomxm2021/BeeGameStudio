@@ -132,6 +132,7 @@ describe('RightSidebar tabs', () => {
             undefined,
             [],
             'disabled',
+            undefined,
         );
 
         await user.selectOptions(thinkingSelect, 'enabled');
@@ -142,6 +143,7 @@ describe('RightSidebar tabs', () => {
             undefined,
             [],
             'enabled',
+            undefined,
         );
     });
 
@@ -204,7 +206,7 @@ describe('RightSidebar tabs', () => {
                 mediaType: 'image/png',
                 filename: 'screen.png',
             }),
-        ], 'disabled');
+        ], 'disabled', undefined);
         expect(onSendMessage.mock.calls[0][2][0].data).toEqual(expect.any(String));
     });
 
@@ -279,7 +281,7 @@ describe('RightSidebar tabs', () => {
                 mediaType: 'image/png',
                 filename: 'clipboard-screen.png',
             }),
-        ], 'disabled');
+        ], 'disabled', undefined);
     });
 
     it('deduplicates pasted screenshots exposed through both clipboard files and items', async () => {

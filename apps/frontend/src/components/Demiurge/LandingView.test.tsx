@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { LandingView } from './LandingView';
+import { ToastProvider } from '../../contexts/ToastContext';
 
 const { analyzeIdeaIntake } = vi.hoisted(() => ({
     analyzeIdeaIntake: vi.fn(),
@@ -60,6 +61,7 @@ const {
 const {
     SupabaseAuthApiError,
     clearSupabaseSession,
+    getValidSupabaseAccessToken,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
@@ -80,6 +82,7 @@ const {
         }
     },
     clearSupabaseSession: vi.fn(),
+    getValidSupabaseAccessToken: vi.fn(),
     isSupabaseAuthConfigured: vi.fn(),
     sendSupabasePasswordReset: vi.fn(),
     signInWithSupabaseOAuth: vi.fn(),
@@ -206,6 +209,7 @@ vi.mock('../../services/invitationApi', () => ({
 vi.mock('../../services/supabaseAuthApi', () => ({
     SupabaseAuthApiError,
     clearSupabaseSession,
+    getValidSupabaseAccessToken,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
@@ -227,12 +231,14 @@ vi.mock('./Landing/FaultyTerminal', () => ({
 }));
 
 const renderLanding = (props?: Partial<React.ComponentProps<typeof LandingView>>) => render(
-    <LandingView
-        onStart={vi.fn()}
-        lang="zh"
-        onSetLang={vi.fn()}
-        {...props}
-    />,
+    <ToastProvider>
+        <LandingView
+            onStart={vi.fn()}
+            lang="zh"
+            onSetLang={vi.fn()}
+            {...props}
+        />
+    </ToastProvider>,
 );
 
 const submitIdea = (idea: string) => {
@@ -336,6 +342,8 @@ const makeIntakeOptions = () => [
 
 beforeEach(() => {
     sessionStorage.clear();
+    getValidSupabaseAccessToken.mockReset();
+    getValidSupabaseAccessToken.mockResolvedValue('');
     analyzeIdeaIntake.mockReset();
     analyzeIdeaIntake.mockResolvedValue({
         clarification_required: false,
@@ -671,7 +679,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh', thinkingMode: 'disabled' });
     });
 
     it('smokes the SaaS entry flow without bypassing login or credit confirmation', async () => {
@@ -735,7 +743,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh', thinkingMode: 'disabled' });
     });
 
     it('restores typed idea text after a page refresh without opening intake', () => {
@@ -1618,7 +1626,7 @@ describe('LandingView bootstrap submission', () => {
 
         const engineSelect = screen.getByRole('combobox', { name: '引擎' });
         const engineValues = within(engineSelect).getAllByRole('option').map((option) => option.getAttribute('value'));
-        expect(engineValues).toEqual(['', 'React', 'Unity', 'Godot', 'Unreal']);
+        expect(engineValues).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
         fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
         fireEvent.change(engineSelect, { target: { value: 'Godot' } });
         fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });

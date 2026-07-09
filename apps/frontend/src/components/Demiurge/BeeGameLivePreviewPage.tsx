@@ -557,6 +557,7 @@ export function BeeGameLivePreviewPage({
                 labels={labels}
                 onClose={() => setDeploymentDialogOpen(false)}
                 onOpenExternal={onOpenExternal}
+                onFixBuildErrors={onFixBuildErrors}
                 onDeploy={handleDeploy}
                 onRollback={onRollbackDeployment}
                 isDeploying={isDeploying}
@@ -573,6 +574,7 @@ function DeploymentDialog({
     labels,
     onClose,
     onOpenExternal,
+    onFixBuildErrors,
     onDeploy,
     onRollback,
     isDeploying,
@@ -583,6 +585,7 @@ function DeploymentDialog({
     labels: Record<string, string>;
     onClose: () => void;
     onOpenExternal?: (url: string) => void;
+    onFixBuildErrors?: (errorLog: string) => void | Promise<void>;
     onDeploy: () => void | Promise<void>;
     onRollback?: (deploymentId: string) => void | Promise<void>;
     isDeploying: boolean;
@@ -697,8 +700,19 @@ function DeploymentDialog({
                     </div>
                     {failureLog ? (
                         <div className="mt-4 rounded-2xl border border-red-200/10 bg-red-950/10 p-4">
-                            <div className="type-caption-2 mb-2 text-red-100/70">
-                                {labels.deploymentFailureLog}
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="type-caption-2 text-red-100/70">
+                                    {labels.deploymentFailureLog}
+                                </div>
+                                <button
+                                    type="button"
+                                    aria-label={labels.fixBuildErrors}
+                                    onClick={() => void onFixBuildErrors?.(failureLog)}
+                                    className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
+                                >
+                                    <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
+                                    <span>{labels.fixBuildErrors}</span>
+                                </button>
                             </div>
                             <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
                                 {failureLog}

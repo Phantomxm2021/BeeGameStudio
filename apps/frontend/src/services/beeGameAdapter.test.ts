@@ -244,8 +244,12 @@ describe('beeGameAdapter prompt rules', () => {
     expect(intake.options[0]).toEqual(expect.objectContaining({ id: 'job_mode', title: 'Job Mode' }));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/beegame-intake/jobs');
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
-    expect(requestBody).toEqual({ idea: 'LLM generated idea', language: 'zh' });
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
+    expect(requestBody).toEqual({
+      idea: 'LLM generated idea',
+      language: 'zh',
+      clientRequestId: expect.any(String),
+    });
   });
 
   it('sends selected BeeGame intake thinking mode to the async job', async () => {
@@ -282,11 +286,13 @@ describe('beeGameAdapter prompt rules', () => {
       idea?: string;
       language?: string;
       thinkingMode?: string;
+      clientRequestId?: string;
     };
     expect(requestBody).toEqual({
       idea: 'LLM generated idea',
       language: 'zh',
       thinkingMode: 'disabled',
+      clientRequestId: expect.any(String),
     });
   });
 
@@ -336,8 +342,8 @@ describe('beeGameAdapter prompt rules', () => {
       firstPlayableValidation: 'LLM validation',
       riskComplexity: 'LLM complexity',
     }));
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
-    expect(requestBody).toEqual({ idea: 'LLM generated idea' });
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; clientRequestId?: string };
+    expect(requestBody).toEqual({ idea: 'LLM generated idea', clientRequestId: expect.any(String) });
   });
 
   it('normalizes snake_case intake setting fields before the UI builds production settings', async () => {
@@ -398,8 +404,8 @@ describe('beeGameAdapter prompt rules', () => {
 
     await beeGameAdapter.runIdeaIntake({ idea: '做一个样例游戏', language: 'zh' });
 
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string };
-    expect(requestBody).toEqual({ idea: '做一个样例游戏', language: 'zh' });
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
+    expect(requestBody).toEqual({ idea: '做一个样例游戏', language: 'zh', clientRequestId: expect.any(String) });
   });
 
   it('rejects structured clarification responses without intake options', async () => {
