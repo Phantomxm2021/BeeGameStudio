@@ -129,6 +129,12 @@ or recreate it intentionally.
 
 Production authentication must use Supabase Auth. `VITE_API_AUTH_TOKEN` is only for dev/offline diagnostics and is ignored in production unless `VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN=1` is explicitly enabled.
 
+## Protected managed previews
+
+Managed preview URLs require a short-lived authenticated browser access session.
+`/previews/*` is not a public sharing URL. Deploy the dashboard and runtime on
+the same site so the runtime can use its scoped HttpOnly preview cookie.
+
 ## Admin Settings
 
 Admin-only configuration includes:
