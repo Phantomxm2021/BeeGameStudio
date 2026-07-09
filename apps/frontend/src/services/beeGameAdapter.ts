@@ -8,7 +8,7 @@ import type {
   ProjectBaselineStatusPayload,
   SendMessageResponse,
   StopTaskResponse,
-  ChatImageAttachmentPayload,
+  ChatAttachmentPayload,
 } from './api';
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
@@ -438,7 +438,7 @@ export const beeGameAdapter = {
     client_message_id?: string;
     supersedes_message_id?: string;
     taskType?: BeeGameCreditTaskType;
-    attachments?: ChatImageAttachmentPayload[];
+    attachments?: ChatAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
@@ -1105,7 +1105,7 @@ async function sendBeeGameInput(
     clientMessageId?: string;
     supersedesMessageId?: string;
     language?: BeeGameLanguage;
-    attachments?: ChatImageAttachmentPayload[];
+    attachments?: ChatAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
   },
 ): Promise<BeeGameSession> {

@@ -12,6 +12,15 @@ import {
   getCurrentUser as getBeeGameCurrentUser,
   type BeeGameCurrentUser,
 } from './currentUserApi';
+import type {
+  ChatAttachmentPayload,
+} from './chatAttachments';
+
+export type {
+  ChatAttachmentPayload,
+  ChatFileAttachmentPayload,
+  ChatImageAttachmentPayload,
+} from './chatAttachments';
 
 export interface SendMessageResponse {
   command_id: string;
@@ -19,13 +28,6 @@ export interface SendMessageResponse {
   state: 'queued' | 'running' | 'resuming';
   resume_mode?: 'recover' | 'resume';
   trace_id: string;
-}
-
-export interface ChatImageAttachmentPayload {
-  type: 'image';
-  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
-  data: string;
-  filename?: string;
 }
 
 export interface ContinueTaskResponse {
@@ -763,7 +765,7 @@ export const api = {
     client_message_id?: string;
     supersedes_message_id?: string;
     taskType?: import('./creditsApi').BeeGameCreditTaskType;
-    attachments?: ChatImageAttachmentPayload[];
+    attachments?: ChatAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
   }) =>
     isBeeGameAdapterEnabled()

@@ -5,6 +5,8 @@
  * the frontend and backend, including WebSocket messages and token usage tracking.
  */
 
+import type { ChatAttachmentPayload } from '../services/chatAttachments';
+
 /**
  * Message type enumeration
  * Defines the different types of messages that can be displayed in the chat
@@ -62,13 +64,8 @@ export interface Message {
   /** Content of the message */
   content: string;
 
-  /** Image attachments submitted with the message */
-  attachments?: Array<{
-    type: 'image';
-    mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
-    data: string;
-    filename?: string;
-  }>;
+  /** Image or document attachments submitted with the message */
+  attachments?: ChatAttachmentPayload[];
 
   /** Timestamp when the message was created (Unix timestamp in milliseconds) */
   timestamp: number;
