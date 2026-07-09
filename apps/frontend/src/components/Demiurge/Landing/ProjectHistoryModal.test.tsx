@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitForElementToBeRemoved } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectHistoryModal } from './ProjectHistoryModal';
@@ -10,6 +10,7 @@ let projectList = [
     created_at: 1710000000000,
   },
 ];
+let projectStoreLoading = false;
 const { getCreditSummary } = vi.hoisted(() => ({
   getCreditSummary: vi.fn(),
 }));
@@ -17,6 +18,7 @@ const { getCreditSummary } = vi.hoisted(() => ({
 vi.mock('../../../store/projectStore', () => ({
   useProjectStore: () => ({
     projects: projectList,
+    isLoading: projectStoreLoading,
     deleteProject: vi.fn(),
   }),
 }));
@@ -40,6 +42,7 @@ describe('ProjectHistoryModal permissions', () => {
         created_at: 1710000000000,
       },
     ];
+    projectStoreLoading = false;
     getCreditSummary.mockReset();
     getCreditSummary.mockResolvedValue({
       entriesCount: 3,
@@ -52,6 +55,8 @@ describe('ProjectHistoryModal permissions', () => {
   });
 
   it('shows delete action for projects in the current account history', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+
     render(
       <ProjectHistoryModal
         isOpen
@@ -67,6 +72,8 @@ describe('ProjectHistoryModal permissions', () => {
   });
 
   it('does not hide delete action behind administrator permissions', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+
     render(
       <ProjectHistoryModal
         isOpen
@@ -91,9 +98,109 @@ describe('ProjectHistoryModal permissions', () => {
       />,
     );
 
-    expect(await screen.findByText('7 credits')).toBeInTheDocument();
-    expect(screen.getByText('5 reserved')).toBeInTheDocument();
+    const settledCredits = await screen.findByText('7 credits');
+    const reservedCredits = screen.getByText('5 reserved');
+    const creditRow = settledCredits.closest('.type-caption-1');
+    expect(settledCredits).toBeInTheDocument();
+    expect(settledCredits).toHaveClass('text-zinc-300');
+    expect(reservedCredits).toBeInTheDocument();
+    expect(creditRow).toHaveClass('text-zinc-500');
+    expect(creditRow).not.toHaveClass('text-amber-200');
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');
+  });
+
+  it('closes an open project menu when clicking elsewhere', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+    expect(screen.getByRole('button', { name: 'Delete Project' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('button', { name: 'Delete Project' })).not.toBeInTheDocument();
+  });
+
+  it('uses the project folder name in history when a root path is available', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+    projectList = [
+      {
+        id: 'project-1',
+        name: 'Original Title',
+        root_path: '/tmp/beegame-workspace/folder-title',
+        created_at: 1710000000000,
+      },
+    ] as any;
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('folder-title')).toBeInTheDocument();
+    expect(screen.queryByText('Original Title')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('More actions folder-title')).toBeInTheDocument();
+  });
+
+  it('keeps credit row space reserved while credit summaries load', async () => {
+    let resolveSummary: ((value: any) => void) | undefined;
+    getCreditSummary.mockReturnValue(new Promise(resolve => {
+      resolveSummary = resolve;
+    }));
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    const placeholder = document.querySelector('[aria-hidden="true"].h-3.w-32');
+    expect(placeholder).toBeInTheDocument();
+    expect(placeholder).toHaveAttribute('data-slot', 'skeleton');
+
+    resolveSummary?.({
+      entriesCount: 3,
+      reservedCredits: 20,
+      settledCredits: 7,
+      refundedCredits: 8,
+      outstandingReservedCredits: 5,
+      weightedTokens: 70_000,
+    });
+
+    await waitForElementToBeRemoved(() => document.querySelector('[aria-hidden="true"].h-3.w-32'));
+    expect(screen.getByText('7 credits')).toBeInTheDocument();
+  });
+
+  it('uses full project row skeletons while project history is loading', () => {
+    projectList = [];
+    projectStoreLoading = true;
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('No projects for this account yet')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThanOrEqual(10);
   });
 
   it('explains empty history for the current account', () => {

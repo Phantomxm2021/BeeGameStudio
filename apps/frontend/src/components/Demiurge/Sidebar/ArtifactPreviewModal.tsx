@@ -2,6 +2,7 @@ import { FileText, X } from 'lucide-react';
 import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
+import { Skeleton } from '../../ui/skeleton';
 
 interface ArtifactPreviewModalProps {
     isOpen: boolean;
@@ -47,9 +48,21 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                         {/* Modal Content */}
                         <div className="flex-1 overflow-y-auto p-8 sm:p-12 scrollbar-hide">
                             {isLoading ? (
-                                <div className="h-full flex flex-col items-center justify-center space-y-4 opacity-40 italic">
-                                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-zinc-900 dark:border-zinc-100"></div>
-                                    <p>{text.fetchingContent}</p>
+                                <div className="space-y-6" aria-label={text.fetchingContent}>
+                                    <div className="space-y-3">
+                                        <Skeleton className="h-7 w-1/3 bg-zinc-200 dark:bg-zinc-800" />
+                                        <Skeleton className="h-4 w-2/3 bg-zinc-200 dark:bg-zinc-800" />
+                                    </div>
+                                    <div className="space-y-3">
+                                        <Skeleton className="h-4 w-full bg-zinc-200 dark:bg-zinc-800" />
+                                        <Skeleton className="h-4 w-11/12 bg-zinc-200 dark:bg-zinc-800" />
+                                        <Skeleton className="h-4 w-4/5 bg-zinc-200 dark:bg-zinc-800" />
+                                    </div>
+                                    <Skeleton className="h-44 w-full rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
+                                    <div className="space-y-3">
+                                        <Skeleton className="h-4 w-5/6 bg-zinc-200 dark:bg-zinc-800" />
+                                        <Skeleton className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800" />
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="prose dark:prose-invert max-w-none">

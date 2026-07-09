@@ -2332,15 +2332,19 @@ describe('beegame session routes', () => {
       expect(fake.starts[0]?.env).toEqual(expect.objectContaining({
         BEEGAME_CONFIG_DIR: expect.stringContaining('.runtime/app'),
         BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
-        SKILL_SEARCH_ENABLED: '1',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         FEATURE_TREE_SITTER_BASH: '1',
         FEATURE_WEB_BROWSER_TOOL: '1',
         FEATURE_BASH_CLASSIFIER: '1',
         FEATURE_MCP_SKILLS: '1',
       }))
+      expect(fake.starts[0]?.env).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('.runtime/app')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).not.toMatch(/claude/i)
+      await expect(readFile(
+        join(fake.starts[0]!.env.CLAUDE_CONFIG_DIR, 'settings.json'),
+        'utf8',
+      )).resolves.toContain('"skillSearchEnabled": true')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -2432,7 +2436,6 @@ describe('beegame session routes', () => {
             env: {
               WEB_SEARCH_ADAPTER: 'brave',
               BRAVE_SEARCH_API_KEY: 'bsa-supabase-secret',
-              SKILL_SEARCH_ENABLED: '1',
               FEATURE_WEB_BROWSER_TOOL: '1',
               FEATURE_BASH_CLASSIFIER: '1',
               BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({
@@ -2539,10 +2542,10 @@ describe('beegame session routes', () => {
       expect(fake.starts[0]?.env).toEqual(expect.objectContaining({
         WEB_SEARCH_ADAPTER: 'brave',
         BRAVE_SEARCH_API_KEY: 'bsa-supabase-secret',
-        SKILL_SEARCH_ENABLED: '1',
         FEATURE_WEB_BROWSER_TOOL: '1',
         FEATURE_BASH_CLASSIFIER: '1',
       }))
+      expect(fake.starts[0]?.env).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(fake.starts[0]?.env.BEEGAME_RUNTIME_SETTINGS_JSON).toBeUndefined()
       await expect(readFile(
         join(
@@ -2555,6 +2558,17 @@ describe('beegame session routes', () => {
         ),
         'utf8',
       )).resolves.toContain('"autoDreamEnabled": true')
+      await expect(readFile(
+        join(
+          projectsRoot,
+          'users',
+          '00000000-0000-0000-0000-000000000001',
+          '.runtime',
+          'app',
+          'settings.json',
+        ),
+        'utf8',
+      )).resolves.toContain('"skillSearchEnabled": true')
     } finally {
       globalThis.fetch = originalFetch
       if (originalUrl === undefined) {
@@ -3592,7 +3606,7 @@ describe('beegame session routes', () => {
       expect(stateRes.status).toBe(200)
       expect(state.build_report).toEqual(expect.objectContaining({
         status: 'passed',
-        build_url: 'http://127.0.0.1:63210/',
+        build_url: `/previews/${session.id}/`,
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -3715,7 +3729,7 @@ describe('beegame session routes', () => {
       expect(previewRes.status).toBe(200)
       expect(preview).toEqual(expect.objectContaining({
         status: 'running',
-        url: 'http://127.0.0.1:63220/',
+        url: `/previews/${preview.sessionId}/`,
       }))
 
       const deployRes = await app.request(
@@ -6085,12 +6099,12 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: 'http://127.0.0.1:63100/',
+        url: '/previews/beegame_preview/',
         script: 'dev',
       }))
       expect(status).toEqual(expect.objectContaining({
         status: 'running',
-        url: 'http://127.0.0.1:63100/',
+        url: '/previews/beegame_preview/',
       }))
       expect(stopped).toEqual(expect.objectContaining({ status: 'stopped' }))
       expect(starts).toHaveLength(1)
@@ -6104,6 +6118,8 @@ describe('beegame session routes', () => {
         '127.0.0.1',
         '--port',
         '63100',
+        '--base',
+        '/previews/beegame_preview/',
       ])
       expect(starts[0].env.PORT).toBe('63100')
       expect(kills).toHaveLength(1)
@@ -6145,7 +6161,10 @@ describe('beegame session routes', () => {
       await writeFile(
         join(workspace, 'package.json'),
         JSON.stringify({
-          scripts: { dev: 'vite --host 127.0.0.1' },
+          scripts: {
+            dev: 'vite --host 127.0.0.1',
+            preview: 'vite preview',
+          },
           devDependencies: { vite: '^6.0.0' },
         }),
       )
@@ -6173,9 +6192,241 @@ describe('beegame session routes', () => {
       expect(starts[0].command).toContain('--base')
       expect(starts[0].command).toContain('/previews/beegame_public_preview/')
       expect(proxiedRootRes.status).toBe(200)
-      expect(proxiedRootText).toBe('proxied /')
+      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedRootText).toBe('proxied /previews/beegame_public_preview/')
       expect(proxiedRes.status).toBe(200)
-      expect(proxiedText).toBe('proxied /assets/main.js?cache=1')
+      expect(proxiedRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedText).toBe('proxied /previews/beegame_public_preview/assets/main.js?cache=1')
+    } finally {
+      if (originalPreviewPublicBaseUrl === undefined) {
+        delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+      } else {
+        process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL = originalPreviewPublicBaseUrl
+      }
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
+      })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('routes local preview HTML through the dashboard proxy and injects console reporting', async () => {
+    const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-local-preview-'))
+    const internalServer = createServer((req, res) => {
+      res.setHeader('content-type', 'text/html')
+      res.end(`<html><head><title>Preview</title></head><body>${req.url || '/'}</body></html>`)
+    })
+    await new Promise<void>((resolveReady, rejectReady) => {
+      internalServer.once('error', rejectReady)
+      internalServer.listen(0, '127.0.0.1', () => resolveReady())
+    })
+    const address = internalServer.address()
+    const internalPort = typeof address === 'object' && address ? address.port : 0
+    let internalServerClosed = false
+    const starts: Array<{ command: string[]; cwd: string; env: Record<string, string> }> = []
+    const previewRunner: BeeGamePreviewRunner = (command, options) => {
+      starts.push({ command, cwd: options.cwd, env: options.env })
+      options.onOutput(`Local: http://127.0.0.1:${internalPort}/\n`)
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => internalPort,
+      previewReadinessProbe: async url => url === `http://127.0.0.1:${internalPort}/`,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_local_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const started = await startRes.json()
+      const proxiedRootRes = await app.request('/previews/beegame_local_preview/')
+      const proxiedRootText = await proxiedRootRes.text()
+
+      expect(startRes.status).toBe(200)
+      expect(started).toEqual(expect.objectContaining({
+        status: 'running',
+        url: '/previews/beegame_local_preview/',
+      }))
+      expect(starts[0].command).toContain('--base')
+      expect(starts[0].command).toContain('/previews/beegame_local_preview/')
+      expect(proxiedRootRes.status).toBe(200)
+      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedRootText).toContain('/previews/beegame_local_preview/')
+      expect(proxiedRootText).toContain('data-beegame-preview-console-bridge')
+      expect(proxiedRootText).toContain('beegame.preview.console')
+
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
+      })
+      internalServerClosed = true
+      const unavailableRes = await app.request('/previews/beegame_local_preview/')
+      const unavailableText = await unavailableRes.text()
+      expect(unavailableRes.status).toBe(502)
+      expect(unavailableRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(unavailableText).toContain('Preview upstream unavailable')
+    } finally {
+      if (originalPreviewPublicBaseUrl === undefined) {
+        delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+      } else {
+        process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL = originalPreviewPublicBaseUrl
+      }
+      if (!internalServerClosed) {
+        await new Promise<void>((resolveClosed, rejectClosed) => {
+          internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
+        })
+      }
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('preserves Vite base paths when proxying preview root requests', async () => {
+    const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-vite-base-preview-'))
+    const internalServer = createServer((req, res) => {
+      if ((req.url || '/') === '/') {
+        res.statusCode = 302
+        res.setHeader('location', '/previews/beegame_vite_base_preview/')
+        res.end()
+        return
+      }
+      res.setHeader('content-type', 'text/html')
+      res.end(`<html><head></head><body>${req.url || '/'}</body></html>`)
+    })
+    await new Promise<void>((resolveReady, rejectReady) => {
+      internalServer.once('error', rejectReady)
+      internalServer.listen(0, '127.0.0.1', () => resolveReady())
+    })
+    const address = internalServer.address()
+    const internalPort = typeof address === 'object' && address ? address.port : 0
+    const previewRunner: BeeGamePreviewRunner = (_command, options) => {
+      options.onOutput(`Local: http://127.0.0.1:${internalPort}/\n`)
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      previewRunner,
+      previewPortAllocator: async () => internalPort,
+      previewReadinessProbe: async url => url === `http://127.0.0.1:${internalPort}/`,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_vite_base_preview/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const proxiedRootRes = await app.request('/previews/beegame_vite_base_preview/')
+      const proxiedRootText = await proxiedRootRes.text()
+
+      expect(startRes.status).toBe(200)
+      expect(proxiedRootRes.status).toBe(200)
+      expect(proxiedRootText).toContain('/previews/beegame_vite_base_preview/')
+      expect(proxiedRootText).not.toBe('')
+    } finally {
+      if (originalPreviewPublicBaseUrl === undefined) {
+        delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+      } else {
+        process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL = originalPreviewPublicBaseUrl
+      }
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
+      })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('serves preview iframe requests without requiring an API authorization header', async () => {
+    const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-iframe-preview-'))
+    const internalServer = createServer((_req, res) => {
+      res.setHeader('content-type', 'text/html')
+      res.end('<html><head></head><body>iframe preview</body></html>')
+    })
+    await new Promise<void>((resolveReady, rejectReady) => {
+      internalServer.once('error', rejectReady)
+      internalServer.listen(0, '127.0.0.1', () => resolveReady())
+    })
+    const address = internalServer.address()
+    const internalPort = typeof address === 'object' && address ? address.port : 0
+    const previewRunner: BeeGamePreviewRunner = (_command, options) => {
+      options.onOutput(`Local: http://127.0.0.1:${internalPort}/\n`)
+      return {
+        kill: () => {},
+        exited: new Promise(() => {}),
+      }
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      currentUserResolver: request => (
+        request.headers.get('authorization') === 'Bearer owner-token'
+          ? { id: DEFAULT_LOCAL_USER_ID, role: 'owner' }
+          : undefined
+      ),
+      previewRunner,
+      previewPortAllocator: async () => internalPort,
+      previewReadinessProbe: async url => url === `http://127.0.0.1:${internalPort}/`,
+    })
+    try {
+      await writeFile(
+        join(workspace, 'package.json'),
+        JSON.stringify({
+          scripts: { dev: 'vite --host 127.0.0.1' },
+          devDependencies: { vite: '^6.0.0' },
+        }),
+      )
+
+      const startRes = await app.request(
+        `/api/beegame-sessions/beegame_iframe_preview/preview`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer owner-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ workspacePath: workspace }),
+        },
+      )
+      const iframeRes = await app.request('/previews/beegame_iframe_preview/')
+      const iframeText = await iframeRes.text()
+
+      expect(startRes.status).toBe(200)
+      expect(iframeRes.status).toBe(200)
+      expect(iframeText).toContain('iframe preview')
+      expect(iframeText).toContain('beegame.preview.console')
     } finally {
       if (originalPreviewPublicBaseUrl === undefined) {
         delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
@@ -6610,7 +6861,7 @@ describe('beegame session routes', () => {
           owner_id: '00000000-0000-0000-0000-000000000001',
           project_id: 'project_preview_metadata',
           status: 'running',
-          url: 'http://127.0.0.1:63100/',
+          url: `/previews/${session.id}/`,
           metadata: expect.objectContaining({
             workspacePath: sessionWorkspace,
             port: 63100,
@@ -6714,7 +6965,7 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: 'http://127.0.0.1:63101/',
+        url: '/previews/beegame_fullstack_preview/',
         script: 'dev',
         entrypoint: 'client/package.json',
       }))

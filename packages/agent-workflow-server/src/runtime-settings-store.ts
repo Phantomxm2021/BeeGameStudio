@@ -103,9 +103,6 @@ export function mapRuntimeSettingsToEnv(
     CLAUDE_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
     BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
   }
-  if (config.skillSearchEnabled !== undefined) {
-    env.SKILL_SEARCH_ENABLED = config.skillSearchEnabled ? '1' : '0'
-  }
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
   }
@@ -131,7 +128,8 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   migrateLegacyRuntimeLayout(options)
   if (
     config.autoMemoryEnabled === undefined &&
-    config.autoDreamEnabled === undefined
+    config.autoDreamEnabled === undefined &&
+    config.skillSearchEnabled === undefined
   ) {
     return
   }
@@ -145,6 +143,9 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
       : {}),
     ...(config.autoDreamEnabled !== undefined
       ? { autoDreamEnabled: config.autoDreamEnabled }
+      : {}),
+    ...(config.skillSearchEnabled !== undefined
+      ? { skillSearchEnabled: config.skillSearchEnabled }
       : {}),
   }
   const tempPath = `${filePath}.tmp`

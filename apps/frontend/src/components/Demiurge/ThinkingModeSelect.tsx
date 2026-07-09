@@ -20,7 +20,7 @@ export function ThinkingModeSelect({
 }: ThinkingModeSelectProps) {
     return (
         <div className={className}>
-            <div className="group relative flex h-10 w-fit shrink-0 items-center rounded-full px-2 transition-colors hover:bg-white/[0.06]">
+            <div className="group relative grid h-10 w-fit shrink-0 place-items-center rounded-full px-2 transition-colors hover:bg-white/[0.06]">
                 <select
                     aria-label={label}
                     value={value}
@@ -29,7 +29,7 @@ export function ThinkingModeSelect({
                         event.currentTarget.blur();
                     }}
                     disabled={disabled}
-                    className="type-button h-full w-auto cursor-pointer appearance-none bg-transparent pl-0 pr-5 text-zinc-500 outline-none transition-colors hover:text-zinc-300 focus-visible:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="type-button h-full w-auto cursor-pointer appearance-none bg-transparent pl-2 pr-7 text-center text-zinc-500 outline-none transition-colors [text-align-last:center] hover:text-zinc-300 focus-visible:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     {options.map(option => (
                         <option key={option.value} value={option.value}>

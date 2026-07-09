@@ -39,7 +39,7 @@ export function MessageScroller({ className, ...props }: MessageScrollerProps) {
 export function MessageScrollerViewport({ className, ...props }: MessageScrollerViewportProps) {
     return (
         <BaseMessageScroller.Viewport
-            className={cx('relative min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4', className)}
+            className={cx('scroll-fade scroll-fade-y relative min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4', className)}
             {...props}
         />
     );
@@ -137,7 +137,7 @@ export function MessageScrollerOutline({ items, className }: MessageScrollerOutl
                     className="pointer-events-none absolute left-9 top-1/2 w-80 -translate-y-1/2 rounded-3xl border border-white/10 bg-zinc-900/90 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/35 backdrop-blur-2xl"
                 >
                     <div className="type-callout truncate text-zinc-50">{hoveredItem.label}</div>
-                    <div className="type-footnote mt-2 line-clamp-2 text-zinc-400">{hoveredItem.label}</div>
+                    <div className="type-muted mt-2 line-clamp-2 text-muted-foreground">{hoveredItem.label}</div>
                 </div>
             ) : null}
         </div>

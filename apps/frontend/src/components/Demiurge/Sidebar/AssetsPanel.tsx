@@ -14,6 +14,7 @@ import {
 import type { BeeGameAssetManifestPayload, BeeGameAssetSlotPayload } from '../../../services/api';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
+import { Skeleton } from '../../ui/skeleton';
 
 interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
@@ -46,9 +47,37 @@ export const AssetsPanel = memo(({
 
     if (isLoading && slots.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-100"></div>
-                <div className="type-callout">{text.loading}</div>
+            <div className="h-full overflow-y-auto p-5" aria-label={text.loading}>
+                <div className="mb-4 flex items-center justify-between">
+                    <div className="min-w-0 space-y-2">
+                        <Skeleton className="h-4 w-24 bg-white/10" />
+                        <Skeleton className="h-3 w-40 bg-white/10" />
+                    </div>
+                    <Skeleton className="h-7 w-14 rounded-full bg-white/10" />
+                </div>
+                <div className="space-y-3">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                        <div key={index} className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                            <div className="flex items-start gap-3">
+                                <Skeleton className="h-10 w-10 shrink-0 rounded-xl bg-white/10" />
+                                <div className="min-w-0 flex-1 space-y-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 space-y-2">
+                                            <Skeleton className="h-4 w-36 bg-white/10" />
+                                            <Skeleton className="h-3 w-56 bg-white/10" />
+                                        </div>
+                                        <Skeleton className="h-6 w-20 rounded-full bg-white/10" />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Skeleton className="h-6 w-14 rounded-full bg-white/10" />
+                                        <Skeleton className="h-6 w-16 rounded-full bg-white/10" />
+                                    </div>
+                                    <Skeleton className="h-9 w-32 rounded-full bg-white/10" />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         );
     }

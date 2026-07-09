@@ -1,9 +1,10 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Square, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Info, MonitorPlay, Play, RefreshCw, Rocket, Square, X } from 'lucide-react';
+import { BsStars } from 'react-icons/bs';
 import type { Language } from './AgentsConfig';
-import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
+import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
+import { Button } from '../ui/button';
+import { ButtonGroup } from '../ui/button-group';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
@@ -16,8 +17,11 @@ import { clearSupabaseSession } from '../../services/supabaseAuthApi';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
-type PreviewControl = 'reload' | 'stop' | 'play' | 'open' | 'deploy';
-type TooltipPosition = { left: number; top: number };
+type PreviewConsoleEntry = {
+    level: string;
+    message: string;
+    createdAt?: string;
+};
 
 interface BeeGameLivePreviewPageProps {
     lang: Language;
@@ -36,13 +40,16 @@ interface BeeGameLivePreviewPageProps {
     } | null;
     modelName: string;
     isSyncing: boolean;
+    isInteractionLocked?: boolean;
     buildReport?: BuildReportPayload | null;
     deployments?: BeeGameDeploymentPayload[];
+    previewRefreshNonce?: number;
     onStartPreview?: () => void | Promise<void>;
     onRestartPreview?: () => void | Promise<void>;
     onStopPreview?: () => void | Promise<void>;
     onDeployProject?: () => void | Promise<void>;
     onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
+    onFixBuildErrors?: (errorLog: string) => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
     isDeploying?: boolean;
     onBack?: () => void;
@@ -53,6 +60,19 @@ const normalizeUrl = (url?: string): string => {
     const value = String(url || '').trim();
     if (!value) return '';
     return value;
+};
+
+const getPreviewSessionId = (url?: string): string => {
+    const value = normalizeUrl(url);
+    if (!value || typeof window === 'undefined') return '';
+    try {
+        const parsed = new URL(value, window.location.origin);
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        if (parts[0] !== 'previews') return '';
+        return decodeURIComponent(parts[1] || '');
+    } catch {
+        return '';
+    }
 };
 
 const displayDeploymentUrl = (url?: string): string => {
@@ -76,6 +96,27 @@ const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPaylo
     return 'idle';
 };
 
+const collectBuildErrorLogs = (buildReport?: BuildReportPayload | null): string[] => {
+    const reportStatus = String(buildReport?.status || '').toLowerCase();
+    const isFailedReport = reportStatus === 'failed' || reportStatus === 'error';
+    const logs = new Set<string>();
+    const failureReason = String(buildReport?.failure_reason || '').trim();
+    if (failureReason) logs.add(failureReason);
+
+    for (const check of buildReport?.checks || []) {
+        const checkStatus = String(check.status || '').toLowerCase();
+        const isFailedCheck = checkStatus === 'failed' || checkStatus === 'error';
+        const detail = String(check.detail || '').trim();
+        if (!detail || (!isFailedReport && !isFailedCheck)) continue;
+        const name = String(check.name || '').trim();
+        logs.add(name ? `${name}: ${detail}` : detail);
+    }
+
+    return Array.from(logs);
+};
+
+const previewControlButtonClass = 'border-white/[0.08] bg-white/[0.025] text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-white/15 hover:bg-white/[0.055] hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-white/25 disabled:text-zinc-600 disabled:opacity-45';
+
 export function BeeGameLivePreviewPage({
     lang,
     projectName,
@@ -86,13 +127,16 @@ export function BeeGameLivePreviewPage({
     accountCreditBalance,
     modelName,
     isSyncing,
+    isInteractionLocked = false,
     buildReport,
     deployments = [],
+    previewRefreshNonce = 0,
     onStartPreview,
     onRestartPreview,
     onStopPreview,
     onDeployProject,
     onRollbackDeployment,
+    onFixBuildErrors,
     onOpenExternal,
     isDeploying = false,
     onBack,
@@ -104,21 +148,38 @@ export function BeeGameLivePreviewPage({
     const [isHistoryOpen, setHistoryOpen] = useState(false);
     const [isProfileOpen, setProfileOpen] = useState(false);
     const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
-    const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStoppingPreview, setStoppingPreview] = useState(false);
-    const { i18n } = useTranslation('beegame');
-    const labels = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame').livePreview as Record<string, string>;
+    const [previewConsoleEntries, setPreviewConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
+    const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
     const uiText = useBeeGameText(lang);
+    const labels = uiText.livePreview as Record<string, string>;
     const currentUser = useSystemStore(state => state.currentUser);
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
+    const embeddedPreviewUrl = useMemo(() => {
+        if (!previewUrl || previewRefreshNonce <= 0 || typeof window === 'undefined') return previewUrl;
+        try {
+            const url = new URL(previewUrl, window.location.origin);
+            url.searchParams.set('__beegame_preview_refresh', String(previewRefreshNonce));
+            return /^https?:\/\//i.test(previewUrl)
+                ? url.toString()
+                : `${url.pathname}${url.search}${url.hash}`;
+        } catch {
+            return previewUrl;
+        }
+    }, [previewRefreshNonce, previewUrl]);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
-    const canStartPreview = !canShowPreview && !isStoppingPreview;
-    const canStopPreview = canShowPreview && !isStoppingPreview;
-    const canDeploy = Boolean(onDeployProject) && !isDeploying;
+    const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStoppingPreview && !isInteractionLocked;
+    const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
+    const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked;
+    const buildErrorLogs = collectBuildErrorLogs(buildReport);
+    const runtimeErrorLogs = previewConsoleEntries
+        .filter(entry => entry.level === 'error' || entry.level === 'warn')
+        .map(entry => `[preview ${entry.level}] ${entry.message}`);
+    const buildErrorLog = [...buildErrorLogs, ...runtimeErrorLogs].join('\n\n');
     const statusText = previewState === 'live'
         ? labels.live
         : previewState === 'failed'
@@ -128,8 +189,11 @@ export function BeeGameLivePreviewPage({
                 : previewState === 'starting'
                     ? labels.starting
                     : labels.waiting;
+    const previewDetailText = previewState === 'failed'
+        ? (buildReport?.failure_reason || buildReport?.summary || labels.noPreview)
+        : '';
     const handleStop = async () => {
-        if (!canStopPreview) return;
+        if (!canStopPreview || isInteractionLocked) return;
         setStoppingPreview(true);
         try {
             await onStopPreview?.();
@@ -139,14 +203,17 @@ export function BeeGameLivePreviewPage({
         }
     };
     const handlePlay = async () => {
+        if (isInteractionLocked) return;
         setStoppedPreviewUrl('');
         await onStartPreview?.();
     };
     const handleRestart = async () => {
+        if (isInteractionLocked) return;
         setStoppedPreviewUrl('');
         await onRestartPreview?.();
     };
     const handleDeploy = async () => {
+        if (isInteractionLocked) return;
         await onDeployProject?.();
     };
     const closeAccountSurfaces = () => {
@@ -156,6 +223,7 @@ export function BeeGameLivePreviewPage({
         setProfileOpen(false);
     };
     const handleSelectProject = async (projectId: string) => {
+        if (isInteractionLocked) return;
         setHistoryOpen(false);
         await useProjectStore.getState().setActiveProject(projectId);
     };
@@ -167,6 +235,34 @@ export function BeeGameLivePreviewPage({
     };
     useEffect(() => {
         setStoppedPreviewUrl('');
+        setPreviewConsoleEntries([]);
+    }, [previewRefreshNonce, previewUrl]);
+
+    useEffect(() => {
+        const handlePreviewConsoleMessage = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin && event.origin !== 'null') return;
+            if (event.source !== previewFrameRef.current?.contentWindow) return;
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+            if ((data as { type?: unknown }).type !== 'beegame.preview.console') return;
+            const expectedSessionId = getPreviewSessionId(previewUrl);
+            const sessionId = String((data as { sessionId?: unknown }).sessionId || '').trim();
+            if (expectedSessionId && sessionId !== expectedSessionId) return;
+            const level = String((data as { level?: unknown }).level || '').trim();
+            const message = String((data as { message?: unknown }).message || '').trim();
+            if (!level || !message) return;
+            setPreviewConsoleEntries(entries => [
+                ...entries.slice(-9),
+                {
+                    level,
+                    message,
+                    createdAt: String((data as { createdAt?: unknown }).createdAt || '').trim(),
+                },
+            ]);
+        };
+
+        window.addEventListener('message', handlePreviewConsoleMessage);
+        return () => window.removeEventListener('message', handlePreviewConsoleMessage);
     }, [previewUrl]);
 
     return (
@@ -187,34 +283,32 @@ export function BeeGameLivePreviewPage({
                     >
                         <ChevronLeft className="h-4 w-4" />
                     </button>
+                    <div
+                        data-testid="beegame-project-trigger"
+                        className="type-title-3 min-w-0 max-w-[34rem] truncate text-zinc-100"
+                    >
+                        {projectName}
+                    </div>
                     <button
                         type="button"
-                        data-testid="beegame-project-trigger"
+                        data-testid="beegame-project-info-trigger"
+                        aria-label={labels.projectInfo || 'Project info'}
                         aria-describedby={isProjectHintOpen ? 'beegame-project-hint' : undefined}
                         onMouseEnter={() => setProjectHintOpen(true)}
                         onMouseLeave={() => setProjectHintOpen(false)}
                         onFocus={() => setProjectHintOpen(true)}
                         onBlur={() => setProjectHintOpen(false)}
-                        className="type-title-3 min-w-0 max-w-[34rem] truncate bg-transparent p-0 text-left text-zinc-100 outline-none transition hover:text-white focus-visible:text-white"
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-700 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
                     >
-                        {projectName}
+                        <Info className="h-4 w-4" />
                     </button>
-                    <div className="type-footnote flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-300">
-                        <Globe2 className="h-3.5 w-3.5" />
-                        Web
-                    </div>
-                    <div className="type-footnote flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1 text-emerald-300">
-                        <span className={`h-2 w-2 rounded-full ${status === 'running' ? 'bg-emerald-400' : status === 'offline' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
-                        {statusText}
-                    </div>
-                    {credits ? (
-                        <div className="type-footnote flex items-center gap-2 rounded-xl bg-amber-400/10 px-3 py-1 text-amber-200">
-                            {labels.credits}: {credits.settledCredits.toLocaleString()}
-                        </div>
-                    ) : null}
                     {isSyncing ? (
-                        <div className="type-footnote rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-400">
-                            {labels.syncing}
+                        <div
+                            data-testid="beegame-sync-status"
+                            className="type-footnote flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-400"
+                        >
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                            <span>{labels.syncing}</span>
                         </div>
                     ) : null}
                     {isProjectHintOpen ? (
@@ -224,6 +318,7 @@ export function BeeGameLivePreviewPage({
                             data-testid="beegame-project-hint"
                             className="absolute left-5 top-12 z-50 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
                         >
+                            <ProjectHintRow label={labels.platform || 'Platform'} value="Web" />
                             <ProjectHintRow label={labels.tokens} value={tokens.toLocaleString()} />
                             {credits ? (
                                 <>
@@ -280,73 +375,87 @@ export function BeeGameLivePreviewPage({
                                 </h1>
                             </div>
                         </div>
-                        <div className="relative z-20 flex items-center gap-3 overflow-visible">
-                            <PreviewControlButton
-                                control="reload"
-                                label={labels.reload}
-                                disabled={!canShowPreview}
-                                hoveredControl={hoveredControl}
-                                setHoveredControl={setHoveredControl}
+                        <ButtonGroup aria-label={labels.actions || 'Actions'} className="relative z-20">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-lg"
+                                aria-label={labels.reload}
+                                title={labels.reload}
+                                disabled={!canShowPreview || isInteractionLocked}
                                 onClick={handleRestart}
+                                className={previewControlButtonClass}
                             >
                                 <RefreshCw className="h-4 w-4" />
-                            </PreviewControlButton>
+                            </Button>
                             {!canShowPreview ? (
-                                <PreviewControlButton
-                                    control="play"
-                                    label={labels.play}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-lg"
+                                    aria-label={labels.play}
+                                    title={labels.play}
                                     disabled={!canStartPreview}
-                                    hoveredControl={hoveredControl}
-                                    setHoveredControl={setHoveredControl}
                                     onClick={handlePlay}
+                                    className={previewControlButtonClass}
                                 >
-                                    <Play className="h-4 w-4 fill-emerald-400 text-emerald-400" />
-                                </PreviewControlButton>
+                                    <Play className="h-4 w-4 fill-current" />
+                                </Button>
                             ) : (
-                                <PreviewControlButton
-                                    control="stop"
-                                    label={labels.stop}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-lg"
+                                    aria-label={labels.stop}
+                                    title={labels.stop}
                                     disabled={!canStopPreview}
-                                    hoveredControl={hoveredControl}
-                                    setHoveredControl={setHoveredControl}
                                     onClick={handleStop}
+                                    className={previewControlButtonClass}
                                 >
-                                    <Square className="h-4 w-4 fill-red-500 text-red-500" />
-                                </PreviewControlButton>
+                                    <Square className="h-3.5 w-3.5 fill-current" />
+                                </Button>
                             )}
-                            <PreviewControlButton
-                                control="deploy"
-                                label={isDeploying ? labels.deploying : labels.deploy}
-                                disabled={!onDeployProject}
-                                hoveredControl={hoveredControl}
-                                setHoveredControl={setHoveredControl}
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-lg"
+                                aria-label={isDeploying ? labels.deploying : labels.deploy}
+                                title={isDeploying ? labels.deploying : labels.deploy}
+                                disabled={!canDeploy}
                                 onClick={() => setDeploymentDialogOpen(true)}
+                                className={previewControlButtonClass}
                             >
                                 <Rocket className="h-4 w-4" />
-                            </PreviewControlButton>
-                            <PreviewControlButton
-                                control="open"
-                                label={labels.openLive || labels.open}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-lg"
+                                aria-label={labels.openLive || labels.open}
+                                title={labels.openLive || labels.open}
                                 disabled={!canShowPreview}
-                                hoveredControl={hoveredControl}
-                                setHoveredControl={setHoveredControl}
                                 onClick={() => {
                                     if (previewUrl) onOpenExternal?.(previewUrl);
                                 }}
+                                className={previewControlButtonClass}
                             >
                                 <ExternalLink className="h-4 w-4" />
-                            </PreviewControlButton>
-                        </div>
+                            </Button>
+                        </ButtonGroup>
                     </div>
 
-                    <div className="mx-9 mb-9 min-h-0 flex-1 rounded-xl border border-zinc-800 bg-black p-4">
+                    <div
+                        data-testid="beegame-preview-surface"
+                        className="relative mx-9 mb-9 min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black p-4"
+                    >
                         {canShowPreview ? (
                             <iframe
-                                key={previewUrl}
+                                ref={previewFrameRef}
+                                key={`${previewUrl}:${previewRefreshNonce}`}
                                 title={uiText.previewTitle}
                                 data-testid="beegame-live-preview-frame"
-                                src={previewUrl}
-                                sandbox="allow-forms allow-pointer-lock allow-popups allow-same-origin allow-scripts"
+                                src={embeddedPreviewUrl}
+                                sandbox="allow-forms allow-pointer-lock allow-popups allow-scripts"
                                 className="h-full w-full rounded-lg border-0 bg-white"
                             />
                         ) : (
@@ -358,12 +467,39 @@ export function BeeGameLivePreviewPage({
                                     <div className="type-caption-1 mt-6 text-zinc-400">
                                         {statusText}
                                     </div>
-                                    <p className="type-callout mt-3 text-zinc-500">
-                                        {buildReport?.failure_reason || buildReport?.summary || labels.noPreview}
-                                    </p>
+                                    {previewDetailText ? (
+                                        <p className="type-callout mt-3 text-zinc-500">
+                                            {previewDetailText}
+                                        </p>
+                                    ) : null}
                                 </div>
                             </div>
                         )}
+
+                        {buildErrorLog ? (
+                            <div
+                                data-testid="beegame-preview-error-overlay"
+                                className="absolute bottom-4 left-4 right-4 z-20 overflow-hidden rounded-xl border border-red-300/20 bg-zinc-950/88 shadow-2xl shadow-black/45 backdrop-blur-xl"
+                            >
+                                <div className="flex h-11 items-center justify-between gap-4 border-b border-red-300/10 px-4">
+                                    <div className="type-caption-1 text-zinc-300">
+                                        {labels.console}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        aria-label={labels.fixBuildErrors}
+                                        onClick={() => void onFixBuildErrors?.(buildErrorLog)}
+                                        className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
+                                    >
+                                        <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
+                                        <span>{labels.fixBuildErrors}</span>
+                                    </button>
+                                </div>
+                                <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-5 text-red-200/85">
+                                    {buildErrorLog}
+                                </pre>
+                            </div>
+                        ) : null}
                     </div>
 
                 </section>
@@ -649,99 +785,6 @@ function ProjectHintRow({ label, value }: { label: string; value: string }) {
             <div className="type-callout min-w-0 truncate text-right text-zinc-100">
                 {value}
             </div>
-        </div>
-    );
-}
-
-function PreviewControlButton({
-    control,
-    label,
-    disabled,
-    hoveredControl,
-    setHoveredControl,
-    onClick,
-    children,
-}: {
-    control: PreviewControl;
-    label: string;
-    disabled: boolean;
-    hoveredControl: PreviewControl | null;
-    setHoveredControl: (control: PreviewControl | null) => void;
-    onClick?: () => void | Promise<void>;
-    children: ReactNode;
-}) {
-    const isHintVisible = hoveredControl === control;
-    const buttonRef = useRef<HTMLButtonElement | null>(null);
-    const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition | null>(null);
-    const updateTooltipPosition = useCallback(() => {
-        const button = buttonRef.current;
-        if (!button) return;
-        const rect = button.getBoundingClientRect();
-        setTooltipPosition({
-            left: rect.left + rect.width / 2,
-            top: rect.top - 8,
-        });
-    }, []);
-
-    useEffect(() => {
-        if (!isHintVisible) {
-            setTooltipPosition(null);
-            return;
-        }
-
-        updateTooltipPosition();
-        window.addEventListener('resize', updateTooltipPosition);
-        window.addEventListener('scroll', updateTooltipPosition, true);
-        return () => {
-            window.removeEventListener('resize', updateTooltipPosition);
-            window.removeEventListener('scroll', updateTooltipPosition, true);
-        };
-    }, [isHintVisible, updateTooltipPosition]);
-
-    const showTooltip = () => {
-        setHoveredControl(control);
-        updateTooltipPosition();
-    };
-
-    const hideTooltip = () => {
-        setHoveredControl(null);
-        setTooltipPosition(null);
-    };
-
-    return (
-        <div
-            className="relative z-30"
-            onMouseEnter={showTooltip}
-            onMouseLeave={hideTooltip}
-        >
-            <button
-                ref={buttonRef}
-                type="button"
-                aria-label={label}
-                aria-describedby={isHintVisible ? `beegame-preview-control-${control}` : undefined}
-                title={label}
-                onFocus={showTooltip}
-                onBlur={hideTooltip}
-                onClick={onClick}
-                disabled={disabled}
-                className="glass-icon-button h-11 w-11 rounded-xl text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-                {children}
-            </button>
-            {isHintVisible && tooltipPosition && typeof document !== 'undefined' ? createPortal(
-                <div
-                    id={`beegame-preview-control-${control}`}
-                    role="tooltip"
-                    className="type-footnote pointer-events-none fixed z-[9999] -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-zinc-200 shadow-xl shadow-black/40"
-                    style={{
-                        left: tooltipPosition.left,
-                        top: tooltipPosition.top,
-                    }}
-                >
-                    {label}
-                </div>,
-                document.body,
-            ) : null}
         </div>
     );
 }

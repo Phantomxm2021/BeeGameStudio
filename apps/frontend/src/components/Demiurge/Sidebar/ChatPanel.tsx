@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react';
-import { MessageSquare, AlertCircle, Send, ImagePlus, X } from 'lucide-react';
+import { MessageSquare, AlertCircle, Send, X } from 'lucide-react';
+import { FaPaperclip } from 'react-icons/fa6';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import {
@@ -170,9 +171,11 @@ export const ChatPanel = memo(({
     currentUserAvatarUrl,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
-    const thinkingLabel = text.thinkingLabel || '思考';
-    const thinkingOff = 'Default';
-    const thinkingOn = 'Thinking';
+    const thinkingLabel = text.thinkingLabel || text.thinking || 'Thinking';
+    const thinkingOff = text.thinkingOff || 'Default';
+    const thinkingOn = text.thinkingOn || 'Thinking';
+    const composerPlaceholder = text.chatPlaceholder || waitingApproval.placeholder;
+    const attachImageLabel = text.attachImage || 'Attach image';
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
@@ -244,10 +247,10 @@ export const ChatPanel = memo(({
         ? 'border-t border-white/10 bg-black/25 px-4 pb-4 pt-4 backdrop-blur-2xl'
         : 'pt-4 bg-transparent border-t border-zinc-100 dark:border-zinc-800 px-8 pb-8';
     const normalComposerClassName = isBeeGameVariant
-        ? 'glass-control group flex min-h-[81px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl'
+        ? 'glass-control group flex min-h-[60px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl'
         : 'relative group';
     const textareaClassName = isBeeGameVariant
-        ? 'type-input scrollbar-hide w-full bg-transparent px-5 py-4 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[72px] max-h-[150px] resize-none overflow-y-auto outline-none'
+        ? 'type-input scrollbar-hide w-full bg-transparent px-5 py-3 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-50 min-h-[56px] max-h-[150px] resize-none overflow-y-auto outline-none'
         : 'type-input w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-6 py-4 pr-16 outline-none focus:border-zinc-900 dark:focus:border-zinc-100 transition-all text-zinc-900 dark:text-zinc-100 disabled:opacity-50 min-h-[52px] max-h-[160px] resize-none overflow-y-auto';
     const textareaInsetClassName = isBeeGameVariant ? '' : 'pl-14';
     const sendButtonClassName = isBeeGameVariant
@@ -551,7 +554,7 @@ export const ChatPanel = memo(({
                                 <textarea
                                     ref={textareaRef}
                                     className={`${textareaClassName} ${textareaInsetClassName}`}
-                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
+                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : composerPlaceholder}
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {
@@ -571,17 +574,17 @@ export const ChatPanel = memo(({
                                     disabled={isComposerDisabled}
                                 />
                                 <div
-                                    className="flex items-center justify-between px-3 pb-3 pt-1"
+                                    className="flex items-center justify-between px-3 pb-2 pt-0"
                                     data-testid="beegame-chat-toolbar"
                                 >
                                     <label
                                         htmlFor="beegame-chat-image-upload"
-                                        aria-label="Attach image"
-                                        title="Attach image"
+                                        aria-label={attachImageLabel}
+                                        title={attachImageLabel}
                                         className={`flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
                                         data-testid="beegame-chat-attach-button"
                                     >
-                                        <ImagePlus className="h-5 w-5" />
+                                        <FaPaperclip className="h-4 w-4" />
                                     </label>
                                     <div className="flex items-center gap-3">
                                         <ThinkingModeSelect
@@ -622,16 +625,16 @@ export const ChatPanel = memo(({
                                 />
                                 <label
                                     htmlFor="beegame-chat-image-upload"
-                                    aria-label="Attach image"
-                                    title="Attach image"
+                                    aria-label={attachImageLabel}
+                                    title={attachImageLabel}
                                     className={`absolute bottom-3.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
                                 >
-                                    <ImagePlus className="h-5 w-5" />
+                                    <FaPaperclip className="h-4 w-4" />
                                 </label>
                                 <textarea
                                     ref={textareaRef}
                                     className={`${textareaClassName} ${textareaInsetClassName}`}
-                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : waitingApproval.placeholder}
+                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : composerPlaceholder}
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {

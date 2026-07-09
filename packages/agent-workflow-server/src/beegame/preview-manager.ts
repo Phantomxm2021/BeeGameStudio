@@ -49,6 +49,7 @@ export type BeeGamePreviewReadinessProbe = (url: string) => Promise<boolean>
 type PreviewRecord = {
   snapshot: BeeGamePreviewSnapshot
   internalUrl?: string
+  expectsPublicPath?: boolean
   processes?: BeeGamePreviewProcess[]
 }
 
@@ -116,11 +117,12 @@ export class BeeGamePreviewManager {
 
     this.stop(options.sessionId, workspacePath)
 
+    const publicPath = this.publicPath(options.sessionId)
     const plan = await createPreviewPlan(
       workspacePath,
       this.portStart,
       this.allocatePort,
-      this.publicPath(options.sessionId),
+      publicPath,
     )
     if (!plan.supported) {
       const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
@@ -159,7 +161,11 @@ export class BeeGamePreviewManager {
         }
       },
     }))
-    this.records.set(options.sessionId, { snapshot, processes })
+    this.records.set(options.sessionId, {
+      snapshot,
+      processes,
+      expectsPublicPath: plan.command.includes('--base') && plan.command.includes(publicPath),
+    })
     this.watchPreviewProcesses(options.sessionId, processes, plan)
     const readiness = await checkPreviewPlanReadiness(plan, this.readinessProbe)
     const record = this.records.get(options.sessionId)
@@ -220,6 +226,11 @@ export class BeeGamePreviewManager {
     return record.internalUrl
   }
 
+  expectsPublicPath(sessionId: string): boolean {
+    const record = this.records.get(sessionId)
+    return Boolean(record?.expectsPublicPath)
+  }
+
   private createSnapshot(
     sessionId: string,
     workspacePath: string,
@@ -237,13 +248,15 @@ export class BeeGamePreviewManager {
   }
 
   private publicUrl(sessionId: string, internalUrl: string): string {
-    if (!internalUrl || !this.publicBaseUrl.trim()) return ''
+    if (!internalUrl) return ''
+    const encodedSessionId = encodeURIComponent(sessionId)
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodedSessionId}/`
     const base = this.publicBaseUrl.trim().replace(/\/+$/, '')
-    return `${base}/${encodeURIComponent(sessionId)}/`
+    return `${base}/${encodedSessionId}/`
   }
 
   private publicPath(sessionId: string): string {
-    if (!this.publicBaseUrl.trim()) return ''
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(sessionId)}/`
     try {
       const url = new URL(this.publicUrl(sessionId, DEFAULT_HOST))
       return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`
@@ -317,11 +330,11 @@ async function createPreviewPlan(
   )
   if (splitPlan) return splitPlan
 
-  const script = chooseScript(manifest, ['preview', 'dev', 'start'])
+  const script = chooseScript(manifest, ['dev', 'preview', 'start'])
   if (!script) {
     return {
       supported: false,
-      message: 'Preview host did not find a preview, dev, or start script',
+      message: 'Preview host did not find a dev, preview, or start script',
     }
   }
   const port = await allocatePort(portStart)

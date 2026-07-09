@@ -65,6 +65,32 @@ const upsertDeploymentHistory = (
     ...current.filter((item) => item.id !== deployment.id),
 ];
 
+const createBuildErrorFixPrompt = (template: string, errorLog: string): string => (
+    template.replace('{{errorLog}}', errorLog)
+);
+
+const PROJECT_SYNC_TIMEOUT_MS = 10_000;
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error.trim()) return error;
+    return fallback;
+};
+
+const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            operation,
+            new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(message)), PROJECT_SYNC_TIMEOUT_MS);
+            }),
+        ]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+};
+
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
     const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
@@ -73,9 +99,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
     const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
     const [isDeployingProject, setDeployingProject] = useState(false);
+    const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
     const hasSentInitialPrompt = useRef(false);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const previousBeeGameStatusRef = useRef<string | null>(null);
     const isBeeGameMode = isBeeGameAdapterEnabled();
     const { i18n } = useTranslation('beegame');
     const translateBeeGame = useMemo(
@@ -98,9 +126,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         hasPermission,
         currentUser,
     } = useSystemStore();
-    const { projects, pendingReviews, projectStatus, runtimeReadiness, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
+    const { projects, pendingReviews, projectStatus, runtimeReadiness, isOpeningProject, loadPendingReviews, loadProjectStatus, loadSystemReadiness } = useProjectStore();
     const { messages } = useChatStore();
-    const { showSuccess, showError } = useToast();
+    const { showSuccess, showError, showWarning } = useToast();
 
     const confirmCreditQuote = useCallback((quote: BeeGameCreditQuote): Promise<boolean> => {
         setCreditQuote(quote);
@@ -245,12 +273,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         () => getWaitingApprovalState(projectRuntimeDisplay, reviewDisplayModels),
         [projectRuntimeDisplay, reviewDisplayModels],
     );
-    const canSendMessage = hasPermission('agent.send_message');
-    const canApproveTool = hasPermission('agent.approve_tool');
-    const canManagePreview = hasPermission('preview.manage');
-    const canManageDeployment = hasPermission('deployment.manage');
-    const canUploadAssets = hasPermission('assets.upload');
-    const canIntegrateAssets = hasPermission('assets.integrate');
+    const isProjectInteractionLocked = isOpeningProject || isSyncing;
+    const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked;
+    const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
+    const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
+    const canManageDeployment = hasPermission('deployment.manage') && !isProjectInteractionLocked;
+    const canUploadAssets = hasPermission('assets.upload') && !isProjectInteractionLocked;
+    const canIntegrateAssets = hasPermission('assets.integrate') && !isProjectInteractionLocked;
     const canExportProject = hasPermission('project.export');
 
     // Auto-Send Initial Prompt
@@ -301,9 +330,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleStartPreview = async () => {
-        if (!canManagePreview) return;
+        if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.startProjectPreview(projectId);
+            setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
@@ -311,9 +341,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleRestartPreview = async () => {
-        if (!canManagePreview) return;
+        if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.restartProjectPreview(projectId);
+            setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
@@ -321,9 +352,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleStopPreview = async () => {
-        if (!canManagePreview) return;
+        if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.stopProjectPreview(projectId);
+            setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
@@ -331,7 +363,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleDeployProject = async () => {
-        if (!canManageDeployment || isDeployingProject) return;
+        if (!canManageDeployment || isDeployingProject || isProjectInteractionLocked) return;
         setDeployingProject(true);
         try {
             const deployment = await api.deployProject(projectId);
@@ -351,7 +383,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleRollbackDeployment = async (deploymentId: string) => {
-        if (!canManageDeployment || isDeployingProject) return;
+        if (!canManageDeployment || isDeployingProject || isProjectInteractionLocked) return;
         setDeployingProject(true);
         try {
             const deployment = await api.rollbackProjectDeployment(projectId, deploymentId);
@@ -367,10 +399,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     };
 
-    // Poll live runtime state. BeeGame mode deliberately avoids legacy workflow phase/task telemetry.
-    useEffect(() => {
-        if (!projectId) return;
-
+    const runProjectSync = useCallback(async () => {
         const initialLoads: Array<Promise<unknown>> = [
             loadPendingReviews(projectId),
             loadProjectStatus(projectId),
@@ -383,7 +412,24 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 loadTasks(projectId),
             );
         }
-        Promise.allSettled(initialLoads).finally(() => setInitialGateStateReady(true));
+        const results = await withProjectSyncTimeout(
+            Promise.allSettled(initialLoads),
+            translateBeeGame('livePreview.syncTimeoutMessage'),
+        );
+        const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failedResult) throw failedResult.reason;
+    }, [isBeeGameMode, loadAgents, loadPendingReviews, loadPhases, loadProjectStatus, loadSystemReadiness, loadTasks, projectId, translateBeeGame]);
+
+    // Poll live runtime state. BeeGame mode deliberately avoids legacy workflow phase/task telemetry.
+    useEffect(() => {
+        if (!projectId) return;
+
+        runProjectSync()
+            .then(() => setInitialGateStateReady(true))
+            .catch((error) => {
+                setInitialGateStateReady(false);
+                showWarning(getErrorMessage(error, translateBeeGame('livePreview.syncFailedMessage')));
+            });
         loadTokenUsage(projectId).catch(console.error);
 
         const poll = () => {
@@ -423,7 +469,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             clearInterval(tokenInterval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [projectId, isBeeGameMode, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive]);
+    }, [projectId, isBeeGameMode, loadPhases, loadTokenUsage, loadAgents, loadTasks, loadPendingReviews, loadProjectStatus, loadSystemReadiness, currentStatus, hasUnfinishedTasks, isPipelineActive, runProjectSync, showWarning, translateBeeGame]);
+
+    useEffect(() => {
+        if (!isOpeningProject && !isSyncing) return undefined;
+        const timeoutId = setTimeout(() => {
+            showWarning(translateBeeGame('livePreview.syncTimeoutMessage'));
+        }, PROJECT_SYNC_TIMEOUT_MS);
+        return () => clearTimeout(timeoutId);
+    }, [isOpeningProject, isSyncing, showWarning, translateBeeGame]);
 
     // BeeGame follows the live runtime turn, not the legacy multi-stage workflow.
     const progressPercent = useMemo(() => {
@@ -473,6 +527,17 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
             modelConfigs[0],
         ) || savedRuntimeSnapshot?.model_name || '';
     }, [modelConfigs, projectStatus?.model_config_id, savedRuntimeSnapshot?.model_name]);
+
+    useEffect(() => {
+        if (!isBeeGameMode) return;
+        const previousStatus = previousBeeGameStatusRef.current;
+        previousBeeGameStatusRef.current = currentStatus;
+        const wasWorking = previousStatus === 'running' || previousStatus === 'waiting_approval';
+        const isSettled = currentStatus === 'finished' || currentStatus === 'paused' || currentStatus === 'idle';
+        if (wasWorking && isSettled && projectStatus?.build_report?.build_url) {
+            setPreviewRefreshNonce(value => value + 1);
+        }
+    }, [currentStatus, isBeeGameMode, projectStatus?.build_report?.build_url]);
 
     // Logging Token Usage and Progress
     useEffect(() => {
@@ -543,13 +608,19 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 accountCreditBalance={creditBalance}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
+                isInteractionLocked={isProjectInteractionLocked}
                 buildReport={projectStatus?.build_report || null}
                 deployments={deploymentHistory}
+                previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
                 onStopPreview={canManagePreview ? handleStopPreview : undefined}
                 onDeployProject={canManageDeployment ? handleDeployProject : undefined}
                 onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
+                onFixBuildErrors={(errorLog) => {
+                    if (isProjectInteractionLocked) return Promise.resolve();
+                    return sendMessage(createBuildErrorFixPrompt(translateBeeGame('livePreview.fixBuildErrorsPrompt'), errorLog));
+                }}
                 isDeploying={isDeployingProject}
                 onOpenExternal={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
                 onBack={onBack}
@@ -566,12 +637,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     taskType?: BeeGameCreditTaskType,
                     attachments?: ChatImageAttachmentPayload[],
                     thinkingMode?: BeeGameThinkingMode,
-                ) =>
-                    sendMessage(message, undefined, taskType, attachments, thinkingMode)
-                }
+                ) => {
+                    if (isProjectInteractionLocked) return Promise.resolve();
+                    return sendMessage(message, undefined, taskType, attachments, thinkingMode);
+                }}
                 isLoading={isLoading}
                 isRuntimeBusy={currentStatus === 'running'}
-                onApprovePlan={hasPendingPlanReview && canApproveTool ? approvePlan : undefined}
+                onApprovePlan={hasPendingPlanReview && canApproveTool && !isProjectInteractionLocked ? approvePlan : undefined}
                 approvalState={approvalState}
                 pendingReviews={reviewDisplayModels}
                 projectStatus={projectRuntimeDisplay}

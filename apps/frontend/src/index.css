@@ -1,9 +1,22 @@
 @import "tailwindcss";
+@import "shadcn/tailwind.css";
 @config "../tailwind.config.js";
 
 @variant dark (&:where(.dark, .dark *));
 
 :root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
   --scrollbar-track: #f3f4f6;
   --scrollbar-thumb: #d1d5db;
   /* Lighter/subtle gray for light mode */
@@ -11,6 +24,18 @@
 }
 
 .dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
   --scrollbar-track: rgba(0, 0, 0, 0.05);
   /* Nearly transparent track */
   --scrollbar-thumb: rgba(255, 255, 255, 0.15);
@@ -114,16 +139,16 @@
   .type-subheadline,
   .type-body-lg,
   .type-lead {
-    font-size: 20px;
-    line-height: 1.6;
+    font-size: 18px;
+    line-height: 1.55;
     font-weight: 400;
     letter-spacing: 0;
   }
 
   .type-body,
   .type-p {
-    font-size: 16px;
-    line-height: 1.75;
+    font-size: 15px;
+    line-height: 1.65;
     font-weight: 400;
     letter-spacing: 0;
   }
@@ -151,16 +176,16 @@
     font-size: 12px;
     line-height: 1.25;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .type-caption-2 {
     font-size: 12px;
     line-height: 1.25;
     font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .type-button {
@@ -253,8 +278,8 @@
     font-size: 12px;
     line-height: 1.25;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .type-table-cell {
@@ -499,21 +524,21 @@
     .type-subheadline,
     .type-body-lg,
     .type-lead {
-      font-size: 18px;
+      font-size: 17px;
       line-height: 1.55;
     }
 
     .type-body,
     .type-p,
     .type-input {
-      font-size: 16px;
-      line-height: 1.65;
+      font-size: 15px;
+      line-height: 1.6;
     }
 
     .type-caption-1,
     .type-label {
       font-size: 11px;
-      letter-spacing: 0.1em;
+      letter-spacing: 0;
     }
   }
 }

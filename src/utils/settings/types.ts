@@ -1022,6 +1022,12 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Enable background memory consolidation (auto-dream). When set, overrides the server-side default.',
         ),
+      skillSearchEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Enable automatic skill discovery and skill-search runtime hot paths.',
+        ),
       showThinkingSummaries: z
         .boolean()
         .optional()

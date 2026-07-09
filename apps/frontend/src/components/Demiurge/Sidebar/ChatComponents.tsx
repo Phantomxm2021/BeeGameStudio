@@ -209,6 +209,9 @@ import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', variant = 'legacy', lang = 'en' }: { content: string, isUser: boolean, messageId?: string; variant?: 'legacy' | 'beegame'; lang?: Language }) => {
     const isBeeGameVariant = variant === 'beegame';
     const textColor = isBeeGameVariant ? 'text-zinc-200' : isUser ? 'text-white dark:text-zinc-900' : 'text-zinc-800 dark:text-zinc-100';
+    const bodyClassName = isBeeGameVariant
+        ? `max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`
+        : `type-body max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`;
     const [isThoughtExpanded, setIsThoughtExpanded] = useState(false);
     const text = useBeeGameText(lang);
 
@@ -233,7 +236,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
 
     return (
         <MarkdownErrorBoundary messageId={messageId} rawContent={content}>
-            <div className={`type-body max-w-none select-text ${textColor} break-words [overflow-wrap:anywhere]`}>
+            <div className={bodyClassName}>
                 {thoughtContent && (
                     <div className="mb-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                         <button
@@ -290,14 +293,56 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBreaks]}
                             components={{
-                                p: (props) => <p className="type-p mb-3 last:mb-0 opacity-90 break-words [overflow-wrap:anywhere]" {...props} />,
-                                ul: (props) => <ul className="type-list list-disc opacity-90" {...props} />,
-                                ol: (props) => <ol className="type-list list-decimal opacity-90" {...props} />,
+                                p: (props) => (
+                                    <p
+                                        className={isBeeGameVariant
+                                            ? 'mb-3 text-[15px] leading-7 font-normal text-zinc-200/90 last:mb-0 break-words [overflow-wrap:anywhere]'
+                                            : 'type-p mb-3 last:mb-0 opacity-90 break-words [overflow-wrap:anywhere]'}
+                                        {...props}
+                                    />
+                                ),
+                                ul: (props) => (
+                                    <ul
+                                        className={isBeeGameVariant
+                                            ? 'my-3 ml-5 list-disc space-y-1 text-[15px] leading-7 text-zinc-200/90'
+                                            : 'type-list list-disc opacity-90'}
+                                        {...props}
+                                    />
+                                ),
+                                ol: (props) => (
+                                    <ol
+                                        className={isBeeGameVariant
+                                            ? 'my-3 ml-5 list-decimal space-y-1 text-[15px] leading-7 text-zinc-200/90'
+                                            : 'type-list list-decimal opacity-90'}
+                                        {...props}
+                                    />
+                                ),
                                 li: (props) => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
-                                blockquote: (props) => <blockquote className="type-blockquote my-4" {...props} />,
-                                h1: (props) => <h1 className="type-title-2 border-b border-zinc-200 pb-2 mb-4 dark:border-zinc-700" {...props} />,
-                                h2: (props) => <h2 className="type-title-3 mt-6 mb-3" {...props} />,
-                                h3: (props) => <h3 className="type-headline mt-4 mb-2" {...props} />,
+                                blockquote: (props) => <blockquote className={isBeeGameVariant ? 'my-4 border-l-2 border-white/15 pl-4 text-zinc-300/85' : 'type-blockquote my-4'} {...props} />,
+                                h1: (props) => (
+                                    <h1
+                                        className={isBeeGameVariant
+                                            ? 'mb-4 border-b border-white/10 pb-2 text-[22px] leading-snug font-semibold text-white'
+                                            : 'type-title-2 border-b border-zinc-200 pb-2 mb-4 dark:border-zinc-700'}
+                                        {...props}
+                                    />
+                                ),
+                                h2: (props) => (
+                                    <h2
+                                        className={isBeeGameVariant
+                                            ? 'mt-6 mb-3 text-[18px] leading-snug font-semibold text-white'
+                                            : 'type-title-3 mt-6 mb-3'}
+                                        {...props}
+                                    />
+                                ),
+                                h3: (props) => (
+                                    <h3
+                                        className={isBeeGameVariant
+                                            ? 'mt-5 mb-2 text-[16px] leading-snug font-semibold text-white'
+                                            : 'type-headline mt-4 mb-2'}
+                                        {...props}
+                                    />
+                                ),
 	                                a: (props) => <a className="text-emerald-300 underline decoration-emerald-300/40 underline-offset-4 hover:text-emerald-200" target="_blank" rel="noreferrer" {...props} />,
 	                                strong: (props) => <strong className="opacity-100" {...props} />,
                                 table: (props) => (

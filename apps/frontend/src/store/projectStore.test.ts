@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJSONStorage } from 'zustand/middleware';
 
-const { bootstrapProjectFromIdea, getPendingUserReviews, getProjectStatus, getProjects, chatActions } = vi.hoisted(() => ({
+const { bootstrapProjectFromIdea, getPendingUserReviews, getProjectStatus, getProjects, openProject, chatActions } = vi.hoisted(() => ({
     bootstrapProjectFromIdea: vi.fn(),
     getPendingUserReviews: vi.fn(),
     getProjectStatus: vi.fn(),
     getProjects: vi.fn(),
+    openProject: vi.fn(),
     chatActions: {
         clearMessages: vi.fn(),
         addMessage: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('../services/api', async () => {
             getPendingUserReviews,
             getProjectStatus,
             getProjects,
+            openProject,
         },
     };
 });
@@ -42,6 +44,8 @@ describe('projectStore pending review normalization', () => {
         getPendingUserReviews.mockReset();
         getProjectStatus.mockReset();
         getProjects.mockReset();
+        openProject.mockReset();
+        openProject.mockResolvedValue({});
         chatActions.clearMessages.mockReset();
         chatActions.addMessage.mockReset();
         storageData = new Map<string, string>();
@@ -60,6 +64,7 @@ describe('projectStore pending review normalization', () => {
             projects: [],
             activeProjectId: null,
             isLoading: false,
+            isOpeningProject: false,
             pendingReviews: [],
             projectStatus: null,
             showToastError: null,
@@ -217,6 +222,51 @@ describe('projectStore pending review normalization', () => {
 
         expect(bootstrapProjectFromIdea).toHaveBeenCalledWith({ idea: '样例游戏', clarification });
         expect(useProjectStore.getState().activeProjectId).toBe('proj_1');
+    });
+
+    it('tracks project opening while switching projects', async () => {
+        let resolveOpen: (value: unknown) => void = () => undefined;
+        openProject.mockReturnValue(new Promise(resolve => {
+            resolveOpen = resolve;
+        }));
+        useProjectStore.setState({ activeProjectId: 'proj_old' });
+
+        const promise = useProjectStore.getState().setActiveProject('proj_new');
+        await vi.waitFor(() => expect(useProjectStore.getState().isOpeningProject).toBe(true));
+
+        expect(openProject).toHaveBeenCalledWith('proj_new');
+        expect(useProjectStore.getState().activeProjectId).toBe('proj_old');
+
+        resolveOpen({});
+        await promise;
+
+        expect(useProjectStore.getState().isOpeningProject).toBe(false);
+        expect(useProjectStore.getState().activeProjectId).toBe('proj_new');
+        expect(chatActions.clearMessages).toHaveBeenCalled();
+    });
+
+    it('times out project opening and releases the opening lock', async () => {
+        vi.useFakeTimers();
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            openProject.mockReturnValue(new Promise(() => undefined));
+            useProjectStore.setState({ activeProjectId: 'proj_old' });
+
+            const promise = useProjectStore.getState().setActiveProject('proj_timeout');
+            const rejection = promise.catch((error) => error);
+            expect(useProjectStore.getState().isOpeningProject).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            const error = await rejection;
+            expect(error).toBeInstanceOf(Error);
+            expect(error.message).toBe('Project open timed out');
+            expect(useProjectStore.getState().isOpeningProject).toBe(false);
+            expect(useProjectStore.getState().activeProjectId).toBe('proj_old');
+        } finally {
+            consoleError.mockRestore();
+            vi.useRealTimers();
+        }
     });
 
     it('keeps current status and shows a toast when project status loading fails', async () => {

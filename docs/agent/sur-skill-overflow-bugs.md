@@ -50,7 +50,7 @@ The fix bounds all 5 with FIFO/LRU eviction at sensible sizes (200–1000 entrie
 | `src/services/skillSearch/prefetch.ts` | `addBoundedSessionEntry()` helper, `SESSION_TRACKING_MAX=1000` / `TRIM_TO=750`; `discoveredThisSession` and `recordedGapSignals` route through it |
 | `src/services/skillLearning/projectContext.ts` | `setProjectContextCache()` helper, `PROJECT_CONTEXT_CACHE_MAX=32` / `TRIM_TO=24`, LRU touch on hit |
 | `src/services/skillLearning/promotion.ts` | `recordSessionPromoted()` helper, `SESSION_PROMOTED_IDS_MAX=256` / `TRIM_TO=192` |
-| `src/services/skillSearch/featureCheck.ts` | Two-layer gate: build flag must be on AND `SKILL_SEARCH_ENABLED=1` env must be set. Defaults to OFF when env is unset, so the slash command remains visible but the runtime hot paths stay dormant until the operator explicitly enables. |
+| `src/services/skillSearch/featureCheck.ts` | Build flag controls whether the command is compiled in. Runtime activation is read from BeeGame/admin runtime settings when present; `SKILL_SEARCH_ENABLED=1` is only a legacy CLI fallback when no settings value exists. |
 | `src/services/skillLearning/featureCheck.ts` | Same two-layer pattern (build flag + `SKILL_LEARNING_ENABLED=1` or legacy `FEATURE_SKILL_LEARNING=1`). |
 | `scripts/defines.ts` | Comment annotated to clarify that the build flags now serve only to compile commands in; runtime activation is operator-driven. |
 
@@ -65,9 +65,9 @@ Three reasons aside from the unbounded-cache concern:
 **The fix is NOT to remove the flags from `DEFAULT_BUILD_FEATURES`** — doing so would also strip the `/skill-search` and `/skill-learning` slash commands from the build, leaving operators with no UI to opt in. Instead the activation logic in `featureCheck.ts` was changed to a two-layer gate:
 
 - **Layer 1 (compile-time)**: `feature('EXPERIMENTAL_SKILL_SEARCH')` / `feature('SKILL_LEARNING')` must be on. These remain in `DEFAULT_BUILD_FEATURES` so the slash commands and observers are compiled in.
-- **Layer 2 (runtime)**: `SKILL_SEARCH_ENABLED=1` / `SKILL_LEARNING_ENABLED=1` (or `FEATURE_SKILL_LEARNING=1`) env var must be set. Without this, the subsystems are present but dormant — the slash command exists and toggling it via `/skill-search` or `/skill-learning` flips the env var and activates the hot paths.
+- **Layer 2 (runtime)**: BeeGame/admin-provided runtime settings are authoritative for Skill Search when present. `SKILL_SEARCH_ENABLED=1` remains only as a non-BeeGame legacy CLI fallback. Skill Learning still uses its historical runtime env gate.
 
-Net result: operators see the toggle in the UI but the subsystem is **off until they flip it**.
+Net result: in BeeGame, admin settings control Skill Search globally; there is no per-user runtime env mirror for this capability.
 
 ## 6. Out of scope (filed for follow-up)
 

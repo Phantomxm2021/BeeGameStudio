@@ -5,6 +5,19 @@ import userEvent from '@testing-library/user-event';
 import { AssetsPanel } from './AssetsPanel';
 
 describe('AssetsPanel', () => {
+    it('uses shadcn skeletons while asset data loads', () => {
+        render(
+            <AssetsPanel
+                manifest={null}
+                isLoading
+                onUpload={vi.fn()}
+            />
+        );
+
+        expect(screen.getByLabelText(/Loading asset/i)).toBeInTheDocument();
+        expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+    });
+
     it('renders engine asset contracts with MCP integration metadata', () => {
         render(
             <AssetsPanel

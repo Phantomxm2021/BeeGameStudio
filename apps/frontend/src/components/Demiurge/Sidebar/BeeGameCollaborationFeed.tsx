@@ -2,22 +2,14 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import {
     ChevronDown,
     ChevronRight,
-    CheckCircle2,
-    FileText,
-    FolderOpen,
-    GitCompare,
     LoaderCircle,
-    Terminal,
-    User,
-    XCircle,
 } from 'lucide-react';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatComponents';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { MessageScrollerItem } from '../../ui/message-scroller';
-
-const BEEGAME_AVATAR_SRC = '/assets/beegame_avatar.png';
+import { Marker, MarkerContent, MarkerIcon } from '../../ui/marker';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -48,7 +40,10 @@ type NormalizedTool = {
     detail: string;
     output: string;
     artifactId?: string;
+    kind: ToolKind;
 };
+
+type ToolKind = 'search' | 'read' | 'write' | 'edit' | 'bash' | 'subagent' | 'generic';
 
 const GENERIC_TOOL_NAME = 'Tool';
 
@@ -64,6 +59,11 @@ const isAgentMessage = (message: ChatDisplayMessage): boolean => {
 const isThinkingMessage = (message: ChatDisplayMessage): boolean => {
     const raw = message as ChatDisplayMessage & { task_kind?: string };
     return message.type === 'thought' || message.taskKind === 'assistant_thinking' || raw.task_kind === 'assistant_thinking';
+};
+
+const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
+    const raw = message as ChatDisplayMessage & { task_kind?: string };
+    return message.taskKind === 'context_update' || raw.task_kind === 'context_update';
 };
 
 const getStructuredLineValue = (content: string, label: string): string => {
@@ -99,6 +99,17 @@ const stripStructuredDetailLabel = (value: string): string => {
     return value;
 };
 
+const getToolKind = (toolName?: string): ToolKind => {
+    const normalized = String(toolName || '').trim().toLowerCase();
+    if (normalized === 'search' || normalized === 'grep' || normalized === 'glob') return 'search';
+    if (normalized === 'read') return 'read';
+    if (normalized === 'write') return 'write';
+    if (normalized === 'edit' || normalized === 'multiedit') return 'edit';
+    if (normalized === 'bash') return 'bash';
+    if (normalized === 'task' || normalized === 'subagent') return 'subagent';
+    return 'generic';
+};
+
 const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null => {
     const content = String(message.content || '');
     const firstLine = content.split('\n').map((item) => item.trim()).find(Boolean) || '';
@@ -119,6 +130,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         detail: stripStructuredDetailLabel(rawDetail),
         output,
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
+        kind: getToolKind(name),
     };
 };
 
@@ -129,19 +141,17 @@ const getToolStatusLabel = (status: NormalizedTool['status'], text: BeeGameText)
 };
 
 const getToolTitle = (tool: NormalizedTool, text: BeeGameText): string => {
-    if (isWriteTool(tool.name) && tool.detail) {
+    if (isEditableTool(tool) && tool.detail) {
         return `Write ${getPathFileName(tool.detail)}`;
     }
+    if (tool.kind === 'read' && tool.detail) {
+        return `Read ${getPathFileName(tool.detail)}`;
+    }
+    if (tool.kind === 'search') return text.toolSearchCompleted;
     return `${tool.name} ${getToolStatusLabel(tool.status, text)}`;
 };
 
-const getToolIcon = (toolName?: string) => {
-    const normalized = String(toolName || '').toLowerCase();
-    if (normalized === 'bash') return Terminal;
-    return FileText;
-};
-
-const isWriteTool = (toolName?: string): boolean => String(toolName || '').trim().toLowerCase() === 'write';
+const isEditableTool = (tool: NormalizedTool): boolean => tool.kind === 'write' || tool.kind === 'edit';
 
 const getPathFileName = (value: string): string => {
     const normalized = value.replaceAll('\\', '/');
@@ -149,31 +159,10 @@ const getPathFileName = (value: string): string => {
     return parts[parts.length - 1] || value;
 };
 
-const getUserInitial = (value?: string): string => {
-    const trimmed = String(value || '').trim();
-    return trimmed ? trimmed.slice(0, 1).toUpperCase() : '';
-};
-
-const getAgentPreview = (content: string): { preview: string; isTruncated: boolean } => {
-    const lines = content
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-    const previewLines = lines.slice(0, 5);
-    const joined = previewLines.join('\n');
-    const maxLength = 360;
-    if (joined.length > maxLength) {
-        return { preview: `${joined.slice(0, maxLength).trim()}...`, isTruncated: true };
-    }
-    return {
-        preview: joined,
-        isTruncated: lines.length > previewLines.length,
-    };
-};
-
 type FeedEntry =
     | { kind: 'user'; message: ChatDisplayMessage }
     | { kind: 'thinking'; message: ChatDisplayMessage }
+    | { kind: 'context'; message: ChatDisplayMessage }
     | { kind: 'agent'; message: ChatDisplayMessage; tools: NormalizedTool[] }
     | { kind: 'tools'; id: string; tools: NormalizedTool[] };
 
@@ -188,6 +177,11 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
 
         if (isThinkingMessage(message)) {
             entries.push({ kind: 'thinking', message });
+            continue;
+        }
+
+        if (isContextUpdateMessage(message)) {
+            entries.push({ kind: 'context', message });
             continue;
         }
 
@@ -218,11 +212,7 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
 export const BeeGameCollaborationFeed = memo(({
     messages,
     projectStatus,
-    onPreviewArtifact,
     lang = 'en',
-    currentUserDisplayName,
-    currentUserEmail,
-    currentUserAvatarUrl,
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
@@ -234,40 +224,42 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        scrollAnchor
-                        className="relative z-10 mb-3 pl-12"
+                        className="relative z-10 mb-4 pl-12"
                     >
                         <UserMessageCard
                             message={entry.message}
-                            text={text}
                             lang={lang}
-                            currentUserDisplayName={currentUserDisplayName}
-                            currentUserEmail={currentUserEmail}
-                            currentUserAvatarUrl={currentUserAvatarUrl}
                         />
                     </MessageScrollerItem>
                 ) : entry.kind === 'thinking' ? (
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-3 pl-12"
+                        className="relative z-10 mb-4 pl-12"
                     >
                         <ThinkingStatusCard
                             message={entry.message}
-                            lang={lang}
+                            text={text}
                             isRunning={projectStatus?.phase === 'running'}
                         />
+                    </MessageScrollerItem>
+                ) : entry.kind === 'context' ? (
+                    <MessageScrollerItem
+                        key={entry.message.id}
+                        messageId={entry.message.id}
+                        className="relative z-10 mb-4 pl-12"
+                    >
+                        <ContextUpdateSeparator text={text} />
                     </MessageScrollerItem>
                 ) : entry.kind === 'agent' ? (
                     <MessageScrollerItem
                         key={entry.message.id}
                         messageId={entry.message.id}
-                        className="relative z-10 mb-3 pl-12"
+                        className="relative z-10 mb-4 pl-12"
                     >
                         <AgentFeedGroup
                             message={entry.message}
                             tools={entry.tools}
-                            onPreviewArtifact={onPreviewArtifact}
                             text={text}
                             lang={lang}
                         />
@@ -276,9 +268,9 @@ export const BeeGameCollaborationFeed = memo(({
                     <MessageScrollerItem
                         key={entry.id}
                         messageId={entry.id}
-                        className="relative z-10 mb-3 pl-12"
+                        className="relative z-10 mb-4 pl-12"
                     >
-                        <ToolGroup tools={entry.tools} onPreviewArtifact={onPreviewArtifact} text={text} />
+                        <ToolGroup tools={entry.tools} text={text} lang={lang} />
                     </MessageScrollerItem>
                 )
             ))}
@@ -290,11 +282,11 @@ BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
 function ThinkingStatusCard({
     message,
-    lang,
+    text,
     isRunning,
 }: {
     message: ChatDisplayMessage;
-    lang: Language;
+    text: BeeGameText;
     isRunning: boolean;
 }) {
     const [now, setNow] = useState(() => Date.now());
@@ -307,9 +299,7 @@ function ThinkingStatusCard({
 
     const elapsedMs = Math.max(0, now - Number(message.timestamp || now));
     const isStalled = isRunning && elapsedMs >= 60000;
-    const label = lang.startsWith('zh')
-        ? (isStalled ? '仍在 Thinking，可继续等待或停止' : 'AI 正在思考...')
-        : (isStalled ? 'Still thinking. You can wait or stop.' : 'Thinking...');
+    const label = isStalled ? text.thinkingStalled : text.thinkingActive;
 
     return (
         <section
@@ -317,50 +307,37 @@ function ThinkingStatusCard({
             className="glass-control inline-flex max-w-full items-center gap-2 rounded-2xl px-3 py-2 text-zinc-400 shadow-sm backdrop-blur-2xl"
         >
             <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" />
-            <span className="type-footnote min-w-0 truncate">{label}</span>
+            <span className="shimmer type-footnote min-w-0 truncate text-muted-foreground">{label}</span>
         </section>
+    );
+}
+
+function ContextUpdateSeparator({ text }: { text: BeeGameText }) {
+    return (
+        <Marker
+            data-testid="beegame-context-separator"
+            variant="separator"
+            className="type-muted py-2 text-muted-foreground"
+        >
+            <MarkerContent className="shrink-0 text-center">
+                {text.contextCompacted}
+            </MarkerContent>
+        </Marker>
     );
 }
 
 function UserMessageCard({
     message,
-    text,
     lang,
-    currentUserDisplayName,
-    currentUserEmail,
-    currentUserAvatarUrl,
 }: {
     message: ChatDisplayMessage;
-    text: BeeGameText;
     lang: Language;
-    currentUserDisplayName?: string;
-    currentUserEmail?: string;
-    currentUserAvatarUrl?: string;
 }) {
-    const userLabel = currentUserDisplayName || currentUserEmail || text.you;
-    const initial = getUserInitial(userLabel);
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
-            className="w-full rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
+            className="w-full max-w-[46rem] rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
         >
-            <div className="mb-2 flex items-center justify-end gap-2">
-                <span className="type-caption-1 max-w-[14rem] truncate text-emerald-100/85">{userLabel}</span>
-                <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full border border-emerald-200/20 bg-emerald-200/[0.08] text-emerald-100">
-                    {currentUserAvatarUrl ? (
-                        <img
-                            src={currentUserAvatarUrl}
-                            alt={userLabel}
-                            className="h-full w-full object-cover"
-                            draggable={false}
-                        />
-                    ) : initial ? (
-                        <span className="type-caption-1 text-emerald-50">{initial}</span>
-                    ) : (
-                        <User className="h-4 w-4" />
-                    )}
-                </span>
-            </div>
             <MarkdownRenderer
                 content={message.content}
                 isUser
@@ -375,236 +352,165 @@ function UserMessageCard({
 function AgentFeedGroup({
     message,
     tools,
-    onPreviewArtifact,
     text,
     lang,
 }: {
     message: ChatDisplayMessage;
     tools: NormalizedTool[];
-    onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     text: BeeGameText;
     lang: Language;
 }) {
-    const [isCollapsed, setIsCollapsed] = useState(false);
-
     return (
-        <div className="space-y-3">
-            <AgentSummaryCard
+        <div
+            data-testid={`beegame-agent-feed-group-${message.id}`}
+            className="max-w-[46rem]"
+        >
+            <AgentResponseBlock
                 message={message}
-                isCollapsed={isCollapsed}
-                onToggleCollapsed={() => setIsCollapsed((value) => !value)}
-                text={text}
                 lang={lang}
             />
-            {!isCollapsed && tools.length > 0 ? (
-                <ToolGroup tools={tools} onPreviewArtifact={onPreviewArtifact} text={text} />
+            {tools.length > 0 ? (
+                <ToolGroup tools={tools} text={text} lang={lang} />
             ) : null}
         </div>
     );
 }
 
-function AgentSummaryCard({
+function AgentResponseBlock({
     message,
-    isCollapsed,
-    onToggleCollapsed,
-    text,
     lang,
 }: {
     message: ChatDisplayMessage;
-    isCollapsed: boolean;
-    onToggleCollapsed: () => void;
-    text: BeeGameText;
     lang: Language;
 }) {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const preview = getAgentPreview(message.content);
-    const content = isExpanded ? message.content : preview.preview;
-
     return (
-        <section data-testid={`beegame-agent-message-${message.id}`} className="glass-control rounded-3xl px-4 py-3 text-zinc-100 shadow-sm backdrop-blur-2xl">
-            <div className="min-w-0">
-                <div className="mb-2 flex items-center gap-2">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black/25 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.28)]">
-                        <img
-                            src={BEEGAME_AVATAR_SRC}
-                            alt={text.assistantName}
-                            className="h-5 w-5 object-contain"
-                            draggable={false}
-                        />
-                    </span>
-                    <button
-                        type="button"
-                        aria-expanded={!isCollapsed}
-                        aria-label={isCollapsed ? text.expandMessage : text.collapseMessage}
-                        onClick={onToggleCollapsed}
-                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-                    >
-                        <span className="type-caption-1 min-w-0 truncate text-zinc-300">
-                            {text.assistantName}
-                        </span>
-                        {isCollapsed ? (
-                            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
-                        ) : (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
-                        )}
-                    </button>
-                </div>
-                {!isCollapsed ? (
-                    <>
-                        <MarkdownRenderer
-                            content={content}
-                            isUser={false}
-                            messageId={message.id}
-                            variant="beegame"
-                            lang={lang}
-                        />
-                        {preview.isTruncated ? (
-                            <button
-                                type="button"
-                                onClick={() => setIsExpanded((value) => !value)}
-                                className="type-footnote mt-2 inline-flex items-center gap-1 text-zinc-300 hover:text-white"
-                            >
-                                {isExpanded ? text.hideSummaryDetails : text.viewSummaryDetails}
-                                {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                            </button>
-                        ) : null}
-                    </>
-                ) : null}
-            </div>
+        <section data-testid={`beegame-agent-message-${message.id}`} className="beegame-ai-prose w-full px-0 py-0 text-zinc-100">
+            <MarkdownRenderer
+                content={message.content}
+                isUser={false}
+                messageId={message.id}
+                variant="beegame"
+                lang={lang}
+            />
         </section>
     );
 }
 
 function ToolGroup({
     tools,
-    onPreviewArtifact,
     text,
+    lang,
 }: {
     tools: NormalizedTool[];
-    onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     text: BeeGameText;
+    lang: Language;
 }) {
+    const shouldCollapseGroup = tools.length > 1;
+    const [isExpanded, setIsExpanded] = useState(!shouldCollapseGroup);
+    const summary = getToolGroupSummary(tools, lang);
+
     return (
-        <div className="relative ml-8 pl-8">
-            <div className="space-y-3">
-                {tools.map((message, index) => (
-                    <ToolTimelineCard
-                        key={message.id}
-                        message={message}
-                        isLast={index === tools.length - 1}
-                        onPreviewArtifact={onPreviewArtifact}
-                        text={text}
-                    />
-                ))}
-            </div>
+        <div className="relative mt-2 max-w-full" data-testid="beegame-tool-group">
+            {shouldCollapseGroup ? (
+                <button
+                    type="button"
+                    aria-expanded={isExpanded}
+                    onClick={() => setIsExpanded((value) => !value)}
+                    className="group inline-flex max-w-full rounded-xl px-0 py-0.5 text-left text-muted-foreground transition-colors hover:text-zinc-400"
+                >
+                    <Marker className="type-muted min-h-6 text-muted-foreground group-hover:text-zinc-400">
+                        <MarkerIcon>
+                            <StatusDot status={getToolGroupStatus(tools)} />
+                        </MarkerIcon>
+                        <MarkerContent className="truncate">{summary}</MarkerContent>
+                        {isExpanded ? (
+                            <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-zinc-600 group-hover:text-zinc-400" />
+                        ) : (
+                            <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-600 group-hover:text-zinc-400" />
+                        )}
+                    </Marker>
+                </button>
+            ) : null}
+            {isExpanded ? (
+                <div
+                    data-testid="beegame-tool-list"
+                    className={`${shouldCollapseGroup ? 'ml-[7px] border-l border-white/10 pl-4' : 'pl-0'} space-y-0.5 pt-1`}
+                >
+                    {tools.map((message) => (
+                        <ToolTimelineCard
+                            key={message.id}
+                            message={message}
+                            text={text}
+                        />
+                    ))}
+                </div>
+            ) : null}
         </div>
     );
 }
 
+function getToolGroupStatus(tools: NormalizedTool[]): NormalizedTool['status'] {
+    if (tools.some((tool) => tool.status === 'failed')) return 'failed';
+    if (tools.some((tool) => tool.status === 'running')) return 'running';
+    return 'completed';
+}
+
+function getToolGroupSummary(tools: NormalizedTool[], lang: Language): string {
+    const completed = tools.filter((tool) => tool.status === 'completed').length;
+    const failed = tools.filter((tool) => tool.status === 'failed').length;
+    const running = tools.length - completed - failed;
+    if (lang.startsWith('zh')) {
+        return [
+            `执行了 ${tools.length} 次工具调用`,
+            completed ? `${completed} 成功` : '',
+            running ? `${running} 运行中` : '',
+            failed ? `${failed} 失败` : '',
+        ].filter(Boolean).join(' · ');
+    }
+    return [
+        `${tools.length} tool calls`,
+        completed ? `${completed} completed` : '',
+        running ? `${running} running` : '',
+        failed ? `${failed} failed` : '',
+    ].filter(Boolean).join(' · ');
+}
+
 function ToolTimelineCard({
     message,
-    isLast,
-    onPreviewArtifact,
     text,
 }: {
     message: NormalizedTool;
-    isLast: boolean;
-    onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     text: BeeGameText;
 }) {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const Icon = getToolIcon(message.name);
-    const isCompleted = message.status === 'completed';
-    const isFailed = message.status === 'failed';
-    const isRunning = !isCompleted && !isFailed;
-    const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : LoaderCircle;
-    const statusClassName = isCompleted ? 'text-emerald-300' : isFailed ? 'text-red-300' : 'text-zinc-300';
-    const detail = message.detail;
-    const output = message.output;
     const title = getToolTitle(message, text);
-    const previewId = message.artifactId || message.id;
-    const previewTitle = detail || title;
-    const previewContent = message.artifactId ? undefined : [detail, output].filter(Boolean).join('\n\n');
-    const canPreviewTool = isWriteTool(message.name) && Boolean(detail || output);
-    const diffContent = [
-        `Tool: ${message.name}`,
-        `Status: ${message.status}`,
-        detail ? `Target: ${detail}` : '',
-        output ? `\n${output}` : '',
-    ].filter(Boolean).join('\n');
 
     return (
-        <div data-testid="beegame-tool-timeline-card" data-tool-id={message.id} className="glass-control relative rounded-2xl p-3 backdrop-blur-2xl">
-            {!isLast ? (
-                <div
-                    data-testid="beegame-tool-connector"
-                    className="absolute -left-[1.1rem] top-10 h-[calc(100%+0.75rem)] w-px bg-white/10"
-                />
-            ) : null}
-            <div
-                data-testid="beegame-tool-status-icon"
-                className={`absolute -left-[1.55rem] top-5 flex h-4 w-4 items-center justify-center ${statusClassName}`}
-            >
-                <StatusIcon className={`h-4 w-4 ${isRunning ? 'animate-spin' : ''}`} />
-            </div>
-            <div className="flex items-start gap-3">
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-300">
-                    <Icon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <button
-                        type="button"
-                        aria-expanded={isExpanded}
-                        onClick={() => setIsExpanded((value) => !value)}
-                        className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
-                    >
-                        <span className="flex min-w-0 items-center gap-2">
-                            <span className="type-footnote truncate text-zinc-100">{title}</span>
-                        </span>
-                        {isExpanded ? (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
-                        ) : (
-                            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
-                        )}
-                    </button>
-                    {isExpanded ? (
-                        <div>
-                            {detail ? (
-	                                <div className="type-code-sm mt-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-zinc-400 [overflow-wrap:anywhere]">
-                                    {detail}
-                                </div>
-                            ) : null}
-                            {output ? (
-                                <div className="type-footnote mt-2 line-clamp-3 text-zinc-500 [overflow-wrap:anywhere]">
-                                    {output}
-                                </div>
-                            ) : null}
-                            {canPreviewTool ? (
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        aria-label={`${text.open} ${previewTitle}`}
-                                        onClick={() => onPreviewArtifact?.(previewId, previewTitle, previewContent || undefined)}
-                                        className="type-footnote inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-zinc-300 hover:border-white/20 hover:bg-white/[0.06]"
-                                    >
-                                        <FolderOpen className="h-3.5 w-3.5" />
-                                        {text.open}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        aria-label={`${text.diff} ${previewTitle}`}
-                                        onClick={() => onPreviewArtifact?.(`${previewId}:diff`, `${text.diff}: ${previewTitle}`, diffContent)}
-                                        className="type-footnote inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-zinc-300 hover:border-white/20 hover:bg-white/[0.06]"
-                                    >
-                                        <GitCompare className="h-3.5 w-3.5" />
-                                        {text.diff}
-                                    </button>
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-                </div>
-            </div>
+        <div
+            data-testid="beegame-tool-timeline-card"
+            data-tool-id={message.id}
+            className="relative py-0.5"
+        >
+            <Marker className="type-muted min-h-6 text-muted-foreground">
+                <MarkerIcon>
+                    <StatusDot status={message.status} />
+                </MarkerIcon>
+                <MarkerContent className="truncate text-muted-foreground">
+                    {title}
+                </MarkerContent>
+            </Marker>
         </div>
+    );
+}
+
+function StatusDot({ status }: { status: NormalizedTool['status'] }) {
+    const colorClass = status === 'failed'
+        ? 'border-rose-300/55 text-rose-300'
+        : status === 'running'
+            ? 'border-amber-300/55 text-amber-300'
+            : 'border-emerald-300/55 text-emerald-300';
+    return (
+        <span
+            className={`relative block h-3.5 w-3.5 rounded-full border ${colorClass} before:absolute before:inset-[4px] before:rounded-full before:bg-current before:opacity-60`}
+        />
     );
 }

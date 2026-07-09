@@ -3,9 +3,62 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
+import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('does not treat user runtime settings as platform runtime capabilities', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const userRoot = join(dataRoot, 'users', 'owner-user')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => userRoot,
+      skillsConfig: false,
+    })
+    const request = new Request('http://beegame.test/api/runtime-settings')
+    const user = { id: 'owner-user', role: 'owner' as const }
+
+    try {
+      saveRuntimeSettingsConfig({ skillSearchEnabled: true }, { dataDir: userRoot })
+
+      await expect(repository.loadRuntimeSettings(request, user)).resolves.toEqual({})
+      await expect(repository.getRuntimeEnv(userRoot, user.id)).resolves.not.toHaveProperty('SKILL_SEARCH_ENABLED')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('maps platform runtime capabilities into every user runtime settings file', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const userARoot = join(dataRoot, 'users', 'owner-a')
+    const userBRoot = join(dataRoot, 'users', 'owner-b')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => userARoot,
+      skillsConfig: false,
+    })
+
+    try {
+      saveRuntimeSettingsConfig({ skillSearchEnabled: true }, { dataDir: dataRoot })
+
+      const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
+      const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
+
+      expect(ownerAEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      expect(ownerBEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      await expect(readFile(
+        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
+        'utf8',
+      )).resolves.toContain('"skillSearchEnabled": true')
+      await expect(readFile(
+        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
+        'utf8',
+      )).resolves.toContain('"skillSearchEnabled": true')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('materializes enabled remote user skills before runtime env is returned', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const userRoot = join(dataRoot, 'users', 'owner-user')

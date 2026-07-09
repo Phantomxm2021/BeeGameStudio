@@ -5,6 +5,7 @@ import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
 import { getCreditSummary, type BeeGameCreditSummary } from '../../../services/creditsApi';
+import { Skeleton } from '../../ui/skeleton';
 
 interface ProjectHistoryModalProps {
     isOpen: boolean;
@@ -19,12 +20,21 @@ const formatProjectDate = (createdAt: number | string) => {
     return date.toLocaleDateString();
 };
 
+const getPathFolderName = (path?: string): string => {
+    const normalized = String(path || '').replaceAll('\\', '/').replace(/\/+$/, '');
+    return normalized.split('/').filter(Boolean).at(-1) || '';
+};
+
+const getProjectDisplayName = (project: { name?: string; root_path?: string }, fallback: string): string => (
+    getPathFolderName(project.root_path) || project.name || fallback
+);
+
 const MENU_WIDTH = 150;
 const MENU_MARGIN = 12;
 const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
-    const { projects, deleteProject } = useProjectStore();
+    const { projects, isLoading, deleteProject } = useProjectStore();
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -68,6 +78,23 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     const activeProject = activeMenuId
         ? projects.find(project => project.id === activeMenuId)
         : undefined;
+    const isProjectListLoading = isLoading && projects.length === 0;
+
+    useEffect(() => {
+        if (!isOpen || !activeMenuId) return undefined;
+
+        const handlePointerDown = () => closeMenu();
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') closeMenu();
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [activeMenuId, isOpen]);
 
     useEffect(() => {
         if (!isOpen || projects.length === 0) {
@@ -116,9 +143,13 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                 <h2 className="type-title-3 text-white">
                                     {t.historyProjects}
                                 </h2>
-                                <p className="type-footnote mt-2 text-zinc-400">
-                                    {projects.length} {t.recentProjects}
-                                </p>
+                                <div className="type-footnote mt-2 text-zinc-400">
+                                    {isProjectListLoading ? (
+                                        <Skeleton className="h-4 w-24 rounded-full bg-white/10" aria-hidden="true" />
+                                    ) : (
+                                        <>{projects.length} {t.recentProjects}</>
+                                    )}
+                                </div>
                             </div>
                             <button
                                 type="button"
@@ -134,14 +165,19 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         </div>
 
                         <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-premium">
-                            {projects.length === 0 ? (
+                            {isProjectListLoading ? (
+                                <ProjectHistoryListSkeleton />
+                            ) : projects.length === 0 ? (
                                 <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-8 text-center text-zinc-400">
                                     <Clock className="h-8 w-8 stroke-1" />
                                     <span className="type-callout text-zinc-200">{text.noProjectsForAccount}</span>
                                     <span className="type-footnote max-w-sm text-zinc-500">{text.localProjectsNeedMigration}</span>
                                 </div>
                             ) : (
-                                projects.map((project) => (
+                                projects.map((project) => {
+                                    const displayName = getProjectDisplayName(project, text.untitledProject);
+                                    const creditSummary = creditSummaries[project.id];
+                                    return (
                                     <div key={project.id} className="relative">
                                         <div
                                             role="button"
@@ -157,26 +193,30 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                         >
                                             <div className="min-w-0 pr-4">
                                                 <span className="type-callout block truncate text-white">
-                                                    {project.name || text.untitledProject}
+                                                    {displayName}
                                                 </span>
                                                 <span className="type-caption-1 mt-2 flex items-center gap-1.5 text-zinc-400">
                                                     <Clock className="h-3 w-3" />
                                                     {formatProjectDate(project.created_at)}
                                                 </span>
-                                                {creditSummaries[project.id] ? (
-                                                    <span className="type-footnote mt-2 flex flex-wrap items-center gap-2 text-amber-200">
-                                                        <span>{creditSummaries[project.id].settledCredits.toLocaleString()} credits</span>
-                                                        {creditSummaries[project.id].outstandingReservedCredits > 0 ? (
-                                                            <span className="text-zinc-500">
-                                                                {creditSummaries[project.id].outstandingReservedCredits.toLocaleString()} reserved
-                                                            </span>
-                                                        ) : null}
-                                                    </span>
-                                                ) : null}
+                                                <span className="type-caption-1 mt-2 flex min-h-[1rem] flex-wrap items-center gap-2 text-zinc-500">
+                                                    {creditSummary ? (
+                                                        <>
+                                                            <span className="text-zinc-300">{creditSummary.settledCredits.toLocaleString()} credits</span>
+                                                            {creditSummary.outstandingReservedCredits > 0 ? (
+                                                                <span>
+                                                                    {creditSummary.outstandingReservedCredits.toLocaleString()} reserved
+                                                                </span>
+                                                            ) : null}
+                                                        </>
+                                                    ) : (
+                                                        <Skeleton className="h-3 w-32 rounded-full bg-white/10" aria-hidden="true" />
+                                                    )}
+                                                </span>
                                             </div>
                                             <button
                                                 type="button"
-                                                aria-label={`${text.moreActionsFor} ${project.name || text.untitledProject}`}
+                                                aria-label={`${text.moreActionsFor} ${displayName}`}
                                                 onClick={(event) => toggleMenu(event, project.id)}
                                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                                             >
@@ -184,7 +224,8 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                             </button>
                                         </div>
                                     </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>
@@ -193,6 +234,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                 <div
                                     style={{ left: menuPosition.left, top: menuPosition.top }}
                                     data-surface="frosted-glass"
+                                    onPointerDown={(event) => event.stopPropagation()}
                                     className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
                                 >
                                     <button
@@ -211,5 +253,32 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         )
                         : null}
                 </>
+    );
+}
+
+function ProjectHistoryListSkeleton() {
+    return (
+        <>
+            {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                    key={index}
+                    className="flex w-full items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4"
+                    aria-hidden="true"
+                >
+                    <div className="min-w-0 flex-1 pr-4">
+                        <Skeleton className="h-5 w-44 max-w-full rounded-full bg-white/10" />
+                        <div className="mt-3 flex items-center gap-2">
+                            <Skeleton className="h-3 w-3 rounded-full bg-white/10" />
+                            <Skeleton className="h-3 w-24 rounded-full bg-white/10" />
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Skeleton className="h-4 w-24 rounded-full bg-white/10" />
+                            <Skeleton className="h-4 w-20 rounded-full bg-white/10" />
+                        </div>
+                    </div>
+                    <Skeleton className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
+                </div>
+            ))}
+        </>
     );
 }

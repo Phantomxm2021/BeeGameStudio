@@ -29,6 +29,8 @@ vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
 }));
 
+const getChatInput = () => screen.getByRole('textbox') as HTMLTextAreaElement;
+
 describe('RightSidebar tabs', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -119,11 +121,11 @@ describe('RightSidebar tabs', () => {
         const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
         expect(thinkingSelect).toHaveValue('disabled');
         expect(thinkingSelect).toHaveClass('text-zinc-500');
-        expect(within(thinkingSelect).getByRole('option', { name: 'Default' })).toBeInTheDocument();
-        expect(within(thinkingSelect).getByRole('option', { name: 'Thinking' })).toBeInTheDocument();
-        await waitFor(() => expect(screen.getByPlaceholderText('Type...')).toHaveStyle({ height: '81px' }));
+        expect(within(thinkingSelect).getByRole('option', { name: '默认' })).toBeInTheDocument();
+        expect(within(thinkingSelect).getByRole('option', { name: '深度思考' })).toBeInTheDocument();
+        await waitFor(() => expect(getChatInput()).toHaveStyle({ height: '56px' }));
 
-        await user.type(screen.getByPlaceholderText('Type...'), '先修复渲染问题');
+        await user.type(getChatInput(), '先修复渲染问题');
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
         expect(onSendMessage).toHaveBeenLastCalledWith(
             '先修复渲染问题',
@@ -133,7 +135,7 @@ describe('RightSidebar tabs', () => {
         );
 
         await user.selectOptions(thinkingSelect, 'enabled');
-        await user.type(screen.getByPlaceholderText('Type...'), '深入分析性能问题');
+        await user.type(getChatInput(), '深入分析性能问题');
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
         expect(onSendMessage).toHaveBeenLastCalledWith(
             '深入分析性能问题',
@@ -191,7 +193,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'screen.png', { type: 'image/png' });
-        await user.upload(screen.getByLabelText('Attach image'), image);
+        await user.upload(screen.getByLabelText('上传图片'), image);
 
         await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
         await user.click(screen.getByRole('button', { name: 'Send message' }));
@@ -227,7 +229,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'pasted-screen.png', { type: 'image/png' });
-        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+        fireEvent.paste(getChatInput(), {
             clipboardData: {
                 files: [image],
             },
@@ -258,7 +260,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'clipboard-screen.png', { type: 'image/png' });
-        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+        fireEvent.paste(getChatInput(), {
             clipboardData: {
                 files: [],
                 items: [{
@@ -302,7 +304,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'duplicated-screen.png', { type: 'image/png' });
-        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+        fireEvent.paste(getChatInput(), {
             clipboardData: {
                 files: [image],
                 items: [{
@@ -347,7 +349,7 @@ describe('RightSidebar tabs', () => {
             type: 'image/png',
             lastModified: 2,
         });
-        fireEvent.paste(screen.getByPlaceholderText('Type...'), {
+        fireEvent.paste(getChatInput(), {
             clipboardData: {
                 files: [clipboardFile],
                 items: [{
@@ -384,7 +386,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        const pasteTarget = screen.getByPlaceholderText('Type...');
+        const pasteTarget = getChatInput();
         const image = new File(['same-png-bytes'], 'pasted-again.png', { type: 'image/png' });
         fireEvent.paste(pasteTarget, {
             clipboardData: {

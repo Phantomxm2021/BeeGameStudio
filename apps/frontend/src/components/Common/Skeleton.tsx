@@ -14,6 +14,7 @@
  */
 
 import React from 'react';
+import { Skeleton as BaseSkeleton } from '../ui/skeleton';
 
 /**
  * Skeleton variant types
@@ -69,13 +70,8 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   };
 
   return (
-    <div
-      className={`
-        bg-gray-200 
-        ${getVariantClasses()} 
-        ${animate ? 'animate-pulse' : ''}
-        ${className}
-      `}
+    <BaseSkeleton
+      className={`${getVariantClasses()} ${animate ? '' : 'animate-none'} ${className}`}
       style={style}
     />
   );

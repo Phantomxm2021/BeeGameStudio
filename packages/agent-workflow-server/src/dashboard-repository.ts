@@ -1038,26 +1038,19 @@ export class DashboardRepository {
   }
 
   private loadLocalPlatformRuntimeSettings(
-    request: Request,
+    _request: Request,
   ): RuntimeSettingsConfig {
-    const platformSettings = loadRuntimeSettingsConfig({
-      dataDir: this.options.dashboardDataRoot,
-    })
-    if (Object.keys(platformSettings).length > 0) return platformSettings
     return loadRuntimeSettingsConfig({
-      dataDir: this.options.getUserDataRoot(request),
+      dataDir: this.options.dashboardDataRoot,
     })
   }
 
   private mapLocalPlatformRuntimeSettingsToEnv(
     dataDir: string,
   ): Record<string, string> {
-    const platformSettings = loadRuntimeSettingsConfig({
+    const settings = loadRuntimeSettingsConfig({
       dataDir: this.options.dashboardDataRoot,
     })
-    const settings = Object.keys(platformSettings).length > 0
-      ? platformSettings
-      : loadRuntimeSettingsConfig({ dataDir })
     syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
     return mapRuntimeSettingsToEnv(settings, {
         dataDir,

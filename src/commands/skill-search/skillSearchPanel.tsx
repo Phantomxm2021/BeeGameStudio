@@ -3,7 +3,7 @@ import { Box, Text, useInput } from '@anthropic/ink';
 import { Dialog } from '@anthropic/ink';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { isSkillSearchEnabled } from '../../services/skillSearch/featureCheck.js';
+import { getSkillSearchSettingsValue, isSkillSearchEnabled } from '../../services/skillSearch/featureCheck.js';
 
 type SkillSearchAction = {
   label: string;
@@ -34,9 +34,13 @@ Skill Search 控制对话中的自动技能匹配功能。
 `;
 
 function getStatusText(): string {
+  const settingsValue = getSkillSearchSettingsValue();
   return [
     'Skill Search (自动技能匹配)',
     `Status: ${isSkillSearchEnabled() ? 'enabled' : 'disabled'}`,
+    settingsValue === undefined
+      ? 'Source: session'
+      : 'Source: runtime settings',
     '',
     'When enabled, relevant skills are automatically matched and',
     'injected into conversation context each turn.',
@@ -44,6 +48,12 @@ function getStatusText(): string {
 }
 
 async function startSkillSearch(): Promise<string> {
+  const settingsValue = getSkillSearchSettingsValue();
+  if (settingsValue !== undefined) {
+    return settingsValue
+      ? 'Skill Search: already enabled by runtime settings'
+      : 'Skill Search: disabled by runtime settings';
+  }
   if (isSkillSearchEnabled() && process.env.SKILL_SEARCH_ENABLED !== '0') {
     return 'Skill Search: already enabled';
   }
@@ -63,6 +73,12 @@ async function startSkillSearch(): Promise<string> {
 }
 
 async function stopSkillSearch(): Promise<string> {
+  const settingsValue = getSkillSearchSettingsValue();
+  if (settingsValue !== undefined) {
+    return settingsValue
+      ? 'Skill Search: enabled by runtime settings'
+      : 'Skill Search: already disabled by runtime settings';
+  }
   if (!isSkillSearchEnabled()) {
     return 'Skill Search: already disabled';
   }

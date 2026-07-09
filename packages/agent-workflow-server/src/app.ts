@@ -294,21 +294,16 @@ export function createAgentWorkflowApp(
     })
   })
   const handlePreviewProxy = async (c: Context) => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.read')
-    if (forbidden) return c.json(forbidden, 403)
     const sessionId = c.req.param('sessionId')
     if (!sessionId) return c.text('Preview not found', 404)
-    const sessionForbidden = requireBeeGameSessionOwner(
-      c.req.raw,
-      sessionId,
-      beeGameSessions,
-      getCurrentUser,
-    )
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const internalUrl = beeGamePreviews.internalUrl(sessionId)
     if (!internalUrl) return c.text('Preview not found', 404)
-    return proxyBeeGamePreviewRequest(c.req.raw, sessionId, internalUrl)
+    return proxyBeeGamePreviewRequest(
+      c.req.raw,
+      sessionId,
+      internalUrl,
+      beeGamePreviews.expectsPublicPath(sessionId),
+    )
   }
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
@@ -3137,28 +3132,110 @@ async function proxyBeeGamePreviewRequest(
   request: Request,
   sessionId: string,
   internalBaseUrl: string,
+  preservePublicPath = false,
 ): Promise<Response> {
   const requestUrl = new URL(request.url)
   const prefix = `/previews/${encodeURIComponent(sessionId)}`
   const restPath = requestUrl.pathname.startsWith(prefix)
     ? requestUrl.pathname.slice(prefix.length) || '/'
     : '/'
-  const target = new URL(restPath, ensureTrailingSlash(internalBaseUrl))
+  const targetPath = preservePublicPath ? requestUrl.pathname : restPath
+  const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
   target.search = requestUrl.search
   const headers = new Headers(request.headers)
   headers.delete('host')
   const method = request.method.toUpperCase()
-  const upstream = await fetch(target, {
-    method,
-    headers,
-    body: method === 'GET' || method === 'HEAD' ? undefined : request.body,
-    redirect: 'manual',
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(target, {
+      method,
+      headers,
+      body: method === 'GET' || method === 'HEAD' ? undefined : request.body,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    return new Response(`Preview upstream unavailable: ${toErrorMessage(error)}`, {
+      status: 502,
+      headers: withPreviewCorsHeaders(new Headers({ 'content-type': 'text/plain; charset=UTF-8' })),
+    })
+  }
+  const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers))
+  if (method === 'GET' && isHtmlResponse(upstream.headers)) {
+    const html = await upstream.text()
+    responseHeaders.delete('content-length')
+    return new Response(injectBeeGamePreviewConsoleBridge(html, sessionId), {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: responseHeaders,
+    })
+  }
   return new Response(upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: upstream.headers,
+    headers: responseHeaders,
   })
+}
+
+function isHtmlResponse(headers: Headers): boolean {
+  return (headers.get('content-type') || '').toLowerCase().includes('text/html')
+}
+
+function withPreviewCorsHeaders(headers: Headers): Headers {
+  headers.set('access-control-allow-origin', '*')
+  headers.set('access-control-allow-methods', 'GET, HEAD, OPTIONS')
+  headers.set('access-control-allow-headers', '*')
+  return headers
+}
+
+function injectBeeGamePreviewConsoleBridge(html: string, sessionId: string): string {
+  const bridge = `<script data-beegame-preview-console-bridge>
+(() => {
+  if (window.__beegamePreviewConsoleBridgeInstalled) return;
+  window.__beegamePreviewConsoleBridgeInstalled = true;
+  const sessionId = ${JSON.stringify(sessionId)};
+  const serialize = (value) => {
+    if (value instanceof Error) return value.stack || value.message || String(value);
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  };
+  const emit = (level, values) => {
+    const message = values.map(serialize).filter(Boolean).join(' ');
+    if (!message) return;
+    const parentOrigin = (() => {
+      try {
+        return document.referrer ? new URL(document.referrer).origin : window.location.origin;
+      } catch {
+        return window.location.origin;
+      }
+    })();
+    window.parent?.postMessage({
+      type: 'beegame.preview.console',
+      sessionId,
+      level,
+      message,
+      createdAt: new Date().toISOString(),
+    }, parentOrigin);
+  };
+  for (const level of ['error', 'warn']) {
+    const original = console[level];
+    console[level] = (...args) => {
+      emit(level, args);
+      original.apply(console, args);
+    };
+  }
+  window.addEventListener('error', event => {
+    emit('error', [event.error || event.message || 'Unhandled preview error']);
+  });
+  window.addEventListener('unhandledrejection', event => {
+    emit('error', [event.reason || 'Unhandled preview promise rejection']);
+  });
+})();
+</script>`
+  const headClose = html.indexOf('</head>')
+  if (headClose >= 0) return `${html.slice(0, headClose)}${bridge}${html.slice(headClose)}`
+  const bodyClose = html.indexOf('</body>')
+  if (bodyClose >= 0) return `${html.slice(0, bodyClose)}${bridge}${html.slice(bodyClose)}`
+  return `${bridge}${html}`
 }
 
 function ensureTrailingSlash(value: string): string {

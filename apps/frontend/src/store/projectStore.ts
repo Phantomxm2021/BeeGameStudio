@@ -49,6 +49,24 @@ const upsertProject = (projects: Project[], project: Project): Project[] => {
   return [project, ...projects.filter((item) => item.id !== project.id)];
 };
 
+const PROJECT_OPEN_TIMEOUT_MS = 10_000;
+
+const withProjectOpenTimeout = async (operation: Promise<unknown>): Promise<void> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Project open timed out'));
+        }, PROJECT_OPEN_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
 /**
  * Project store state interface
  */
@@ -61,6 +79,9 @@ interface ProjectState {
 
   /** Loading state for async operations */
   isLoading: boolean;
+
+  /** Whether a project open/switch operation is in progress */
+  isOpeningProject: boolean;
 
   /** List of pending user reviews for the active project */
   pendingReviews: PendingUserReviewItem[];
@@ -185,6 +206,7 @@ export const useProjectStore = create<ProjectState>()(
       projects: [],
       activeProjectId: null,
       isLoading: false,
+      isOpeningProject: false,
       pendingReviews: [],
       projectStatus: null,
       runtimeReadiness: null,
@@ -280,14 +302,16 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         try {
+          set({ isOpeningProject: true });
           // Mandatory opening signal as per integration guide
-          await api.openProject(normalizedProjectId);
+          await withProjectOpenTimeout(api.openProject(normalizedProjectId));
 
-          set({ activeProjectId: normalizedProjectId });
+          set({ activeProjectId: normalizedProjectId, isOpeningProject: false });
           // Clear current messages to prepare for loading new project's history
           useChatStore.getState().clearMessages();
         } catch (error) {
           console.error(`Failed to open project ${normalizedProjectId}:`, error);
+          set({ isOpeningProject: false });
           const { showToastError } = get();
           if (showToastError) {
             showToastError('切换项目失败，后端连接异常');

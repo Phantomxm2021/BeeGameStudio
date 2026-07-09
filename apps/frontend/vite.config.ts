@@ -7,6 +7,7 @@ const frontendReactJsxRuntimePath = fileURLToPath(new URL('./node_modules/react/
 const frontendReactJsxDevRuntimePath = fileURLToPath(new URL('./node_modules/react/jsx-dev-runtime.js', import.meta.url))
 const frontendReactDomPath = fileURLToPath(new URL('./node_modules/react-dom/index.js', import.meta.url))
 const frontendReactDomClientPath = fileURLToPath(new URL('./node_modules/react-dom/client.js', import.meta.url))
+const frontendSrcPath = fileURLToPath(new URL('./src', import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -24,6 +25,7 @@ export default defineConfig(({ mode }) => {
         { find: 'react-dom/client', replacement: frontendReactDomClientPath },
         { find: 'react-dom', replacement: frontendReactDomPath },
         { find: 'react', replacement: frontendReactPath },
+        { find: '@', replacement: frontendSrcPath },
       ],
       dedupe: ['react', 'react-dom'],
     },
@@ -49,6 +51,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/deployments': {
+          target: env.VITE_API_BASE_URL || 'http://localhost:62174',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/previews': {
           target: env.VITE_API_BASE_URL || 'http://localhost:62174',
           changeOrigin: true,
           secure: false,

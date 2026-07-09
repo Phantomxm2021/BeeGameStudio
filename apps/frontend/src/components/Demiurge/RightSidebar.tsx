@@ -241,7 +241,7 @@ export function RightSidebar({
     useEffect(() => {
         const textarea = textareaRef.current;
         if (textarea) {
-            const minComposerHeight = variant === 'beegame' ? 81 : 52;
+            const minComposerHeight = variant === 'beegame' ? 56 : 52;
             textarea.style.height = 'auto';
             const scrollHeight = textarea.scrollHeight;
             textarea.style.height = Math.min(Math.max(scrollHeight, minComposerHeight), 160) + 'px';

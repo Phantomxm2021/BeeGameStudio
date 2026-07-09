@@ -1153,12 +1153,6 @@ begin
       'BEEGAME_RUNTIME_SETTINGS_JSON',
       platform_settings::text
     );
-    if platform_settings ? 'skillSearchEnabled' then
-      settings_env := settings_env || jsonb_build_object(
-        'SKILL_SEARCH_ENABLED',
-        case when (platform_settings->>'skillSearchEnabled')::boolean then '1' else '0' end
-      );
-    end if;
     if platform_settings ? 'autoMemoryEnabled' then
       settings_env := settings_env || jsonb_build_object(
         'CLAUDE_CODE_DISABLE_AUTO_MEMORY',

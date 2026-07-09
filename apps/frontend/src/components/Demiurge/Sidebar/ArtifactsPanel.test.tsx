@@ -5,6 +5,21 @@ import userEvent from '@testing-library/user-event';
 import { ArtifactsPanel } from './ArtifactsPanel';
 
 describe('ArtifactsPanel', () => {
+    it('uses shadcn skeletons while artifact data loads', () => {
+        render(
+            <ArtifactsPanel
+                artifacts={[]}
+                isLoading
+                reviewStatuses={{}}
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+            />
+        );
+
+        expect(screen.getByLabelText('Loading artifacts...')).toBeInTheDocument();
+        expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+    });
+
     it('uses artifact_id for review status lookup and preview/download callbacks', async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();
@@ -39,7 +54,13 @@ describe('ArtifactsPanel', () => {
             />
         );
 
-        expect(screen.getByText(/review: approved/i)).toBeInTheDocument();
+        const table = screen.getByRole('table');
+        expect(table).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeInTheDocument();
+        expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+        expect(screen.queryByText(/review: approved/i)).not.toBeInTheDocument();
         const scrollRegion = screen.getByText('GDD.md').closest('.overflow-y-auto');
         expect(scrollRegion).toHaveClass('overflow-y-auto');
         expect(scrollRegion).not.toHaveClass('scrollbar-hide');
@@ -103,7 +124,7 @@ describe('ArtifactsPanel', () => {
         );
 
         expect(screen.queryByTitle('Preview')).not.toBeInTheDocument();
-        expect(screen.getByText('Generated on download')).toBeInTheDocument();
+        expect(screen.queryByText('Generated on download')).not.toBeInTheDocument();
 
         await user.click(screen.getByTitle('Download'));
 
@@ -133,6 +154,7 @@ describe('ArtifactsPanel', () => {
 
         expect(screen.queryByTitle('Preview')).not.toBeInTheDocument();
         expect(screen.queryByTitle('Download')).not.toBeInTheDocument();
-        expect(screen.getByText('Generated on download')).toBeInTheDocument();
+        expect(screen.queryByText('Generated on download')).not.toBeInTheDocument();
+        expect(screen.getByText('sample-game.zip')).toBeInTheDocument();
     });
 });

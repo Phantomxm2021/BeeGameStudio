@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CreditCard, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
+import { Skeleton } from '../../ui/skeleton';
 import {
   createStripeCheckoutSession,
   getStripeCreditPacks,
@@ -111,7 +112,21 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
 
         <div className="mt-4 min-h-0">
           {isLoading ? (
-            <div className="type-footnote rounded-2xl border border-white/10 px-3 py-4 text-zinc-500">{copy.loading}</div>
+            <div className="overflow-hidden rounded-2xl border border-white/10" aria-label={copy.loading}>
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="grid gap-3 border-b border-white/10 bg-white/[0.035] px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                >
+                  <div className="min-w-0 space-y-2">
+                    <Skeleton className="h-4 w-32 bg-white/10" />
+                    <Skeleton className="h-3 w-56 bg-white/10" />
+                  </div>
+                  <Skeleton className="h-5 w-24 bg-white/10 sm:ml-auto" />
+                  <Skeleton className="h-9 w-full rounded-full bg-white/10 sm:w-24" />
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="max-h-[min(360px,calc(100vh-13rem))] overflow-y-auto rounded-2xl border border-white/10">
               {packs.map((pack, index) => (
