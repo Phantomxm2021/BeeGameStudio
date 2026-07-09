@@ -32,7 +32,8 @@ Claude-Haiku-*.txt
 
 # Agent / tool state dirs
 .swarm/
-.beegame/
+.beegame/skills/*/
+!.beegame/skills/builtinskills/
 .agents/__pycache__/
 
 # Python bytecode
