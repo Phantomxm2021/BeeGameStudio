@@ -6236,7 +6236,7 @@ describe('beegame session routes', () => {
       expect(proxiedRootText).toBe('proxied /previews/beegame_public_preview/')
       expect(proxiedRes.status).toBe(200)
       expect(proxiedRes.headers.get('access-control-allow-origin')).toBeNull()
-      expect(proxiedText).toBe('proxied /assets/main.js?cache=1')
+      expect(proxiedText).toBe('proxied /previews/beegame_public_preview/assets/main.js?cache=1')
     } finally {
       if (originalPreviewPublicBaseUrl === undefined) {
         delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
