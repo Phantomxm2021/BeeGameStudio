@@ -59,6 +59,12 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_API_BASE_URL || 'http://localhost:62174',
           changeOrigin: true,
           secure: false,
+          configure: proxy => {
+            proxy.on('proxyRes', proxyRes => {
+              proxyRes.headers['access-control-allow-origin'] = 'null'
+              proxyRes.headers['access-control-allow-credentials'] = 'true'
+            })
+          },
         },
       },
     },
