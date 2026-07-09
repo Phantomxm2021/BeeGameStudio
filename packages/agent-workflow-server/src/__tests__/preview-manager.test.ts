@@ -43,4 +43,24 @@ describe('BeeGamePreviewManager', () => {
     expect(restarted.generation).toBe(2)
     expect(processes).toHaveLength(2)
   })
+
+  test('keeps loopback public bases on the authenticated dashboard proxy path', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-preview-manager-loopback-'))
+    workspaces.push(workspace)
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } }))
+    const manager = new BeeGamePreviewManager(
+      (_command, options) => {
+        options.onOutput('http://127.0.0.1:62173/\n')
+        return { kill: () => {}, exited: new Promise(() => {}) }
+      },
+      62173,
+      async () => 62173,
+      async () => true,
+      'http://127.0.0.1:62173/previews',
+    )
+
+    const preview = await manager.start({ sessionId: 'session-loopback', workspacePath: workspace })
+
+    expect(preview.url).toBe('/previews/session-loopback/')
+  })
 })

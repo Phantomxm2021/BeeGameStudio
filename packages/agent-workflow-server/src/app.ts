@@ -3195,7 +3195,11 @@ async function proxyBeeGamePreviewRequest(
   const restPath = requestUrl.pathname.startsWith(prefix)
     ? requestUrl.pathname.slice(prefix.length) || '/'
     : '/'
-  const targetPath = preservePublicPath ? requestUrl.pathname : restPath
+  // Vite serves the HTML document from its configured public base, but its
+  // development modules remain rooted at `/`. Keep the base only for root.
+  const targetPath = preservePublicPath && restPath === '/'
+    ? requestUrl.pathname
+    : restPath
   const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
   target.search = requestUrl.search
   const headers = new Headers(request.headers)
@@ -3212,10 +3216,10 @@ async function proxyBeeGamePreviewRequest(
   } catch (error) {
     return new Response(`Preview upstream unavailable: ${toErrorMessage(error)}`, {
       status: 502,
-      headers: withPreviewCorsHeaders(new Headers({ 'content-type': 'text/plain; charset=UTF-8' })),
+      headers: withPreviewCorsHeaders(new Headers({ 'content-type': 'text/plain; charset=UTF-8' }), request),
     })
   }
-  const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers))
+  const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers), request)
   if (method === 'GET' && isHtmlResponse(upstream.headers)) {
     const html = await upstream.text()
     responseHeaders.delete('content-length')
@@ -3236,7 +3240,11 @@ function isHtmlResponse(headers: Headers): boolean {
   return (headers.get('content-type') || '').toLowerCase().includes('text/html')
 }
 
-function withPreviewCorsHeaders(headers: Headers): Headers {
+function withPreviewCorsHeaders(headers: Headers, request: Request): Headers {
+  if (request.headers.get('origin') === 'null') {
+    headers.set('access-control-allow-origin', 'null')
+    headers.set('access-control-allow-credentials', 'true')
+  }
   headers.set('access-control-allow-methods', 'GET, HEAD, OPTIONS')
   return headers
 }
