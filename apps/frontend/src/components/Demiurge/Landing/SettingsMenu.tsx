@@ -91,7 +91,7 @@ interface SettingsMenuProps {
     canReadAudit?: boolean;
 }
 
-type SettingsSection = 'personal' | 'platform';
+type SettingsSection = 'personal' | 'skills' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'invitations' | 'projects' | 'credit';
 type PopoverAnchorRect = {
     top: number;
@@ -172,7 +172,6 @@ export function SettingsMenu({
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||
         effectiveCanManageMcp ||
-        effectiveCanManageSkills ||
         effectiveCanManageModelConfig ||
         effectiveCanManageInvitations ||
         effectiveCanReadAudit;
@@ -862,11 +861,14 @@ export function SettingsMenu({
     const adminCopy = getAdminSettingsCopy(translateSettings);
     const sectionTabs = useMemo(() => [
         { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
+        ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
         ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
     ], [
         adminCopy.platform,
+        effectiveCanManageSkills,
         hasPlatformSettings,
         text.settingsGeneral,
+        userSkillsCopy.tab,
     ]);
     const platformTabs = useMemo(() => {
         return [
@@ -874,7 +876,6 @@ export function SettingsMenu({
             ...(effectiveCanManageInvitations ? [{ id: 'invitations' as const, label: adminCopy.invitation.tab, icon: Ticket }] : []),
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
-            ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
@@ -883,7 +884,6 @@ export function SettingsMenu({
         effectiveCanManageWorkspace,
         effectiveCanManageSecrets,
         effectiveCanManageMcp,
-        effectiveCanManageSkills,
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
         effectiveCanManageRuntimeSettings,
@@ -894,10 +894,11 @@ export function SettingsMenu({
         mcpCopy.title,
         projectLifecycleCopy.tab,
         text.settingsModel,
-        userSkillsCopy.tab,
     ]);
     const activeTabLabel = activeSection === 'personal'
         ? text.settingsGeneral
+        : activeSection === 'skills'
+        ? userSkillsCopy.title
         : activeTab === 'general'
         ? adminCopy.deployment
         : activeTab === 'runtime'
@@ -948,7 +949,7 @@ export function SettingsMenu({
                     : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
 
     const handleSaveSettings = async () => {
-        if (activeSection === 'personal') return;
+        if (activeSection !== 'platform') return;
         if (activeTab === 'model') {
             const saved = await handleSaveModelConfig();
             if (saved) onClose();
@@ -1013,10 +1014,15 @@ export function SettingsMenu({
             setActiveTab('general');
             return;
         }
+        if (!effectiveCanManageSkills && activeSection === 'skills') {
+            setActiveSection('personal');
+            setActiveTab('general');
+            return;
+        }
         if (activeSection === 'platform' && !platformTabs.some((tab) => tab.id === activeTab)) {
             setActiveTab(platformTabs[0]?.id ?? 'general');
         }
-    }, [activeSection, activeTab, hasPlatformSettings, platformTabs]);
+    }, [activeSection, activeTab, effectiveCanManageSkills, hasPlatformSettings, platformTabs]);
 
     if (!isOpen) return null;
 
@@ -1104,7 +1110,11 @@ export function SettingsMenu({
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
                                             <div className="type-caption-1 text-zinc-500">
-                                                {activeSection === 'platform' ? adminCopy.platform : t.systemSettings}
+                                                {activeSection === 'platform'
+                                                    ? adminCopy.platform
+                                                    : activeSection === 'skills'
+                                                        ? userSkillsCopy.tab
+                                                        : t.systemSettings}
                                             </div>
                                             <h2 className="type-title-3 mt-3 text-zinc-100">{activeTabLabel}</h2>
                                         </div>
@@ -1490,7 +1500,7 @@ export function SettingsMenu({
                                         onImportActive={(server) => void handleImportActiveMcpServer(server)}
                                     />
                                 ) : null}
-                                {activeSection === 'platform' && activeTab === 'skills' && effectiveCanManageSkills ? (
+                                {activeSection === 'skills' && effectiveCanManageSkills ? (
                                     <UserSkillsSettingsPanel
                                         copy={userSkillsCopy}
                                         skills={userSkills}
@@ -1506,7 +1516,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
                                 </div>
-                                {activeSection === 'platform' && activeTab !== 'mcp' && activeTab !== 'skills' && activeTab !== 'projects' && activeTab !== 'credit' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
+                                {activeSection === 'platform' && activeTab !== 'mcp' && activeTab !== 'projects' && activeTab !== 'credit' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"

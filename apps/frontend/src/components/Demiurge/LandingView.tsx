@@ -1374,7 +1374,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     canManageSecrets={canOpenPlatformSettings && hasPermission('secrets.manage')}
                     canManageRuntimeSettings={canOpenPlatformSettings && hasPermission('runtime_settings.manage')}
                     canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
-                    canManageSkills={canOpenPlatformSettings && hasPermission('skills.manage')}
+                    canManageSkills={hasPermission('skills.manage')}
                     canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
                     canManageInvitations={canOpenPlatformSettings}
                     canReadAudit={canOpenPlatformSettings && hasPermission('audit.read')}

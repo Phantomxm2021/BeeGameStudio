@@ -646,16 +646,19 @@ as $$
       'preview.manage',
       'deployment.manage',
       'assets.upload',
-      'assets.integrate'
+      'assets.integrate',
+      'skills.manage'
     ]
     when 'reviewer' then array[
       'workspace.read',
       'project.read',
-      'project.export'
+      'project.export',
+      'skills.manage'
     ]
     else array[
       'workspace.read',
-      'project.read'
+      'project.read',
+      'skills.manage'
     ]
   end
 $$;

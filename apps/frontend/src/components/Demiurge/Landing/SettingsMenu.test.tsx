@@ -171,6 +171,10 @@ const openPlatformSettingsTab = async (name: string | RegExp) => {
     await userEvent.click(screen.getByRole('tab', { name }));
 };
 
+const openUserSkillsSettings = async () => {
+    await userEvent.click(screen.getByRole('tab', { name: '技能' }));
+};
+
 describe('SettingsMenu model settings', () => {
     beforeEach(() => {
         localStorage.clear();
@@ -368,6 +372,7 @@ describe('SettingsMenu model settings', () => {
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
         expect(screen.getByRole('tab', { name: '通用' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: '技能' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '平台' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
@@ -406,7 +411,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
-    it('lets platform owners manage user skills from the settings panel', async () => {
+    it('lets users manage private skills from the settings panel', async () => {
         listUserSkills.mockResolvedValue([
             {
                 id: 'skill_1',
@@ -449,7 +454,7 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await openPlatformSettingsTab('技能');
+        await openUserSkillsSettings();
 
         await expect(screen.findByText('movement-contracts')).resolves.toBeInTheDocument();
         await userEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -473,6 +478,30 @@ describe('SettingsMenu model settings', () => {
             content: expect.stringContaining('Updated guidance.'),
         })));
         expect(await screen.findByText('技能已保存。')).toBeInTheDocument();
+    });
+
+    it('shows private skills without exposing platform administration', async () => {
+        renderSettings({
+            canManageWorkspace: false,
+            canManageSecrets: false,
+            canManageRuntimeSettings: false,
+            canManageMcp: false,
+            canManageSkills: true,
+            canManageModelConfig: false,
+            canManageInvitations: false,
+            canReadAudit: false,
+        });
+
+        expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '技能' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
+
+        await openUserSkillsSettings();
+
+        await waitFor(() => expect(listUserSkills).toHaveBeenCalledWith());
+        expect(screen.getByText('用户技能')).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '部署' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
     });
 
     it('wraps long deployment workspace paths within the settings panel', async () => {
@@ -619,6 +648,7 @@ describe('SettingsMenu model settings', () => {
             canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
+            canManageSkills: false,
             canManageModelConfig: false,
         });
 

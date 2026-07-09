@@ -361,6 +361,7 @@ const VIEWER_PERMISSIONS = new Set<BeeGamePermission>([
   'workspace.read',
   'project.read',
   'project.export',
+  'skills.manage',
 ])
 
 const REVIEWER_PERMISSIONS = new Set<BeeGamePermission>([
@@ -386,7 +387,6 @@ const OWNER_PERMISSIONS = new Set<BeeGamePermission>([
   'project.delete',
   'model_config.manage',
   'mcp.manage',
-  'skills.manage',
   'runtime_settings.manage',
   'secrets.manage',
   'audit.read',

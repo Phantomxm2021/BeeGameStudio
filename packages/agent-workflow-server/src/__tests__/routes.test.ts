@@ -116,6 +116,7 @@ describe('agent workflow server routes', () => {
         'workspace.read',
         'project.read',
         'project.export',
+        'skills.manage',
       ],
     })
   })
@@ -1012,6 +1013,7 @@ describe('agent workflow server routes', () => {
           'workspace.read',
           'project.read',
           'project.export',
+          'skills.manage',
         ],
       })
 
@@ -1446,30 +1448,55 @@ describe('agent workflow server routes', () => {
       viewerApp.request('/api/mcp-servers/server-id', {
         method: 'DELETE',
       }),
-      viewerApp.request('/api/user-skills'),
-      viewerApp.request('/api/user-skills', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          content: [
-            '---',
-            'name: viewer-skill',
-            'description: Viewer skill.',
-            '---',
-            '',
-            '# Viewer Skill',
-          ].join('\n'),
-        }),
-      }),
-      viewerApp.request('/api/user-skills/user-skill-id', {
-        method: 'DELETE',
-      }),
     ]
 
     for (const response of await Promise.all(requests)) {
       expect(response.status).toBe(403)
       expect(await response.json()).toEqual({ error: 'Forbidden' })
     }
+  })
+
+  test('lets read-only users manage private user skills', async () => {
+    const viewerApp = createAgentWorkflowApp({
+      defaultWorkspacePath: testRoot,
+      currentUser: {
+        id: 'viewer-user',
+        role: 'viewer',
+      },
+    })
+
+    const createRes = await viewerApp.request('/api/user-skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        content: [
+          '---',
+          'name: viewer-movement-contracts',
+          'description: Private movement guidance.',
+          '---',
+          '',
+          '# Viewer Movement Contracts',
+        ].join('\n'),
+      }),
+    })
+    expect(createRes.status).toBe(200)
+    const created = await createRes.json() as { id: string; slug: string; enabled: boolean }
+    expect(created.slug).toBe('viewer-movement-contracts')
+    expect(created.enabled).toBe(true)
+
+    const listRes = await viewerApp.request('/api/user-skills')
+    expect(listRes.status).toBe(200)
+    expect(await listRes.json()).toMatchObject([{
+      id: created.id,
+      slug: 'viewer-movement-contracts',
+      enabled: true,
+    }])
+
+    const deleteRes = await viewerApp.request(`/api/user-skills/${created.id}`, {
+      method: 'DELETE',
+    })
+    expect(deleteRes.status).toBe(200)
+    expect(await deleteRes.json()).toEqual({ deleted: true })
   })
 
   test('creates updates lists and deletes user skills for owner users', async () => {
