@@ -41,6 +41,10 @@ export type BeeGameUserSkillInput = {
   references?: BeeGameUserSkillReference[]
 }
 
+export type BeeGameUserSkillValidationResult =
+  | { ok: true; skill: BeeGameUserSkill }
+  | { ok: false; message: string }
+
 export type UserSkillsStoreOptions = {
   dataDir?: string
 }
@@ -87,17 +91,29 @@ export function upsertUserSkill(
     : -1
   const existing = existingIndex >= 0 ? skills[existingIndex] : undefined
   const normalized = normalizeUserSkillInput(input, existing)
-  const duplicate = skills.find(skill =>
-    skill.id !== normalized.id && skill.slug === normalized.slug
-  )
-  if (duplicate) {
-    throw new UserSkillValidationError(`Skill name already exists: ${normalized.name}`)
-  }
+  assertUniqueSkillSlug(normalized, skills)
   const nextSkills = existingIndex >= 0
     ? skills.map(skill => skill.id === normalized.id ? normalized : skill)
     : [...skills, normalized]
   saveUserSkills(nextSkills, options)
   return normalized
+}
+
+export function validateUserSkillInput(
+  input: BeeGameUserSkillInput,
+  existing?: BeeGameUserSkill,
+  skills: BeeGameUserSkill[] = [],
+): BeeGameUserSkillValidationResult {
+  try {
+    const normalized = normalizeUserSkillInput(input, existing)
+    assertUniqueSkillSlug(normalized, skills)
+    return { ok: true, skill: normalized }
+  } catch (err) {
+    if (err instanceof UserSkillValidationError) {
+      return { ok: false, message: err.message }
+    }
+    throw err
+  }
 }
 
 export function deleteUserSkill(
@@ -200,6 +216,18 @@ function normalizeStoredUserSkill(input: BeeGameUserSkill): BeeGameUserSkill {
     ...normalized,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
+  }
+}
+
+function assertUniqueSkillSlug(
+  skill: BeeGameUserSkill,
+  skills: BeeGameUserSkill[],
+): void {
+  const duplicate = skills.find(item =>
+    item.id !== skill.id && item.slug === skill.slug
+  )
+  if (duplicate) {
+    throw new UserSkillValidationError(`Skill name already exists: ${skill.name}`)
   }
 }
 

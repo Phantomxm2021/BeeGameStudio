@@ -824,6 +824,17 @@ export function createAgentWorkflowApp(
     return c.json(await dashboardRepository.listUserSkills(c.req.raw, user))
   })
 
+  app.post('/api/user-skills/validate', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'skills.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    return c.json(await dashboardRepository.validateUserSkill(
+      c.req.raw,
+      user,
+      toUserSkillInput(await readJson(c.req.raw)),
+    ))
+  })
+
   app.post('/api/user-skills', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'skills.manage')

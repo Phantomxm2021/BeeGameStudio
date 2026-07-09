@@ -38,6 +38,7 @@ const {
     createUserSkill,
     updateUserSkill,
     deleteUserSkill,
+    validateUserSkill,
     planProjectRetention,
     runProjectRetention,
 } = vi.hoisted(() => ({
@@ -73,6 +74,7 @@ const {
     createUserSkill: vi.fn(),
     updateUserSkill: vi.fn(),
     deleteUserSkill: vi.fn(),
+    validateUserSkill: vi.fn(),
     planProjectRetention: vi.fn(),
     runProjectRetention: vi.fn(),
 }));
@@ -140,6 +142,7 @@ vi.mock('../../../services/userSkillsApi', () => ({
     createUserSkill,
     updateUserSkill,
     deleteUserSkill,
+    validateUserSkill,
 }));
 
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
@@ -221,6 +224,21 @@ describe('SettingsMenu model settings', () => {
         createUserSkill.mockReset();
         updateUserSkill.mockReset();
         deleteUserSkill.mockReset();
+        validateUserSkill.mockReset();
+        validateUserSkill.mockResolvedValue({
+            ok: true,
+            skill: {
+                id: 'validated',
+                slug: 'my-beegame-skill',
+                name: 'my-beegame-skill',
+                description: '描述 BeeGame 什么时候应该使用这个技能。',
+                enabled: true,
+                content: '',
+                references: [],
+                createdAt: '2026-07-09T00:00:00.000Z',
+                updatedAt: '2026-07-09T00:00:00.000Z',
+            },
+        });
         createModelConfig.mockReset();
         getBeeGameSubagentsEnabled.mockReturnValue(true);
         setBeeGameSubagentsEnabled.mockReset();
@@ -502,6 +520,44 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByText('用户技能')).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '部署' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
+    });
+
+    it('validates private skills before saving', async () => {
+        validateUserSkill.mockResolvedValue({
+            ok: true,
+            skill: {
+                id: 'validated',
+                slug: 'movement-contracts',
+                name: 'movement-contracts',
+                description: 'Keep movement controls consistent.',
+                enabled: true,
+                content: '',
+                references: [],
+                createdAt: '2026-07-09T00:00:00.000Z',
+                updatedAt: '2026-07-09T00:00:00.000Z',
+            },
+        });
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        const editor = screen.getByLabelText('Skill markdown 内容');
+        await userEvent.clear(editor);
+        await userEvent.type(editor, [
+            '---',
+            'name: movement-contracts',
+            'description: Keep movement controls consistent.',
+            '---',
+            '',
+            '# Movement',
+        ].join('\n'));
+        await userEvent.click(screen.getByRole('button', { name: '检查技能' }));
+
+        await waitFor(() => expect(validateUserSkill).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('movement-contracts'),
+            enabled: true,
+        })));
+        expect(await screen.findByText('检查通过：movement-contracts')).toBeInTheDocument();
     });
 
     it('wraps long deployment workspace paths within the settings panel', async () => {

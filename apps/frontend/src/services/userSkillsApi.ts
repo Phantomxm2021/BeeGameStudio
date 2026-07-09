@@ -24,6 +24,10 @@ export type UserSkillInput = {
   references?: UserSkillReference[];
 };
 
+export type UserSkillValidationResult =
+  | { ok: true; skill: UserSkill }
+  | { ok: false; message: string };
+
 export const listUserSkills = (): Promise<UserSkill[]> => (
   apiClient.get('/api/user-skills')
 );
@@ -38,4 +42,8 @@ export const updateUserSkill = (id: string, input: UserSkillInput): Promise<User
 
 export const deleteUserSkill = (id: string): Promise<{ deleted: boolean }> => (
   apiClient.delete(`/api/user-skills/${encodeURIComponent(id)}`)
+);
+
+export const validateUserSkill = (input: UserSkillInput): Promise<UserSkillValidationResult> => (
+  apiClient.post('/api/user-skills/validate', input)
 );

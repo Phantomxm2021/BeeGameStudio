@@ -1499,6 +1499,44 @@ describe('agent workflow server routes', () => {
     expect(await deleteRes.json()).toEqual({ deleted: true })
   })
 
+  test('validates user skill content without saving it', async () => {
+    const validateRes = await app.request('/api/user-skills/validate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        content: [
+          '---',
+          'name: validation-contracts',
+          'description: Checks skill syntax before saving.',
+          '---',
+          '',
+          '# Validation Contracts',
+        ].join('\n'),
+      }),
+    })
+    expect(validateRes.status).toBe(200)
+    expect(await validateRes.json()).toEqual({
+      ok: true,
+      skill: expect.objectContaining({
+        slug: 'validation-contracts',
+        name: 'validation-contracts',
+        description: 'Checks skill syntax before saving.',
+      }),
+    })
+    expect(await (await app.request('/api/user-skills')).json()).toEqual([])
+
+    const invalidRes = await app.request('/api/user-skills/validate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content: '# Missing frontmatter' }),
+    })
+    expect(invalidRes.status).toBe(200)
+    expect(await invalidRes.json()).toEqual({
+      ok: false,
+      message: 'Skill content must start with YAML frontmatter',
+    })
+  })
+
   test('creates updates lists and deletes user skills for owner users', async () => {
     const createRes = await app.request('/api/user-skills', {
       method: 'POST',

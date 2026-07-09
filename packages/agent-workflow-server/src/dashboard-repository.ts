@@ -46,8 +46,10 @@ import {
   listUserSkills,
   materializeUserSkills,
   upsertUserSkill,
+  validateUserSkillInput,
   type BeeGameUserSkill,
   type BeeGameUserSkillInput,
+  type BeeGameUserSkillValidationResult,
 } from './user-skills-store'
 import {
   BeeGameProjectMetadataStore,
@@ -491,6 +493,23 @@ export class DashboardRepository {
       : upsertUserSkill(input, {
           dataDir: this.options.getUserDataRoot(request),
         })
+  }
+
+  async validateUserSkill(
+    request: Request,
+    user: BeeGameUserContext,
+    input: BeeGameUserSkillInput,
+  ): Promise<BeeGameUserSkillValidationResult> {
+    const supabase = this.supabaseForRequest(request)
+    const skills = supabase
+      ? await supabase.listUserSkills(user.id)
+      : listUserSkills({
+          dataDir: this.options.getUserDataRoot(request),
+        })
+    const existing = input.id
+      ? skills.find(skill => skill.id === input.id)
+      : undefined
+    return validateUserSkillInput(input, existing, skills)
   }
 
   async deleteUserSkill(

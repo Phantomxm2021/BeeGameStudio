@@ -46,6 +46,7 @@ import {
     deleteUserSkill,
     listUserSkills,
     updateUserSkill,
+    validateUserSkill,
     type UserSkill,
 } from '../../../services/userSkillsApi';
 import {
@@ -215,6 +216,7 @@ export function SettingsMenu({
     const [userSkillForm, setUserSkillForm] = useState<UserSkillFormState>(() => createEmptyUserSkillForm(userSkillsCopy.template));
     const [userSkillsStatus, setUserSkillsStatus] = useState('');
     const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
+    const [isValidatingUserSkill, setIsValidatingUserSkill] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
@@ -724,6 +726,28 @@ export function SettingsMenu({
             setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
         } finally {
             setIsSavingUserSkill(false);
+        }
+    };
+
+    const handleValidateUserSkill = async () => {
+        const content = userSkillForm.content.trim();
+        if (!content) {
+            setUserSkillsStatus(userSkillsCopy.contentRequired);
+            return;
+        }
+        setUserSkillsStatus('');
+        setIsValidatingUserSkill(true);
+        try {
+            const result = await validateUserSkill({
+                ...(userSkillForm.id ? { id: userSkillForm.id } : {}),
+                enabled: userSkillForm.enabled,
+                content,
+            });
+            setUserSkillsStatus(result.ok ? userSkillsCopy.valid(result.skill.name) : result.message);
+        } catch (error) {
+            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.validateFailed);
+        } finally {
+            setIsValidatingUserSkill(false);
         }
     };
 
@@ -1507,9 +1531,11 @@ export function SettingsMenu({
                                         form={userSkillForm}
                                         status={userSkillsStatus}
                                         isSaving={isSavingUserSkill}
+                                        isValidating={isValidatingUserSkill}
                                         onFormChange={setUserSkillForm}
                                         onNew={handleNewUserSkill}
                                         onEdit={handleEditUserSkill}
+                                        onValidate={() => void handleValidateUserSkill()}
                                         onSave={() => void handleSaveUserSkill()}
                                         onToggle={(skill) => void handleToggleUserSkill(skill)}
                                         onDelete={(skill) => void handleDeleteUserSkill(skill)}
@@ -1680,6 +1706,10 @@ function getUserSkillsSettingsCopy(translate: SettingsTranslate): UserSkillsSett
         contentRequired: translate('userSkills.contentRequired'),
         saved: translate('userSkills.saved'),
         saveFailed: translate('userSkills.saveFailed'),
+        validate: translate('userSkills.validate'),
+        validating: translate('userSkills.validating'),
+        valid: (name: string) => translate('userSkills.valid', { name }),
+        validateFailed: translate('userSkills.validateFailed'),
         deleteFailed: translate('userSkills.deleteFailed'),
         unavailable: translate('userSkills.unavailable'),
         runtimeNote: translate('userSkills.runtimeNote'),
@@ -1927,6 +1957,10 @@ type UserSkillsSettingsCopy = {
     contentRequired: string;
     saved: string;
     saveFailed: string;
+    validate: string;
+    validating: string;
+    valid: (name: string) => string;
+    validateFailed: string;
     deleteFailed: string;
     unavailable: string;
     runtimeNote: string;
@@ -2198,9 +2232,11 @@ function UserSkillsSettingsPanel({
     form,
     status,
     isSaving,
+    isValidating,
     onFormChange,
     onNew,
     onEdit,
+    onValidate,
     onSave,
     onToggle,
     onDelete,
@@ -2210,14 +2246,17 @@ function UserSkillsSettingsPanel({
     form: UserSkillFormState;
     status: string;
     isSaving: boolean;
+    isValidating: boolean;
     onFormChange: (form: UserSkillFormState) => void;
     onNew: () => void;
     onEdit: (skill: UserSkill) => void;
+    onValidate: () => void;
     onSave: () => void;
     onToggle: (skill: UserSkill) => void;
     onDelete: (skill: UserSkill) => void;
 }) {
-    const saveDisabled = isSaving || !form.content.trim();
+    const saveDisabled = isSaving || isValidating || !form.content.trim();
+    const validateDisabled = isSaving || isValidating || !form.content.trim();
     return (
         <div className="space-y-5 py-2">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2256,14 +2295,24 @@ function UserSkillsSettingsPanel({
                 </label>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <div className="type-footnote text-amber-300">{status}</div>
-                    <button
-                        type="button"
-                        onClick={onSave}
-                        disabled={saveDisabled}
-                        className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        {isSaving ? copy.saving : copy.save}
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={onValidate}
+                            disabled={validateDisabled}
+                            className="type-button inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {isValidating ? copy.validating : copy.validate}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onSave}
+                            disabled={saveDisabled}
+                            className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {isSaving ? copy.saving : copy.save}
+                        </button>
+                    </div>
                 </div>
             </section>
 
