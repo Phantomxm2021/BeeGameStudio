@@ -70,6 +70,7 @@
     "billing:dev": "npm run --workspace=packages/beegame-billing-server dev",
     "skills:dev": "npm run --workspace=packages/beegame-skills-server dev",
     "dashboard:docker": "sh scripts/beegame-docker.sh up",
+    "docker:init": "sh scripts/beegame-docker.sh init",
     "docker:up": "sh scripts/beegame-docker.sh up",
     "docker:down": "sh scripts/beegame-docker.sh down",
     "docker:restart": "sh scripts/beegame-docker.sh restart",

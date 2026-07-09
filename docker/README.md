@@ -18,9 +18,12 @@ billing backend, and a dedicated user skills backend.
 ## Prepare
 
 ```bash
-cp docker/.env.production.example docker/.env.production
-cp docker/.env.billing.example docker/.env.billing
+npm run docker:init
 ```
+
+This creates `docker/.env.production` and `docker/.env.billing` from the
+examples when they are missing, generates `BEEGAME_SKILLS_SERVICE_TOKEN`, and
+sets the same `BEEGAME_CREDIT_CONTROL_TOKEN` in both env files.
 
 Fill the Supabase and public runtime URLs in `docker/.env.production`.
 
@@ -30,13 +33,13 @@ signed-in user's Bearer token on Credit Store requests, and uses the
 service-role key only for provider credit grants after Stripe webhook
 verification.
 
-Set `BEEGAME_CREDIT_CONTROL_TOKEN` in both files to the same high-entropy
-random value. The runtime host uses it only for internal reserve, settle, and
-refund requests to `beegame-billing`; it is not passed to the frontend image.
+`BEEGAME_CREDIT_CONTROL_TOKEN` must match in both files. The runtime host uses
+it only for internal reserve, settle, and refund requests to `beegame-billing`;
+it is not passed to the frontend image.
 
-Set `BEEGAME_SKILLS_SERVICE_TOKEN` in `docker/.env.production` to a high-entropy
-random value. The runtime host uses it only for internal enabled-skill
-materialization requests to `beegame-skills`.
+`BEEGAME_SKILLS_SERVICE_TOKEN` lives in `docker/.env.production`. The same value
+is injected into `beegame-runtime` and `beegame-skills`; the runtime host uses it
+only for internal enabled-skill materialization requests to `beegame-skills`.
 
 Do not put Supabase service-role keys or Stripe secrets in
 `docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`

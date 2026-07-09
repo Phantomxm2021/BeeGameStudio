@@ -3,6 +3,9 @@ node_modules
 dist
 coverage
 .env
+.env.production
+docker/.env.production
+docker/.env.billing
 *.log
 .idea
 .vscode/*
