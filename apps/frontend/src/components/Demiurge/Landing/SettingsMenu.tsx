@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Brain, BookOpenText, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
+import { Bot, Brain, BookOpenText, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, Plus as FaPlus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -42,11 +42,10 @@ import {
     type McpServerTransport,
 } from '../../../services/mcpServersApi';
 import {
-    createUserSkill,
     deleteUserSkill,
+    importUserSkillPackage,
     listUserSkills,
-    updateUserSkill,
-    validateUserSkill,
+    updateUserSkillEnabled,
     type UserSkill,
 } from '../../../services/userSkillsApi';
 import {
@@ -127,12 +126,6 @@ type BillingPackFormState = {
     displayName: string;
     sortOrder: string;
     enabled: boolean;
-};
-
-type UserSkillFormState = {
-    id: string;
-    enabled: boolean;
-    content: string;
 };
 
 export function SettingsMenu({
@@ -217,12 +210,11 @@ export function SettingsMenu({
     const [testingMcpServerId, setTestingMcpServerId] = useState('');
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
     const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
-    const [userSkillForm, setUserSkillForm] = useState<UserSkillFormState>(() => createEmptyUserSkillForm(userSkillsCopy.template));
     const [userSkillsStatus, setUserSkillsStatus] = useState('');
     const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
-    const [isValidatingUserSkill, setIsValidatingUserSkill] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
+    const userSkillImportInputRef = useRef<HTMLInputElement | null>(null);
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
     const [invitationRequired, setInvitationRequired] = useState(false);
     const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
@@ -354,7 +346,6 @@ export function SettingsMenu({
                 .then((skills) => {
                     if (cancelled) return;
                     setUserSkills(skills);
-                    setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
                     setUserSkillsStatus('');
                 })
                 .catch((error) => {
@@ -426,7 +417,6 @@ export function SettingsMenu({
         projectLifecycleCopy.unavailable,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
-        userSkillsCopy.template,
         userSkillsCopy.unavailable,
     ]);
 
@@ -684,48 +674,20 @@ export function SettingsMenu({
         }
     };
 
-    const handleNewUserSkill = () => {
-        setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
-        setUserSkillsStatus('');
-    };
-
-    const handleEditUserSkill = (skill: UserSkill) => {
-        setUserSkillForm({
-            id: skill.id,
-            enabled: skill.enabled,
-            content: skill.content,
-        });
-        setUserSkillsStatus('');
-    };
-
-    const handleSaveUserSkill = async () => {
-        const content = userSkillForm.content.trim();
-        if (!content) {
-            setUserSkillsStatus(userSkillsCopy.contentRequired);
+    const handleImportUserSkill = async (file: File) => {
+        if (!file.name.toLowerCase().endsWith('.zip')) {
+            setUserSkillsStatus(userSkillsCopy.importFailed);
             return;
         }
         setUserSkillsStatus('');
         setIsSavingUserSkill(true);
         try {
-            const saved = userSkillForm.id
-                ? await updateUserSkill(userSkillForm.id, {
-                    enabled: userSkillForm.enabled,
-                    content,
-                })
-                : await createUserSkill({
-                    enabled: userSkillForm.enabled,
-                    content,
-                });
+            const saved = await importUserSkillPackage(file);
             setUserSkills((current) => [
                 saved,
                 ...current.filter((skill) => skill.id !== saved.id),
             ].sort((left, right) => left.name.localeCompare(right.name)));
-            setUserSkillForm({
-                id: saved.id,
-                enabled: saved.enabled,
-                content: saved.content,
-            });
-            setUserSkillsStatus(userSkillsCopy.saved);
+            setUserSkillsStatus(userSkillsCopy.imported(file.name));
         } catch (error) {
             setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
         } finally {
@@ -733,41 +695,18 @@ export function SettingsMenu({
         }
     };
 
-    const handleValidateUserSkill = async () => {
-        const content = userSkillForm.content.trim();
-        if (!content) {
-            setUserSkillsStatus(userSkillsCopy.contentRequired);
-            return;
-        }
-        setUserSkillsStatus('');
-        setIsValidatingUserSkill(true);
-        try {
-            const result = await validateUserSkill({
-                ...(userSkillForm.id ? { id: userSkillForm.id } : {}),
-                enabled: userSkillForm.enabled,
-                content,
-            });
-            setUserSkillsStatus(result.ok ? userSkillsCopy.valid(result.skill.name) : result.message);
-        } catch (error) {
-            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.validateFailed);
-        } finally {
-            setIsValidatingUserSkill(false);
-        }
+    const handleImportUserSkillInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (file) void handleImportUserSkill(file);
     };
 
     const handleToggleUserSkill = async (skill: UserSkill) => {
         setUserSkillsStatus('');
         setIsSavingUserSkill(true);
         try {
-            const saved = await updateUserSkill(skill.id, {
-                enabled: !skill.enabled,
-                content: skill.content,
-                references: skill.references,
-            });
+            const saved = await updateUserSkillEnabled(skill.id, !skill.enabled);
             setUserSkills((current) => current.map((item) => item.id === saved.id ? saved : item));
-            if (userSkillForm.id === saved.id) {
-                setUserSkillForm((current) => ({ ...current, enabled: saved.enabled }));
-            }
         } catch (error) {
             setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
         } finally {
@@ -781,9 +720,7 @@ export function SettingsMenu({
         try {
             await deleteUserSkill(skill.id);
             setUserSkills((current) => current.filter((item) => item.id !== skill.id));
-            if (userSkillForm.id === skill.id) {
-                setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
-            }
+            setUserSkillsStatus(userSkillsCopy.deleted);
         } catch (error) {
             setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
         } finally {
@@ -1228,6 +1165,28 @@ export function SettingsMenu({
                                                 ) : null}
                                             </div>
                                         ) : null}
+                                        {activeSection === 'skills' && effectiveCanManageSkills ? (
+                                            <div>
+                                                <input
+                                                    ref={userSkillImportInputRef}
+                                                    aria-label={userSkillsCopy.importFileLabel}
+                                                    type="file"
+                                                    accept=".zip,application/zip,application/x-zip-compressed"
+                                                    className="sr-only"
+                                                    onChange={handleImportUserSkillInputChange}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    aria-label={userSkillsCopy.importSkill}
+                                                    title={userSkillsCopy.importFileLabel}
+                                                    onClick={() => userSkillImportInputRef.current?.click()}
+                                                    disabled={isSavingUserSkill}
+                                                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <FaPlus className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </header>
 
@@ -1532,15 +1491,9 @@ export function SettingsMenu({
                                     <UserSkillsSettingsPanel
                                         copy={userSkillsCopy}
                                         skills={userSkills}
-                                        form={userSkillForm}
                                         status={userSkillsStatus}
                                         isSaving={isSavingUserSkill}
-                                        isValidating={isValidatingUserSkill}
-                                        onFormChange={setUserSkillForm}
-                                        onNew={handleNewUserSkill}
-                                        onEdit={handleEditUserSkill}
-                                        onValidate={() => void handleValidateUserSkill()}
-                                        onSave={() => void handleSaveUserSkill()}
+                                        onImport={(file) => void handleImportUserSkill(file)}
                                         onToggle={(skill) => void handleToggleUserSkill(skill)}
                                         onDelete={(skill) => void handleDeleteUserSkill(skill)}
                                     />
@@ -1696,28 +1649,20 @@ function getUserSkillsSettingsCopy(translate: SettingsTranslate): UserSkillsSett
         tab: translate('userSkills.tab'),
         title: translate('userSkills.title'),
         description: translate('userSkills.description'),
-        editorTitle: translate('userSkills.editorTitle'),
-        listTitle: translate('userSkills.listTitle'),
-        newSkill: translate('userSkills.newSkill'),
-        save: translate('userSkills.save'),
-        saving: translate('userSkills.saving'),
+        importSkill: translate('userSkills.importSkill'),
+        importFileLabel: translate('userSkills.importFileLabel'),
+        importFailed: translate('userSkills.importFailed'),
+        imported: (name: string) => translate('userSkills.imported', { name }),
         enabled: translate('userSkills.enabled'),
         disabled: translate('userSkills.disabled'),
-        edit: translate('userSkills.edit'),
         delete: translate('userSkills.delete'),
         empty: translate('userSkills.empty'),
-        contentLabel: translate('userSkills.contentLabel'),
-        contentRequired: translate('userSkills.contentRequired'),
-        saved: translate('userSkills.saved'),
+        emptyDescription: translate('userSkills.emptyDescription'),
         saveFailed: translate('userSkills.saveFailed'),
-        validate: translate('userSkills.validate'),
-        validating: translate('userSkills.validating'),
-        valid: (name: string) => translate('userSkills.valid', { name }),
-        validateFailed: translate('userSkills.validateFailed'),
         deleteFailed: translate('userSkills.deleteFailed'),
+        deleted: translate('userSkills.deleted'),
         unavailable: translate('userSkills.unavailable'),
         runtimeNote: translate('userSkills.runtimeNote'),
-        template: translate('userSkills.template'),
     };
 }
 
@@ -1764,14 +1709,6 @@ function createEmptyBillingPackForm(): BillingPackFormState {
         displayName: '',
         sortOrder: '0',
         enabled: true,
-    };
-}
-
-function createEmptyUserSkillForm(template: string): UserSkillFormState {
-    return {
-        id: '',
-        enabled: true,
-        content: template,
     };
 }
 
@@ -1947,28 +1884,20 @@ type UserSkillsSettingsCopy = {
     tab: string;
     title: string;
     description: string;
-    editorTitle: string;
-    listTitle: string;
-    newSkill: string;
-    save: string;
-    saving: string;
+    importSkill: string;
+    importFileLabel: string;
+    importFailed: string;
+    imported: (name: string) => string;
     enabled: string;
     disabled: string;
-    edit: string;
     delete: string;
     empty: string;
-    contentLabel: string;
-    contentRequired: string;
-    saved: string;
+    emptyDescription: string;
     saveFailed: string;
-    validate: string;
-    validating: string;
-    valid: (name: string) => string;
-    validateFailed: string;
     deleteFailed: string;
+    deleted: string;
     unavailable: string;
     runtimeNote: string;
-    template: string;
 };
 
 type RuntimeCapabilityItem = {
@@ -2233,105 +2162,57 @@ function InvitationSettingsPanel({
 function UserSkillsSettingsPanel({
     copy,
     skills,
-    form,
     status,
     isSaving,
-    isValidating,
-    onFormChange,
-    onNew,
-    onEdit,
-    onValidate,
-    onSave,
+    onImport,
     onToggle,
     onDelete,
 }: {
     copy: UserSkillsSettingsCopy;
     skills: UserSkill[];
-    form: UserSkillFormState;
     status: string;
     isSaving: boolean;
-    isValidating: boolean;
-    onFormChange: (form: UserSkillFormState) => void;
-    onNew: () => void;
-    onEdit: (skill: UserSkill) => void;
-    onValidate: () => void;
-    onSave: () => void;
+    onImport: (file: File) => void;
     onToggle: (skill: UserSkill) => void;
     onDelete: (skill: UserSkill) => void;
 }) {
-    const saveDisabled = isSaving || isValidating || !form.content.trim();
-    const validateDisabled = isSaving || isValidating || !form.content.trim();
+    const [isDragActive, setIsDragActive] = useState(false);
+    const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setIsDragActive(true);
+    };
+    const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            return;
+        }
+        setIsDragActive(false);
+    };
+    const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        setIsDragActive(false);
+        const file = event.dataTransfer.files.item?.(0) ?? event.dataTransfer.files[0];
+        if (file) onImport(file);
+    };
     return (
-        <div className="space-y-5 py-2">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <p className="type-callout max-w-2xl text-zinc-400">{copy.description}</p>
-                    <p className="type-footnote mt-2 max-w-2xl text-zinc-500">{copy.runtimeNote}</p>
-                </div>
-                <button
-                    type="button"
-                    onClick={onNew}
-                    className="type-button inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-                >
-                    <Plus className="h-4 w-4" />
-                    {copy.newSkill}
-                </button>
-            </div>
+        <div className="space-y-4 py-2">
+            {status ? (
+                <div className="type-footnote text-amber-300">{status}</div>
+            ) : null}
 
-            <section className="rounded-3xl border border-white/10 bg-white/[0.025] p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="type-caption-1 text-zinc-500">{copy.editorTitle}</div>
-                    <Switch
-                        checked={form.enabled}
-                        label={form.enabled ? copy.enabled : copy.disabled}
-                        onClick={() => onFormChange({ ...form, enabled: !form.enabled })}
-                    />
-                </div>
-                <label className="grid gap-2">
-                    <span className="sr-only">{copy.contentLabel}</span>
-                    <textarea
-                        aria-label={copy.contentLabel}
-                        value={form.content}
-                        onChange={(event) => onFormChange({ ...form, content: event.target.value })}
-                        spellCheck={false}
-                        className="type-code-sm min-h-[220px] max-h-[min(36vh,360px)] w-full resize-y rounded-2xl border border-white/15 bg-black/20 px-3 py-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-black/25"
-                    />
-                </label>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <div className="type-footnote text-amber-300">{status}</div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={onValidate}
-                            disabled={validateDisabled}
-                            className="type-button inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            {isValidating ? copy.validating : copy.validate}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onSave}
-                            disabled={saveDisabled}
-                            className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            {isSaving ? copy.saving : copy.save}
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            <section className="space-y-2">
-                <div className="type-caption-1 text-zinc-500">{copy.listTitle}</div>
+            <section
+                data-testid="user-skills-drop-zone"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`rounded-3xl transition-colors ${isDragActive ? 'bg-white/[0.045] ring-2 ring-white/25' : ''}`}
+            >
                 {skills.length ? (
                     <div className="max-h-[240px] overflow-y-auto rounded-3xl border border-white/10 [scrollbar-gutter:stable]">
                         <div className="divide-y divide-white/10">
                             {skills.map((skill) => (
                                 <div key={skill.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => onEdit(skill)}
-                                        className="min-w-0 flex-1 rounded-2xl px-2 py-1 text-left transition-colors hover:bg-white/5"
-                                    >
+                                    <div className="min-w-0 flex-1 px-2 py-1">
                                         <div className="flex items-center gap-2">
                                             <span className={`h-2 w-2 shrink-0 rounded-full ${skill.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                                             <span className="type-footnote truncate text-zinc-100">{skill.name}</span>
@@ -2342,7 +2223,7 @@ function UserSkillsSettingsPanel({
                                         <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
                                             {skill.description}
                                         </div>
-                                    </button>
+                                    </div>
                                     <div className="flex shrink-0 items-center gap-2">
                                         <button
                                             type="button"
@@ -2354,19 +2235,12 @@ function UserSkillsSettingsPanel({
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => onEdit(skill)}
-                                            className="type-button h-8 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10"
-                                        >
-                                            {copy.edit}
-                                        </button>
-                                        <button
-                                            type="button"
                                             onClick={() => onDelete(skill)}
                                             disabled={isSaving}
-                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                            aria-label={copy.delete}
+                                            className="type-button inline-flex h-8 items-center gap-2 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             <Trash2 className="h-4 w-4" />
+                                            {copy.delete}
                                         </button>
                                     </div>
                                 </div>
@@ -2374,8 +2248,12 @@ function UserSkillsSettingsPanel({
                         </div>
                     </div>
                 ) : (
-                    <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">
-                        {copy.empty}
+                    <div className="flex min-h-[190px] flex-col items-center justify-center rounded-3xl border border-dashed border-white/20 bg-white/[0.025] px-6 py-8 text-center">
+                        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 text-zinc-400">
+                            <BookOpenText className="h-5 w-5" />
+                        </div>
+                        <div className="type-callout text-zinc-100">{copy.empty}</div>
+                        <p className="type-footnote mt-3 max-w-md text-zinc-500">{copy.emptyDescription}</p>
                     </div>
                 )}
             </section>

@@ -22,6 +22,7 @@ describe('agent workflow server routes', () => {
     app = createAgentWorkflowApp({
       defaultWorkspacePath: testRoot,
       currentUser: testOwner,
+      skillsConfig: false,
     })
   })
 
@@ -1456,147 +1457,121 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('lets read-only users manage private user skills', async () => {
+  test('proxies private user skill management to the skills service', async () => {
+    const calls: Array<{ url: string; method: string; contentType?: string }> = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input, init) => {
+      const headers = new Headers(init?.headers)
+      calls.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        contentType: headers.get('content-type') ?? undefined,
+      })
+      if (String(input).endsWith('/api/user-skills')) {
+        return Response.json([{
+          id: 'skill_1',
+          slug: 'movement-contracts',
+          name: 'movement-contracts',
+          description: 'Private movement guidance.',
+          enabled: true,
+          content: '# Movement Contracts',
+          references: [],
+          files: [{ path: 'SKILL.md', content: '# Movement Contracts' }],
+          createdAt: '2026-07-09T00:00:00.000Z',
+          updatedAt: '2026-07-09T00:00:00.000Z',
+        }])
+      }
+      if (String(input).endsWith('/api/user-skills/import')) {
+        return Response.json({
+          id: 'skill_2',
+          slug: 'imported-skill',
+          name: 'imported-skill',
+          description: 'Imported.',
+          enabled: true,
+          content: '# Imported',
+          references: [],
+          files: [{ path: 'SKILL.md', content: '# Imported' }],
+          createdAt: '2026-07-09T00:00:00.000Z',
+          updatedAt: '2026-07-09T00:00:00.000Z',
+        })
+      }
+      if (String(input).endsWith('/api/user-skills/skill_1/enabled')) {
+        return Response.json({
+          id: 'skill_1',
+          slug: 'movement-contracts',
+          name: 'movement-contracts',
+          description: 'Private movement guidance.',
+          enabled: false,
+          content: '# Movement Contracts',
+          references: [],
+          files: [{ path: 'SKILL.md', content: '# Movement Contracts' }],
+          createdAt: '2026-07-09T00:00:00.000Z',
+          updatedAt: '2026-07-09T00:00:00.000Z',
+        })
+      }
+      if (String(input).endsWith('/api/user-skills/skill_1')) {
+        return Response.json({ deleted: true })
+      }
+      return new Response('not found', { status: 404 })
+    }) as typeof fetch
+
     const viewerApp = createAgentWorkflowApp({
       defaultWorkspacePath: testRoot,
       currentUser: {
         id: 'viewer-user',
         role: 'viewer',
+        permissions: ['project.read'],
+      },
+      skillsConfig: {
+        apiBaseUrl: 'http://skills.test',
       },
     })
 
-    const createRes = await viewerApp.request('/api/user-skills', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        content: [
-          '---',
-          'name: viewer-movement-contracts',
-          'description: Private movement guidance.',
-          '---',
-          '',
-          '# Viewer Movement Contracts',
-        ].join('\n'),
-      }),
-    })
-    expect(createRes.status).toBe(200)
-    const created = await createRes.json() as { id: string; slug: string; enabled: boolean }
-    expect(created.slug).toBe('viewer-movement-contracts')
-    expect(created.enabled).toBe(true)
+    try {
+      const listRes = await viewerApp.request('/api/user-skills')
+      expect(listRes.status).toBe(200)
+      expect(await listRes.json()).toMatchObject([{
+        id: 'skill_1',
+        slug: 'movement-contracts',
+        enabled: true,
+      }])
 
-    const listRes = await viewerApp.request('/api/user-skills')
-    expect(listRes.status).toBe(200)
-    expect(await listRes.json()).toMatchObject([{
-      id: created.id,
-      slug: 'viewer-movement-contracts',
-      enabled: true,
-    }])
+      const importRes = await viewerApp.request('/api/user-skills/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/zip' },
+        body: 'zip-bytes',
+      })
+      expect(importRes.status).toBe(200)
+      expect(await importRes.json()).toMatchObject({
+        id: 'skill_2',
+        slug: 'imported-skill',
+      })
 
-    const deleteRes = await viewerApp.request(`/api/user-skills/${created.id}`, {
-      method: 'DELETE',
-    })
-    expect(deleteRes.status).toBe(200)
-    expect(await deleteRes.json()).toEqual({ deleted: true })
-  })
-
-  test('validates user skill content without saving it', async () => {
-    const validateRes = await app.request('/api/user-skills/validate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        content: [
-          '---',
-          'name: validation-contracts',
-          'description: Checks skill syntax before saving.',
-          '---',
-          '',
-          '# Validation Contracts',
-        ].join('\n'),
-      }),
-    })
-    expect(validateRes.status).toBe(200)
-    expect(await validateRes.json()).toEqual({
-      ok: true,
-      skill: expect.objectContaining({
-        slug: 'validation-contracts',
-        name: 'validation-contracts',
-        description: 'Checks skill syntax before saving.',
-      }),
-    })
-    expect(await (await app.request('/api/user-skills')).json()).toEqual([])
-
-    const invalidRes = await app.request('/api/user-skills/validate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ content: '# Missing frontmatter' }),
-    })
-    expect(invalidRes.status).toBe(200)
-    expect(await invalidRes.json()).toEqual({
-      ok: false,
-      message: 'Skill content must start with YAML frontmatter',
-    })
-  })
-
-  test('creates updates lists and deletes user skills for owner users', async () => {
-    const createRes = await app.request('/api/user-skills', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        content: [
-          '---',
-          'name: interaction-contracts',
-          'description: Shared interaction contracts.',
-          '---',
-          '',
-          '# Interaction Contracts',
-        ].join('\n'),
-        references: [{
-          path: 'references/xr.md',
-          content: '# XR\n\nKeep comfort controls explicit.',
-        }],
-      }),
-    })
-    expect(createRes.status).toBe(200)
-    const created = await createRes.json() as { id: string; slug: string; enabled: boolean }
-    expect(created.slug).toBe('interaction-contracts')
-    expect(created.enabled).toBe(true)
-
-    const updateRes = await app.request(`/api/user-skills/${created.id}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+      const toggleRes = await viewerApp.request('/api/user-skills/skill_1/enabled', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      })
+      expect(toggleRes.status).toBe(200)
+      expect(await toggleRes.json()).toMatchObject({
+        id: 'skill_1',
         enabled: false,
-        content: [
-          '---',
-          'name: interaction-contracts',
-          'description: Shared interaction contracts.',
-          '---',
-          '',
-          '# Interaction Contracts',
-          '',
-          'Updated.',
-        ].join('\n'),
-      }),
-    })
-    expect(updateRes.status).toBe(200)
-    const updated = await updateRes.json() as { enabled: boolean; content: string }
-    expect(updated.enabled).toBe(false)
-    expect(updated.content).toContain('Updated.')
+      })
 
-    const listRes = await app.request('/api/user-skills')
-    expect(listRes.status).toBe(200)
-    expect(await listRes.json()).toMatchObject([{
-      id: created.id,
-      slug: 'interaction-contracts',
-      enabled: false,
-    }])
-
-    const deleteRes = await app.request(`/api/user-skills/${created.id}`, {
-      method: 'DELETE',
-    })
-    expect(deleteRes.status).toBe(200)
-    expect(await deleteRes.json()).toEqual({ deleted: true })
-    expect(await (await app.request('/api/user-skills')).json()).toEqual([])
+      const deleteRes = await viewerApp.request('/api/user-skills/skill_1', {
+        method: 'DELETE',
+      })
+      expect(deleteRes.status).toBe(200)
+      expect(await deleteRes.json()).toEqual({ deleted: true })
+      expect(calls.map(call => `${call.method} ${call.url}`)).toEqual([
+        'GET http://skills.test/api/user-skills',
+        'POST http://skills.test/api/user-skills/import',
+        'PUT http://skills.test/api/user-skills/skill_1/enabled',
+        'DELETE http://skills.test/api/user-skills/skill_1',
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 
   test('applies project and workspace route permissions by role', async () => {

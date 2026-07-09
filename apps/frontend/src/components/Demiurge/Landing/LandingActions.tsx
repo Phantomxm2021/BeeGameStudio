@@ -1,13 +1,13 @@
-import { History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
-import { useCommonText } from '../../../i18n/useBeeGameTranslations';
-import { UserAccountMenu, type UserAccountMenuItem } from './UserAccountMenu';
+import { AccountActionsMenu } from './AccountActionsMenu';
 
 interface LandingActionsProps {
     lang: Language;
     isTransitioning: boolean;
     isSettingsOpen: boolean;
     isHistoryOpen: boolean;
+    isProfileOpen?: boolean;
+    isCreditStoreOpen?: boolean;
     currentUserId?: string;
     currentUserDisplayName?: string;
     currentUserEmail?: string;
@@ -26,6 +26,8 @@ export function LandingActions({
     isTransitioning,
     isSettingsOpen,
     isHistoryOpen,
+    isProfileOpen,
+    isCreditStoreOpen,
     currentUserId,
     currentUserDisplayName,
     currentUserEmail,
@@ -38,52 +40,24 @@ export function LandingActions({
     onOpenLogin,
     onSignOut,
 }: LandingActionsProps) {
-    const t = useCommonText(lang);
-    const userMenuLabel = t.userMenu;
-    const signOutLabel = t.signOut;
-    const profileLabel = t.profile;
-    const fallbackUserLabel = t.account;
-    const items: UserAccountMenuItem[] = [
-        {
-            key: 'profile',
-            label: profileLabel,
-            icon: <UserCircle className="h-4 w-4" />,
-            onClick: onOpenProfile,
-        },
-        {
-            key: 'credit-store',
-            label: t.creditStore,
-            icon: <ShoppingCart className="h-4 w-4" />,
-            onClick: onOpenCreditStore,
-        },
-        {
-            key: 'settings',
-            label: t.settings,
-            icon: <Settings className="h-4 w-4" />,
-            onClick: onToggleSettings,
-        },
-        {
-            key: 'history',
-            label: t.historyProjects,
-            icon: <History className="h-4 w-4" />,
-            onClick: onToggleHistory,
-        },
-    ];
-
     return (
-        <UserAccountMenu
-            ariaLabel={userMenuLabel}
+        <AccountActionsMenu
+            lang={lang}
             className="absolute right-4 top-4 z-50 flex items-center gap-2 sm:right-8 sm:top-8"
             isTransitioning={isTransitioning}
-            isActive={isSettingsOpen || isHistoryOpen}
+            isSettingsOpen={isSettingsOpen}
+            isHistoryOpen={isHistoryOpen}
+            isProfileOpen={isProfileOpen}
+            isCreditStoreOpen={isCreditStoreOpen}
             currentUserId={currentUserId}
             currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}
             currentUserAvatarUrl={currentUserAvatarUrl}
             creditBalance={creditBalance}
-            fallbackUserLabel={fallbackUserLabel}
-            signOutLabel={signOutLabel}
-            items={items}
+            onToggleSettings={onToggleSettings}
+            onToggleHistory={onToggleHistory}
+            onOpenCreditStore={onOpenCreditStore}
+            onOpenProfile={onOpenProfile}
             onOpenLogin={onOpenLogin}
             onSignOut={onSignOut}
         />

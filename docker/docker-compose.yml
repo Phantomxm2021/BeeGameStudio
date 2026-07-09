@@ -1,4 +1,27 @@
 services:
+  beegame-skills:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.skills
+    env_file:
+      - ./.env.production
+    environment:
+      BEEGAME_SKILLS_HOST: 0.0.0.0
+      BEEGAME_SKILLS_PORT: 62176
+      BEEGAME_SKILLS_DATA_DIR: /srv/beegame/skills
+      BEEGAME_SKILLS_SERVICE_TOKEN: ${BEEGAME_SKILLS_SERVICE_TOKEN:-}
+    ports:
+      - "${BEEGAME_SKILLS_PUBLIC_PORT:-62176}:62176"
+    volumes:
+      - beegame-skills:/srv/beegame/skills
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:62176/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   beegame-billing:
     build:
       context: ..
@@ -33,6 +56,8 @@ services:
       BEEGAME_CONFIG_DIR: /home/bun/.beegame
       BEEGAME_BILLING_MODE: remote
       BEEGAME_BILLING_API_BASE_URL: http://beegame-billing:62175
+      BEEGAME_SKILLS_API_BASE_URL: http://beegame-skills:62176
+      BEEGAME_SKILLS_SERVICE_TOKEN: ${BEEGAME_SKILLS_SERVICE_TOKEN:-}
     ports:
       - "62174:62174"
     volumes:
@@ -40,6 +65,8 @@ services:
       - beegame-config:/home/bun/.beegame
     depends_on:
       beegame-billing:
+        condition: service_healthy
+      beegame-skills:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -67,3 +94,4 @@ services:
 
 volumes:
   beegame-config:
+  beegame-skills:

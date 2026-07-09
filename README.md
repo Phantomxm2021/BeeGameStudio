@@ -142,6 +142,46 @@ bun run build
 
 如果遇到 bug 请直接提一个 issues, 我们优先解决
 
+### 🐝 BeeGame 本地验证
+
+BeeGame Web UI、runtime host、billing backend、skills backend 可以一条命令一起启动：
+
+```bash
+npm run beegame:dev
+```
+
+默认地址：
+
+- Frontend: `http://127.0.0.1:62173`
+- Runtime host: `http://127.0.0.1:62174`
+- Billing backend: `http://127.0.0.1:62175`
+- Skills backend: `http://127.0.0.1:62176`
+
+该命令会自动注入本地服务地址：
+
+- runtime 使用 `BEEGAME_BILLING_MODE=remote`
+- runtime 连接 `http://127.0.0.1:62175` 的 billing backend
+- runtime 连接 `http://127.0.0.1:62176` 的 skills backend
+- frontend 指向本地 runtime host
+
+如果端口被占用，脚本会在默认端口后面自动寻找可用端口，并把最终端口同步写入各子进程环境变量。需要手动指定端口时：
+
+```bash
+npm run beegame:dev -- \
+  --frontend-port 62173 \
+  --runtime-port 62174 \
+  --billing-port 62175 \
+  --skills-port 62176
+```
+
+只调试单个服务时仍可使用：
+
+```bash
+npm run dashboard:dev
+npm run billing:dev
+npm run skills:dev
+```
+
 ### 🐝 BeeGame SaaS 首次部署
 
 BeeGame Web Dashboard 的 SaaS 部署使用 Supabase Auth/RLS。首次部署时不要求数据库里已经有用户账号；推荐流程是先预置平台 owner 邮箱，再让 owner 用同一个邮箱正常注册或登录。

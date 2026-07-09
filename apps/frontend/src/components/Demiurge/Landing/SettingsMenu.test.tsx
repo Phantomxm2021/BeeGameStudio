@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,10 +35,9 @@ const {
     upsertBillingCreditPack,
     getProjectLifecycleOverview,
     listUserSkills,
-    createUserSkill,
-    updateUserSkill,
+    importUserSkillPackage,
+    updateUserSkillEnabled,
     deleteUserSkill,
-    validateUserSkill,
     planProjectRetention,
     runProjectRetention,
 } = vi.hoisted(() => ({
@@ -71,10 +70,9 @@ const {
     upsertBillingCreditPack: vi.fn(),
     getProjectLifecycleOverview: vi.fn(),
     listUserSkills: vi.fn(),
-    createUserSkill: vi.fn(),
-    updateUserSkill: vi.fn(),
+    importUserSkillPackage: vi.fn(),
+    updateUserSkillEnabled: vi.fn(),
     deleteUserSkill: vi.fn(),
-    validateUserSkill: vi.fn(),
     planProjectRetention: vi.fn(),
     runProjectRetention: vi.fn(),
 }));
@@ -139,10 +137,9 @@ vi.mock('../../../services/projectLifecycleApi', () => ({
 
 vi.mock('../../../services/userSkillsApi', () => ({
     listUserSkills,
-    createUserSkill,
-    updateUserSkill,
+    importUserSkillPackage,
+    updateUserSkillEnabled,
     deleteUserSkill,
-    validateUserSkill,
 }));
 
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
@@ -221,24 +218,10 @@ describe('SettingsMenu model settings', () => {
         listMcpServers.mockResolvedValue([]);
         listUserSkills.mockReset();
         listUserSkills.mockResolvedValue([]);
-        createUserSkill.mockReset();
-        updateUserSkill.mockReset();
+        importUserSkillPackage.mockReset();
+        updateUserSkillEnabled.mockReset();
         deleteUserSkill.mockReset();
-        validateUserSkill.mockReset();
-        validateUserSkill.mockResolvedValue({
-            ok: true,
-            skill: {
-                id: 'validated',
-                slug: 'my-beegame-skill',
-                name: 'my-beegame-skill',
-                description: '描述 BeeGame 什么时候应该使用这个技能。',
-                enabled: true,
-                content: '',
-                references: [],
-                createdAt: '2026-07-09T00:00:00.000Z',
-                updatedAt: '2026-07-09T00:00:00.000Z',
-            },
-        });
+        deleteUserSkill.mockResolvedValue({ deleted: true });
         createModelConfig.mockReset();
         getBeeGameSubagentsEnabled.mockReturnValue(true);
         setBeeGameSubagentsEnabled.mockReset();
@@ -429,7 +412,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
-    it('lets users manage private skills from the settings panel', async () => {
+    it('lets users delete private skills from the settings panel without exposing editing', async () => {
         listUserSkills.mockResolvedValue([
             {
                 id: 'skill_1',
@@ -450,21 +433,35 @@ describe('SettingsMenu model settings', () => {
                 updatedAt: '2026-07-09T00:00:00.000Z',
             },
         ]);
-        updateUserSkill.mockResolvedValue({
-            id: 'skill_1',
-            slug: 'movement-contracts',
-            name: 'movement-contracts',
-            description: 'Keep movement controls consistent.',
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        await expect(screen.findByText('movement-contracts')).resolves.toBeInTheDocument();
+        expect(screen.queryByLabelText('Skill markdown 内容')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('button', { name: '删除技能' }));
+
+        await waitFor(() => expect(deleteUserSkill).toHaveBeenCalledWith('skill_1'));
+        expect(screen.queryByText('movement-contracts')).not.toBeInTheDocument();
+        expect(await screen.findByText('技能已删除。')).toBeInTheDocument();
+    });
+
+    it('imports zipped skills without exposing an editing draft', async () => {
+        importUserSkillPackage.mockResolvedValue({
+            id: 'skill_2',
+            slug: 'imported-movement-contracts',
+            name: 'imported-movement-contracts',
+            description: 'Imported movement guidance.',
             enabled: true,
             content: [
                 '---',
-                'name: movement-contracts',
-                'description: Keep movement controls consistent.',
+                'name: imported-movement-contracts',
+                'description: Imported movement guidance.',
                 '---',
                 '',
-                '# Movement',
-                '',
-                'Updated guidance.',
+                '# Imported Movement',
             ].join('\n'),
             references: [],
             createdAt: '2026-07-09T00:00:00.000Z',
@@ -474,28 +471,52 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
         await openUserSkillsSettings();
 
-        await expect(screen.findByText('movement-contracts')).resolves.toBeInTheDocument();
-        await userEvent.click(screen.getByRole('button', { name: '编辑' }));
-        const editor = screen.getByLabelText('Skill markdown 内容');
-        expect((editor as HTMLTextAreaElement).value).toContain('# Movement');
-        await userEvent.clear(editor);
-        await userEvent.type(editor, [
-            '---',
-            'name: movement-contracts',
-            'description: Keep movement controls consistent.',
-            '---',
-            '',
-            '# Movement',
-            '',
-            'Updated guidance.',
-        ].join('\n'));
-        await userEvent.click(screen.getByRole('button', { name: '保存技能' }));
+        expect(screen.queryByText('导入只属于当前用户的 BeeGame skill zip 包，并在新 runtime 任务启动前注入。')).not.toBeInTheDocument();
+        expect(screen.queryByText('已启用技能会在新的 BeeGame runtime turn 启动前写入 user-* 目录。')).not.toBeInTheDocument();
+        expect(screen.queryByText('导入技能')).not.toBeInTheDocument();
+        expect(screen.queryByText('已保存技能')).not.toBeInTheDocument();
+        const file = new File(['zip-bytes'], 'imported-movement-contracts.zip', { type: 'application/zip' });
+        await userEvent.upload(screen.getByLabelText('导入 Skill zip 文件'), file);
 
-        await waitFor(() => expect(updateUserSkill).toHaveBeenCalledWith('skill_1', expect.objectContaining({
+        await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
+        expect(await screen.findByText('imported-movement-contracts')).toBeInTheDocument();
+        expect(await screen.findByText('已导入：imported-movement-contracts.zip')).toBeInTheDocument();
+        expect(screen.queryByLabelText('Skill markdown 内容')).not.toBeInTheDocument();
+    });
+
+    it('imports zipped skills by dropping them onto the skills list', async () => {
+        importUserSkillPackage.mockResolvedValue({
+            id: 'skill_drop',
+            slug: 'dropped-skill',
+            name: 'dropped-skill',
+            description: 'Dropped skill.',
             enabled: true,
-            content: expect.stringContaining('Updated guidance.'),
-        })));
-        expect(await screen.findByText('技能已保存。')).toBeInTheDocument();
+            content: [
+                '---',
+                'name: dropped-skill',
+                'description: Dropped skill.',
+                '---',
+                '',
+                '# Dropped',
+            ].join('\n'),
+            references: [],
+            createdAt: '2026-07-09T00:00:00.000Z',
+            updatedAt: '2026-07-09T00:01:00.000Z',
+        });
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        const file = new File(['zip-bytes'], 'dropped-skill.zip', { type: 'application/zip' });
+        fireEvent.drop(screen.getByTestId('user-skills-drop-zone'), {
+            dataTransfer: {
+                files: [file],
+            },
+        });
+
+        await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
+        expect(await screen.findByText('dropped-skill')).toBeInTheDocument();
+        expect(await screen.findByText('已导入：dropped-skill.zip')).toBeInTheDocument();
     });
 
     it('shows private skills without exposing platform administration', async () => {
@@ -518,46 +539,17 @@ describe('SettingsMenu model settings', () => {
 
         await waitFor(() => expect(listUserSkills).toHaveBeenCalledWith());
         expect(screen.getByText('用户技能')).toBeInTheDocument();
+        expect(screen.getByText('还没有用户技能。')).toBeInTheDocument();
+        expect(screen.getByText('导入 Skill zip 文件后，已保存的技能会显示在这里。')).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '部署' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
     });
 
-    it('validates private skills before saving', async () => {
-        validateUserSkill.mockResolvedValue({
-            ok: true,
-            skill: {
-                id: 'validated',
-                slug: 'movement-contracts',
-                name: 'movement-contracts',
-                description: 'Keep movement controls consistent.',
-                enabled: true,
-                content: '',
-                references: [],
-                createdAt: '2026-07-09T00:00:00.000Z',
-                updatedAt: '2026-07-09T00:00:00.000Z',
-            },
-        });
-
+    it('does not expose skill validation controls to users', async () => {
         renderSettings();
         await openUserSkillsSettings();
 
-        const editor = screen.getByLabelText('Skill markdown 内容');
-        await userEvent.clear(editor);
-        await userEvent.type(editor, [
-            '---',
-            'name: movement-contracts',
-            'description: Keep movement controls consistent.',
-            '---',
-            '',
-            '# Movement',
-        ].join('\n'));
-        await userEvent.click(screen.getByRole('button', { name: '检查技能' }));
-
-        await waitFor(() => expect(validateUserSkill).toHaveBeenCalledWith(expect.objectContaining({
-            content: expect.stringContaining('movement-contracts'),
-            enabled: true,
-        })));
-        expect(await screen.findByText('检查通过：movement-contracts')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '检查技能' })).not.toBeInTheDocument();
     });
 
     it('wraps long deployment workspace paths within the settings panel', async () => {

@@ -17,33 +17,24 @@ export type UserSkill = {
   updatedAt: string;
 };
 
-export type UserSkillInput = {
-  id?: string;
-  enabled?: boolean;
-  content: string;
-  references?: UserSkillReference[];
+export const listUserSkills = (): Promise<UserSkill[]> => (
+  apiClient.get('/api/user-skills', {
+    headers: {
+      'Hide-Error-Toast': 'true',
+    },
+  })
+);
+
+export const importUserSkillPackage = (file: File): Promise<UserSkill> => {
+  const formData = new FormData();
+  formData.set('skill', file);
+  return apiClient.post('/api/user-skills/import', formData);
 };
 
-export type UserSkillValidationResult =
-  | { ok: true; skill: UserSkill }
-  | { ok: false; message: string };
-
-export const listUserSkills = (): Promise<UserSkill[]> => (
-  apiClient.get('/api/user-skills')
-);
-
-export const createUserSkill = (input: UserSkillInput): Promise<UserSkill> => (
-  apiClient.post('/api/user-skills', input)
-);
-
-export const updateUserSkill = (id: string, input: UserSkillInput): Promise<UserSkill> => (
-  apiClient.put(`/api/user-skills/${encodeURIComponent(id)}`, input)
+export const updateUserSkillEnabled = (id: string, enabled: boolean): Promise<UserSkill> => (
+  apiClient.put(`/api/user-skills/${encodeURIComponent(id)}/enabled`, { enabled })
 );
 
 export const deleteUserSkill = (id: string): Promise<{ deleted: boolean }> => (
   apiClient.delete(`/api/user-skills/${encodeURIComponent(id)}`)
-);
-
-export const validateUserSkill = (input: UserSkillInput): Promise<UserSkillValidationResult> => (
-  apiClient.post('/api/user-skills/validate', input)
 );

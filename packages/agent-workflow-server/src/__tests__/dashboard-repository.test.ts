@@ -4,35 +4,69 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
-import { upsertUserSkill } from '../user-skills-store'
 
 describe('DashboardRepository Supabase boundaries', () => {
-  test('materializes enabled local user skills before runtime env is returned', async () => {
+  test('materializes enabled remote user skills before runtime env is returned', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const userRoot = join(dataRoot, 'users', 'owner-user')
+    const calls: string[] = []
     const repository = new DashboardRepository({
       dashboardDataRoot: dataRoot,
       getUserDataRoot: () => userRoot,
+      skillsConfig: {
+        apiBaseUrl: 'http://skills.test',
+        serviceToken: 'skills-token',
+      },
     })
-    upsertUserSkill({
-      content: [
-        '---',
-        'name: runtime-skill',
-        'description: Runtime injected skill.',
-        '---',
-        '',
-        '# Runtime Skill',
-      ].join('\n'),
-    }, { dataDir: userRoot })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input, init) => {
+      calls.push(String(input))
+      expect(init?.headers).toEqual({
+        authorization: 'Bearer skills-token',
+      })
+      return Response.json([{
+        id: 'skill_1',
+        slug: 'runtime-skill',
+        name: 'runtime-skill',
+        description: 'Runtime injected skill.',
+        enabled: true,
+        content: [
+          '---',
+          'name: runtime-skill',
+          'description: Runtime injected skill.',
+          '---',
+          '',
+          '# Runtime Skill',
+        ].join('\n'),
+        references: [],
+        files: [{
+          path: 'SKILL.md',
+          content: [
+            '---',
+            'name: runtime-skill',
+            'description: Runtime injected skill.',
+            '---',
+            '',
+            '# Runtime Skill',
+          ].join('\n'),
+        }],
+        createdAt: '2026-07-09T00:00:00.000Z',
+        updatedAt: '2026-07-09T00:00:00.000Z',
+      }])
+    }) as typeof fetch
 
     try {
-      await repository.getRuntimeEnv(userRoot)
+      await repository.getRuntimeEnv(userRoot, 'owner-user')
 
+      expect(calls).toEqual([
+        'http://skills.test/api/internal/user-skills/enabled?userId=owner-user',
+      ])
       await expect(readFile(
         join(userRoot, '.runtime', 'app', 'skills', 'user-runtime-skill', 'SKILL.md'),
         'utf8',
       )).resolves.toContain('Runtime Skill')
     } finally {
+      globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })
     }
   })

@@ -20,7 +20,9 @@ import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayMod
 import { isBeeGameAdapterEnabled, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
 import { listModelConfigs, type ModelConfig } from '../../services/modelConfigApi';
 import {
+    getCreditBalance,
     getCreditSummary,
+    type BeeGameCreditBalance,
     type BeeGameCreditQuote,
     type BeeGameCreditSummary,
     type BeeGameCreditTaskType,
@@ -67,6 +69,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
     const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
     const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
+    const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
     const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
     const [isDeployingProject, setDeployingProject] = useState(false);
@@ -113,12 +116,21 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         resolve?.(confirmed);
     }, []);
 
-    const refreshCreditSummary = useCallback(async () => {
+    const refreshCredits = useCallback(async () => {
         if (!isBeeGameMode) return;
-        try {
-            setCreditSummary(await getCreditSummary(projectId));
-        } catch (error) {
-            console.error('Failed to load credit summary:', error);
+        const [summaryResult, balanceResult] = await Promise.allSettled([
+            getCreditSummary(projectId),
+            getCreditBalance(),
+        ]);
+        if (summaryResult.status === 'fulfilled') {
+            setCreditSummary(summaryResult.value);
+        } else {
+            console.error('Failed to load credit summary:', summaryResult.reason);
+        }
+        if (balanceResult.status === 'fulfilled') {
+            setCreditBalance(balanceResult.value);
+        } else {
+            console.error('Failed to load credit balance:', balanceResult.reason);
         }
     }, [isBeeGameMode, projectId]);
 
@@ -174,7 +186,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     }
                     loadPendingReviews(projectId).catch(console.error);
                     loadProjectStatus(projectId).catch(console.error);
-                    refreshCreditSummary().catch(console.error);
+                    refreshCredits().catch(console.error);
                     refreshTimerRef.current = null;
                 }, 2000);
             }
@@ -184,11 +196,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     useEffect(() => {
         hasSentInitialPrompt.current = false;
         setInitialGateStateReady(false);
+        setCreditBalance(null);
         setCreditSummary(null);
         setDeploymentHistory([]);
-        void refreshCreditSummary();
+        void refreshCredits();
         void refreshDeploymentHistory();
-    }, [projectId, refreshCreditSummary, refreshDeploymentHistory]);
+    }, [projectId, refreshCredits, refreshDeploymentHistory]);
 
     useEffect(() => {
         if (!isBeeGameMode) return;
@@ -527,6 +540,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 phaseLabel={phaseLabel}
                 tokens={displayedTokenTotal}
                 credits={creditSummary}
+                accountCreditBalance={creditBalance}
                 modelName={currentModelName}
                 isSyncing={isSyncing}
                 buildReport={projectStatus?.build_report || null}

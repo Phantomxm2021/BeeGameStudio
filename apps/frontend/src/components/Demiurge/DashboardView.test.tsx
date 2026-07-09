@@ -12,6 +12,7 @@ const loadTasks = vi.fn().mockResolvedValue(undefined);
 const loadPendingReviews = vi.fn().mockResolvedValue(undefined);
 const loadProjectStatus = vi.fn().mockResolvedValue(undefined);
 const loadSystemReadiness = vi.fn().mockResolvedValue(undefined);
+const loadCurrentUser = vi.fn().mockResolvedValue(undefined);
 const toggleTheme = vi.fn();
 const showSuccess = vi.fn();
 const showError = vi.fn();
@@ -106,6 +107,7 @@ vi.mock('../../store/systemStore', () => ({
             toggleTheme,
             hasPermission: mockedHasPermission,
             currentUser: mockedCurrentUser,
+            loadCurrentUser,
         };
         return selector ? selector(state) : state;
     },
@@ -186,8 +188,23 @@ vi.mock('../../services/modelConfigApi', () => ({
 }));
 
 vi.mock('../../services/creditsApi', () => ({
+    getCreditBalance: vi.fn(() => Promise.resolve({
+        userId: 'user_1',
+        plan: 'free',
+        balanceCredits: 162,
+        includedCredits: 200,
+        consumedCredits: 38,
+        reservedCredits: 7,
+        creditUnitWeightedTokens: 1000,
+        estimates: {
+            ideaIntake: { minCredits: 1, maxCredits: 2 },
+            planningDocs: { minCredits: 2, maxCredits: 4 },
+            smallPlayableGame: { minCredits: 4, maxCredits: 8 },
+            standardGame: { minCredits: 8, maxCredits: 16 },
+            complexGame: { minCredits: 16, maxCredits: 32 },
+        },
+    })),
     getCreditSummary: vi.fn(() => Promise.resolve({
-        balanceCredits: 300,
         entriesCount: 3,
         reservedCredits: 50,
         settledCredits: 12,
@@ -195,6 +212,17 @@ vi.mock('../../services/creditsApi', () => ({
         outstandingReservedCredits: 0,
         weightedTokens: 120000,
     })),
+    getCreditLedger: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock('../../services/currentUserApi', () => ({
+    deleteCurrentUser: vi.fn(() => Promise.resolve({ ok: true })),
+}));
+
+vi.mock('../../services/supabaseAuthApi', () => ({
+    clearSupabaseSession: vi.fn(),
+    updateSupabaseAvatarUrl: vi.fn(() => Promise.resolve({ avatarUrl: 'https://cdn.example.com/avatar.png' })),
+    uploadSupabaseAvatarImage: vi.fn(() => Promise.resolve('https://cdn.example.com/avatar.png')),
 }));
 
 vi.mock('../../services/beeGameAdapter', () => ({
@@ -492,8 +520,13 @@ describe('DashboardView runtime loading', () => {
         expect(userSettingsMenu).toHaveAttribute('data-surface', 'frosted-glass');
         expect(within(userSettingsMenu).getByText('Nova Player')).toBeInTheDocument();
         expect(within(userSettingsMenu).getByText('nova@example.com')).toBeInTheDocument();
-        expect(within(userSettingsMenu).getByText('300 credits')).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByText('162 credits')).toBeInTheDocument();
         expect(within(userSettingsMenu).queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
+        expect(within(userSettingsMenu).getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByRole('menuitem', { name: 'Credit 商店' })).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
+        expect(within(userSettingsMenu).getByRole('menuitem', { name: '退出登录' })).toBeInTheDocument();
 
         await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '系统设置' }));
 
@@ -502,6 +535,22 @@ describe('DashboardView runtime loading', () => {
         expect(within(settingsDialog).getByRole('tab', { name: '技能' })).toBeInTheDocument();
         await user.selectOptions(within(settingsDialog).getByRole('combobox', { name: '语言选择' }), 'en');
         expect(onSetLang).toHaveBeenCalledWith('en');
+    });
+
+    it('opens the shared profile modal from the dashboard user menu', async () => {
+        const user = userEvent.setup();
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+
+        await user.click(screen.getByRole('button', { name: '用户菜单' }));
+        await user.click(within(screen.getByTestId('beegame-user-settings-menu')).getByRole('menuitem', { name: '个人主页' }));
+
+        const profileDialog = await screen.findByRole('dialog');
+        expect(within(profileDialog).getByText('Nova Player')).toBeInTheDocument();
+        expect(within(profileDialog).getByText('nova@example.com')).toBeInTheDocument();
+        expect(within(profileDialog).getByText('162 credits')).toBeInTheDocument();
     });
 
     it('keeps the top bar popover layer above the right-side chat panel', async () => {

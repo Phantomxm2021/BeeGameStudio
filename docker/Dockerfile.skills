@@ -45,25 +45,21 @@ ENV CLAUDE_CODE_SKIP_CHROME_MCP_SETUP=1
 
 RUN bun install --frozen-lockfile --registry=https://registry.npmmirror.com/ --network-concurrency=8 --no-progress
 
-COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
 COPY src ./src
 COPY vendor ./vendor
-COPY .beegame /opt/beegame/default-config
-COPY docker/runtime-entrypoint.sh /usr/local/bin/beegame-runtime-entrypoint.sh
 
-RUN mkdir -p /srv/beegame/projects /home/bun/.beegame && \
-    chmod +x /usr/local/bin/beegame-runtime-entrypoint.sh && \
-    chown -R bun:bun /srv/beegame /home/bun/.beegame /app /opt/beegame/default-config
+RUN mkdir -p /srv/beegame/skills /home/bun/.beegame && \
+    chown -R bun:bun /srv/beegame /home/bun/.beegame /app
+
+USER bun
 
 ENV NODE_ENV=production
-ENV AGENT_WORKFLOW_HOST=0.0.0.0
-ENV AGENT_WORKFLOW_PORT=62174
-ENV BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
-ENV BEEGAME_CONFIG_DIR=/home/bun/.beegame
+ENV BEEGAME_SKILLS_HOST=0.0.0.0
+ENV BEEGAME_SKILLS_PORT=62176
+ENV BEEGAME_SKILLS_DATA_DIR=/srv/beegame/skills
 
-EXPOSE 62174
+EXPOSE 62176
 
-ENTRYPOINT ["beegame-runtime-entrypoint.sh"]
-CMD ["bun", "packages/agent-workflow-server/src/index.ts"]
+CMD ["bun", "packages/beegame-skills-server/src/index.ts"]

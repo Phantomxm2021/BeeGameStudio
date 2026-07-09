@@ -11,6 +11,9 @@ import {
   resolveBeeGameBillingConfig,
   type BeeGameBillingConfig,
 } from '@claude-code-best/beegame-billing-core/billing-config'
+import {
+  resolveBeeGameSkillsConfig,
+} from '@claude-code-best/beegame-skills-core/config'
 import type {
   BeeGameBillingAppFactoryOptions,
 } from './billing-app-factory'
@@ -51,6 +54,7 @@ export function createBeeGameBillingRuntimeDeps(
     getUserDataRoot: request =>
       getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id),
     modelConfigStore: false,
+    skillsConfig: resolveBeeGameSkillsConfig(),
   })
 
   return {

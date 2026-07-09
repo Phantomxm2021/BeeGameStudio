@@ -1,13 +1,18 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Settings, Square, X } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ExternalLink, FileText, Globe2, MonitorPlay, Play, RefreshCw, Rocket, Square, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
-import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
+import { normalizeI18nLanguage, useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { SettingsMenu } from './Landing/SettingsMenu';
-import { UserAccountMenu, type UserAccountMenuItem } from './Landing/UserAccountMenu';
+import { CreditStoreModal } from './Landing/CreditStoreModal';
+import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
+import { AccountActionsMenu } from './Landing/AccountActionsMenu';
+import { ProfileModal } from './Landing/ProfileModal';
 import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
 import { useSystemStore } from '../../store/systemStore';
+import { useProjectStore } from '../../store/projectStore';
+import { clearSupabaseSession } from '../../services/supabaseAuthApi';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
@@ -21,9 +26,13 @@ interface BeeGameLivePreviewPageProps {
     phaseLabel: string;
     tokens: number;
     credits?: {
-        balanceCredits?: number;
         settledCredits: number;
         outstandingReservedCredits: number;
+    } | null;
+    accountCreditBalance?: {
+        balanceCredits: number;
+        consumedCredits: number;
+        reservedCredits: number;
     } | null;
     modelName: string;
     isSyncing: boolean;
@@ -74,6 +83,7 @@ export function BeeGameLivePreviewPage({
     phaseLabel,
     tokens,
     credits,
+    accountCreditBalance,
     modelName,
     isSyncing,
     buildReport,
@@ -90,6 +100,9 @@ export function BeeGameLivePreviewPage({
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
+    const [isHistoryOpen, setHistoryOpen] = useState(false);
+    const [isProfileOpen, setProfileOpen] = useState(false);
     const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
     const [hoveredControl, setHoveredControl] = useState<PreviewControl | null>(null);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
@@ -97,8 +110,8 @@ export function BeeGameLivePreviewPage({
     const { i18n } = useTranslation('beegame');
     const labels = i18n.getResourceBundle(normalizeI18nLanguage(lang), 'beegame').livePreview as Record<string, string>;
     const uiText = useBeeGameText(lang);
-    const commonText = useCommonText(lang);
     const currentUser = useSystemStore(state => state.currentUser);
+    const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
@@ -136,14 +149,22 @@ export function BeeGameLivePreviewPage({
     const handleDeploy = async () => {
         await onDeployProject?.();
     };
-    const userMenuItems: UserAccountMenuItem[] = [
-        {
-            key: 'settings',
-            label: commonText.settings,
-            icon: <Settings className="h-4 w-4" />,
-            onClick: () => setSettingsOpen(true),
-        },
-    ];
+    const closeAccountSurfaces = () => {
+        setSettingsOpen(false);
+        setCreditStoreOpen(false);
+        setHistoryOpen(false);
+        setProfileOpen(false);
+    };
+    const handleSelectProject = async (projectId: string) => {
+        setHistoryOpen(false);
+        await useProjectStore.getState().setActiveProject(projectId);
+    };
+    const handleSignOut = async () => {
+        closeAccountSurfaces();
+        clearSupabaseSession();
+        await loadCurrentUser?.();
+        onBack?.();
+    };
     useEffect(() => {
         setStoppedPreviewUrl('');
     }, [previewUrl]);
@@ -216,19 +237,36 @@ export function BeeGameLivePreviewPage({
                     ) : null}
                 </div>
 
-                <UserAccountMenu
-                    ariaLabel={commonText.userMenu}
-                    className="relative ml-auto"
-                    isActive={isSettingsOpen}
+                <AccountActionsMenu
+                    lang={lang}
+                    className="absolute right-7 top-5 z-[150]"
+                    isSettingsOpen={isSettingsOpen}
+                    isHistoryOpen={isHistoryOpen}
+                    isProfileOpen={isProfileOpen}
+                    isCreditStoreOpen={isCreditStoreOpen}
                     currentUserId={currentUser?.id}
                     currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                     currentUserEmail={currentUser?.email}
                     currentUserAvatarUrl={currentUser?.avatarUrl}
-                    creditBalance={credits?.balanceCredits}
-                    fallbackUserLabel={commonText.account}
-                    signOutLabel={commonText.signOut}
-                    items={userMenuItems}
+                    creditBalance={accountCreditBalance?.balanceCredits}
                     onOpenLogin={() => setSettingsOpen(true)}
+                    onOpenProfile={() => {
+                        closeAccountSurfaces();
+                        setProfileOpen(true);
+                    }}
+                    onOpenCreditStore={() => {
+                        closeAccountSurfaces();
+                        setCreditStoreOpen(true);
+                    }}
+                    onToggleSettings={() => {
+                        closeAccountSurfaces();
+                        setSettingsOpen(true);
+                    }}
+                    onToggleHistory={() => {
+                        closeAccountSurfaces();
+                        setHistoryOpen(true);
+                    }}
+                    onSignOut={currentUser ? () => void handleSignOut() : undefined}
                 />
             </header>
 
@@ -336,6 +374,27 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
+            />
+            <ProjectHistoryModal
+                isOpen={isHistoryOpen}
+                lang={lang}
+                onClose={() => setHistoryOpen(false)}
+                onSelectProject={(projectId) => void handleSelectProject(projectId)}
+            />
+            <CreditStoreModal
+                isOpen={isCreditStoreOpen}
+                lang={lang}
+                onClose={() => setCreditStoreOpen(false)}
+            />
+            <ProfileModal
+                isOpen={isProfileOpen}
+                lang={lang}
+                currentUser={currentUser}
+                creditBalance={accountCreditBalance ?? null}
+                onClose={() => setProfileOpen(false)}
+                onUserChanged={async () => {
+                    await loadCurrentUser();
+                }}
             />
             <DeploymentDialog
                 isOpen={isDeploymentDialogOpen}

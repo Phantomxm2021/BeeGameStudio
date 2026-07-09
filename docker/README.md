@@ -1,7 +1,7 @@
 # BeeGame Docker Deployment
 
-This stack runs BeeGame as a static frontend, a local runtime host, and a
-dedicated billing backend.
+This stack runs BeeGame as a static frontend, a local runtime host, a dedicated
+billing backend, and a dedicated user skills backend.
 
 ## Services
 
@@ -11,6 +11,9 @@ dedicated billing backend.
 - `beegame-billing`: trusted Stripe/Supabase service-role backend for Credit
   Store packs, Checkout Session creation, Stripe webhooks, and provider credit
   grants.
+- `beegame-skills`: user-private BeeGame skill package backend. Users upload
+  zip packages here; the runtime host only materializes enabled skills before a
+  new BeeGame runtime turn starts.
 
 ## Prepare
 
@@ -31,6 +34,10 @@ Set `BEEGAME_CREDIT_CONTROL_TOKEN` in both files to the same high-entropy
 random value. The runtime host uses it only for internal reserve, settle, and
 refund requests to `beegame-billing`; it is not passed to the frontend image.
 
+Set `BEEGAME_SKILLS_SERVICE_TOKEN` in `docker/.env.production` to a high-entropy
+random value. The runtime host uses it only for internal enabled-skill
+materialization requests to `beegame-skills`.
+
 Do not put Supabase service-role keys or Stripe secrets in
 `docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
 and calls the billing backend through the internal Compose URL
@@ -41,9 +48,23 @@ and calls the billing backend through the internal Compose URL
 frontend sends to the runtime host; direct browser visits to those API routes
 return `401 Unauthorized`.
 
+`http://127.0.0.1:62176/health` is public. User skill routes under
+`/api/user-skills/*` require the signed-in user Authorization header. Internal
+enabled-skill reads can require `BEEGAME_SKILLS_SERVICE_TOKEN` when configured.
+
 ## Local Billing Backend
 
-For local development without Docker, create `docker/.env.billing` and run:
+For full local development without Docker, prefer the one-command launcher from
+the repository root:
+
+```bash
+npm run beegame:dev
+```
+
+It starts frontend, runtime host, billing backend, and skills backend together,
+auto-selects free ports, and injects the local service URLs into each process.
+
+When debugging billing only, create `docker/.env.billing` and run:
 
 ```bash
 npm run billing:dev
@@ -55,6 +76,18 @@ values. Override the env file path with `BEEGAME_BILLING_ENV_FILE` only when
 you deliberately need a different local file.
 Billing listens on `BEEGAME_BILLING_PORT` or defaults to `62175`; it does not
 inherit the runtime host's `AGENT_WORKFLOW_PORT`.
+
+## Local Skills Backend
+
+When debugging skills only, run:
+
+```bash
+npm run skills:dev
+```
+
+The skills server listens on `BEEGAME_SKILLS_PORT` or defaults to `62176`. It
+stores uploaded user skill packages under `BEEGAME_SKILLS_DATA_DIR`, or under
+the local BeeGame config directory when that variable is not set.
 
 ## Start
 
@@ -82,6 +115,7 @@ Default local ports:
 - Frontend: `http://127.0.0.1:18080`
 - Runtime host: `http://127.0.0.1:62174`
 - Billing backend: `http://127.0.0.1:62175`
+- Skills backend: `http://127.0.0.1:62176`
 
 ## Billing Flow
 
@@ -102,6 +136,20 @@ container that should receive:
 - `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`
 - `BEEGAME_STRIPE_SECRET_KEY`
 - `BEEGAME_STRIPE_WEBHOOK_SECRET`
+
+## Skills Flow
+
+The user skills topology is also split:
+
+```text
+browser -> beegame-runtime -> beegame-skills
+runtime turn startup -> beegame-skills -> materialized .runtime/app/skills/user-*
+```
+
+`beegame-runtime` proxies user skill list/import/toggle/delete requests to
+`beegame-skills`, forwarding the signed-in user's Authorization header.
+`beegame-skills` accepts zip packages containing `SKILL.md` plus optional
+`references/*.md` files. It does not expose markdown editing through the UI.
 
 Configure Stripe webhooks to call:
 
@@ -129,8 +177,10 @@ After `docker compose` is healthy:
 5. Confirm the user's credit balance increases after the webhook is delivered.
 6. Generate or edit a project and confirm the runtime host can reserve and
    settle credits through the billing backend.
-7. Restart `beegame-runtime` and `beegame-billing`, then confirm Credit Store
-   and credit balance still work.
+7. Open Settings -> Skills, import a valid skill zip, toggle it on, then start a
+   new BeeGame runtime turn and confirm the runtime host materializes it.
+8. Restart `beegame-runtime`, `beegame-billing`, and `beegame-skills`, then
+   confirm Credit Store, credit balance, and imported skills still work.
 
 ## Reverse Proxy
 
@@ -140,10 +190,14 @@ balancer:
 - `https://app.your-domain.com` -> frontend port `18080`
 - `https://runtime.your-domain.com` -> runtime host port `62174`
 - `https://billing.your-domain.com` -> billing backend port `62175`
+- `https://skills.your-domain.com` -> skills backend port `62176` only if you
+  intentionally expose it directly; the default frontend path goes through
+  runtime host proxy routes.
 
 The runtime domain must support WebSocket upgrades.
 The billing domain does not need WebSocket upgrades. Configure Stripe webhooks
 to call `https://billing.your-domain.com/api/payments/stripe/webhook`.
+The skills domain does not need WebSocket upgrades.
 
 Managed live previews are exposed through the runtime host under `/previews/*`.
 Set `BEEGAME_PREVIEW_PUBLIC_BASE_URL` to the public runtime preview base, for
