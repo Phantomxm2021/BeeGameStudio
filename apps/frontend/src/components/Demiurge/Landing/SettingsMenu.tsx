@@ -676,7 +676,7 @@ export function SettingsMenu({
 
     const handleImportUserSkill = async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.zip')) {
-            setUserSkillsStatus(userSkillsCopy.importFailed);
+            setUserSkillsStatus('');
             return;
         }
         setUserSkillsStatus('');
@@ -688,8 +688,8 @@ export function SettingsMenu({
                 ...current.filter((skill) => skill.id !== saved.id),
             ].sort((left, right) => left.name.localeCompare(right.name)));
             setUserSkillsStatus(userSkillsCopy.imported(file.name));
-        } catch (error) {
-            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
+        } catch {
+            setUserSkillsStatus('');
         } finally {
             setIsSavingUserSkill(false);
         }

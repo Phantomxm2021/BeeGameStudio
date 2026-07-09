@@ -519,6 +519,22 @@ describe('SettingsMenu model settings', () => {
         expect(await screen.findByText('已导入：dropped-skill.zip')).toBeInTheDocument();
     });
 
+    it('keeps the empty skills state clean when import validation fails', async () => {
+        importUserSkillPackage.mockRejectedValue(new Error('Skill zip file is required'));
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        const file = new File(['bad-zip'], 'broken-skill.zip', { type: 'application/zip' });
+        await userEvent.upload(screen.getByLabelText('导入 Skill zip 文件'), file);
+
+        await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
+        expect(screen.queryByText('Skill zip file is required')).not.toBeInTheDocument();
+        expect(screen.queryByText('请选择 .zip skill 包。')).not.toBeInTheDocument();
+        expect(screen.getByText('还没有用户技能。')).toBeInTheDocument();
+        expect(screen.getByText('导入 Skill zip 文件后，已保存的技能会显示在这里。')).toBeInTheDocument();
+    });
+
     it('shows private skills without exposing platform administration', async () => {
         renderSettings({
             canManageWorkspace: false,
