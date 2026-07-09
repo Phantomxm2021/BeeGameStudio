@@ -50,6 +50,9 @@ export interface Message {
   /** Stable client-side optimistic identity for user messages */
   clientMessageId?: string;
 
+  /** Stable identity of the user message superseded by this message version */
+  supersedesMessageId?: string;
+
   /** Semantic dedupe key used when stable identities are unavailable */
   dedupeKey?: string;
 
@@ -202,6 +205,9 @@ export interface WebSocketMessage {
 
   /** Stable client message identity for optimistic user messages */
   client_message_id?: string;
+
+  /** Stable identity of the user message superseded by this message version */
+  supersedes_message_id?: string;
 
   /** Tool name (optional, used for tool_start and tool_end types) */
   tool?: string;

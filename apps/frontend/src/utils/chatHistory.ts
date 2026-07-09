@@ -101,6 +101,9 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const messageId = resolveStableMessageId(record);
     const clientMessageId = String(record.client_message_id ?? record.clientMessageId ?? '').trim() || undefined;
     const metadata = (record.metadata && typeof record.metadata === 'object') ? record.metadata as Record<string, unknown> : {};
+    const supersedesMessageId = String(
+      record.supersedes_message_id ?? record.supersedesMessageId ?? metadata.supersedes_message_id ?? metadata.supersedesMessageId ?? '',
+    ).trim() || undefined;
     const rawType = String(record.message_type || record.type || metadata.message_type || '').trim() as MessageType;
     const renderHint = String(record.render_hint ?? record.renderHint ?? metadata.render_hint ?? metadata.renderHint ?? '').trim() as Message['renderHint'];
     const artifactType = String(record.artifact_type ?? record.artifactType ?? metadata.artifact_type ?? metadata.artifactType ?? '').trim() || undefined;
@@ -135,6 +138,7 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       id,
       messageId: messageId || undefined,
       clientMessageId: finalClientMessageId,
+      supersedesMessageId,
       dedupeKey,
       sender,
       content,

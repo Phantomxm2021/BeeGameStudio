@@ -644,6 +644,7 @@ export class BeeGameSessionManager {
       taskType?: BeeGameCreditTaskType
       authToken?: string
       clientMessageId?: string
+      supersedesMessageId?: string
       language?: BeeGameSessionLanguage
       attachments?: BeeGameImageAttachment[]
       thinkingMode?: BeeGameChatThinkingMode
@@ -676,6 +677,7 @@ export class BeeGameSessionManager {
         ...(display?.displayText ? { displayText: display.displayText } : {}),
         ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
         ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
+        ...(display?.supersedesMessageId ? { supersedesMessageId: display.supersedesMessageId } : {}),
       },
     )
 

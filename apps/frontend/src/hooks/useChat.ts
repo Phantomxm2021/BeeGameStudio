@@ -98,6 +98,7 @@ export interface UseChatReturn {
     taskType?: BeeGameCreditTaskType,
     attachments?: ChatImageAttachmentPayload[],
     thinkingMode?: BeeGameThinkingMode,
+    supersedesMessageId?: string,
   ) => Promise<void>;
 
   /**
@@ -831,6 +832,7 @@ export const useChat = ({
     taskType: BeeGameCreditTaskType = 'edit_turn',
     attachments?: ChatImageAttachmentPayload[],
     thinkingMode: BeeGameThinkingMode = 'disabled',
+    supersedesMessageId?: string,
   ) => {
     if (waitingApproval.isBlockingChat) {
       emitWaitingApprovalBlock(waitingApproval.message);
@@ -852,6 +854,7 @@ export const useChat = ({
       addMessage({
         id: clientMessageId,
         clientMessageId,
+        supersedesMessageId,
         sender: 'user',
         content,
         attachments,
@@ -870,6 +873,7 @@ export const useChat = ({
         taskType,
         attachments,
         thinkingMode,
+        supersedes_message_id: supersedesMessageId,
       }) as SendMessageResponse;
 
       setCurrentTaskId(response.task_id);

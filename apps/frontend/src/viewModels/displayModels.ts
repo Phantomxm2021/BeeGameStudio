@@ -18,6 +18,7 @@ export interface ChatDisplayMessage
     | 'id'
     | 'messageId'
     | 'clientMessageId'
+    | 'supersedesMessageId'
     | 'dedupeKey'
     | 'sender'
     | 'content'

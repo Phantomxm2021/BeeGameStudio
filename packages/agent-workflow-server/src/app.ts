@@ -3902,12 +3902,18 @@ function registerBeeGameSessionRoutes(
         : typeof body.client_message_id === 'string'
           ? body.client_message_id
           : undefined
+      const supersedesMessageId = typeof body.supersedesMessageId === 'string'
+        ? body.supersedesMessageId
+        : typeof body.supersedes_message_id === 'string'
+          ? body.supersedes_message_id
+          : undefined
       return c.json(
         await beeGameSessions.sendWithDisplay(c.req.param('id'), inputText, {
           displayText,
           displayKind,
           taskType,
           clientMessageId,
+          supersedesMessageId,
           attachments,
           thinkingMode: isBeeGameChatThinkingMode(body.thinkingMode)
             ? body.thinkingMode

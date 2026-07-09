@@ -436,6 +436,7 @@ export const beeGameAdapter = {
     content: string;
     project_id: string;
     client_message_id?: string;
+    supersedes_message_id?: string;
     taskType?: BeeGameCreditTaskType;
     attachments?: ChatImageAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
@@ -448,6 +449,7 @@ export const beeGameAdapter = {
     await sendBeeGameInput(session.id, prompt, {
       taskType: data.taskType || 'edit_turn',
       clientMessageId: data.client_message_id,
+      supersedesMessageId: data.supersedes_message_id,
       language,
       attachments: data.attachments,
       thinkingMode: data.thinkingMode,
@@ -1101,6 +1103,7 @@ async function sendBeeGameInput(
     displayKind?: string;
     taskType?: BeeGameCreditTaskType;
     clientMessageId?: string;
+    supersedesMessageId?: string;
     language?: BeeGameLanguage;
     attachments?: ChatImageAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
@@ -1112,6 +1115,7 @@ async function sendBeeGameInput(
     ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
     ...(display?.taskType ? { taskType: display.taskType } : {}),
     ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
+    ...(display?.supersedesMessageId ? { supersedesMessageId: display.supersedesMessageId } : {}),
     ...(display?.language ? { language: display.language } : {}),
     ...(display?.attachments?.length ? { attachments: display.attachments } : {}),
     ...(display?.thinkingMode ? { thinkingMode: display.thinkingMode } : {}),
@@ -1767,6 +1771,9 @@ function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, proje
   const clientMessageId = sender === 'user'
     ? getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id')
     : '';
+  const supersedesMessageId = sender === 'user'
+    ? getPayloadString(event, 'supersedesMessageId') || getPayloadString(event, 'supersedes_message_id')
+    : '';
   const messageId = sender === 'beegame'
     ? getBeeGameAssistantMessageId(event)
     : clientMessageId || `beegame-event-${event.id}`;
@@ -1778,6 +1785,7 @@ function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, proje
     content: event.text,
     message_id: messageId,
     ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
+    ...(supersedesMessageId ? { supersedes_message_id: supersedesMessageId } : {}),
     timestamp: Date.parse(event.createdAt) || Date.now(),
   } as WebSocketMessage;
 }

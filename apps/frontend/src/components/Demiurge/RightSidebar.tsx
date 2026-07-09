@@ -39,7 +39,8 @@ interface RightSidebarProps {
         msg: string,
         taskType?: BeeGameCreditTaskType,
         attachments?: ChatImageAttachmentPayload[],
-        thinkingMode?: BeeGameThinkingMode
+        thinkingMode?: BeeGameThinkingMode,
+        supersedesMessageId?: string,
     ) => void;
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
@@ -155,7 +156,7 @@ export function RightSidebar({
     // Handlers
     const handleSend = () => {
         if (!canSendMessage || (!chatInput.trim() && imageAttachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage(chatInput, undefined, imageAttachments, chatThinkingMode);
+        onSendMessage(chatInput, undefined, imageAttachments, chatThinkingMode, editingMessageId || undefined);
         setChatInput('');
         setImageAttachments([]);
         setEditingMessageId(null);

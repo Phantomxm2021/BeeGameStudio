@@ -444,6 +444,25 @@ describe('useChat clarification gate handling', () => {
     });
   });
 
+  it('records the source message when sending an edited draft', async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue({
+      task_id: 'task_edited',
+      command_id: 'task_edited',
+      state: 'running',
+    } as any);
+
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await result.current.sendMessage('updated request', undefined, 'edit_turn', undefined, 'disabled', 'msg_original');
+    });
+
+    expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'updated request',
+      supersedes_message_id: 'msg_original',
+    }));
+  });
+
   it('surfaces backend send failures in chat and toast', async () => {
     const showToastError = vi.fn();
     const onError = vi.fn();

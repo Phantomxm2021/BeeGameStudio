@@ -637,9 +637,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     taskType?: BeeGameCreditTaskType,
                     attachments?: ChatImageAttachmentPayload[],
                     thinkingMode?: BeeGameThinkingMode,
+                    supersedesMessageId?: string,
                 ) => {
                     if (isProjectInteractionLocked) return Promise.resolve();
-                    return sendMessage(message, undefined, taskType, attachments, thinkingMode);
+                    return sendMessage(message, undefined, taskType, attachments, thinkingMode, supersedesMessageId);
                 }}
                 isLoading={isLoading}
                 onStopTask={stopTask}

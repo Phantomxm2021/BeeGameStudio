@@ -761,6 +761,7 @@ export const api = {
     project_id: string;
     termination_node?: string;
     client_message_id?: string;
+    supersedes_message_id?: string;
     taskType?: import('./creditsApi').BeeGameCreditTaskType;
     attachments?: ChatImageAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
