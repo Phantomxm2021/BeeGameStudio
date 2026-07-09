@@ -6,7 +6,7 @@
       "name": "bee-game-studio",
       "dependencies": {
         "@agentclientprotocol/sdk": "^0.19.0",
-        "@bee-game-studio/mcp-chrome-bridge": "^3.0.1",
+        "@claude-code-best/mcp-chrome-bridge": "^3.0.1",
         "highlight.js": "^11.11.1",
         "ws": "^8.20.0",
       },
@@ -727,7 +727,7 @@
 
     "@bee-game-studio/builtin-tools": ["@bee-game-studio/builtin-tools@workspace:packages/builtin-tools"],
 
-    "@bee-game-studio/mcp-chrome-bridge": ["@bee-game-studio/mcp-chrome-bridge@3.0.1", "https://registry.npmmirror.com/@bee-game-studio/mcp-chrome-bridge/-/mcp-chrome-bridge-3.0.1.tgz", { "dependencies": { "@hono/node-server": "^1.19.13", "@modelcontextprotocol/sdk": "^1.11.0", "commander": "^13.1.0", "hono": "^4.12.12", "is-admin": "^4.0.0" }, "bin": { "mcp-chrome-bridge": "dist/cli.js", "mcp-chrome-stdio": "dist/mcp/mcp-server-stdio.js" } }, "sha512-ozeLHVOdckTUsWKJneJAL+CclrUlwVyBpfzFxgsrSL9f0LvjlJXE7+VcF5OmjDPwmZy6QNorvtg3/8NT2cIlzA=="],
+    "@claude-code-best/mcp-chrome-bridge": ["@claude-code-best/mcp-chrome-bridge@3.0.1", "https://registry.npmmirror.com/@claude-code-best/mcp-chrome-bridge/-/mcp-chrome-bridge-3.0.1.tgz", { "dependencies": { "@hono/node-server": "^1.19.13", "@modelcontextprotocol/sdk": "^1.11.0", "commander": "^13.1.0", "hono": "^4.12.12", "is-admin": "^4.0.0" }, "bin": { "mcp-chrome-bridge": "dist/cli.js", "mcp-chrome-stdio": "dist/mcp/mcp-server-stdio.js" } }, "sha512-ozeLHVOdckTUsWKJneJAL+CclrUlwVyBpfzFxgsrSL9f0LvjlJXE7+VcF5OmjDPwmZy6QNorvtg3/8NT2cIlzA=="],
 
     "@bee-game-studio/mcp-client": ["@bee-game-studio/mcp-client@workspace:packages/mcp-client"],
 
@@ -3803,7 +3803,7 @@
 
     "@bee-game-studio/agent-tools/zod": ["zod@3.25.76", "https://registry.npmmirror.com/zod/-/zod-3.25.76.tgz", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
-    "@bee-game-studio/mcp-chrome-bridge/@hono/node-server": ["@hono/node-server@1.19.13", "https://registry.npmmirror.com/@hono/node-server/-/node-server-1.19.13.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ=="],
+    "@claude-code-best/mcp-chrome-bridge/@hono/node-server": ["@hono/node-server@1.19.13", "https://registry.npmmirror.com/@hono/node-server/-/node-server-1.19.13.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ=="],
 
     "@bee-game-studio/mcp-client/lru-cache": ["lru-cache@10.4.3", "https://registry.npmmirror.com/lru-cache/-/lru-cache-10.4.3.tgz", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 

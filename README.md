@@ -46,7 +46,7 @@ npm i -g bee-game-studio
 
 # bun 安装比较多问题, 推荐 npm 装
 # bun  i -g bee-game-studio
-# bun pm -g trust bee-game-studio @bee-game-studio/mcp-chrome-bridge
+# bun pm -g trust bee-game-studio @claude-code-best/mcp-chrome-bridge
 
 ccb # 以 nodejs 打开 claude code
 ccb-bun # 以 bun 形态打开
