@@ -15,7 +15,7 @@ import { useWebSocket } from './useWebSocket';
 import { useChatStore } from '../store/chatStore';
 import { useProjectStore } from '../store/projectStore';
 import { useSystemStore, type ProjectTask } from '../store/systemStore';
-import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ChatImageAttachmentPayload, type ReviewBindingPayload } from '../services/api';
+import { api, normalizeApprovePlanPayload, normalizeReviewBindingPayload, type ChatAttachmentPayload, type ReviewBindingPayload } from '../services/api';
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api';
 import type { WebSocketMessage } from '../types/message';
 import type { WebSocketState } from './useWebSocket';
@@ -96,7 +96,7 @@ export interface UseChatReturn {
     content: string,
     terminationNode?: string,
     taskType?: BeeGameCreditTaskType,
-    attachments?: ChatImageAttachmentPayload[],
+    attachments?: ChatAttachmentPayload[],
     thinkingMode?: BeeGameThinkingMode,
     supersedesMessageId?: string,
   ) => Promise<void>;
@@ -169,7 +169,7 @@ export interface UseChatReturn {
 }
 
 type PendingAction =
-  | { kind: 'send_message'; content: string; terminationNode?: string; attachments?: ChatImageAttachmentPayload[] }
+  | { kind: 'send_message'; content: string; terminationNode?: string; attachments?: ChatAttachmentPayload[] }
   | { kind: 'continue_task'; taskId?: string };
 
 /**
@@ -830,7 +830,7 @@ export const useChat = ({
     content: string,
     terminationNode?: string,
     taskType: BeeGameCreditTaskType = 'edit_turn',
-    attachments?: ChatImageAttachmentPayload[],
+    attachments?: ChatAttachmentPayload[],
     thinkingMode: BeeGameThinkingMode = 'disabled',
     supersedesMessageId?: string,
   ) => {

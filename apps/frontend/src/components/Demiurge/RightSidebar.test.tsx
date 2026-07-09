@@ -195,7 +195,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'screen.png', { type: 'image/png' });
-        await user.upload(screen.getByLabelText('上传图片'), image);
+        await user.upload(screen.getByLabelText('上传附件'), image);
 
         await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
         await user.click(screen.getByRole('button', { name: 'Send message' }));
@@ -208,6 +208,48 @@ describe('RightSidebar tabs', () => {
             }),
         ], 'disabled', undefined);
         expect(onSendMessage.mock.calls[0][2][0].data).toEqual(expect.any(String));
+    });
+
+    it('sends an uploaded JSONL document attachment without rendering it as an image', async () => {
+        const user = userEvent.setup();
+        const onSendMessage = vi.fn();
+
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={onSendMessage}
+                isLoading={false}
+                waitingApproval={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+                variant="beegame"
+            />
+        );
+
+        const input = document.getElementById('beegame-chat-attachment-upload') as HTMLInputElement;
+        expect(input.accept).toContain('.jsonl');
+        expect(input.accept).not.toContain('image/gif');
+
+        await user.upload(input, new File(['{"ok":true}\n'], 'events.jsonl', { type: 'application/jsonl' }));
+
+        await waitFor(() => expect(screen.getByText('events.jsonl')).toBeInTheDocument());
+        expect(screen.queryByAltText('events.jsonl')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Send message' }));
+
+        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+            expect.objectContaining({
+                type: 'file',
+                mediaType: 'application/jsonl',
+                filename: 'events.jsonl',
+            }),
+        ], 'disabled', undefined);
     });
 
     it('accepts pasted screenshot attachments in the chat composer', async () => {

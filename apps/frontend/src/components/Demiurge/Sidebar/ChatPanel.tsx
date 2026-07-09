@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { MessageSquare, AlertCircle, Send, Square, X } from 'lucide-react';
+import { FileText, MessageSquare, AlertCircle, Send, Square, X } from 'lucide-react';
 import { FaPaperclip } from 'react-icons/fa6';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
@@ -13,7 +13,8 @@ import {
     MessageScrollerViewport,
 } from '../../ui/message-scroller';
 import type { ReviewBindingPayload } from '../../../services/api';
-import type { ChatImageAttachmentPayload } from '../../../services/api';
+import type { ChatAttachmentPayload } from '../../../services/api';
+import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments, isSupportedChatFile } from '../../../services/chatAttachments';
 import { formatReviewSummary, getReviewWorkspaceRef, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
@@ -35,11 +36,11 @@ interface ChatPanelProps {
     onEditMessage?: (message: ChatDisplayMessage) => void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
-    imageAttachments?: ChatImageAttachmentPayload[];
+    attachments?: ChatAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
     onThinkingModeChange?: (mode: BeeGameThinkingMode) => void;
-    onAddImageAttachments?: (attachments: ChatImageAttachmentPayload[]) => void;
-    onRemoveImageAttachment?: (index: number) => void;
+    onAddAttachments?: (attachments: ChatAttachmentPayload[]) => void;
+    onRemoveAttachment?: (index: number) => void;
     onPreviewArtifact: (id: string, title: string, content?: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -80,38 +81,6 @@ const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & {
     return review as unknown as ReviewBindingPayload & { gate_id: string };
 };
 
-const SUPPORTED_IMAGE_TYPES = new Set([
-    'image/png',
-    'image/jpeg',
-    'image/gif',
-    'image/webp',
-]);
-
-const fileToImageAttachment = (file: File): Promise<ChatImageAttachmentPayload | null> => {
-    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) return Promise.resolve(null);
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = typeof reader.result === 'string' ? reader.result : '';
-            const commaIndex = result.indexOf(',');
-            const data = commaIndex >= 0 ? result.slice(commaIndex + 1) : result;
-            resolve(data ? {
-                type: 'image',
-                mediaType: file.type as ChatImageAttachmentPayload['mediaType'],
-                data,
-                filename: file.name || undefined,
-            } : null);
-        };
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(file);
-    });
-};
-
-const filesToImageAttachments = async (files: File[]): Promise<ChatImageAttachmentPayload[]> => {
-    const attachments = await Promise.all(files.map(fileToImageAttachment));
-    return attachments.filter((item): item is ChatImageAttachmentPayload => Boolean(item));
-};
-
 const dedupeImageFiles = (files: File[]): File[] => {
     const seen = new Set<string>();
     const uniqueFiles: File[] = [];
@@ -124,13 +93,14 @@ const dedupeImageFiles = (files: File[]): File[] => {
     return uniqueFiles;
 };
 
-const clipboardDataToImageFiles = (clipboardData: DataTransfer | null): File[] => {
+const clipboardDataToAttachmentFiles = (clipboardData: DataTransfer | null): File[] => {
     if (!clipboardData) return [];
-    const files = Array.from(clipboardData.files || []).filter(file => file.type.startsWith('image/'));
+    const files = Array.from(clipboardData.files || []).filter(isSupportedChatFile);
     const itemFiles = Array.from(clipboardData.items || [])
-        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .filter(item => item.kind === 'file')
         .map(item => item.getAsFile())
-        .filter((file): file is File => Boolean(file));
+        .filter((file): file is File => Boolean(file))
+        .filter(isSupportedChatFile);
     return dedupeImageFiles([...files, ...itemFiles]);
 };
 
@@ -248,11 +218,11 @@ export const ChatPanel = memo(({
     onEditMessage,
     editingMessageId = null,
     onCancelEdit,
-    imageAttachments = [],
+    attachments = [],
     thinkingMode = 'disabled',
     onThinkingModeChange,
-    onAddImageAttachments,
-    onRemoveImageAttachment,
+    onAddAttachments,
+    onRemoveAttachment,
     onPreviewArtifact,
     textareaRef,
     scrollContainerRef,
@@ -279,7 +249,7 @@ export const ChatPanel = memo(({
     const thinkingOff = text.thinkingOff || 'Default';
     const thinkingOn = text.thinkingOn || 'Thinking';
     const composerPlaceholder = text.chatPlaceholder || waitingApproval.placeholder;
-    const attachImageLabel = text.attachImage || 'Attach image';
+    const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
     const reviewActionLabel = (
         review: ReviewDisplayModel,
         action: 'approve' | 'revise' | 'reject',
@@ -329,7 +299,7 @@ export const ChatPanel = memo(({
         onSendMessage?.(message);
     };
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
-    const canSubmitComposer = Boolean(chatInput.trim() || imageAttachments.length > 0);
+    const canSubmitComposer = Boolean(chatInput.trim() || attachments.length > 0);
     const isBeeGameVariant = variant === 'beegame';
     const messageOutlineItems = useMemo(
         () => messages
@@ -341,9 +311,9 @@ export const ChatPanel = memo(({
         [messages],
     );
     const handleImageFiles = async (files: File[]) => {
-        if (!files.length || !onAddImageAttachments) return;
-        const attachments = await filesToImageAttachments(files);
-        if (attachments.length > 0) onAddImageAttachments(attachments);
+        if (!files.length || !onAddAttachments) return;
+        const nextAttachments = await filesToChatAttachments(files);
+        if (nextAttachments.length > 0) onAddAttachments(nextAttachments);
     };
 
     const panelClassName = isBeeGameVariant
@@ -646,25 +616,32 @@ export const ChatPanel = memo(({
                     </div>
                 ) : (
                     <div className={normalComposerClassName} data-testid={isBeeGameVariant ? 'beegame-chat-composer' : undefined}>
-                        {imageAttachments.length > 0 ? (
+                        {attachments.length > 0 ? (
                             <div
                                 className={isBeeGameVariant ? 'flex gap-3 overflow-x-auto px-4 pt-4 pb-2' : 'mb-3 flex gap-2 overflow-x-auto'}
                                 data-testid={isBeeGameVariant ? 'beegame-chat-attachments' : undefined}
                             >
-                                {imageAttachments.map((attachment, index) => (
+                                {attachments.map((attachment, index) => (
                                     <div
-                                        key={`${attachment.filename || 'image'}-${index}`}
+                                        key={`${attachment.filename || attachment.type}-${index}`}
                                         className="relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-black/30"
                                     >
-                                        <img
-                                            src={`data:${attachment.mediaType};base64,${attachment.data}`}
-                                            alt={attachment.filename || `image-${index + 1}`}
-                                            className="h-full w-full object-cover"
-                                        />
+                                        {attachment.type === 'image' ? (
+                                            <img
+                                                src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                                alt={attachment.filename || `image-${index + 1}`}
+                                                className="h-full w-full object-cover"
+                                            />
+                                        ) : (
+                                            <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-zinc-300" title={attachment.filename}>
+                                                <FileText className="h-5 w-5" />
+                                                <span className="w-full truncate text-center text-[9px]">{attachment.filename}</span>
+                                            </div>
+                                        )}
                                         <button
                                             type="button"
-                                            aria-label="Remove image"
-                                            onClick={() => onRemoveImageAttachment?.(index)}
+                                            aria-label="Remove attachment"
+                                            onClick={() => onRemoveAttachment?.(index)}
                                             className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white"
                                         >
                                             <X className="h-3 w-3" />
@@ -676,9 +653,9 @@ export const ChatPanel = memo(({
                         {isBeeGameVariant ? (
                             <>
                                 <input
-                                    id="beegame-chat-image-upload"
+                                    id="beegame-chat-attachment-upload"
                                     type="file"
-                                    accept="image/png,image/jpeg,image/gif,image/webp"
+                                    accept={CHAT_ATTACHMENT_ACCEPT}
                                     multiple
                                     className="hidden"
                                     onChange={(event) => {
@@ -695,7 +672,7 @@ export const ChatPanel = memo(({
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {
-                                        const files = clipboardDataToImageFiles(e.clipboardData);
+                                        const files = clipboardDataToAttachmentFiles(e.clipboardData);
                                         if (files.length === 0) return;
                                         e.preventDefault();
                                         void handleImageFiles(files);
@@ -715,9 +692,9 @@ export const ChatPanel = memo(({
                                     data-testid="beegame-chat-toolbar"
                                 >
                                     <label
-                                        htmlFor="beegame-chat-image-upload"
-                                        aria-label={attachImageLabel}
-                                        title={attachImageLabel}
+                                        htmlFor="beegame-chat-attachment-upload"
+                                        aria-label={attachFileLabel}
+                                        title={attachFileLabel}
                                         className={`flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
                                         data-testid="beegame-chat-attach-button"
                                     >
@@ -748,9 +725,9 @@ export const ChatPanel = memo(({
                         ) : (
                             <div className="relative flex items-end">
                                 <input
-                                    id="beegame-chat-image-upload"
+                                    id="beegame-chat-attachment-upload"
                                     type="file"
-                                    accept="image/png,image/jpeg,image/gif,image/webp"
+                                    accept={CHAT_ATTACHMENT_ACCEPT}
                                     multiple
                                     className="hidden"
                                     onChange={(event) => {
@@ -761,9 +738,9 @@ export const ChatPanel = memo(({
                                     disabled={isComposerDisabled}
                                 />
                                 <label
-                                    htmlFor="beegame-chat-image-upload"
-                                    aria-label={attachImageLabel}
-                                    title={attachImageLabel}
+                                    htmlFor="beegame-chat-attachment-upload"
+                                    aria-label={attachFileLabel}
+                                    title={attachFileLabel}
                                     className={`absolute bottom-3.5 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors ${isComposerDisabled ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-white/10 hover:text-zinc-100'}`}
                                 >
                                     <FaPaperclip className="h-4 w-4" />
@@ -775,7 +752,7 @@ export const ChatPanel = memo(({
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {
-                                        const files = clipboardDataToImageFiles(e.clipboardData);
+                                        const files = clipboardDataToAttachmentFiles(e.clipboardData);
                                         if (files.length === 0) return;
                                         e.preventDefault();
                                         void handleImageFiles(files);

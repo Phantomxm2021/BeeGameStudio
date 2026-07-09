@@ -268,7 +268,7 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByPlaceholderText('询问团队（Shift+Enter 换行）...')).toBeInTheDocument();
-        expect(screen.getByLabelText('上传图片')).toBeInTheDocument();
+        expect(screen.getByLabelText('上传附件')).toBeInTheDocument();
     });
 
     it('keeps BeeGame image attachments in a padded preview strip', () => {
@@ -276,7 +276,7 @@ describe('ChatPanel approval bar', () => {
             actionReview: undefined,
             pendingReviews: [],
             variant: 'beegame',
-            imageAttachments: [{
+            attachments: [{
                 type: 'image',
                 mediaType: 'image/png',
                 data: 'iVBORw0KGgo=',

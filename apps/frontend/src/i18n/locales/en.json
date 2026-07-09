@@ -653,6 +653,7 @@
     "aiProcessing": "AI is processing...",
     "chatPlaceholder": "Ask team (Shift+Enter to new line)...",
     "attachImage": "Attach image",
+    "attachFile": "Attach file",
     "innerThought": "Inner thought",
     "contextUpdate": "Context update",
     "useContext": "Use context",

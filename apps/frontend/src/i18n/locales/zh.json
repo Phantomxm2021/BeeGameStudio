@@ -653,6 +653,7 @@
     "aiProcessing": "AI 正在处理...",
     "chatPlaceholder": "询问团队（Shift+Enter 换行）...",
     "attachImage": "上传图片",
+    "attachFile": "上传附件",
     "innerThought": "内部思考",
     "contextUpdate": "上下文更新",
     "useContext": "使用上下文",

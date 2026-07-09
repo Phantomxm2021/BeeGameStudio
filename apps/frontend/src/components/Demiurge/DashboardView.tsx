@@ -12,7 +12,7 @@ import { SideMenu } from './SideMenu';
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { ProjectTask } from '../../store/systemStore';
-import type { BeeGameDeploymentPayload, ChatImageAttachmentPayload, PendingUserReviewItem } from '../../services/api';
+import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingUserReviewItem } from '../../services/api';
 import { api } from '../../services/api';
 import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/waitingApproval';
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
@@ -638,7 +638,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 onSendMessage={(
                     message,
                     taskType?: BeeGameCreditTaskType,
-                    attachments?: ChatImageAttachmentPayload[],
+                    attachments?: ChatAttachmentPayload[],
                     thinkingMode?: BeeGameThinkingMode,
                     supersedesMessageId?: string,
                 ) => {

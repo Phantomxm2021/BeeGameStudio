@@ -3,7 +3,7 @@ import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
-import type { ChatImageAttachmentPayload } from '../../services/api';
+import type { ChatAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
 import type { BeeGameCreditTaskType } from '../../services/creditsApi';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -18,9 +18,9 @@ import { ArtifactsPanel } from './Sidebar/ArtifactsPanel';
 import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 
-const dedupeImageAttachments = (attachments: ChatImageAttachmentPayload[]): ChatImageAttachmentPayload[] => {
+const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachmentPayload[] => {
     const seen = new Set<string>();
-    const uniqueAttachments: ChatImageAttachmentPayload[] = [];
+    const uniqueAttachments: ChatAttachmentPayload[] = [];
     for (const attachment of attachments) {
         const key = [attachment.mediaType, attachment.data].join('\u0000');
         if (seen.has(key)) continue;
@@ -38,7 +38,7 @@ interface RightSidebarProps {
     onSendMessage: (
         msg: string,
         taskType?: BeeGameCreditTaskType,
-        attachments?: ChatImageAttachmentPayload[],
+        attachments?: ChatAttachmentPayload[],
         thinkingMode?: BeeGameThinkingMode,
         supersedesMessageId?: string,
     ) => void;
@@ -106,7 +106,7 @@ export function RightSidebar({
     const [chatInput, setChatInput] = useState('');
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [chatThinkingMode, setChatThinkingMode] = useState<BeeGameThinkingMode>('disabled');
-    const [imageAttachments, setImageAttachments] = useState<ChatImageAttachmentPayload[]>([]);
+    const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
@@ -155,10 +155,10 @@ export function RightSidebar({
 
     // Handlers
     const handleSend = () => {
-        if (!canSendMessage || (!chatInput.trim() && imageAttachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage(chatInput, undefined, imageAttachments, chatThinkingMode, editingMessageId || undefined);
+        if (!canSendMessage || (!chatInput.trim() && attachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
+        onSendMessage(chatInput, undefined, attachments, chatThinkingMode, editingMessageId || undefined);
         setChatInput('');
-        setImageAttachments([]);
+        setAttachments([]);
         setEditingMessageId(null);
     };
 
@@ -428,14 +428,14 @@ export function RightSidebar({
                                 onEditMessage={!isLoading ? handleEditMessage : undefined}
                                 editingMessageId={editingMessageId}
                                 onCancelEdit={handleCancelEdit}
-                                imageAttachments={imageAttachments}
+                                attachments={attachments}
                                 thinkingMode={chatThinkingMode}
                                 onThinkingModeChange={setChatThinkingMode}
-                                onAddImageAttachments={(attachments) => {
-                                    setImageAttachments(current => dedupeImageAttachments([...current, ...attachments]));
+                                onAddAttachments={(nextAttachments) => {
+                                    setAttachments(current => dedupeAttachments([...current, ...nextAttachments]));
                                 }}
-                                onRemoveImageAttachment={(index) => {
-                                    setImageAttachments(current => current.filter((_, itemIndex) => itemIndex !== index));
+                                onRemoveAttachment={(index) => {
+                                    setAttachments(current => current.filter((_, itemIndex) => itemIndex !== index));
                                 }}
                                 onPreviewArtifact={handlePreviewArtifact}
                                 textareaRef={textareaRef}
