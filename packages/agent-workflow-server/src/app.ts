@@ -3195,11 +3195,9 @@ async function proxyBeeGamePreviewRequest(
   const restPath = requestUrl.pathname.startsWith(prefix)
     ? requestUrl.pathname.slice(prefix.length) || '/'
     : '/'
-  // Vite serves the HTML document from its configured public base, but its
-  // development modules remain rooted at `/`. Keep the base only for root.
-  const targetPath = preservePublicPath && restPath === '/'
-    ? requestUrl.pathname
-    : restPath
+  // Vite's dev server strips its configured base before resolving both the
+  // HTML document and development modules such as `@vite/client`.
+  const targetPath = preservePublicPath ? requestUrl.pathname : restPath
   const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
   target.search = requestUrl.search
   const headers = new Headers(request.headers)
