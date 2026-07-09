@@ -77,6 +77,54 @@ describe('MarkdownRenderer structured output', () => {
     });
 });
 
+describe('MessageItem attachments', () => {
+    it('renders document attachments as file cards instead of images', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'message-document',
+                    sender: 'user',
+                    content: '',
+                    timestamp: Date.now(),
+                    attachments: [{
+                        type: 'file',
+                        mediaType: 'application/jsonl',
+                        data: 'ZXZlbnQ=',
+                        filename: 'events.jsonl',
+                    }],
+                }}
+                variant="beegame"
+            />
+        );
+
+        expect(screen.getByText('events.jsonl')).toBeInTheDocument();
+        expect(screen.queryByAltText('events.jsonl')).not.toBeInTheDocument();
+        expect(document.querySelector('img[src^="data:"]')).not.toBeInTheDocument();
+    });
+
+    it('keeps image attachments rendered as images', () => {
+        render(
+            <MessageItem
+                m={{
+                    id: 'message-image',
+                    sender: 'user',
+                    content: '',
+                    timestamp: Date.now(),
+                    attachments: [{
+                        type: 'image',
+                        mediaType: 'image/png',
+                        data: 'iVBORw0KGgo=',
+                        filename: 'screen.png',
+                    }],
+                }}
+                variant="beegame"
+            />
+        );
+
+        expect(screen.getByAltText('screen.png')).toBeInTheDocument();
+    });
+});
+
 describe('MessageItem semantic rendering', () => {
     it('renders context updates as a collapsed divider without sender chrome', async () => {
         render(

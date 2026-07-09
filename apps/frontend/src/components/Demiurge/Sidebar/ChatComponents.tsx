@@ -759,12 +759,23 @@ export const MessageItem = memo(({
                             {m.attachments?.length ? (
                                 <div className="mb-3 flex flex-wrap gap-2">
                                     {m.attachments.map((attachment, index) => (
-                                        <img
-                                            key={`${attachment.filename || 'image'}-${index}`}
-                                            src={`data:${attachment.mediaType};base64,${attachment.data}`}
-                                            alt={attachment.filename || `image-${index + 1}`}
-                                            className="max-h-44 rounded-2xl border border-white/15 object-contain"
-                                        />
+                                        attachment.type === 'image' ? (
+                                            <img
+                                                key={`${attachment.filename || 'image'}-${index}`}
+                                                src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                                alt={attachment.filename || `image-${index + 1}`}
+                                                className="max-h-44 rounded-2xl border border-white/15 object-contain"
+                                            />
+                                        ) : (
+                                            <div
+                                                key={`${attachment.filename || 'file'}-${index}`}
+                                                className="flex min-w-52 items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-3 text-sm text-zinc-200"
+                                                title={attachment.mediaType}
+                                            >
+                                                <FileText className="h-5 w-5 shrink-0 text-zinc-400" />
+                                                <span className="min-w-0 truncate">{attachment.filename}</span>
+                                            </div>
+                                        )
                                     ))}
                                 </div>
                             ) : null}
