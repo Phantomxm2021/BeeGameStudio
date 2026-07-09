@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Brain, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
+import { Bot, Brain, BookOpenText, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -42,6 +42,13 @@ import {
     type McpServerTransport,
 } from '../../../services/mcpServersApi';
 import {
+    createUserSkill,
+    deleteUserSkill,
+    listUserSkills,
+    updateUserSkill,
+    type UserSkill,
+} from '../../../services/userSkillsApi';
+import {
     createInvitation,
     deleteInvitation,
     getInvitationPublicSettings,
@@ -78,13 +85,14 @@ interface SettingsMenuProps {
     canManageSecrets?: boolean;
     canManageRuntimeSettings?: boolean;
     canManageMcp?: boolean;
+    canManageSkills?: boolean;
     canManageModelConfig?: boolean;
     canManageInvitations?: boolean;
     canReadAudit?: boolean;
 }
 
 type SettingsSection = 'personal' | 'platform';
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'model' | 'invitations' | 'projects' | 'credit';
+type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'invitations' | 'projects' | 'credit';
 type PopoverAnchorRect = {
     top: number;
     right: number;
@@ -119,6 +127,12 @@ type BillingPackFormState = {
     enabled: boolean;
 };
 
+type UserSkillFormState = {
+    id: string;
+    enabled: boolean;
+    content: string;
+};
+
 export function SettingsMenu({
     isOpen,
     lang,
@@ -128,6 +142,7 @@ export function SettingsMenu({
     canManageSecrets = false,
     canManageRuntimeSettings = false,
     canManageMcp = false,
+    canManageSkills = false,
     canManageModelConfig = false,
     canManageInvitations = false,
     canReadAudit = false,
@@ -144,10 +159,12 @@ export function SettingsMenu({
     const text = useBeeGameText(lang);
     const billingCopy = getBillingSettingsCopy(translateSettings);
     const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
+    const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
     const effectiveCanManageWorkspace = canManageWorkspace;
     const effectiveCanManageSecrets = canManageSecrets;
     const effectiveCanManageRuntimeSettings = canManageRuntimeSettings;
     const effectiveCanManageMcp = canManageMcp;
+    const effectiveCanManageSkills = canManageSkills;
     const effectiveCanManageModelConfig = canManageModelConfig;
     const effectiveCanManageInvitations = canManageInvitations;
     const effectiveCanReadAudit = canReadAudit;
@@ -155,6 +172,7 @@ export function SettingsMenu({
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||
         effectiveCanManageMcp ||
+        effectiveCanManageSkills ||
         effectiveCanManageModelConfig ||
         effectiveCanManageInvitations ||
         effectiveCanReadAudit;
@@ -194,6 +212,10 @@ export function SettingsMenu({
     const [mcpHealthById, setMcpHealthById] = useState<Record<string, McpServerTestResult>>({});
     const [testingMcpServerId, setTestingMcpServerId] = useState('');
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
+    const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
+    const [userSkillForm, setUserSkillForm] = useState<UserSkillFormState>(() => createEmptyUserSkillForm(userSkillsCopy.template));
+    const [userSkillsStatus, setUserSkillsStatus] = useState('');
+    const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
     const [subagentsEnabled, setSubagentsEnabled] = useState(true);
@@ -322,6 +344,21 @@ export function SettingsMenu({
                     }
                 });
         }
+        if (effectiveCanManageSkills) {
+            void listUserSkills()
+                .then((skills) => {
+                    if (cancelled) return;
+                    setUserSkills(skills);
+                    setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
+                    setUserSkillsStatus('');
+                })
+                .catch((error) => {
+                    if (!cancelled) {
+                        setUserSkills([]);
+                        setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.unavailable);
+                    }
+                });
+        }
         if (effectiveCanReadAudit) {
             void getProjectLifecycleOverview()
                 .then((overview) => {
@@ -371,6 +408,7 @@ export function SettingsMenu({
         };
     }, [
         effectiveCanManageMcp,
+        effectiveCanManageSkills,
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
         effectiveCanManageRuntimeSettings,
@@ -383,6 +421,8 @@ export function SettingsMenu({
         projectLifecycleCopy.unavailable,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
+        userSkillsCopy.template,
+        userSkillsCopy.unavailable,
     ]);
 
     const handleSaveModelConfig = async () => {
@@ -639,6 +679,91 @@ export function SettingsMenu({
         }
     };
 
+    const handleNewUserSkill = () => {
+        setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
+        setUserSkillsStatus('');
+    };
+
+    const handleEditUserSkill = (skill: UserSkill) => {
+        setUserSkillForm({
+            id: skill.id,
+            enabled: skill.enabled,
+            content: skill.content,
+        });
+        setUserSkillsStatus('');
+    };
+
+    const handleSaveUserSkill = async () => {
+        const content = userSkillForm.content.trim();
+        if (!content) {
+            setUserSkillsStatus(userSkillsCopy.contentRequired);
+            return;
+        }
+        setUserSkillsStatus('');
+        setIsSavingUserSkill(true);
+        try {
+            const saved = userSkillForm.id
+                ? await updateUserSkill(userSkillForm.id, {
+                    enabled: userSkillForm.enabled,
+                    content,
+                })
+                : await createUserSkill({
+                    enabled: userSkillForm.enabled,
+                    content,
+                });
+            setUserSkills((current) => [
+                saved,
+                ...current.filter((skill) => skill.id !== saved.id),
+            ].sort((left, right) => left.name.localeCompare(right.name)));
+            setUserSkillForm({
+                id: saved.id,
+                enabled: saved.enabled,
+                content: saved.content,
+            });
+            setUserSkillsStatus(userSkillsCopy.saved);
+        } catch (error) {
+            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
+        } finally {
+            setIsSavingUserSkill(false);
+        }
+    };
+
+    const handleToggleUserSkill = async (skill: UserSkill) => {
+        setUserSkillsStatus('');
+        setIsSavingUserSkill(true);
+        try {
+            const saved = await updateUserSkill(skill.id, {
+                enabled: !skill.enabled,
+                content: skill.content,
+                references: skill.references,
+            });
+            setUserSkills((current) => current.map((item) => item.id === saved.id ? saved : item));
+            if (userSkillForm.id === saved.id) {
+                setUserSkillForm((current) => ({ ...current, enabled: saved.enabled }));
+            }
+        } catch (error) {
+            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
+        } finally {
+            setIsSavingUserSkill(false);
+        }
+    };
+
+    const handleDeleteUserSkill = async (skill: UserSkill) => {
+        setUserSkillsStatus('');
+        setIsSavingUserSkill(true);
+        try {
+            await deleteUserSkill(skill.id);
+            setUserSkills((current) => current.filter((item) => item.id !== skill.id));
+            if (userSkillForm.id === skill.id) {
+                setUserSkillForm(createEmptyUserSkillForm(userSkillsCopy.template));
+            }
+        } catch (error) {
+            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
+        } finally {
+            setIsSavingUserSkill(false);
+        }
+    };
+
     const handleTestMcpServer = async (server: McpServerConfig) => {
         setMcpStatus('');
         setTestingMcpServerId(server.id);
@@ -749,6 +874,7 @@ export function SettingsMenu({
             ...(effectiveCanManageInvitations ? [{ id: 'invitations' as const, label: adminCopy.invitation.tab, icon: Ticket }] : []),
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
+            ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
@@ -757,6 +883,7 @@ export function SettingsMenu({
         effectiveCanManageWorkspace,
         effectiveCanManageSecrets,
         effectiveCanManageMcp,
+        effectiveCanManageSkills,
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
         effectiveCanManageRuntimeSettings,
@@ -767,6 +894,7 @@ export function SettingsMenu({
         mcpCopy.title,
         projectLifecycleCopy.tab,
         text.settingsModel,
+        userSkillsCopy.tab,
     ]);
     const activeTabLabel = activeSection === 'personal'
         ? text.settingsGeneral
@@ -774,8 +902,10 @@ export function SettingsMenu({
         ? adminCopy.deployment
         : activeTab === 'runtime'
             ? capabilityCopy.title
-            : activeTab === 'mcp'
+        : activeTab === 'mcp'
                 ? mcpCopy.title
+            : activeTab === 'skills'
+                ? userSkillsCopy.title
             : activeTab === 'invitations'
                     ? adminCopy.invitation.tab
                     : activeTab === 'projects'
@@ -788,6 +918,8 @@ export function SettingsMenu({
         : activeTab === 'runtime'
             ? isSavingRuntimeSettings
         : activeTab === 'mcp'
+                ? false
+            : activeTab === 'skills'
                 ? false
             : activeTab === 'invitations'
                     ? isSavingInvitations
@@ -805,6 +937,8 @@ export function SettingsMenu({
             ? isSavingCurrentTab
         : activeTab === 'mcp'
                 ? false
+            : activeTab === 'skills'
+                ? true
             : activeTab === 'invitations'
                     ? isSavingCurrentTab
                     : activeTab === 'projects'
@@ -831,6 +965,7 @@ export function SettingsMenu({
             return;
         }
         if (activeTab === 'mcp') return;
+        if (activeTab === 'skills') return;
         if (activeTab === 'projects') return;
         if (activeTab === 'credit') return;
         const webToolsSaved = effectiveCanManageSecrets ? await handleSaveWebTools() : true;
@@ -1355,8 +1490,23 @@ export function SettingsMenu({
                                         onImportActive={(server) => void handleImportActiveMcpServer(server)}
                                     />
                                 ) : null}
+                                {activeSection === 'platform' && activeTab === 'skills' && effectiveCanManageSkills ? (
+                                    <UserSkillsSettingsPanel
+                                        copy={userSkillsCopy}
+                                        skills={userSkills}
+                                        form={userSkillForm}
+                                        status={userSkillsStatus}
+                                        isSaving={isSavingUserSkill}
+                                        onFormChange={setUserSkillForm}
+                                        onNew={handleNewUserSkill}
+                                        onEdit={handleEditUserSkill}
+                                        onSave={() => void handleSaveUserSkill()}
+                                        onToggle={(skill) => void handleToggleUserSkill(skill)}
+                                        onDelete={(skill) => void handleDeleteUserSkill(skill)}
+                                    />
+                                ) : null}
                                 </div>
-                                {activeSection === 'platform' && activeTab !== 'mcp' && activeTab !== 'projects' && activeTab !== 'credit' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
+                                {activeSection === 'platform' && activeTab !== 'mcp' && activeTab !== 'skills' && activeTab !== 'projects' && activeTab !== 'credit' && (activeTab !== 'general' || hasGeneralSaveAction) ? (
                                 <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
                                     <button
                                         type="button"
@@ -1501,6 +1651,32 @@ function getProjectLifecycleSettingsCopy(translate: SettingsTranslate): ProjectL
     };
 }
 
+function getUserSkillsSettingsCopy(translate: SettingsTranslate): UserSkillsSettingsCopy {
+    return {
+        tab: translate('userSkills.tab'),
+        title: translate('userSkills.title'),
+        description: translate('userSkills.description'),
+        editorTitle: translate('userSkills.editorTitle'),
+        listTitle: translate('userSkills.listTitle'),
+        newSkill: translate('userSkills.newSkill'),
+        save: translate('userSkills.save'),
+        saving: translate('userSkills.saving'),
+        enabled: translate('userSkills.enabled'),
+        disabled: translate('userSkills.disabled'),
+        edit: translate('userSkills.edit'),
+        delete: translate('userSkills.delete'),
+        empty: translate('userSkills.empty'),
+        contentLabel: translate('userSkills.contentLabel'),
+        contentRequired: translate('userSkills.contentRequired'),
+        saved: translate('userSkills.saved'),
+        saveFailed: translate('userSkills.saveFailed'),
+        deleteFailed: translate('userSkills.deleteFailed'),
+        unavailable: translate('userSkills.unavailable'),
+        runtimeNote: translate('userSkills.runtimeNote'),
+        template: translate('userSkills.template'),
+    };
+}
+
 function parsePositiveInteger(value: string): number | null {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -1544,6 +1720,14 @@ function createEmptyBillingPackForm(): BillingPackFormState {
         displayName: '',
         sortOrder: '0',
         enabled: true,
+    };
+}
+
+function createEmptyUserSkillForm(template: string): UserSkillFormState {
+    return {
+        id: '',
+        enabled: true,
+        content: template,
     };
 }
 
@@ -1713,6 +1897,30 @@ type ProjectLifecycleSettingsCopy = {
     dryRunFailed: string;
     runFailed: string;
     unavailable: string;
+};
+
+type UserSkillsSettingsCopy = {
+    tab: string;
+    title: string;
+    description: string;
+    editorTitle: string;
+    listTitle: string;
+    newSkill: string;
+    save: string;
+    saving: string;
+    enabled: string;
+    disabled: string;
+    edit: string;
+    delete: string;
+    empty: string;
+    contentLabel: string;
+    contentRequired: string;
+    saved: string;
+    saveFailed: string;
+    deleteFailed: string;
+    unavailable: string;
+    runtimeNote: string;
+    template: string;
 };
 
 type RuntimeCapabilityItem = {
@@ -1970,6 +2178,144 @@ function InvitationSettingsPanel({
                     <div className="type-footnote text-amber-300">{status}</div>
                 ) : null}
             </div>
+        </div>
+    );
+}
+
+function UserSkillsSettingsPanel({
+    copy,
+    skills,
+    form,
+    status,
+    isSaving,
+    onFormChange,
+    onNew,
+    onEdit,
+    onSave,
+    onToggle,
+    onDelete,
+}: {
+    copy: UserSkillsSettingsCopy;
+    skills: UserSkill[];
+    form: UserSkillFormState;
+    status: string;
+    isSaving: boolean;
+    onFormChange: (form: UserSkillFormState) => void;
+    onNew: () => void;
+    onEdit: (skill: UserSkill) => void;
+    onSave: () => void;
+    onToggle: (skill: UserSkill) => void;
+    onDelete: (skill: UserSkill) => void;
+}) {
+    const saveDisabled = isSaving || !form.content.trim();
+    return (
+        <div className="space-y-5 py-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="type-callout max-w-2xl text-zinc-400">{copy.description}</p>
+                    <p className="type-footnote mt-2 max-w-2xl text-zinc-500">{copy.runtimeNote}</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={onNew}
+                    className="type-button inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                >
+                    <Plus className="h-4 w-4" />
+                    {copy.newSkill}
+                </button>
+            </div>
+
+            <section className="rounded-3xl border border-white/10 bg-white/[0.025] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="type-caption-1 text-zinc-500">{copy.editorTitle}</div>
+                    <Switch
+                        checked={form.enabled}
+                        label={form.enabled ? copy.enabled : copy.disabled}
+                        onClick={() => onFormChange({ ...form, enabled: !form.enabled })}
+                    />
+                </div>
+                <label className="grid gap-2">
+                    <span className="sr-only">{copy.contentLabel}</span>
+                    <textarea
+                        aria-label={copy.contentLabel}
+                        value={form.content}
+                        onChange={(event) => onFormChange({ ...form, content: event.target.value })}
+                        spellCheck={false}
+                        className="type-code-sm min-h-[220px] max-h-[min(36vh,360px)] w-full resize-y rounded-2xl border border-white/15 bg-black/20 px-3 py-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-black/25"
+                    />
+                </label>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="type-footnote text-amber-300">{status}</div>
+                    <button
+                        type="button"
+                        onClick={onSave}
+                        disabled={saveDisabled}
+                        className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {isSaving ? copy.saving : copy.save}
+                    </button>
+                </div>
+            </section>
+
+            <section className="space-y-2">
+                <div className="type-caption-1 text-zinc-500">{copy.listTitle}</div>
+                {skills.length ? (
+                    <div className="max-h-[240px] overflow-y-auto rounded-3xl border border-white/10 [scrollbar-gutter:stable]">
+                        <div className="divide-y divide-white/10">
+                            {skills.map((skill) => (
+                                <div key={skill.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => onEdit(skill)}
+                                        className="min-w-0 flex-1 rounded-2xl px-2 py-1 text-left transition-colors hover:bg-white/5"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className={`h-2 w-2 shrink-0 rounded-full ${skill.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                                            <span className="type-footnote truncate text-zinc-100">{skill.name}</span>
+                                            <span className="type-caption-1 text-zinc-500">
+                                                {skill.enabled ? copy.enabled : copy.disabled}
+                                            </span>
+                                        </div>
+                                        <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
+                                            {skill.description}
+                                        </div>
+                                    </button>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => onToggle(skill)}
+                                            disabled={isSaving}
+                                            className="type-button h-8 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {skill.enabled ? copy.disabled : copy.enabled}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onEdit(skill)}
+                                            className="type-button h-8 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10"
+                                        >
+                                            {copy.edit}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onDelete(skill)}
+                                            disabled={isSaving}
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                            aria-label={copy.delete}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">
+                        {copy.empty}
+                    </div>
+                )}
+            </section>
         </div>
     );
 }

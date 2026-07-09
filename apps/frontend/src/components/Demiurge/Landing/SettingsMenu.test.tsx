@@ -34,6 +34,10 @@ const {
     getBillingEvents,
     upsertBillingCreditPack,
     getProjectLifecycleOverview,
+    listUserSkills,
+    createUserSkill,
+    updateUserSkill,
+    deleteUserSkill,
     planProjectRetention,
     runProjectRetention,
 } = vi.hoisted(() => ({
@@ -65,6 +69,10 @@ const {
     getBillingEvents: vi.fn(),
     upsertBillingCreditPack: vi.fn(),
     getProjectLifecycleOverview: vi.fn(),
+    listUserSkills: vi.fn(),
+    createUserSkill: vi.fn(),
+    updateUserSkill: vi.fn(),
+    deleteUserSkill: vi.fn(),
     planProjectRetention: vi.fn(),
     runProjectRetention: vi.fn(),
 }));
@@ -127,6 +135,13 @@ vi.mock('../../../services/projectLifecycleApi', () => ({
     runProjectRetention,
 }));
 
+vi.mock('../../../services/userSkillsApi', () => ({
+    listUserSkills,
+    createUserSkill,
+    updateUserSkill,
+    deleteUserSkill,
+}));
+
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
     <SettingsMenu
         isOpen
@@ -137,6 +152,7 @@ const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}
         canManageSecrets
         canManageRuntimeSettings
         canManageMcp
+        canManageSkills
         canManageModelConfig
         {...props}
     />,
@@ -196,6 +212,11 @@ describe('SettingsMenu model settings', () => {
         });
         listMcpServers.mockReset();
         listMcpServers.mockResolvedValue([]);
+        listUserSkills.mockReset();
+        listUserSkills.mockResolvedValue([]);
+        createUserSkill.mockReset();
+        updateUserSkill.mockReset();
+        deleteUserSkill.mockReset();
         createModelConfig.mockReset();
         getBeeGameSubagentsEnabled.mockReturnValue(true);
         setBeeGameSubagentsEnabled.mockReset();
@@ -385,6 +406,75 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
     });
 
+    it('lets platform owners manage user skills from the settings panel', async () => {
+        listUserSkills.mockResolvedValue([
+            {
+                id: 'skill_1',
+                slug: 'movement-contracts',
+                name: 'movement-contracts',
+                description: 'Keep movement controls consistent.',
+                enabled: true,
+                content: [
+                    '---',
+                    'name: movement-contracts',
+                    'description: Keep movement controls consistent.',
+                    '---',
+                    '',
+                    '# Movement',
+                ].join('\n'),
+                references: [],
+                createdAt: '2026-07-09T00:00:00.000Z',
+                updatedAt: '2026-07-09T00:00:00.000Z',
+            },
+        ]);
+        updateUserSkill.mockResolvedValue({
+            id: 'skill_1',
+            slug: 'movement-contracts',
+            name: 'movement-contracts',
+            description: 'Keep movement controls consistent.',
+            enabled: true,
+            content: [
+                '---',
+                'name: movement-contracts',
+                'description: Keep movement controls consistent.',
+                '---',
+                '',
+                '# Movement',
+                '',
+                'Updated guidance.',
+            ].join('\n'),
+            references: [],
+            createdAt: '2026-07-09T00:00:00.000Z',
+            updatedAt: '2026-07-09T00:01:00.000Z',
+        });
+
+        renderSettings();
+        await openPlatformSettingsTab('技能');
+
+        await expect(screen.findByText('movement-contracts')).resolves.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: '编辑' }));
+        const editor = screen.getByLabelText('Skill markdown 内容');
+        expect((editor as HTMLTextAreaElement).value).toContain('# Movement');
+        await userEvent.clear(editor);
+        await userEvent.type(editor, [
+            '---',
+            'name: movement-contracts',
+            'description: Keep movement controls consistent.',
+            '---',
+            '',
+            '# Movement',
+            '',
+            'Updated guidance.',
+        ].join('\n'));
+        await userEvent.click(screen.getByRole('button', { name: '保存技能' }));
+
+        await waitFor(() => expect(updateUserSkill).toHaveBeenCalledWith('skill_1', expect.objectContaining({
+            enabled: true,
+            content: expect.stringContaining('Updated guidance.'),
+        })));
+        expect(await screen.findByText('技能已保存。')).toBeInTheDocument();
+    });
+
     it('wraps long deployment workspace paths within the settings panel', async () => {
         const longWorkspacePath = '/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/Projects';
         getBeeGameWorkspaceSettings.mockResolvedValue({
@@ -445,6 +535,7 @@ describe('SettingsMenu model settings', () => {
             canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
+            canManageSkills: false,
             canManageModelConfig: false,
             canReadAudit: false,
         });
@@ -485,12 +576,14 @@ describe('SettingsMenu model settings', () => {
         getWebToolsConfig.mockClear();
         getRuntimeSettings.mockClear();
         listMcpServers.mockClear();
+        listUserSkills.mockClear();
 
         renderSettings({
             canManageWorkspace: false,
             canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
+            canManageSkills: false,
             canManageModelConfig: false,
         });
 
@@ -499,6 +592,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '部署' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '技能' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
@@ -510,6 +604,7 @@ describe('SettingsMenu model settings', () => {
         expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
+        expect(listUserSkills).not.toHaveBeenCalled();
     });
 
     it('keeps settings limited to personal preferences without management permissions', () => {

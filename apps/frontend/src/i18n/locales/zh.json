@@ -380,6 +380,29 @@
       "runFailed": "Retention 执行失败",
       "unavailable": "项目生命周期不可用"
     },
+    "userSkills": {
+      "tab": "技能",
+      "title": "用户技能",
+      "description": "创建只属于当前用户的 BeeGame 技能，并在新 runtime 任务启动前注入。",
+      "editorTitle": "Skill Markdown",
+      "listTitle": "已保存技能",
+      "newSkill": "新建技能",
+      "save": "保存技能",
+      "saving": "保存中...",
+      "enabled": "启用",
+      "disabled": "停用",
+      "edit": "编辑",
+      "delete": "删除技能",
+      "empty": "还没有用户技能。",
+      "contentLabel": "Skill markdown 内容",
+      "contentRequired": "请输入 skill 内容。",
+      "saved": "技能已保存。",
+      "saveFailed": "技能保存失败。",
+      "deleteFailed": "技能删除失败。",
+      "unavailable": "用户技能不可用",
+      "runtimeNote": "已启用技能会在新的 BeeGame runtime turn 启动前写入 user-* 目录。",
+      "template": "---\nname: my-beegame-skill\ndescription: 描述 BeeGame 什么时候应该使用这个技能。\n---\n\n# Instructions\n\n写下 BeeGame 应遵守的行为、限制和验收标准。"
+    },
     "runtime": {
       "autoMemory": "自动记忆",
       "autoDream": "自动整理"
