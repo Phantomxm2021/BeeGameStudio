@@ -129,7 +129,11 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   if (
     config.autoMemoryEnabled === undefined &&
     config.autoDreamEnabled === undefined &&
-    config.skillSearchEnabled === undefined
+    config.skillSearchEnabled === undefined &&
+    config.treeSitterBashEnabled === undefined &&
+    config.webBrowserToolEnabled === undefined &&
+    config.bashClassifierEnabled === undefined &&
+    config.mcpSkillsEnabled === undefined
   ) {
     return
   }
@@ -146,6 +150,18 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
       : {}),
     ...(config.skillSearchEnabled !== undefined
       ? { skillSearchEnabled: config.skillSearchEnabled }
+      : {}),
+    ...(config.treeSitterBashEnabled !== undefined
+      ? { treeSitterBashEnabled: config.treeSitterBashEnabled }
+      : {}),
+    ...(config.webBrowserToolEnabled !== undefined
+      ? { webBrowserToolEnabled: config.webBrowserToolEnabled }
+      : {}),
+    ...(config.bashClassifierEnabled !== undefined
+      ? { bashClassifierEnabled: config.bashClassifierEnabled }
+      : {}),
+    ...(config.mcpSkillsEnabled !== undefined
+      ? { mcpSkillsEnabled: config.mcpSkillsEnabled }
       : {}),
   }
   const tempPath = `${filePath}.tmp`

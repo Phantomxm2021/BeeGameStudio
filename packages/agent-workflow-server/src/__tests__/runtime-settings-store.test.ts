@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import {
   cleanupRuntimeLayout,
   mapRuntimeSettingsToEnv,
+  syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from '../runtime-settings-store'
 
 describe('runtime settings store', () => {
@@ -157,6 +158,36 @@ describe('runtime settings store', () => {
           'utf8',
         ),
       ).toBe('export TEST=1\n')
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('syncs all admin runtime settings to the app runtime settings file', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-settings-'))
+    try {
+      syncRuntimeSettingsToDedicatedRuntimeConfig({
+        autoMemoryEnabled: false,
+        autoDreamEnabled: true,
+        skillSearchEnabled: true,
+        treeSitterBashEnabled: true,
+        webBrowserToolEnabled: true,
+        bashClassifierEnabled: false,
+        mcpSkillsEnabled: true,
+      }, { dataDir })
+
+      expect(JSON.parse(readFileSync(
+        join(dataDir, '.runtime', 'app', 'settings.json'),
+        'utf8',
+      ))).toEqual({
+        autoMemoryEnabled: false,
+        autoDreamEnabled: true,
+        skillSearchEnabled: true,
+        treeSitterBashEnabled: true,
+        webBrowserToolEnabled: true,
+        bashClassifierEnabled: false,
+        mcpSkillsEnabled: true,
+      })
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
     }

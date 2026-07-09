@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { MessageSquare, AlertCircle, Send, X } from 'lucide-react';
+import { MessageSquare, AlertCircle, Send, Square, X } from 'lucide-react';
 import { FaPaperclip } from 'react-icons/fa6';
 import { MessageItem } from './ChatComponents';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
@@ -14,7 +14,7 @@ import {
 } from '../../ui/message-scroller';
 import type { ReviewBindingPayload } from '../../../services/api';
 import type { ChatImageAttachmentPayload } from '../../../services/api';
-import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
+import { formatReviewSummary, getReviewWorkspaceRef, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
@@ -26,6 +26,8 @@ import { ThinkingModeSelect } from '../ThinkingModeSelect';
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
     isLoading: boolean;
+    onStop?: () => void | Promise<void>;
+    isStopping?: boolean;
     chatInput: string;
     onChatInputChange: (val: string) => void;
     onSend: () => void;
@@ -137,9 +139,105 @@ const getMessageOutlineLabel = (content: string): string => {
     return firstLine.length > 80 ? `${firstLine.slice(0, 80).trim()}...` : firstLine;
 };
 
+const getObjectField = (value: unknown, key: string): unknown => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    return (value as Record<string, unknown>)[key];
+};
+
+const getBeeGamePermissionCommand = (review: ReviewDisplayModel | undefined | null): string => {
+    const artifact = getObjectField(review, 'artifact');
+    const input = getObjectField(artifact, 'input');
+    const command = getObjectField(input, 'command');
+    return typeof command === 'string' ? command.trim() : '';
+};
+
+const getBeeGamePermissionTarget = (review: ReviewDisplayModel | undefined | null): string => {
+    const artifact = getObjectField(review, 'artifact');
+    const input = getObjectField(artifact, 'input');
+    const path = getObjectField(input, 'path') || getObjectField(input, 'file_path') || getObjectField(input, 'notebook_path');
+    return typeof path === 'string' ? path.trim() : '';
+};
+
+interface BeeGamePermissionPanelProps {
+    review: ReviewDisplayModel;
+    text: Record<string, string>;
+    approvalState: ChatPanelProps['approvalState'];
+    onApprovePlan?: ChatPanelProps['onApprovePlan'];
+}
+
+const BeeGamePermissionPanel = ({
+    review,
+    text,
+    approvalState,
+    onApprovePlan,
+}: BeeGamePermissionPanelProps) => {
+    const command = getBeeGamePermissionCommand(review);
+    const target = command || getBeeGamePermissionTarget(review) || formatReviewSummary(review);
+    const workspaceRef = getReviewWorkspaceRef(review) || text.permissionScopeUnknown || '-';
+    const isAllowPending = isApprovalActionPending(approvalState, review.gate_id, 'approve');
+    const isDenyPending = isApprovalActionPending(approvalState, review.gate_id, 'revise');
+
+    return (
+        <section
+            aria-label={text.permissionRequired}
+            className="glass-control mb-3 overflow-hidden rounded-3xl border border-white/15 bg-zinc-950/75 text-zinc-100 shadow-2xl shadow-black/30 backdrop-blur-2xl"
+            data-testid="beegame-permission-panel"
+        >
+            <div className="flex items-start gap-4 border-b border-white/10 px-5 py-4">
+                <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06] text-amber-300">
+                    <AlertCircle className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="type-caption-1 mb-1 text-amber-300">{text.permissionRequired}</div>
+                    <h3 className="type-title-3 text-zinc-100">{command ? text.permissionBashTitle : text.permissionToolTitle}</h3>
+                    <p className="type-footnote mt-1 text-zinc-400">{text.permissionPanelDescription}</p>
+                </div>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+                <div>
+                    <div className="type-caption-2 mb-2 uppercase tracking-[0.16em] text-zinc-500">{command ? text.permissionCommandLabel : text.permissionTargetLabel}</div>
+                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-black/35 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-100 [overflow-wrap:anywhere]">
+                        {target}
+                    </pre>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                        <div className="type-caption-2 mb-1 text-zinc-500">{text.permissionScopeLabel}</div>
+                        <div className="type-footnote truncate text-zinc-300" title={workspaceRef}>{workspaceRef}</div>
+                    </div>
+                    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                        <div className="type-caption-2 mb-1 text-zinc-500">{text.permissionRiskLabel}</div>
+                        <div className="type-footnote truncate text-zinc-300" title={text.permissionRiskGeneric}>{text.permissionRiskGeneric}</div>
+                    </div>
+                </div>
+            </div>
+            <div className="grid gap-2 border-t border-white/10 px-5 pb-5 pt-1 min-[420px]:grid-cols-2">
+                <button
+                    type="button"
+                    onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'revise')}
+                    disabled={isDenyPending}
+                    className="type-button flex min-h-11 items-center justify-center rounded-2xl bg-white text-zinc-950 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                    {isDenyPending ? text.submitting : text.deny}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onApprovePlan?.(toApprovalPayload(review))}
+                    disabled={isAllowPending}
+                    className="type-button flex min-h-11 items-center justify-center rounded-2xl bg-emerald-600 text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                    {isAllowPending ? text.submitting : text.allowOnce}
+                </button>
+            </div>
+        </section>
+    );
+};
+
 export const ChatPanel = memo(({
     messages,
     isLoading,
+    onStop,
+    isStopping = false,
     chatInput,
     onChatInputChange,
     onSend,
@@ -215,13 +313,16 @@ export const ChatPanel = memo(({
     const beeGamePermission = isBeeGamePermissionReview(actionReview);
     const projectFailed = Boolean(projectStatus?.blocked && String(projectStatus?.blocked_reason || '').trim() === 'pipeline_failed');
     const activeComposerReview = projectFailed ? clarificationReview : (clarificationReview || actionReview);
-    const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview);
+    const activeBeeGamePermissionReview = activeComposerReview && isBeeGamePermissionReview(activeComposerReview)
+        ? activeComposerReview
+        : undefined;
+    const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview && !activeBeeGamePermissionReview);
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
     const handleContinueFixing = (message: string) => {
         if (!canSendMessage || isComposerLocked || waitingApproval.isBlockingChat) return;
         onSendMessage?.(message);
     };
-    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat;
+    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
     const canSubmitComposer = Boolean(chatInput.trim() || imageAttachments.length > 0);
     const isBeeGameVariant = variant === 'beegame';
     const messageOutlineItems = useMemo(
@@ -256,6 +357,11 @@ export const ChatPanel = memo(({
     const sendButtonClassName = isBeeGameVariant
         ? 'primary-pill flex h-8 w-8 shrink-0 items-center justify-center shadow-lg transition-transform group-active:scale-95 disabled:cursor-not-allowed disabled:opacity-35'
         : 'absolute right-3 bottom-2 w-10 h-10 flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full shadow-lg group-active:scale-95 transition-transform disabled:opacity-50 disabled:bg-zinc-400';
+    const effectiveComposerPlaceholder = activeBeeGamePermissionReview
+        ? text.permissionPendingPlaceholder
+        : isComposerLocked || isLoading
+            ? text.aiProcessing
+            : composerPlaceholder;
 
     return (
         <div className={panelClassName} data-testid={isBeeGameVariant ? 'beegame-chat-panel' : undefined}>
@@ -437,6 +543,14 @@ export const ChatPanel = memo(({
                         {waitingApproval.message}
                     </div>
                 )}
+                {activeBeeGamePermissionReview ? (
+                    <BeeGamePermissionPanel
+                        review={activeBeeGamePermissionReview}
+                        text={text}
+                        approvalState={approvalState}
+                        onApprovePlan={onApprovePlan}
+                    />
+                ) : null}
                 {shouldShowApprovalBar && activeComposerReview ? (
                     <div
                         key={`approval-bar-${activeComposerReview.gate_id}`}
@@ -554,7 +668,7 @@ export const ChatPanel = memo(({
                                 <textarea
                                     ref={textareaRef}
                                     className={`${textareaClassName} ${textareaInsetClassName}`}
-                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : composerPlaceholder}
+                                    placeholder={effectiveComposerPlaceholder}
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {
@@ -598,12 +712,12 @@ export const ChatPanel = memo(({
                                             onChange={(mode) => onThinkingModeChange?.(mode)}
                                         />
                                         <button
-                                            onClick={onSend}
-                                            aria-label="Send message"
-                                            disabled={!canSubmitComposer || isComposerDisabled}
+                                            onClick={isLoading ? () => void onStop?.() : onSend}
+                                            aria-label={isLoading ? (isStopping ? 'Stopping task' : 'Stop task') : 'Send message'}
+                                            disabled={isLoading ? !onStop || isStopping : !canSubmitComposer || isComposerDisabled}
                                             className={sendButtonClassName}
                                         >
-                                            <Send className="h-4 w-4 -ml-0.5" />
+                                            {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 -ml-0.5" />}
                                         </button>
                                     </div>
                                 </div>
@@ -634,7 +748,7 @@ export const ChatPanel = memo(({
                                 <textarea
                                     ref={textareaRef}
                                     className={`${textareaClassName} ${textareaInsetClassName}`}
-                                    placeholder={isComposerLocked || isLoading ? text.aiProcessing : composerPlaceholder}
+                                    placeholder={effectiveComposerPlaceholder}
                                     value={chatInput}
                                     onChange={(e) => onChatInputChange(e.target.value)}
                                     onPaste={(e) => {
@@ -653,14 +767,14 @@ export const ChatPanel = memo(({
                                     }}
                                     disabled={isComposerDisabled}
                                 />
-                                <button
-                                    onClick={onSend}
-                                    aria-label="Send message"
-                                    disabled={!canSubmitComposer || isComposerDisabled}
-                                    className={sendButtonClassName}
-                                >
-                                    <Send className="h-4 w-4 -ml-0.5" />
-                                </button>
+                                        <button
+                                            onClick={isLoading ? () => void onStop?.() : onSend}
+                                            aria-label={isLoading ? (isStopping ? 'Stopping task' : 'Stop task') : 'Send message'}
+                                            disabled={isLoading ? !onStop || isStopping : !canSubmitComposer || isComposerDisabled}
+                                            className={sendButtonClassName}
+                                        >
+                                            {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 -ml-0.5" />}
+                                        </button>
                                 <ThinkingModeSelect
                                     label={thinkingLabel}
                                     value={thinkingMode}

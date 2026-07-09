@@ -233,7 +233,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST parser",
           "description": "AST로 Bash 구조와 주입 위험을 이해합니다.",
-          "note": "runtime을 FEATURE_TREE_SITTER_BASH와 함께 시작해야 합니다. 복잡한 명령은 더 보수적으로 처리됩니다.",
+          "note": "관리자 설정으로 제어되며 다음 BeeGame 턴에 적용됩니다. 복잡한 명령은 더 보수적으로 처리됩니다.",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {
@@ -475,7 +475,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
+        "refundRule": "Charged by actual use; unused credits return.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {
@@ -636,7 +636,7 @@
       }
     },
     "credits": {
-      "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
+      "refundRule": "Charged by actual use; unused credits return."
     }
   },
   "dashboard": {

@@ -110,6 +110,9 @@ export interface UseChatReturn {
    */
   stopTask: () => Promise<void>;
 
+  /** Whether a stop request is awaiting backend confirmation */
+  isStopping: boolean;
+
   /**
    * Approve the current plan
    * @param feedback - Optional user feedback
@@ -207,6 +210,8 @@ export const useChat = ({
 }: UseChatOptions): UseChatReturn => {
   // State management
   const [isLoading, setIsLoading] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const isStoppingRef = useRef(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [canContinue, setCanContinue] = useState(false);
   const [approvalState, setApprovalState] = useState<UseChatReturn['approvalState']>({
@@ -957,6 +962,7 @@ export const useChat = ({
    * Requirements: 6.1
    */
   const stopTask = useCallback(async () => {
+    if (isStoppingRef.current) return;
     const stopTargetId = currentTaskId || (isBeeGameAdapterEnabled() ? projectId : '');
     if (!stopTargetId) {
       console.warn('[useChat] No task to stop');
@@ -964,6 +970,8 @@ export const useChat = ({
     }
 
     try {
+      isStoppingRef.current = true;
+      setIsStopping(true);
       console.log('[useChat] Stopping task:', stopTargetId);
 
       // Send stop request to backend
@@ -998,6 +1006,9 @@ export const useChat = ({
       });
 
       onError?.(error as Error);
+    } finally {
+      isStoppingRef.current = false;
+      setIsStopping(false);
     }
   }, [currentTaskId, projectId, addMessage, setCurrentSender, onError]);
 
@@ -1161,6 +1172,7 @@ export const useChat = ({
     reviseManifest,
     approvalState,
     isLoading,
+    isStopping,
     currentTaskId,
     canContinue,
     wsState

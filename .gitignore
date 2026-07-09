@@ -3,6 +3,8 @@ node_modules
 dist
 coverage
 .env
+.env.local
+.env.billing
 .env.production
 docker/.env.production
 docker/.env.billing

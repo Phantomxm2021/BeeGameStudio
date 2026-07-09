@@ -29,6 +29,7 @@ const originalEnv = { ...process.env }
 
 beforeEach(() => {
   process.env = { ...originalEnv }
+  process.env.SKILL_SEARCH_ENABLED = '1'
   haikuCalls.length = 0
   haikuResponder = async () => ({
     message: { content: [{ type: 'text', text: 'optimize code performance' }] },
@@ -42,25 +43,28 @@ afterEach(() => {
 })
 
 describe('isIntentNormalizeEnabled', () => {
-  test('defaults to disabled when flag is unset', () => {
+  test('follows skill search when intent flag is unset', () => {
     delete process.env.SKILL_SEARCH_INTENT_ENABLED
-    expect(isIntentNormalizeEnabled()).toBe(false)
-  })
-
-  test('enabled when flag is "1"', () => {
-    process.env.SKILL_SEARCH_INTENT_ENABLED = '1'
+    process.env.SKILL_SEARCH_ENABLED = '1'
     expect(isIntentNormalizeEnabled()).toBe(true)
   })
 
-  test('disabled for any value other than "1"', () => {
-    process.env.SKILL_SEARCH_INTENT_ENABLED = 'true'
+  test('disabled when skill search is disabled', () => {
+    delete process.env.SKILL_SEARCH_INTENT_ENABLED
+    delete process.env.SKILL_SEARCH_ENABLED
+    expect(isIntentNormalizeEnabled()).toBe(false)
+  })
+
+  test('debug override disables normalization', () => {
+    process.env.SKILL_SEARCH_ENABLED = '1'
+    process.env.SKILL_SEARCH_INTENT_ENABLED = '0'
     expect(isIntentNormalizeEnabled()).toBe(false)
   })
 })
 
 describe('normalizeQueryIntent — feature flag gating', () => {
-  test('returns query unchanged when flag is off', async () => {
-    delete process.env.SKILL_SEARCH_INTENT_ENABLED
+  test('returns query unchanged when skill search is off', async () => {
+    delete process.env.SKILL_SEARCH_ENABLED
     const result = await normalizeQueryIntent('帮我优化代码的性能')
     expect(result).toBe('帮我优化代码的性能')
     expect(haikuCalls.length).toBe(0)

@@ -123,6 +123,7 @@ describe('useChat clarification gate handling', () => {
         value.mockClear();
       }
     });
+
     systemStoreState.tasks = [];
     Object.values(systemStoreState).forEach((value) => {
       if (typeof value === 'function' && 'mockClear' in value) {
@@ -134,6 +135,31 @@ describe('useChat clarification gate handling', () => {
         value.mockClear();
       }
     });
+  });
+
+  it('coalesces duplicate stop requests while waiting for backend confirmation', async () => {
+    let resolveStop: (() => void) | undefined;
+    vi.mocked(api.stopTask).mockImplementationOnce(() => new Promise(resolve => {
+      resolveStop = () => resolve({} as any);
+    }));
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    let firstStop: Promise<void> | undefined;
+    let secondStop: Promise<void> | undefined;
+    act(() => {
+      firstStop = result.current.stopTask();
+      secondStop = result.current.stopTask();
+    });
+
+    expect(api.stopTask).toHaveBeenCalledTimes(1);
+    expect(result.current.isStopping).toBe(true);
+
+    await act(async () => {
+      resolveStop?.();
+      await Promise.all([firstStop, secondStop]);
+    });
+
+    expect(result.current.isStopping).toBe(false);
   });
 
   it('does not expose clarification gates as generic continue state', () => {

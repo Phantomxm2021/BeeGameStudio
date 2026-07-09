@@ -47,6 +47,21 @@ const legacyGateReview: PendingUserReviewItem = {
     open_blocker_ids: ['issue_1'],
 };
 
+const beeGamePermissionReview: PendingUserReviewItem = {
+    ...approvalReview,
+    gate_id: 'gate_beegame_permission',
+    type: 'BEEGAME_PERMISSION',
+    title: 'Bash permission',
+    artifact: {
+        input: {
+            command: 'npm create vite@latest . -- --template react-ts 2>&1',
+        },
+    },
+    binding: {
+        workspace_ref: '/Projects/BeeGameStudio/generated-game',
+    },
+};
+
 const renderChatPanel = (overrides: Partial<ComponentProps<typeof ChatPanel>> = {}) => {
     const onApprovePlan = vi.fn().mockResolvedValue(undefined);
     const onPreviewArtifact = vi.fn();
@@ -114,6 +129,38 @@ describe('ChatPanel approval bar', () => {
         expect(onApprovePlan).toHaveBeenCalledWith(approvalReview);
     });
 
+    it('shows a single stop action while the AI is processing', async () => {
+        const user = userEvent.setup();
+        const onStop = vi.fn().mockResolvedValue(undefined);
+
+        renderChatPanel({
+            isLoading: true,
+            actionReview: undefined,
+            onStop,
+            isStopping: false,
+        });
+
+        const stopButton = screen.getByRole('button', { name: 'Stop task' });
+        expect(stopButton).toBeEnabled();
+        expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
+
+        await user.click(stopButton);
+        expect(onStop).toHaveBeenCalledTimes(1);
+    });
+
+    it('disables the stop action while the stop request is in flight', () => {
+        const onStop = vi.fn().mockResolvedValue(undefined);
+
+        renderChatPanel({
+            isLoading: true,
+            actionReview: undefined,
+            onStop,
+            isStopping: true,
+        });
+
+        expect(screen.getByRole('button', { name: 'Stopping task' })).toBeDisabled();
+    });
+
     it('only disables the submitting action and preserves the compact two-column bar layout', () => {
         renderChatPanel({
             approvalState: {
@@ -158,6 +205,25 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByPlaceholderText(/ask team/i)).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+    });
+
+    it('shows BeeGame permission requests in a panel above the composer instead of replacing the input', () => {
+        renderChatPanel({
+            actionReview: beeGamePermissionReview,
+            pendingReviews: [beeGamePermissionReview],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
+        expect(screen.getByText('BeeGame 想运行 Bash 命令')).toBeInTheDocument();
+        expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
+        expect(screen.getByText('/Projects/BeeGameStudio/generated-game')).toBeInTheDocument();
+        expect(screen.getByText('可能创建文件、安装依赖或访问网络')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '允许本次' })).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('等待权限确认')).toBeInTheDocument();
+        expect(screen.queryByPlaceholderText('询问团队（Shift+Enter 换行）...')).not.toBeInTheDocument();
     });
 
     it('uses the BeeGame dock styling for the normal composer', () => {
@@ -252,6 +318,7 @@ describe('ChatPanel approval bar', () => {
 
     it('renders BeeGame messages as a compact feed with tools after their message', async () => {
         const user = userEvent.setup();
+        const onEditMessage = vi.fn();
         renderChatPanel({
             actionReview: undefined,
             pendingReviews: [],
@@ -297,6 +364,7 @@ describe('ChatPanel approval bar', () => {
                 blocked: false,
                 next_action: 'running',
             } as any,
+            onEditMessage,
         });
 
         expect(screen.getByTestId('beegame-message-scroller')).toBeInTheDocument();
@@ -351,6 +419,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
+        await user.click(within(userMessage).getByRole('button', { name: 'Edit message' }));
+        expect(onEditMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'm_user', content: '请构建首个可玩版本' }));
         expect(userMessage).toHaveClass('rounded-3xl');
         expect(userMessage).toHaveClass('max-w-[46rem]');
         expect(userMessage).not.toHaveClass('ml-auto');

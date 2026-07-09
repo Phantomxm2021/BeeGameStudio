@@ -42,6 +42,8 @@ interface RightSidebarProps {
         thinkingMode?: BeeGameThinkingMode
     ) => void;
     isLoading: boolean;
+    onStopTask?: () => void | Promise<void>;
+    isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onApprovePlan?: (
         review: ReviewBindingPayload & { gate_id: string },
@@ -77,6 +79,8 @@ export function RightSidebar({
     messages,
     onSendMessage,
     isLoading,
+    onStopTask,
+    isStopping = false,
     isRuntimeBusy = false,
     onApprovePlan,
     approvalState = { gateId: null, action: null, phase: 'idle', message: '' },
@@ -399,6 +403,8 @@ export function RightSidebar({
                             <ChatPanel 
                                 messages={messages}
                                 isLoading={isLoading}
+                                onStop={onStopTask}
+                                isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}

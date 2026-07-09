@@ -110,7 +110,7 @@
           "fullBuild": "確認構建"
         },
         "description": "本次{{taskName}}將預扣 {{reservedCredits}} credits。任務結束後會按實際 token 和工具消耗結算，未使用部分自動退回。",
-        "refundRule": "任務結束後按實際 token 和工具消耗結算，未使用部分自動退回。",
+        "refundRule": "按實際消耗結算，未用自動退回。",
         "balance": "目前餘額",
         "reserved": "本次預扣",
         "kind": {
@@ -271,7 +271,7 @@
       }
     },
     "credits": {
-      "refundRule": "任務結束後按實際 token 和工具消耗結算，未使用部分自動退回。"
+      "refundRule": "按實際消耗結算，未用自動退回。"
     }
   },
   "settings": {
@@ -365,7 +365,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST 解析",
           "description": "用 AST 理解 Bash 結構與注入風險。",
-          "note": "需要 runtime 帶 FEATURE_TREE_SITTER_BASH 啟動；複雜命令會更保守。",
+          "note": "由管理員設定控制，並在下一次 BeeGame 對話中生效；複雜命令會更保守。",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {

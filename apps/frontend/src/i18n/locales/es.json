@@ -233,7 +233,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST parser",
           "description": "Entiende la estructura Bash y riesgos de inyección con AST.",
-          "note": "Requiere FEATURE_TREE_SITTER_BASH al iniciar runtime. Los comandos complejos serán más conservadores.",
+          "note": "Se controla desde la configuración de admin y se aplica en el siguiente turno de BeeGame. Los comandos complejos serán más conservadores.",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {
@@ -475,7 +475,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
+        "refundRule": "Se cobra el uso real; lo no usado se reembolsa.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {
@@ -636,7 +636,7 @@
       }
     },
     "credits": {
-      "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
+      "refundRule": "Se cobra el uso real; lo no usado se reembolsa."
     }
   },
   "dashboard": {

@@ -22,6 +22,7 @@ const showWarning = vi.fn();
 const stopTask = vi.fn();
 const sendMessage = vi.fn();
 const apiMocks = vi.hoisted(() => ({
+    getProjectPreviewAccess: vi.fn(),
     startProjectPreview: vi.fn().mockResolvedValue({}),
     restartProjectPreview: vi.fn().mockResolvedValue({}),
     stopProjectPreview: vi.fn().mockResolvedValue({}),
@@ -200,6 +201,7 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../services/api', () => ({
     api: {
+        getProjectPreviewAccess: apiMocks.getProjectPreviewAccess,
         startProjectPreview: apiMocks.startProjectPreview,
         restartProjectPreview: apiMocks.restartProjectPreview,
         stopProjectPreview: apiMocks.stopProjectPreview,
@@ -335,6 +337,10 @@ describe('DashboardView runtime loading', () => {
         loadPendingReviews.mockResolvedValue(undefined);
         loadProjectStatus.mockResolvedValue(undefined);
         loadSystemReadiness.mockResolvedValue(undefined);
+        apiMocks.getProjectPreviewAccess.mockImplementation(async () => ({
+            status: 'ready',
+            accessUrl: String(mockedProjectStatus.build_report?.build_url || ''),
+        }));
     });
 
     it('loads runtime status immediately when mounted', async () => {
@@ -580,11 +586,12 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
-        const controls = screen.getByRole('group', { name: '预览操作' });
-        expect(within(controls).getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
-        expect(within(controls).getByRole('button', { name: '播放预览' })).toBeInTheDocument();
-        expect(within(controls).getByRole('button', { name: '发布游戏' })).toBeEnabled();
-        expect(within(controls).getByRole('button', { name: '打开线上版本' })).toBeInTheDocument();
+        const primaryControls = screen.getByRole('group', { name: '预览操作' });
+        const onlineControls = screen.getByRole('group', { name: '打开线上版本' });
+        expect(within(primaryControls).getByRole('button', { name: '播放预览' })).toBeInTheDocument();
+        expect(within(primaryControls).getByRole('button', { name: '发布游戏' })).toBeEnabled();
+        expect(within(onlineControls).getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
+        expect(within(onlineControls).getByRole('button', { name: '打开线上版本' })).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: '预览' })).toBeInTheDocument();
         expect(screen.queryByText('实时预览')).not.toBeInTheDocument();
         expect(screen.queryByText('Live Preview')).not.toBeInTheDocument();
@@ -613,6 +620,7 @@ describe('DashboardView runtime loading', () => {
 
         const userSettingsMenu = screen.getByTestId('beegame-user-settings-menu');
         expect(userSettingsMenu).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-shell-top-nav')).not.toContainElement(userSettingsMenu);
         expect(userSettingsMenu).toHaveAttribute('data-surface', 'frosted-glass');
         expect(within(userSettingsMenu).getByText('Nova Player')).toBeInTheDocument();
         expect(within(userSettingsMenu).getByText('nova@example.com')).toBeInTheDocument();
@@ -681,6 +689,26 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByRole('button', { name: '停止预览' })).toBeInTheDocument();
     });
 
+    it('groups online preview actions after the primary preview actions', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            build_report: {
+                status: 'passed',
+                build_url: 'http://127.0.0.1:5178',
+                entrypoint: 'dist/index.html',
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const actionGroups = await screen.findAllByRole('group');
+        expect(actionGroups).toHaveLength(2);
+        expect(within(actionGroups[0]).getByRole('button', { name: '停止预览' })).toBeInTheDocument();
+        expect(within(actionGroups[0]).getByRole('button', { name: '发布游戏' })).toBeInTheDocument();
+        expect(within(actionGroups[1]).getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
+        expect(within(actionGroups[1]).getByRole('button', { name: '打开线上版本' })).toBeInTheDocument();
+    });
+
     it('stops the managed preview without stopping the BeeGame runtime', async () => {
         const user = userEvent.setup();
         stopTask.mockResolvedValue(undefined);
@@ -727,6 +755,34 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(apiMocks.startProjectPreview).toHaveBeenCalledWith('proj_1'));
         expect(stopTask).not.toHaveBeenCalled();
+    });
+
+    it('shows immediate feedback and prevents duplicate starts while the preview is starting', async () => {
+        const user = userEvent.setup();
+        let resolveStartPreview: (() => void) | undefined;
+        apiMocks.startProjectPreview.mockImplementationOnce(() => new Promise<void>((resolve) => {
+            resolveStartPreview = resolve;
+        }));
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'finished',
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const playButton = screen.getByRole('button', { name: '播放预览' });
+        await user.click(playButton);
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '正在准备预览' })).toBeDisabled();
+            expect(screen.getByTestId('beegame-preview-surface')).toHaveTextContent('正在准备预览');
+        });
+        await user.click(screen.getByRole('button', { name: '正在准备预览' }));
+        expect(apiMocks.startProjectPreview).toHaveBeenCalledTimes(1);
+
+        resolveStartPreview?.();
+        await waitFor(() => expect(screen.getByRole('button', { name: '播放预览' })).toBeEnabled());
     });
 
     it('does not show stale preview summaries in the empty preview state', async () => {
@@ -876,6 +932,10 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(apiMocks.deployProject).toHaveBeenCalledWith('proj_1'));
         await waitFor(() => expect(within(deploymentDialog).getAllByText(/lastPoint/).length).toBeGreaterThan(0));
+        await user.click(within(deploymentDialog).getByRole('button', { name: '修复' }));
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0][0]).toContain("src/components/Canvas.tsx(149,14): error TS18048: 'lastPoint' is possibly 'undefined'.");
         expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });
 

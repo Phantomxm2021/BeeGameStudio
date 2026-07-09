@@ -1904,7 +1904,7 @@ function CreditConfirmDialog({
                             </div>
                         </div>
                         <div className="border-t border-white/10 px-7 py-3">
-                            <p className="type-footnote truncate text-zinc-400">
+                            <p className="type-footnote text-zinc-400">
                                 {copy.credits.refundRule}
                             </p>
                         </div>

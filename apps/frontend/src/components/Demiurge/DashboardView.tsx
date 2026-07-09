@@ -178,7 +178,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const {
         sendMessage, stopTask, continueTask, approvePlan,
         uploadManifestCsv, approveManifest, approvalState,
-        isLoading, canContinue, wsState
+        isLoading, isStopping, canContinue, wsState
     } = useChat({
         projectId,
         onError: (err) => console.error(err),
@@ -642,6 +642,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                     return sendMessage(message, undefined, taskType, attachments, thinkingMode);
                 }}
                 isLoading={isLoading}
+                onStopTask={stopTask}
+                isStopping={isStopping}
                 isRuntimeBusy={currentStatus === 'running'}
                 onApprovePlan={hasPendingPlanReview && canApproveTool && !isProjectInteractionLocked ? approvePlan : undefined}
                 approvalState={approvalState}

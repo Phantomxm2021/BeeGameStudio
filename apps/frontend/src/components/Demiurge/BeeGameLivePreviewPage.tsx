@@ -149,6 +149,7 @@ export function BeeGameLivePreviewPage({
     const [isProfileOpen, setProfileOpen] = useState(false);
     const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
+    const [isStartingPreview, setStartingPreview] = useState(false);
     const [isStoppingPreview, setStoppingPreview] = useState(false);
     const [previewConsoleEntries, setPreviewConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
     const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
@@ -170,9 +171,13 @@ export function BeeGameLivePreviewPage({
         }
     }, [previewRefreshNonce, previewUrl]);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
-    const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
+    const previewState = isStartingPreview
+        ? 'starting'
+        : isPreviewLocallyStopped
+            ? 'stopped'
+            : getPreviewState(status, buildReport);
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
-    const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStoppingPreview && !isInteractionLocked;
+    const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStartingPreview && !isStoppingPreview && !isInteractionLocked;
     const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
     const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked;
     const buildErrorLogs = collectBuildErrorLogs(buildReport);
@@ -203,9 +208,14 @@ export function BeeGameLivePreviewPage({
         }
     };
     const handlePlay = async () => {
-        if (isInteractionLocked) return;
+        if (isInteractionLocked || isStartingPreview) return;
         setStoppedPreviewUrl('');
-        await onStartPreview?.();
+        setStartingPreview(true);
+        try {
+            await onStartPreview?.();
+        } finally {
+            setStartingPreview(false);
+        }
     };
     const handleRestart = async () => {
         if (isInteractionLocked) return;
@@ -332,38 +342,39 @@ export function BeeGameLivePreviewPage({
                     ) : null}
                 </div>
 
-                <AccountActionsMenu
-                    lang={lang}
-                    className="absolute right-7 top-5 z-[150]"
-                    isSettingsOpen={isSettingsOpen}
-                    isHistoryOpen={isHistoryOpen}
-                    isProfileOpen={isProfileOpen}
-                    isCreditStoreOpen={isCreditStoreOpen}
-                    currentUserId={currentUser?.id}
-                    currentUserDisplayName={currentUser?.displayName || currentUser?.email}
-                    currentUserEmail={currentUser?.email}
-                    currentUserAvatarUrl={currentUser?.avatarUrl}
-                    creditBalance={accountCreditBalance?.balanceCredits}
-                    onOpenLogin={() => setSettingsOpen(true)}
-                    onOpenProfile={() => {
-                        closeAccountSurfaces();
-                        setProfileOpen(true);
-                    }}
-                    onOpenCreditStore={() => {
-                        closeAccountSurfaces();
-                        setCreditStoreOpen(true);
-                    }}
-                    onToggleSettings={() => {
-                        closeAccountSurfaces();
-                        setSettingsOpen(true);
-                    }}
-                    onToggleHistory={() => {
-                        closeAccountSurfaces();
-                        setHistoryOpen(true);
-                    }}
-                    onSignOut={currentUser ? () => void handleSignOut() : undefined}
-                />
             </header>
+
+            <AccountActionsMenu
+                lang={lang}
+                className="absolute right-7 top-5 z-[150]"
+                isSettingsOpen={isSettingsOpen}
+                isHistoryOpen={isHistoryOpen}
+                isProfileOpen={isProfileOpen}
+                isCreditStoreOpen={isCreditStoreOpen}
+                currentUserId={currentUser?.id}
+                currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+                currentUserEmail={currentUser?.email}
+                currentUserAvatarUrl={currentUser?.avatarUrl}
+                creditBalance={accountCreditBalance?.balanceCredits}
+                onOpenLogin={() => setSettingsOpen(true)}
+                onOpenProfile={() => {
+                    closeAccountSurfaces();
+                    setProfileOpen(true);
+                }}
+                onOpenCreditStore={() => {
+                    closeAccountSurfaces();
+                    setCreditStoreOpen(true);
+                }}
+                onToggleSettings={() => {
+                    closeAccountSurfaces();
+                    setSettingsOpen(true);
+                }}
+                onToggleHistory={() => {
+                    closeAccountSurfaces();
+                    setHistoryOpen(true);
+                }}
+                onSignOut={currentUser ? () => void handleSignOut() : undefined}
+            />
 
             <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
                 <section className="flex min-h-0 flex-1 flex-col overflow-visible rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
@@ -375,73 +386,81 @@ export function BeeGameLivePreviewPage({
                                 </h1>
                             </div>
                         </div>
-                        <ButtonGroup aria-label={labels.actions || 'Actions'} className="relative z-20">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="icon-lg"
-                                aria-label={labels.reload}
-                                title={labels.reload}
-                                disabled={!canShowPreview || isInteractionLocked}
-                                onClick={handleRestart}
-                                className={previewControlButtonClass}
-                            >
-                                <RefreshCw className="h-4 w-4" />
-                            </Button>
-                            {!canShowPreview ? (
+                        <div className="relative z-20 flex shrink-0 items-center justify-end gap-2">
+                            <ButtonGroup aria-label={labels.actions || 'Actions'}>
+                                {!canShowPreview ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon-lg"
+                                        aria-label={isStartingPreview ? labels.starting : labels.play}
+                                        title={isStartingPreview ? labels.starting : labels.play}
+                                        disabled={!canStartPreview}
+                                        onClick={handlePlay}
+                                        className={previewControlButtonClass}
+                                    >
+                                        {isStartingPreview ? (
+                                            <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                        ) : (
+                                            <Play className="h-4 w-4 fill-current" />
+                                        )}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon-lg"
+                                        aria-label={labels.stop}
+                                        title={labels.stop}
+                                        disabled={!canStopPreview}
+                                        onClick={handleStop}
+                                        className={previewControlButtonClass}
+                                    >
+                                        <Square className="h-3.5 w-3.5 fill-current" />
+                                    </Button>
+                                )}
                                 <Button
                                     type="button"
                                     variant="outline"
                                     size="icon-lg"
-                                    aria-label={labels.play}
-                                    title={labels.play}
-                                    disabled={!canStartPreview}
-                                    onClick={handlePlay}
+                                    aria-label={isDeploying ? labels.deploying : labels.deploy}
+                                    title={isDeploying ? labels.deploying : labels.deploy}
+                                    disabled={!canDeploy}
+                                    onClick={() => setDeploymentDialogOpen(true)}
                                     className={previewControlButtonClass}
                                 >
-                                    <Play className="h-4 w-4 fill-current" />
+                                    <Rocket className="h-4 w-4" />
                                 </Button>
-                            ) : (
+                            </ButtonGroup>
+                            <ButtonGroup aria-label={labels.openLive || labels.open}>
                                 <Button
                                     type="button"
                                     variant="outline"
                                     size="icon-lg"
-                                    aria-label={labels.stop}
-                                    title={labels.stop}
-                                    disabled={!canStopPreview}
-                                    onClick={handleStop}
+                                    aria-label={labels.reload}
+                                    title={labels.reload}
+                                    disabled={!canShowPreview || isInteractionLocked}
+                                    onClick={handleRestart}
                                     className={previewControlButtonClass}
                                 >
-                                    <Square className="h-3.5 w-3.5 fill-current" />
+                                    <RefreshCw className="h-4 w-4" />
                                 </Button>
-                            )}
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="icon-lg"
-                                aria-label={isDeploying ? labels.deploying : labels.deploy}
-                                title={isDeploying ? labels.deploying : labels.deploy}
-                                disabled={!canDeploy}
-                                onClick={() => setDeploymentDialogOpen(true)}
-                                className={previewControlButtonClass}
-                            >
-                                <Rocket className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="icon-lg"
-                                aria-label={labels.openLive || labels.open}
-                                title={labels.openLive || labels.open}
-                                disabled={!canShowPreview}
-                                onClick={() => {
-                                    if (previewUrl) onOpenExternal?.(previewUrl);
-                                }}
-                                className={previewControlButtonClass}
-                            >
-                                <ExternalLink className="h-4 w-4" />
-                            </Button>
-                        </ButtonGroup>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-lg"
+                                    aria-label={labels.openLive || labels.open}
+                                    title={labels.openLive || labels.open}
+                                    disabled={!canShowPreview}
+                                    onClick={() => {
+                                        if (previewUrl) onOpenExternal?.(previewUrl);
+                                    }}
+                                    className={previewControlButtonClass}
+                                >
+                                    <ExternalLink className="h-4 w-4" />
+                                </Button>
+                            </ButtonGroup>
+                        </div>
                     </div>
 
                     <div

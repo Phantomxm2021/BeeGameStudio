@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
@@ -208,6 +208,13 @@ type SessionRecord = {
   currentTurnId: string | null
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
+}
+
+type RuntimeObservationFeature = {
+  id: string
+  label: string
+  stage: string
+  status: 'available' | 'enabled' | 'disabled'
 }
 
 export type StartBeeGameSessionInput = {
@@ -1078,47 +1085,50 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     status: 'initialized' | 'turn_completed' | 'empty_turn' | 'model_updated',
   ): void {
+    const runtimeSettings = readSessionRuntimeSettings(record.userDataRoot)
+    const features: RuntimeObservationFeature[] = [
+      {
+        id: 'CONTEXT_COLLAPSE',
+        label: 'Context collapse',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      {
+        id: 'HISTORY_SNIP',
+        label: 'History snip',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      {
+        id: 'TOKEN_BUDGET',
+        label: 'Token budget',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      {
+        id: 'PROMPT_CACHE_BREAK_DETECTION',
+        label: 'Prompt cache diagnostics',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      {
+        id: 'SHOT_STATS',
+        label: 'Shot stats',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      {
+        id: 'MONITOR_TOOL',
+        label: 'Monitor tool',
+        stage: 'phase_1',
+        status: 'available',
+      },
+      ...runtimeSettingsFeatures(runtimeSettings),
+    ]
     this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
       type: 'runtime.observation',
       status,
-      features: [
-        {
-          id: 'CONTEXT_COLLAPSE',
-          label: 'Context collapse',
-          stage: 'phase_1',
-          status: 'available',
-        },
-        {
-          id: 'HISTORY_SNIP',
-          label: 'History snip',
-          stage: 'phase_1',
-          status: 'available',
-        },
-        {
-          id: 'TOKEN_BUDGET',
-          label: 'Token budget',
-          stage: 'phase_1',
-          status: 'available',
-        },
-        {
-          id: 'PROMPT_CACHE_BREAK_DETECTION',
-          label: 'Prompt cache diagnostics',
-          stage: 'phase_1',
-          status: 'available',
-        },
-        {
-          id: 'SHOT_STATS',
-          label: 'Shot stats',
-          stage: 'phase_1',
-          status: 'available',
-        },
-        {
-          id: 'MONITOR_TOOL',
-          label: 'Monitor tool',
-          stage: 'phase_1',
-          status: 'available',
-        },
-      ],
+      features,
       counters: {
         eventCount: record.events.length,
         toolUseCount: record.toolUses.size,
@@ -3467,6 +3477,75 @@ function sanitizeBeeGameVisibleValue(value: unknown): unknown {
       ]
     }),
   )
+}
+
+function readSessionRuntimeSettings(
+  userDataRoot: string | undefined,
+): Record<string, unknown> {
+  if (!userDataRoot) return {}
+  const filePath = join(userDataRoot, '.runtime', 'app', 'settings.json')
+  if (!existsSync(filePath)) return {}
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown
+    return isObject(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function runtimeSettingsFeatures(
+  settings: Record<string, unknown>,
+): RuntimeObservationFeature[] {
+  return [
+    runtimeSettingsFeature(
+      'AUTO_MEMORY',
+      'Auto memory',
+      settings.autoMemoryEnabled,
+    ),
+    runtimeSettingsFeature(
+      'AUTO_DREAM',
+      'Auto dream',
+      settings.autoDreamEnabled,
+    ),
+    runtimeSettingsFeature(
+      'SKILL_SEARCH',
+      'Skill search',
+      settings.skillSearchEnabled,
+    ),
+    runtimeSettingsFeature(
+      'TREE_SITTER_BASH',
+      'Tree-sitter Bash',
+      settings.treeSitterBashEnabled,
+    ),
+    runtimeSettingsFeature(
+      'WEB_BROWSER_TOOL',
+      'Web browser tool',
+      settings.webBrowserToolEnabled,
+    ),
+    runtimeSettingsFeature(
+      'BASH_CLASSIFIER',
+      'Bash classifier',
+      settings.bashClassifierEnabled,
+    ),
+    runtimeSettingsFeature(
+      'MCP_SKILLS',
+      'MCP skills',
+      settings.mcpSkillsEnabled,
+    ),
+  ]
+}
+
+function runtimeSettingsFeature(
+  id: string,
+  label: string,
+  value: unknown,
+): RuntimeObservationFeature {
+  return {
+    id,
+    label,
+    stage: 'admin_runtime',
+    status: value === true ? 'enabled' : 'disabled',
+  }
 }
 
 function sanitizeBeeGameText(value: string): string {

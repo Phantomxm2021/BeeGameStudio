@@ -17,12 +17,14 @@
  * - Process-level cache: identical queries within a session reuse the result.
  * - Graceful fallback: Haiku failure / timeout / empty → return original query.
  * - ASCII-only fast path: queries without CJK characters skip the LLM entirely.
- * - Feature-flagged: `SKILL_SEARCH_INTENT_ENABLED=1` to opt in.
+ * - Runtime-gated with skill search itself. `SKILL_SEARCH_INTENT_ENABLED=0`
+ *   remains a local debug override to disable this normalization path.
  */
 
 import { queryHaiku } from '../api/claude.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { isSkillSearchEnabled } from './featureCheck.js'
 
 const INTENT_SYSTEM_PROMPT = `You are a query normalizer for a skill-search index.
 
@@ -77,7 +79,8 @@ function setCachedQueryIntent(key: string, value: string): void {
 }
 
 export function isIntentNormalizeEnabled(): boolean {
-  return process.env.SKILL_SEARCH_INTENT_ENABLED === '1'
+  if (process.env.SKILL_SEARCH_INTENT_ENABLED === '0') return false
+  return isSkillSearchEnabled()
 }
 
 /** Only reset between tests. */

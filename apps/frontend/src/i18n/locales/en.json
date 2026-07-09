@@ -112,7 +112,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
+        "refundRule": "Charged by actual use; unused credits return.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {
@@ -273,7 +273,7 @@
       }
     },
     "credits": {
-      "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
+      "refundRule": "Charged by actual use; unused credits return."
     }
   },
   "settings": {
@@ -432,7 +432,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST parser",
           "description": "Understand Bash structure and injection risks with an AST.",
-          "note": "Requires FEATURE_TREE_SITTER_BASH at runtime startup. Complex commands become more conservative.",
+          "note": "Controlled by admin settings and applied on the next BeeGame turn. Complex commands become more conservative.",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {
@@ -635,6 +635,17 @@
     "starting": "Starting",
     "refreshing": "Refreshing",
     "permissionRequired": "Permission Required",
+    "permissionBashTitle": "BeeGame wants to run a Bash command",
+    "permissionToolTitle": "BeeGame wants tool permission",
+    "permissionPanelDescription": "Confirm whether this action is allowed. The current task is paused until you decide.",
+    "permissionCommandLabel": "Command",
+    "permissionTargetLabel": "Target",
+    "permissionScopeLabel": "Scope",
+    "permissionScopeUnknown": "Current workspace",
+    "permissionRiskLabel": "Risk",
+    "permissionRiskGeneric": "May create files, install dependencies, or access the network",
+    "permissionPendingPlaceholder": "Waiting for permission confirmation",
+    "allowOnce": "Allow once",
     "clarificationRequired": "Clarification Required",
     "approvalRequired": "Approval Required",
     "revisionRequired": "Revision Required",

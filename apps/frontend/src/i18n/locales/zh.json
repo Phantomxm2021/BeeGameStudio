@@ -112,7 +112,7 @@
           "fullBuild": "确认构建"
         },
         "description": "本次{{taskName}}将预扣 {{reservedCredits}} credits。任务结束后会按实际 token 和工具消耗结算，未使用部分自动退回。",
-        "refundRule": "任务结束后按实际 token 和工具消耗结算，未使用部分自动退回。",
+        "refundRule": "按实际消耗结算，未用自动退回。",
         "balance": "当前余额",
         "reserved": "本次预扣",
         "kind": {
@@ -273,7 +273,7 @@
       }
     },
     "credits": {
-      "refundRule": "任务结束后按实际 token 和工具消耗结算，未使用部分自动退回。"
+      "refundRule": "按实际消耗结算，未用自动退回。"
     }
   },
   "settings": {
@@ -432,7 +432,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST 解析",
           "description": "用 AST 理解 Bash 结构和注入风险。",
-          "note": "需要 runtime 带 FEATURE_TREE_SITTER_BASH 启动；复杂命令会更保守。",
+          "note": "由管理员设置控制，并在下一次 BeeGame 对话中生效；复杂命令会更保守。",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {
@@ -635,6 +635,17 @@
     "starting": "启动中",
     "refreshing": "刷新中",
     "permissionRequired": "需要权限",
+    "permissionBashTitle": "BeeGame 想运行 Bash 命令",
+    "permissionToolTitle": "BeeGame 想访问工具权限",
+    "permissionPanelDescription": "请确认这次操作是否允许。处理前，当前任务会暂停。",
+    "permissionCommandLabel": "命令",
+    "permissionTargetLabel": "目标",
+    "permissionScopeLabel": "作用范围",
+    "permissionScopeUnknown": "当前工作区",
+    "permissionRiskLabel": "风险提示",
+    "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
+    "permissionPendingPlaceholder": "等待权限确认",
+    "allowOnce": "允许本次",
     "clarificationRequired": "需要澄清",
     "approvalRequired": "需要批准",
     "revisionRequired": "需要修订",

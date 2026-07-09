@@ -233,7 +233,7 @@
         "treeSitterBashEnabled": {
           "label": "Bash AST parser",
           "description": "AST で Bash 構造と注入リスクを理解します。",
-          "note": "FEATURE_TREE_SITTER_BASH 付きで runtime を起動する必要があります。複雑な命令はより保守的になります。",
+          "note": "管理者設定で制御され、次の BeeGame ターンで適用されます。複雑なコマンドはより保守的になります。",
           "scope": "restart"
         },
         "webBrowserToolEnabled": {
@@ -475,7 +475,7 @@
           "fullBuild": "Confirm build"
         },
         "description": "This {{taskName}} will reserve {{reservedCredits}} credits. It settles against actual token and tool usage, and unused credits are refunded.",
-        "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically.",
+        "refundRule": "Charged by actual use; unused credits return.",
         "balance": "Balance",
         "reserved": "Reserved",
         "kind": {
@@ -636,7 +636,7 @@
       }
     },
     "credits": {
-      "refundRule": "Final settlement uses actual token and tool usage; unused credits are refunded automatically."
+      "refundRule": "Charged by actual use; unused credits return."
     }
   },
   "dashboard": {
