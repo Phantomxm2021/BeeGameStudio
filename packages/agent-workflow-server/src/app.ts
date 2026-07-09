@@ -27,6 +27,7 @@ import {
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
+import { PreviewAccessManager } from './beegame/preview-access-manager'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisherFromEnv,
@@ -277,6 +278,7 @@ export function createAgentWorkflowApp(
     options.previewReadinessProbe,
     process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
   )
+  const previewAccess = new PreviewAccessManager()
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
@@ -296,6 +298,11 @@ export function createAgentWorkflowApp(
   const handlePreviewProxy = async (c: Context) => {
     const sessionId = c.req.param('sessionId')
     if (!sessionId) return c.text('Preview not found', 404)
+    const snapshot = beeGamePreviews.runningSnapshot(sessionId)
+    if (!snapshot || !previewAccess.authorize(readCookie(c.req.raw, previewCookieName(sessionId)), {
+      sessionId,
+      generation: snapshot.generation,
+    })) return c.text('Preview not found', 404)
     const internalUrl = beeGamePreviews.internalUrl(sessionId)
     if (!internalUrl) return c.text('Preview not found', 404)
     return proxyBeeGamePreviewRequest(
@@ -305,6 +312,16 @@ export function createAgentWorkflowApp(
       beeGamePreviews.expectsPublicPath(sessionId),
     )
   }
+  app.get('/previews/:sessionId/access/:token', c => {
+    const sessionId = c.req.param('sessionId')
+    const snapshot = beeGamePreviews.runningSnapshot(sessionId)
+    const access = snapshot
+      ? previewAccess.consumeGrant(c.req.param('token'), { sessionId, generation: snapshot.generation })
+      : undefined
+    if (!access) return c.text('Preview not found', 404)
+    c.header('set-cookie', serializePreviewCookie(sessionId, access.token, access.expiresAt))
+    return c.redirect(`/previews/${encodeURIComponent(sessionId)}/`)
+  })
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
   app.use('/api/*', cors())
@@ -1069,6 +1086,40 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/preview/access', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ status: 'unavailable', message: 'Session not found' })
+      const snapshot = beeGamePreviews.runningSnapshot(sessionRef.sessionId)
+      if (!snapshot) return c.json({ status: 'unavailable', message: 'Preview is not running' })
+      const grant = previewAccess.issue({
+        userId: user.id,
+        projectId: c.req.param('id'),
+        sessionId: sessionRef.sessionId,
+        generation: snapshot.generation,
+      })
+      return c.json({
+        status: 'ready',
+        accessUrl: `/previews/${encodeURIComponent(sessionRef.sessionId)}/access/${encodeURIComponent(grant.token)}`,
+        expiresAt: grant.expiresAt,
+      })
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
   app.post('/api/projects/:id/preview', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'preview.manage')
@@ -1086,6 +1137,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
       })
+      previewAccess.revoke(ensured.session.id)
       const snapshot = await beeGamePreviews.start({
         sessionId: ensured.session.id,
         workspacePath: ensured.binding.workspacePath,
@@ -1119,6 +1171,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
       })
+      previewAccess.revoke(ensured.session.id)
       const snapshot = await beeGamePreviews.restart({
         sessionId: ensured.session.id,
         workspacePath: ensured.binding.workspacePath,
@@ -1151,6 +1204,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      previewAccess.revoke(sessionRef.sessionId)
       const snapshot = beeGamePreviews.stop(sessionRef.sessionId, sessionRef.workspacePath)
       await dashboardRepository.upsertPreviewSnapshot(
         c.req.raw,
@@ -1582,6 +1636,7 @@ export function createAgentWorkflowApp(
     '/api/beegame-sessions',
     beeGameSessions,
     beeGamePreviews,
+    previewAccess,
     beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
@@ -1660,6 +1715,7 @@ export function createAgentWorkflowApp(
     '/api/console/sessions',
     beeGameSessions,
     beeGamePreviews,
+    previewAccess,
     undefined,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
@@ -3181,10 +3237,29 @@ function isHtmlResponse(headers: Headers): boolean {
 }
 
 function withPreviewCorsHeaders(headers: Headers): Headers {
-  headers.set('access-control-allow-origin', '*')
   headers.set('access-control-allow-methods', 'GET, HEAD, OPTIONS')
-  headers.set('access-control-allow-headers', '*')
   return headers
+}
+
+function previewCookieName(sessionId: string): string {
+  return `beegame_preview_${encodeURIComponent(sessionId)}`
+}
+
+function readCookie(request: Request, name: string): string | undefined {
+  const value = request.headers.get('cookie') || ''
+  return value.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`))?.slice(name.length + 1)
+}
+
+function serializePreviewCookie(sessionId: string, token: string, expiresAt: string): string {
+  const secure = new URL(process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL || 'http://localhost').protocol === 'https:'
+  return [
+    `${previewCookieName(sessionId)}=${encodeURIComponent(token)}`,
+    `Path=/previews/${encodeURIComponent(sessionId)}/`,
+    'HttpOnly',
+    'SameSite=Strict',
+    `Expires=${new Date(expiresAt).toUTCString()}`,
+    ...(secure ? ['Secure'] : []),
+  ].join('; ')
 }
 
 function injectBeeGamePreviewConsoleBridge(html: string, sessionId: string): string {
@@ -3270,6 +3345,7 @@ function registerBeeGameSessionRoutes(
   basePath: string,
   beeGameSessions: BeeGameSessionManager,
   beeGamePreviews: BeeGamePreviewManager,
+  previewAccess: PreviewAccessManager,
   beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
@@ -3723,6 +3799,27 @@ function registerBeeGameSessionRoutes(
     }
   })
 
+  app.get(`${basePath}/:id/preview/access`, c => {
+    const forbidden = check(c.req.raw, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionId = c.req.param('id')
+    const sessionForbidden = checkSession(c.req.raw, sessionId)
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const snapshot = beeGamePreviews.runningSnapshot(sessionId)
+    if (!snapshot) return c.json({ status: 'unavailable', message: 'Preview is not running' })
+    const grant = previewAccess.issue({
+      userId: options.getCurrentUser(c.req.raw).id,
+      projectId: beeGameSessions.metadata(sessionId)?.projectId || sessionId,
+      sessionId,
+      generation: snapshot.generation,
+    })
+    return c.json({
+      status: 'ready',
+      accessUrl: `/previews/${encodeURIComponent(sessionId)}/access/${encodeURIComponent(grant.token)}`,
+      expiresAt: grant.expiresAt,
+    })
+  })
+
   app.post(`${basePath}/:id/preview`, async c => {
     const forbidden = check(c.req.raw, 'preview.manage')
     if (forbidden) return c.json(forbidden, 403)
@@ -3735,6 +3832,7 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
+      previewAccess.revoke(c.req.param('id'))
       const snapshot = await beeGamePreviews.start({
         sessionId: c.req.param('id'),
         workspacePath,
@@ -3762,6 +3860,7 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
+      previewAccess.revoke(c.req.param('id'))
       const snapshot = await beeGamePreviews.restart({
         sessionId: c.req.param('id'),
         workspacePath,
@@ -3788,6 +3887,7 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         c.req.query('workspacePath'),
       )
+      previewAccess.revoke(c.req.param('id'))
       const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
       await options.persistPreviewSnapshot(
         c.req.raw,

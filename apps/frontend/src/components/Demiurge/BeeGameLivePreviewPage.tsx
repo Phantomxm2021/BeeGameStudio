@@ -42,6 +42,7 @@ interface BeeGameLivePreviewPageProps {
     isSyncing: boolean;
     isInteractionLocked?: boolean;
     buildReport?: BuildReportPayload | null;
+    previewAccessUrl?: string;
     deployments?: BeeGameDeploymentPayload[];
     previewRefreshNonce?: number;
     onStartPreview?: () => void | Promise<void>;
@@ -116,6 +117,7 @@ const collectBuildErrorLogs = (buildReport?: BuildReportPayload | null): string[
 };
 
 const previewControlButtonClass = 'border-white/[0.08] bg-white/[0.025] text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-white/15 hover:bg-white/[0.055] hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-white/25 disabled:text-zinc-600 disabled:opacity-45';
+const fixBuildErrorsButtonClass = 'type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30';
 
 export function BeeGameLivePreviewPage({
     lang,
@@ -129,6 +131,7 @@ export function BeeGameLivePreviewPage({
     isSyncing,
     isInteractionLocked = false,
     buildReport,
+    previewAccessUrl = '',
     deployments = [],
     previewRefreshNonce = 0,
     onStartPreview,
@@ -158,20 +161,21 @@ export function BeeGameLivePreviewPage({
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const embeddedPreviewUrl = useMemo(() => {
-        if (!previewUrl || previewRefreshNonce <= 0 || typeof window === 'undefined') return previewUrl;
+        const accessUrl = normalizeUrl(previewAccessUrl);
+        if (!accessUrl || previewRefreshNonce <= 0 || typeof window === 'undefined') return accessUrl;
         try {
-            const url = new URL(previewUrl, window.location.origin);
+            const url = new URL(accessUrl, window.location.origin);
             url.searchParams.set('__beegame_preview_refresh', String(previewRefreshNonce));
-            return /^https?:\/\//i.test(previewUrl)
+            return /^https?:\/\//i.test(accessUrl)
                 ? url.toString()
                 : `${url.pathname}${url.search}${url.hash}`;
         } catch {
-            return previewUrl;
+            return accessUrl;
         }
-    }, [previewRefreshNonce, previewUrl]);
+    }, [previewAccessUrl, previewRefreshNonce]);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
-    const canShowPreview = previewState === 'live' && Boolean(previewUrl);
+    const canShowPreview = previewState === 'live' && Boolean(previewAccessUrl);
     const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStoppingPreview && !isInteractionLocked;
     const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
     const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked;
@@ -435,7 +439,7 @@ export function BeeGameLivePreviewPage({
                                 title={labels.openLive || labels.open}
                                 disabled={!canShowPreview}
                                 onClick={() => {
-                                    if (previewUrl) onOpenExternal?.(previewUrl);
+                                    if (embeddedPreviewUrl) onOpenExternal?.(embeddedPreviewUrl);
                                 }}
                                 className={previewControlButtonClass}
                             >
@@ -489,7 +493,7 @@ export function BeeGameLivePreviewPage({
                                         type="button"
                                         aria-label={labels.fixBuildErrors}
                                         onClick={() => void onFixBuildErrors?.(buildErrorLog)}
-                                        className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
+                                        className={fixBuildErrorsButtonClass}
                                     >
                                         <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
                                         <span>{labels.fixBuildErrors}</span>
@@ -540,6 +544,7 @@ export function BeeGameLivePreviewPage({
                 onOpenExternal={onOpenExternal}
                 onDeploy={handleDeploy}
                 onRollback={onRollbackDeployment}
+                onFixBuildErrors={onFixBuildErrors}
                 isDeploying={isDeploying}
                 canDeploy={canDeploy}
             />
@@ -556,6 +561,7 @@ function DeploymentDialog({
     onOpenExternal,
     onDeploy,
     onRollback,
+    onFixBuildErrors,
     isDeploying,
     canDeploy,
 }: {
@@ -566,6 +572,7 @@ function DeploymentDialog({
     onOpenExternal?: (url: string) => void;
     onDeploy: () => void | Promise<void>;
     onRollback?: (deploymentId: string) => void | Promise<void>;
+    onFixBuildErrors?: (errorLog: string) => void | Promise<void>;
     isDeploying: boolean;
     canDeploy: boolean;
 }) {
@@ -646,11 +653,7 @@ function DeploymentDialog({
                                 {formatDeploymentTime(latest.deployedAt || latest.updatedAt)}
                             </div>
                         ) : null}
-                        {failureLog ? (
-                            <p className="type-footnote mt-2 line-clamp-2 text-red-200/80">
-                                {failureLog}
-                            </p>
-                        ) : latestDisplayUrl ? (
+                        {failureLog ? null : latestDisplayUrl ? (
                             <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
                                 <div className="min-w-0">
                                     <div className="type-caption-2 text-zinc-600">URL</div>
@@ -678,8 +681,21 @@ function DeploymentDialog({
                     </div>
                     {failureLog ? (
                         <div className="mt-4 rounded-2xl border border-red-200/10 bg-red-950/10 p-4">
-                            <div className="type-caption-2 mb-2 text-red-100/70">
-                                {labels.deploymentFailureLog}
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="type-caption-2 text-red-100/70">
+                                    {labels.deploymentFailureLog}
+                                </div>
+                                {onFixBuildErrors ? (
+                                    <button
+                                        type="button"
+                                        aria-label={labels.fixBuildErrors}
+                                        onClick={() => void onFixBuildErrors(failureLog)}
+                                        className={fixBuildErrorsButtonClass}
+                                    >
+                                        <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
+                                        <span>{labels.fixBuildErrors}</span>
+                                    </button>
+                                ) : null}
                             </div>
                             <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
                                 {failureLog}

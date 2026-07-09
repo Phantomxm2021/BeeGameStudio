@@ -886,6 +886,9 @@ describe('SupabaseDashboardStore', () => {
     await expect(store.upsertPreviewSnapshot(ownerId, 'project_1', {
       sessionId: 'session_1',
       workspacePath: '/tmp/project-one',
+      kind: 'web',
+      engine: 'web',
+      generation: 1,
       status: 'running',
       url: 'http://127.0.0.1:63100/',
       port: 63100,

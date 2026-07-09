@@ -82,6 +82,16 @@ function createAgentWorkflowApp(
   })
 }
 
+async function previewCookie(
+  app: ReturnType<typeof createAgentWorkflowApp>,
+  sessionId: string,
+): Promise<string> {
+  const accessRes = await app.request(`/api/beegame-sessions/${sessionId}/preview/access`)
+  const access = await accessRes.json() as { accessUrl: string }
+  const bootstrapRes = await app.request(access.accessUrl)
+  return bootstrapRes.headers.get('set-cookie') || ''
+}
+
 function cryptoRandomSuffix(): string {
   return createHash('sha1')
     .update(`${Date.now()}-${Math.random()}`)
@@ -2341,10 +2351,39 @@ describe('beegame session routes', () => {
       expect(fake.starts[0]?.env).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('.runtime/app')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).not.toMatch(/claude/i)
-      await expect(readFile(
+      const runtimeSettingsFile = await readFile(
         join(fake.starts[0]!.env.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
-      )).resolves.toContain('"skillSearchEnabled": true')
+      )
+      expect(JSON.parse(runtimeSettingsFile)).toEqual(expect.objectContaining({
+        autoMemoryEnabled: false,
+        autoDreamEnabled: true,
+        skillSearchEnabled: true,
+        treeSitterBashEnabled: true,
+        webBrowserToolEnabled: true,
+        bashClassifierEnabled: true,
+        mcpSkillsEnabled: true,
+      }))
+      const eventsRes = await app.request(
+        `/api/beegame-sessions/${session.id}/events`,
+      )
+      const events = await eventsRes.json()
+      const runtimeObservation = [...events].reverse().find(
+        (event: { type: string }) => event.type === 'runtime.observation',
+      )
+      expect(runtimeObservation).toEqual(expect.objectContaining({
+        payload: expect.objectContaining({
+          features: expect.arrayContaining([
+            expect.objectContaining({ id: 'AUTO_MEMORY', status: 'disabled' }),
+            expect.objectContaining({ id: 'AUTO_DREAM', status: 'enabled' }),
+            expect.objectContaining({ id: 'SKILL_SEARCH', status: 'enabled' }),
+            expect.objectContaining({ id: 'TREE_SITTER_BASH', status: 'enabled' }),
+            expect.objectContaining({ id: 'WEB_BROWSER_TOOL', status: 'enabled' }),
+            expect.objectContaining({ id: 'BASH_CLASSIFIER', status: 'enabled' }),
+            expect.objectContaining({ id: 'MCP_SKILLS', status: 'enabled' }),
+          ]),
+        }),
+      }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -6178,9 +6217,10 @@ describe('beegame session routes', () => {
         },
       )
       const started = await startRes.json()
-      const proxiedRootRes = await app.request('/previews/beegame_public_preview/')
+      const cookie = await previewCookie(app, 'beegame_public_preview')
+      const proxiedRootRes = await app.request('/previews/beegame_public_preview/', { headers: { cookie } })
       const proxiedRootText = await proxiedRootRes.text()
-      const proxiedRes = await app.request('/previews/beegame_public_preview/assets/main.js?cache=1')
+      const proxiedRes = await app.request('/previews/beegame_public_preview/assets/main.js?cache=1', { headers: { cookie } })
       const proxiedText = await proxiedRes.text()
 
       expect(startRes.status).toBe(200)
@@ -6192,10 +6232,10 @@ describe('beegame session routes', () => {
       expect(starts[0].command).toContain('--base')
       expect(starts[0].command).toContain('/previews/beegame_public_preview/')
       expect(proxiedRootRes.status).toBe(200)
-      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBeNull()
       expect(proxiedRootText).toBe('proxied /previews/beegame_public_preview/')
       expect(proxiedRes.status).toBe(200)
-      expect(proxiedRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedRes.headers.get('access-control-allow-origin')).toBeNull()
       expect(proxiedText).toBe('proxied /previews/beegame_public_preview/assets/main.js?cache=1')
     } finally {
       if (originalPreviewPublicBaseUrl === undefined) {
@@ -6258,7 +6298,8 @@ describe('beegame session routes', () => {
         },
       )
       const started = await startRes.json()
-      const proxiedRootRes = await app.request('/previews/beegame_local_preview/')
+      const cookie = await previewCookie(app, 'beegame_local_preview')
+      const proxiedRootRes = await app.request('/previews/beegame_local_preview/', { headers: { cookie } })
       const proxiedRootText = await proxiedRootRes.text()
 
       expect(startRes.status).toBe(200)
@@ -6269,7 +6310,7 @@ describe('beegame session routes', () => {
       expect(starts[0].command).toContain('--base')
       expect(starts[0].command).toContain('/previews/beegame_local_preview/')
       expect(proxiedRootRes.status).toBe(200)
-      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBeNull()
       expect(proxiedRootText).toContain('/previews/beegame_local_preview/')
       expect(proxiedRootText).toContain('data-beegame-preview-console-bridge')
       expect(proxiedRootText).toContain('beegame.preview.console')
@@ -6278,10 +6319,10 @@ describe('beegame session routes', () => {
         internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
       })
       internalServerClosed = true
-      const unavailableRes = await app.request('/previews/beegame_local_preview/')
+      const unavailableRes = await app.request('/previews/beegame_local_preview/', { headers: { cookie } })
       const unavailableText = await unavailableRes.text()
       expect(unavailableRes.status).toBe(502)
-      expect(unavailableRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(unavailableRes.headers.get('access-control-allow-origin')).toBeNull()
       expect(unavailableText).toContain('Preview upstream unavailable')
     } finally {
       if (originalPreviewPublicBaseUrl === undefined) {
@@ -6348,7 +6389,8 @@ describe('beegame session routes', () => {
           body: JSON.stringify({ workspacePath: workspace }),
         },
       )
-      const proxiedRootRes = await app.request('/previews/beegame_vite_base_preview/')
+      const cookie = await previewCookie(app, 'beegame_vite_base_preview')
+      const proxiedRootRes = await app.request('/previews/beegame_vite_base_preview/', { headers: { cookie } })
       const proxiedRootText = await proxiedRootRes.text()
 
       expect(startRes.status).toBe(200)
@@ -6368,7 +6410,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('serves preview iframe requests without requiring an API authorization header', async () => {
+  test('serves preview iframe requests only after an authenticated access bootstrap', async () => {
     const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-iframe-preview-'))
@@ -6420,10 +6462,24 @@ describe('beegame session routes', () => {
           body: JSON.stringify({ workspacePath: workspace }),
         },
       )
-      const iframeRes = await app.request('/previews/beegame_iframe_preview/')
+      const directRes = await app.request('/previews/beegame_iframe_preview/')
+      const accessRes = await app.request(
+        '/api/beegame-sessions/beegame_iframe_preview/preview/access',
+        { headers: { authorization: 'Bearer owner-token' } },
+      )
+      const access = await accessRes.json() as { accessUrl: string }
+      const bootstrapRes = await app.request(access.accessUrl)
+      const cookie = bootstrapRes.headers.get('set-cookie') || ''
+      const iframeRes = await app.request('/previews/beegame_iframe_preview/', {
+        headers: { cookie },
+      })
       const iframeText = await iframeRes.text()
 
       expect(startRes.status).toBe(200)
+      expect(directRes.status).toBe(404)
+      expect(accessRes.status).toBe(200)
+      expect(bootstrapRes.status).toBe(302)
+      expect(cookie).toContain('HttpOnly')
       expect(iframeRes.status).toBe(200)
       expect(iframeText).toContain('iframe preview')
       expect(iframeText).toContain('beegame.preview.console')
