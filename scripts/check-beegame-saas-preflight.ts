@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 
 type Env = Record<string, string | undefined>
@@ -7,6 +8,7 @@ loadEnvFile('.env.local')
 
 const env = process.env as Env
 const checks = [
+  checkTrackedSensitiveFiles(),
   checkAnyEnv('Supabase URL', [
     'BEEGAME_SUPABASE_URL',
     'SUPABASE_URL',
@@ -83,6 +85,41 @@ function checkForbiddenEnv(
     label,
     status: 'fail',
     message: `remove ${configuredKeys.join(', ')} from frontend/runtime env`,
+  }
+}
+
+function checkTrackedSensitiveFiles(): {
+  label: string
+  status: 'pass' | 'fail'
+  message?: string
+} {
+  const sensitivePaths = [
+    '.env.local',
+    '.env.billing',
+    'docker/.env.production',
+    'docker/.env.billing',
+  ]
+  const trackedPaths = sensitivePaths.filter(path => {
+    try {
+      execFileSync('git', ['ls-files', '--error-unmatch', path], {
+        stdio: 'ignore',
+      })
+      return true
+    } catch {
+      return false
+    }
+  })
+  if (trackedPaths.length === 0) {
+    return {
+      label: 'Sensitive env files are not tracked',
+      status: 'pass',
+      message: 'ok',
+    }
+  }
+  return {
+    label: 'Sensitive env files are not tracked',
+    status: 'fail',
+    message: `remove ${trackedPaths.join(', ')} from Git`,
   }
 }
 

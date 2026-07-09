@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
@@ -783,6 +783,30 @@ describe('DashboardView runtime loading', () => {
 
         resolveStartPreview?.();
         await waitFor(() => expect(screen.getByRole('button', { name: '播放预览' })).toBeEnabled());
+    });
+
+    it('recovers with an error when preview startup times out', async () => {
+        vi.useFakeTimers();
+        apiMocks.startProjectPreview.mockImplementationOnce(() => new Promise<void>(() => {}));
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'finished',
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
+        expect(screen.getByRole('button', { name: '正在准备预览' })).toBeDisabled();
+
+        await act(async () => {
+            vi.advanceTimersByTime(10_000);
+            await Promise.resolve();
+        });
+
+        expect(showError).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole('button', { name: '播放预览' })).toBeEnabled();
+        vi.useRealTimers();
     });
 
     it('does not show stale preview summaries in the empty preview state', async () => {

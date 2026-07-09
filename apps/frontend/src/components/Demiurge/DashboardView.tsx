@@ -332,7 +332,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const handleStartPreview = async () => {
         if (!canManagePreview || isProjectInteractionLocked) return;
         try {
-            await api.startProjectPreview(projectId);
+            await withProjectSyncTimeout(
+                api.startProjectPreview(projectId),
+                translateBeeGame('livePreview.syncTimeoutMessage'),
+            );
             setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
