@@ -157,6 +157,7 @@ git commit -m "feat: render document chat attachments"
 
 **Files:**
 - Modify: `packages/agent-workflow-server/src/beegame/session-manager.ts`
+- Modify: `packages/agent-workflow-server/src/app.ts`
 - Test: `packages/agent-workflow-server/src/__tests__/beegame-routes.test.ts`
 
 - [ ] **Step 1: Write failing server tests**
@@ -187,7 +188,7 @@ Expected: server attachment tests pass and the monorepo TypeScript build passes.
 - [ ] **Step 5: Commit server support**
 
 ```bash
-git add packages/agent-workflow-server/src/beegame/session-manager.ts packages/agent-workflow-server/src/__tests__/beegame-routes.test.ts
+git add packages/agent-workflow-server/src/beegame/session-manager.ts packages/agent-workflow-server/src/app.ts packages/agent-workflow-server/src/__tests__/beegame-routes.test.ts
 git commit -m "feat: make document attachments available to BeeGame sessions"
 ```
 
