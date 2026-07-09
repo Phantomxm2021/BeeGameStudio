@@ -498,6 +498,7 @@ describe('DashboardView runtime loading', () => {
 
         const settingsDialog = await screen.findByRole('dialog', { name: '系统设置' });
         expect(screen.queryByTestId('beegame-user-settings-menu')).not.toBeInTheDocument();
+        expect(within(settingsDialog).getByRole('tab', { name: '技能' })).toBeInTheDocument();
         await user.selectOptions(within(settingsDialog).getByRole('combobox', { name: '语言选择' }), 'en');
         expect(onSetLang).toHaveBeenCalledWith('en');
     });
