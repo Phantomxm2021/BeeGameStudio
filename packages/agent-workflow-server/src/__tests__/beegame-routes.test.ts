@@ -6109,11 +6109,9 @@ describe('beegame session routes', () => {
       expect(stopped).toEqual(expect.objectContaining({ status: 'stopped' }))
       expect(starts).toHaveLength(1)
       expect(starts[0].cwd).toBe(resolve(workspace))
-      expect(starts[0].command).toEqual([
-        'npm',
-        'run',
-        'dev',
-        '--',
+      expect(starts[0].command[0]).toBe(process.execPath)
+      expect(starts[0].command[1]).toEndWith('vite-preview-host.ts')
+      expect(starts[0].command.slice(2)).toEqual([
         '--host',
         '127.0.0.1',
         '--port',
@@ -6122,6 +6120,7 @@ describe('beegame session routes', () => {
         '/previews/beegame_preview/',
       ])
       expect(starts[0].env.PORT).toBe('63100')
+      expect(starts[0].env.NODE_ENV).toBe('development')
       expect(kills).toHaveLength(1)
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -6975,11 +6974,19 @@ describe('beegame session routes', () => {
         command: ['npm', 'run', 'dev'],
       }))
       expect(starts[0].env.PORT).toBe('63100')
-      expect(starts[1]).toEqual(expect.objectContaining({
-        cwd: resolve(workspace, 'client'),
-        command: ['npm', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', '63101'],
-      }))
+      expect(starts[1].cwd).toBe(resolve(workspace, 'client'))
+      expect(starts[1].command[0]).toBe(process.execPath)
+      expect(starts[1].command[1]).toEndWith('vite-preview-host.ts')
+      expect(starts[1].command.slice(2)).toEqual([
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '63101',
+        '--base',
+        '/previews/beegame_fullstack_preview/',
+      ])
       expect(starts[1].env.PORT).toBe('63101')
+      expect(starts[1].env.NODE_ENV).toBe('development')
       expect(starts[1].env.VITE_WS_URL).toBe('ws://127.0.0.1:63100')
       expect(starts[1].env.VITE_API_URL).toBe('http://127.0.0.1:63100')
       expect(starts[1].env.VITE_SERVER_URL).toBe('http://127.0.0.1:63100')

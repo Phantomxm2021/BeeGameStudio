@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export type BeeGamePreviewStatus =
   | 'idle'
@@ -66,6 +67,7 @@ type PreviewProcessPlan = {
   command: string[]
   script: string
   entrypoint: string
+  nodeEnv?: 'development'
   url?: string
 }
 
@@ -81,6 +83,7 @@ type SupportedPreviewPlan = {
 
 const DEFAULT_PREVIEW_PORT_START = 63100
 const DEFAULT_HOST = '127.0.0.1'
+const VITE_PREVIEW_HOST_PATH = fileURLToPath(new URL('./vite-preview-host.ts', import.meta.url))
 
 export class BeeGamePreviewManager {
   private readonly records = new Map<string, PreviewRecord>()
@@ -354,6 +357,7 @@ async function createPreviewPlan(
       command,
       script,
       entrypoint: 'package.json',
+      nodeEnv: usesVite(manifest, script) && script === 'dev' ? 'development' : undefined,
       url,
     }],
   }
@@ -390,6 +394,9 @@ async function createSplitClientServerPreviewPlan(
     command: clientCommand,
     script: clientScript,
     entrypoint: 'client/package.json',
+    nodeEnv: usesVite(clientManifest, clientScript) && clientScript === 'dev'
+      ? 'development'
+      : undefined,
     url: clientUrl,
   }
   const processes = serverPlan ? [serverPlan, clientPlan] : [clientPlan]
@@ -479,6 +486,7 @@ function buildRunCommand(
   if (!usesVite(manifest, script)) return base
   const viteArgs = ['--host', DEFAULT_HOST, '--port', String(port)]
   if (publicPath) viteArgs.push('--base', publicPath)
+  if (script === 'dev') return [process.execPath, VITE_PREVIEW_HOST_PATH, ...viteArgs]
   return [...base, '--', ...viteArgs]
 }
 
@@ -498,6 +506,7 @@ function buildPreviewProcessEnv(
   const serverWsUrl = serverPlan ? `ws://${DEFAULT_HOST}:${serverPlan.port}` : ''
   return {
     ...processEnv(),
+    ...(processPlan.nodeEnv ? { NODE_ENV: processPlan.nodeEnv } : {}),
     BEEGAME_PREVIEW_PORT: String(processPlan.port),
     PORT: String(processPlan.port),
     VITE_PORT: String(processPlan.port),
