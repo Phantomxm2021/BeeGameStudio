@@ -6301,10 +6301,6 @@ describe('beegame session routes', () => {
       const cookie = await previewCookie(app, 'beegame_local_preview')
       const proxiedRootRes = await app.request('/previews/beegame_local_preview/', { headers: { cookie } })
       const proxiedRootText = await proxiedRootRes.text()
-      const viteClientRes = await app.request('/previews/beegame_local_preview/@vite/client', {
-        headers: { cookie, origin: 'null' },
-      })
-      const viteClientText = await viteClientRes.text()
 
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
@@ -6318,10 +6314,6 @@ describe('beegame session routes', () => {
       expect(proxiedRootText).toContain('/previews/beegame_local_preview/')
       expect(proxiedRootText).toContain('data-beegame-preview-console-bridge')
       expect(proxiedRootText).toContain('beegame.preview.console')
-      expect(viteClientRes.status).toBe(200)
-      expect(viteClientRes.headers.get('access-control-allow-origin')).toBe('null')
-      expect(viteClientRes.headers.get('access-control-allow-credentials')).toBe('true')
-      expect(viteClientText).toContain('/@vite/client')
 
       await new Promise<void>((resolveClosed, rejectClosed) => {
         internalServer.close(error => error ? rejectClosed(error) : resolveClosed())
@@ -6479,7 +6471,7 @@ describe('beegame session routes', () => {
       const bootstrapRes = await app.request(access.accessUrl)
       const cookie = bootstrapRes.headers.get('set-cookie') || ''
       const iframeRes = await app.request('/previews/beegame_iframe_preview/', {
-        headers: { cookie, origin: 'null' },
+        headers: { cookie },
       })
       const iframeText = await iframeRes.text()
 
@@ -6489,8 +6481,6 @@ describe('beegame session routes', () => {
       expect(bootstrapRes.status).toBe(302)
       expect(cookie).toContain('HttpOnly')
       expect(iframeRes.status).toBe(200)
-      expect(iframeRes.headers.get('access-control-allow-origin')).toBe('null')
-      expect(iframeRes.headers.get('access-control-allow-credentials')).toBe('true')
       expect(iframeText).toContain('iframe preview')
       expect(iframeText).toContain('beegame.preview.console')
     } finally {

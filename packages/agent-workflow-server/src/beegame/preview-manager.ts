@@ -265,17 +265,13 @@ export class BeeGamePreviewManager {
   private publicUrl(sessionId: string, internalUrl: string): string {
     if (!internalUrl) return ''
     const encodedSessionId = encodeURIComponent(sessionId)
-    if (!this.publicBaseUrl.trim() || isLoopbackPublicBase(this.publicBaseUrl)) {
-      return `/previews/${encodedSessionId}/`
-    }
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodedSessionId}/`
     const base = this.publicBaseUrl.trim().replace(/\/+$/, '')
     return `${base}/${encodedSessionId}/`
   }
 
   private publicPath(sessionId: string): string {
-    if (!this.publicBaseUrl.trim() || isLoopbackPublicBase(this.publicBaseUrl)) {
-      return `/previews/${encodeURIComponent(sessionId)}/`
-    }
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(sessionId)}/`
     try {
       const url = new URL(this.publicUrl(sessionId, DEFAULT_HOST))
       return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`
@@ -320,15 +316,6 @@ export class BeeGamePreviewManager {
         delete record.processes
       })
     })
-  }
-}
-
-function isLoopbackPublicBase(value: string): boolean {
-  try {
-    const hostname = new URL(value).hostname.toLowerCase()
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
-  } catch {
-    return false
   }
 }
 
