@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
@@ -22,6 +22,10 @@ import {
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
+import {
+  parseAttachmentBuildAnalysis,
+  type AttachmentBuildAnalysis,
+} from './beegame/attachment-build'
 import {
   BeeGamePreviewManager,
   type BeeGamePreviewSnapshot,
@@ -204,6 +208,15 @@ type BeeGameIntakeJob = {
   updatedAt: number
 }
 
+type BeeGameAttachmentBuildJob = {
+  ownerId: string
+  status: 'running' | 'completed' | 'failed'
+  result?: AttachmentBuildAnalysis
+  error?: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type AgentWorkflowAppOptions = {
   sessionRunner?: BeeGameSessionRunner
   previewRunner?: BeeGamePreviewRunner
@@ -259,6 +272,7 @@ export function createAgentWorkflowApp(
     modelConfigStore,
   })
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
+  const attachmentBuildJobs = new Map<string, BeeGameAttachmentBuildJob>()
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -1413,6 +1427,75 @@ export function createAgentWorkflowApp(
     })
   })
 
+  const runBeeGameAttachmentAnalysis = async (
+    request: Request,
+    user: BeeGameUserContext,
+    body: JsonObject,
+    attachments: BeeGameAttachment[],
+  ): Promise<AttachmentBuildAnalysis> => {
+    const creditBalance = await dashboardRepository.getCreditBalance(request, user)
+    if (!hasEnoughCreditsForIdeaIntake(creditBalance)) {
+      throw new HttpError(402, {
+        error: 'Insufficient credits',
+        message: `Attachment analysis requires at least ${creditBalance.estimates.ideaIntake.minCredits} credit.`,
+        credits: creditBalance,
+      })
+    }
+    const modelConfigId = await resolveDefaultModelConfigId(
+      request,
+      user,
+      typeof body.modelConfigId === 'string' ? body.modelConfigId : undefined,
+      async (nextRequest, requestUser, id) => dashboardRepository.modelConfigExists(nextRequest, requestUser, id),
+      async (nextRequest, requestUser) => dashboardRepository.listModelConfigs(nextRequest, requestUser),
+    )
+    const policy = getCreditTaskPolicy('idea_intake')
+    const reservedCredits = policy.reservedCredits
+    const clientRequestId = getBeeGameClientRequestId(body)
+    const idempotencyPrefix = clientRequestId ? `attachment_analysis:${user.id}:${clientRequestId}` : undefined
+    let reservation: { id: string } | undefined
+    const analysisWorkspace = await mkdtemp(join(getCurrentUserDataRoot(request), 'attachment-analysis-'))
+    try {
+      reservation = await dashboardRepository.reserveCredits(request, user, {
+        credits: reservedCredits,
+        kind: policy.taskType,
+        ...(idempotencyPrefix ? { idempotencyKey: `${idempotencyPrefix}:reserve` } : {}),
+        metadata: { taskType: 'attachment_analysis', ...(clientRequestId ? { clientRequestId } : {}) },
+      })
+      const runtimeEnv = await dashboardRepository.getRuntimeEnv(
+        getCurrentUserDataRoot(request),
+        user.id,
+        getBearerToken(request),
+        modelConfigId,
+      )
+      const analysis = await generateBeeGameAttachmentAnalysis({
+        attachments,
+        workspace: analysisWorkspace,
+        language: typeof body.language === 'string' ? body.language : undefined,
+        modelConfigId,
+        ownerId: user.id,
+        runtimeEnv,
+      })
+      await dashboardRepository.settleCreditReservation(request, user, {
+        reservationId: reservation.id,
+        weightedTokens: reservedCredits * creditBalance.creditUnitWeightedTokens,
+        ...(idempotencyPrefix ? { idempotencyKey: `${idempotencyPrefix}:settle:${reservation.id}` } : {}),
+        metadata: { kind: 'attachment_analysis', ...(clientRequestId ? { clientRequestId } : {}) },
+      })
+      return analysis
+    } catch (err) {
+      if (reservation) {
+        await dashboardRepository.refundCreditReservation(request, user, {
+          reservationId: reservation.id,
+          ...(idempotencyPrefix ? { idempotencyKey: `${idempotencyPrefix}:refund:${reservation.id}` } : {}),
+          metadata: { reason: 'attachment_analysis_failed', ...(clientRequestId ? { clientRequestId } : {}) },
+        }).catch(() => undefined)
+      }
+      throw err
+    } finally {
+      await rm(analysisWorkspace, { recursive: true, force: true })
+    }
+  }
+
   const runBeeGameIntake = async (
     request: Request,
     user: BeeGameUserContext,
@@ -1519,6 +1602,56 @@ export function createAgentWorkflowApp(
       if (err instanceof HttpError) return c.json(err.body, err.status)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
+  })
+
+  app.post('/api/beegame-intake/analyze-attachments', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    const body = await readJson(c.req.raw)
+    const attachments = parseBeeGameAttachments(body.attachments)
+    if (attachments.length === 0) return c.json({ error: 'Attachment analysis requires at least one supported attachment' }, 400)
+    try {
+      const analysis = await runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
+      return c.json(analysis)
+    } catch (err) {
+      if (err instanceof HttpError) return c.json(err.body, err.status)
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/beegame-intake/attachment-jobs', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    const body = await readJson(c.req.raw)
+    const attachments = parseBeeGameAttachments(body.attachments)
+    if (attachments.length === 0) return c.json({ error: 'Attachment analysis requires at least one supported attachment' }, 400)
+    const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
+    const now = Date.now()
+    attachmentBuildJobs.set(jobId, { ownerId: user.id, status: 'running', createdAt: now, updatedAt: now })
+    setTimeout(() => attachmentBuildJobs.delete(jobId), 30 * 60 * 1000)
+    void runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
+      .then(result => {
+        const job = attachmentBuildJobs.get(jobId)
+        if (!job) return
+        attachmentBuildJobs.set(jobId, { ...job, status: 'completed', result, updatedAt: Date.now() })
+      })
+      .catch(err => {
+        const job = attachmentBuildJobs.get(jobId)
+        if (!job) return
+        attachmentBuildJobs.set(jobId, { ...job, status: 'failed', error: toErrorMessage(err), updatedAt: Date.now() })
+      })
+    return c.json({ jobId, status: 'running' }, 202)
+  })
+
+  app.get('/api/beegame-intake/attachment-jobs/:jobId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const job = attachmentBuildJobs.get(c.req.param('jobId'))
+    if (!job || job.ownerId !== user.id) return c.json({ error: 'Attachment analysis job not found' }, 404)
+    if (job.status === 'completed') return c.json({ status: job.status, result: job.result })
+    if (job.status === 'failed') return c.json({ status: job.status, error: job.error || 'Attachment analysis failed' })
+    return c.json({ status: job.status })
   })
 
   app.post('/api/beegame-intake/jobs', async c => {
@@ -2029,6 +2162,85 @@ function toBeeGameThinkingRequest(value: BeeGameThinkingMode | undefined): JsonO
   if (value === 'enabled') return { enable_thinking: true }
   if (value === 'disabled') return { enable_thinking: false }
   return {}
+}
+
+async function generateBeeGameAttachmentAnalysis(input: {
+  attachments: BeeGameAttachment[]
+  workspace: string
+  language?: string
+  modelConfigId?: string
+  ownerId: string
+  runtimeEnv?: Record<string, string>
+}): Promise<AttachmentBuildAnalysis> {
+  const configId = input.modelConfigId ?? listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
+  const runtime = configId ? mapModelConfigToRuntime(configId) : undefined
+  const env = { ...(runtime?.env ?? {}), ...(input.runtimeEnv ?? {}) }
+  const baseUrl = env.OPENAI_BASE_URL
+  const apiKey = env.OPENAI_API_KEY
+  const model = env.OPENAI_DEFAULT_SONNET_MODEL ?? env.OPENAI_DEFAULT_OPUS_MODEL ?? env.OPENAI_DEFAULT_HAIKU_MODEL
+  if (!baseUrl || !apiKey || !model) throw new Error('Attachment analysis requires an OpenAI-compatible model config')
+
+  const sourceType = input.attachments.some(item => item.type === 'image')
+    ? input.attachments.some(item => item.type === 'file') ? 'mixed' : 'image'
+    : 'gdd'
+  const documentContext = input.attachments
+    .filter((item): item is BeeGameFileAttachment => item.type === 'file')
+    .map(item => {
+      const content = Buffer.from(item.data, 'base64').toString('utf8').slice(0, 100_000)
+      return `Document: ${item.filename}\nMIME: ${item.mediaType}\nContent:\n${content}`
+    })
+    .join('\n\n')
+  const text = [
+    `Attachment source type: ${sourceType}`,
+    'Analyze the uploaded game design inputs and return only JSON matching the requested schema.',
+    'For GDD input, preserve explicit facts and assess whether the minimum build design is complete.',
+    'For image input, infer only visible design clues and attach high, medium, or low confidence to every inference.',
+    'For mixed input, treat GDD facts as authoritative and report conflicts instead of silently resolving them.',
+    'Schema: analysisId, sourceType, completeness, confirmedFacts, inferredDesign, missingFields, conflicts, gddDraft.',
+    'confirmedFacts items: field, value, source.',
+    'inferredDesign items: field, value, confidence, source.',
+    'missingFields items: field, reason.',
+    'conflicts items: field, gddValue, imageValue, resolution=needs_user_choice.',
+    documentContext,
+  ].filter(Boolean).join('\n\n')
+  const imageParts = input.attachments
+    .filter((item): item is BeeGameImageAttachment => item.type === 'image')
+    .map(item => ({
+      type: 'image_url',
+      image_url: { url: `data:${item.mediaType};base64,${item.data}` },
+    }))
+  const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `You are the BeeGame attachment design analyst. Return JSON only. Use ${input.language || 'the user language'} for natural-language values while keeping property names in English.`,
+        },
+        { role: 'user', content: [{ type: 'text', text }, ...imageParts] },
+      ],
+    }),
+  })
+  if (!response.ok) throw new Error(`Attachment analysis model request failed: ${response.status}`)
+  const payload = (await response.json()) as JsonObject
+  const choices = Array.isArray(payload.choices) ? payload.choices : []
+  const firstChoice = isObject(choices[0]) ? choices[0] : undefined
+  const message = firstChoice && isObject(firstChoice.message) ? firstChoice.message : undefined
+  const rawContent = message ? extractMessageContentText(message) : ''
+  if (!rawContent) throw new Error('Attachment analysis model returned empty content')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawContent)
+  } catch {
+    throw new Error('Attachment analysis model returned invalid JSON')
+  }
+  const analysis = parseAttachmentBuildAnalysis({ ...(isObject(parsed) ? parsed : {}), analysisId: `attachment_analysis_${randomUUID().replaceAll('-', '')}` })
+  if (analysis.sourceType !== sourceType) throw new Error('Attachment analysis source type did not match uploaded attachments')
+  return analysis
 }
 
 async function generateBeeGameIntakeOptions(input: {

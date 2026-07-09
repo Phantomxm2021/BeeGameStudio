@@ -3534,6 +3534,124 @@ describe('agent workflow server routes', () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  test('analyzes a complete GDD attachment without returning intake options', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            analysisId: 'analysis_gdd',
+            sourceType: 'gdd',
+            completeness: 'complete',
+            confirmedFacts: [{ field: 'coreLoop', value: 'Solve puzzles', source: 'game-design.md' }],
+            inferredDesign: [],
+            missingFields: [],
+            conflicts: [],
+            gddDraft: '# Confirmed GDD',
+          }),
+        },
+      }],
+    })) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/analyze-attachments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: 'attachment-analysis-1',
+          language: 'zh',
+          attachments: [{
+            type: 'file',
+            mediaType: 'text/markdown',
+            filename: 'game-design.md',
+            data: Buffer.from('# Game Design\n').toString('base64'),
+          }],
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const analysis = await res.json()
+      expect(analysis.sourceType).toBe('gdd')
+      expect(analysis.completeness).toBe('complete')
+      expect(analysis.options).toBeUndefined()
+      expect(analysis.gddDraft).toBe('# Confirmed GDD')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('routes image attachment analysis through the job endpoint', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            analysisId: 'analysis_image',
+            sourceType: 'image',
+            completeness: 'partial',
+            confirmedFacts: [],
+            inferredDesign: [{ field: 'camera', value: 'Top-down', confidence: 'medium', source: 'concept.png' }],
+            missingFields: [{ field: 'winCondition', reason: 'Not visible' }],
+            conflicts: [],
+            gddDraft: '# Draft',
+          }),
+        },
+      }],
+    })) as unknown as typeof fetch
+
+    try {
+      const createJobRes = await app.request('/api/beegame-intake/attachment-jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: 'attachment-analysis-job-1',
+          attachments: [{ type: 'image', mediaType: 'image/png', filename: 'concept.png', data: 'iVBORw0KGgo=' }],
+        }),
+      })
+      expect(createJobRes.status).toBe(202)
+      const job = await createJobRes.json()
+      let result: Response | undefined
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        result = await app.request(`/api/beegame-intake/attachment-jobs/${job.jobId}`)
+        const body = await result.clone().json()
+        if (body.status === 'completed' || body.status === 'failed') break
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+      expect(result?.status).toBe(200)
+      expect((await result!.json()).result.sourceType).toBe('image')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })
 
 function signStripePayload(payload: string, secret: string, timestamp = 1720000000): string {
