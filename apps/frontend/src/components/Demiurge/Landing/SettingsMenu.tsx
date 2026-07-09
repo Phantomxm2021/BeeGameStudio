@@ -77,6 +77,7 @@ import {
     type BeeGameProjectLifecycleProject,
     type BeeGameProjectRetentionResult,
 } from '../../../services/projectLifecycleApi';
+import { useSystemStore } from '../../../store/systemStore';
 interface SettingsMenuProps {
     isOpen: boolean;
     lang: Language;
@@ -139,14 +140,14 @@ export function SettingsMenu({
     lang,
     onClose,
     onSetLang,
-    canManageWorkspace = false,
-    canManageSecrets = false,
-    canManageRuntimeSettings = false,
-    canManageMcp = false,
-    canManageSkills = false,
-    canManageModelConfig = false,
-    canManageInvitations = false,
-    canReadAudit = false,
+    canManageWorkspace,
+    canManageSecrets,
+    canManageRuntimeSettings,
+    canManageMcp,
+    canManageSkills,
+    canManageModelConfig,
+    canManageInvitations,
+    canReadAudit,
 }: SettingsMenuProps) {
     const { i18n } = useTranslation('settings');
     const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
@@ -161,14 +162,17 @@ export function SettingsMenu({
     const billingCopy = getBillingSettingsCopy(translateSettings);
     const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
     const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
-    const effectiveCanManageWorkspace = canManageWorkspace;
-    const effectiveCanManageSecrets = canManageSecrets;
-    const effectiveCanManageRuntimeSettings = canManageRuntimeSettings;
-    const effectiveCanManageMcp = canManageMcp;
-    const effectiveCanManageSkills = canManageSkills;
-    const effectiveCanManageModelConfig = canManageModelConfig;
-    const effectiveCanManageInvitations = canManageInvitations;
-    const effectiveCanReadAudit = canReadAudit;
+    const currentUser = useSystemStore(state => state.currentUser);
+    const hasPermission = useSystemStore(state => state.hasPermission);
+    const canOpenPlatformSettings = currentUser?.role === 'owner';
+    const effectiveCanManageWorkspace = canManageWorkspace ?? (canOpenPlatformSettings && hasPermission('workspace.manage'));
+    const effectiveCanManageSecrets = canManageSecrets ?? (canOpenPlatformSettings && hasPermission('secrets.manage'));
+    const effectiveCanManageRuntimeSettings = canManageRuntimeSettings ?? (canOpenPlatformSettings && hasPermission('runtime_settings.manage'));
+    const effectiveCanManageMcp = canManageMcp ?? (canOpenPlatformSettings && hasPermission('mcp.manage'));
+    const effectiveCanManageSkills = canManageSkills ?? Boolean(currentUser);
+    const effectiveCanManageModelConfig = canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
+    const effectiveCanManageInvitations = canManageInvitations ?? canOpenPlatformSettings;
+    const effectiveCanReadAudit = canReadAudit ?? (canOpenPlatformSettings && hasPermission('audit.read'));
     const hasPlatformSettings = effectiveCanManageWorkspace ||
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||

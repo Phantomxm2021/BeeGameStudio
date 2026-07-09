@@ -99,8 +99,6 @@ export function BeeGameLivePreviewPage({
     const uiText = useBeeGameText(lang);
     const commonText = useCommonText(lang);
     const currentUser = useSystemStore(state => state.currentUser);
-    const hasPermission = useSystemStore(state => state.hasPermission);
-    const canOpenPlatformSettings = currentUser?.role === 'owner';
     const previewUrl = normalizeUrl(buildReport?.build_url);
     const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
     const previewState = isPreviewLocallyStopped ? 'stopped' : getPreviewState(status, buildReport);
@@ -338,14 +336,6 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
-                canManageWorkspace={canOpenPlatformSettings && hasPermission('workspace.manage')}
-                canManageSecrets={canOpenPlatformSettings && hasPermission('secrets.manage')}
-                canManageRuntimeSettings={canOpenPlatformSettings && hasPermission('runtime_settings.manage')}
-                canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
-                canManageSkills={hasPermission('skills.manage')}
-                canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
-                canManageInvitations={canOpenPlatformSettings}
-                canReadAudit={canOpenPlatformSettings && hasPermission('audit.read')}
             />
             <DeploymentDialog
                 isOpen={isDeploymentDialogOpen}

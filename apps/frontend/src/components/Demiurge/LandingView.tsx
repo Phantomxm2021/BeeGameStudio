@@ -722,9 +722,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
     const setActiveProject = useProjectStore(state => state.setActiveProject);
     const currentUser = useSystemStore(state => state.currentUser);
-    const hasPermission = useSystemStore(state => state.hasPermission);
     const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
-    const canOpenPlatformSettings = currentUser?.role === 'owner';
 
     const persistIntakeFlow = (
         phase: RestorableIntakePhase,
@@ -1370,14 +1368,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                    canManageWorkspace={canOpenPlatformSettings && hasPermission('workspace.manage')}
-                    canManageSecrets={canOpenPlatformSettings && hasPermission('secrets.manage')}
-                    canManageRuntimeSettings={canOpenPlatformSettings && hasPermission('runtime_settings.manage')}
-                    canManageMcp={canOpenPlatformSettings && hasPermission('mcp.manage')}
-                    canManageSkills={hasPermission('skills.manage')}
-                    canManageModelConfig={canOpenPlatformSettings && hasPermission('model_config.manage')}
-                    canManageInvitations={canOpenPlatformSettings}
-                    canReadAudit={canOpenPlatformSettings && hasPermission('audit.read')}
                 />
 
                 <ProjectHistoryModal

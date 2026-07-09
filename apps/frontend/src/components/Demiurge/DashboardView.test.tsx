@@ -474,6 +474,7 @@ describe('DashboardView runtime loading', () => {
         const user = userEvent.setup();
         const onBack = vi.fn();
         const onSetLang = vi.fn();
+        mockedHasPermission = vi.fn(() => false);
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={onSetLang} onBack={onBack} />);
 
