@@ -20,6 +20,7 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from '../beegame/session-manager'
+import { materializeBeeGameFileAttachments } from '../beegame/session-manager'
 import type {
   BeeGameDeploymentPublisher,
   BeeGameDeploymentRunner,
@@ -1661,6 +1662,90 @@ describe('beegame session routes', () => {
           },
         },
       ])
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('materializes supported document attachments inside the workspace attachment directory', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-document-'))
+
+    try {
+      const result = await materializeBeeGameFileAttachments(workspace, [{
+        type: 'file',
+        mediaType: 'application/jsonl',
+        data: Buffer.from('{"ok":true}\n').toString('base64'),
+        filename: '../events.jsonl',
+      }])
+
+      expect(result).toHaveLength(1)
+      expect(result[0]?.relativePath).toMatch(/^\.beegame-attachments\/[a-f0-9-]+-events\.jsonl$/)
+      expect(await readFile(join(workspace, result[0]!.relativePath), 'utf8')).toBe('{"ok":true}\n')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects GIF and unsupported document attachments at the server boundary', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-document-policy-'))
+
+    try {
+      await expect(materializeBeeGameFileAttachments(workspace, [{
+        type: 'file',
+        mediaType: 'image/gif',
+        data: Buffer.from('gif').toString('base64'),
+        filename: 'animation.gif',
+      }])).rejects.toThrow('Unsupported document attachment')
+      await expect(materializeBeeGameFileAttachments(workspace, [{
+        type: 'file',
+        mediaType: 'application/zip',
+        data: Buffer.from('zip').toString('base64'),
+        filename: 'bundle.zip',
+      }])).rejects.toThrow('Unsupported document attachment')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('passes document attachment paths to the BeeGame session runner', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const workspace = join(projectsRoot, 'game-with-document')
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+
+    try {
+      const sessionRes = await app.request('/api/console/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+
+      const inputRes = await app.request(`/api/console/sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Review this document.',
+          attachments: [{
+            type: 'file',
+            mediaType: 'application/jsonl',
+            data: Buffer.from('{"ok":true}\n').toString('base64'),
+            filename: 'events.jsonl',
+          }],
+        }),
+      })
+
+      await waitFor(async () => fake.runtimes[0]?.submits.length === 1)
+
+      expect(inputRes.status).toBe(200)
+      const prompt = fake.runtimes[0].submits[0].prompt
+      expect(typeof prompt).toBe('string')
+      expect(prompt as string).toContain('events.jsonl')
+      expect(prompt as string).toContain('.beegame-attachments/')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

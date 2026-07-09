@@ -16,7 +16,9 @@ import {
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
   type BeeGameSession,
+  type BeeGameAttachment,
   type BeeGameImageAttachment,
+  type BeeGameFileAttachment,
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
@@ -3882,7 +3884,7 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     const body = await readJson(c.req.raw)
-    const attachments = parseBeeGameImageAttachments(body.attachments)
+    const attachments = parseBeeGameAttachments(body.attachments)
     if (body.text === undefined && attachments.length === 0) {
       return c.json({ error: 'Missing field: text' }, 400)
     }
@@ -4322,30 +4324,39 @@ function isBeeGameSessionLanguage(
     value === 'ko'
 }
 
-function parseBeeGameImageAttachments(value: unknown): BeeGameImageAttachment[] {
+function parseBeeGameAttachments(value: unknown): BeeGameAttachment[] {
   if (!Array.isArray(value)) return []
   return value
-    .map(parseBeeGameImageAttachment)
-    .filter((item): item is BeeGameImageAttachment => item !== undefined)
+    .map(parseBeeGameAttachment)
+    .filter((item): item is BeeGameAttachment => item !== undefined)
 }
 
-function parseBeeGameImageAttachment(
+function parseBeeGameAttachment(
   value: unknown,
-): BeeGameImageAttachment | undefined {
+): BeeGameAttachment | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
-  if (record.type !== 'image') return undefined
-  if (!isBeeGameImageMediaType(record.mediaType)) return undefined
   const data = typeof record.data === 'string' ? record.data.trim() : ''
   if (!data) return undefined
-  return {
-    type: 'image',
-    mediaType: record.mediaType,
-    data,
-    ...(typeof record.filename === 'string' && record.filename.trim()
-      ? { filename: record.filename.trim() }
-      : {}),
+  if (record.type === 'image' && isBeeGameImageMediaType(record.mediaType)) {
+    return {
+      type: 'image',
+      mediaType: record.mediaType,
+      data,
+      ...(typeof record.filename === 'string' && record.filename.trim()
+        ? { filename: record.filename.trim() }
+        : {}),
+    }
   }
+  if (record.type === 'file' && typeof record.mediaType === 'string' && typeof record.filename === 'string' && record.filename.trim()) {
+    return {
+      type: 'file',
+      mediaType: record.mediaType,
+      data,
+      filename: record.filename.trim(),
+    } satisfies BeeGameFileAttachment
+  }
+  return undefined
 }
 
 function isBeeGameImageMediaType(
@@ -4353,7 +4364,6 @@ function isBeeGameImageMediaType(
 ): value is BeeGameImageAttachment['mediaType'] {
   return value === 'image/png' ||
     value === 'image/jpeg' ||
-    value === 'image/gif' ||
     value === 'image/webp'
 }
 

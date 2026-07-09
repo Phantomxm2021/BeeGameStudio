@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -24,9 +24,45 @@ import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameImageAttachment = {
   type: 'image'
-  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp'
   data: string
   filename?: string
+}
+
+export type BeeGameFileAttachment = {
+  type: 'file'
+  mediaType: string
+  data: string
+  filename: string
+}
+
+export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
+
+const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
+  '.pdf': ['application/pdf'],
+  '.doc': ['application/msword'],
+  '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  '.txt': ['text/plain'],
+  '.md': ['text/markdown', 'text/plain'],
+  '.csv': ['text/csv', 'application/csv'],
+  '.xls': ['application/vnd.ms-excel'],
+  '.xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  '.json': ['application/json', 'text/json'],
+  '.jsonl': ['application/jsonl', 'application/x-ndjson', 'text/jsonl'],
+}
+
+const IMAGE_ATTACHMENT_TYPES: Record<string, string[]> = {
+  '.png': ['image/png'],
+  '.jpg': ['image/jpeg'],
+  '.jpeg': ['image/jpeg'],
+  '.webp': ['image/webp'],
+}
+
+export type MaterializedBeeGameFileAttachment = {
+  relativePath: string
+  filename: string
+  mediaType: string
 }
 
 export type BeeGamePromptInput =
@@ -646,7 +682,7 @@ export class BeeGameSessionManager {
       clientMessageId?: string
       supersedesMessageId?: string
       language?: BeeGameSessionLanguage
-      attachments?: BeeGameImageAttachment[]
+      attachments?: BeeGameAttachment[]
       thinkingMode?: BeeGameChatThinkingMode
     },
   ): Promise<BeeGameSession> {
@@ -660,6 +696,13 @@ export class BeeGameSessionManager {
     }
     if (display?.authToken) record.authToken = display.authToken
     if (display?.language) record.language = display.language
+
+    const preparedPrompt = await prepareBeeGamePromptInput({
+      text,
+      language: record.language,
+      workspace: record.session.cwd,
+      attachments: display?.attachments,
+    })
 
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     record.nextTurnIndex += 1
@@ -683,14 +726,11 @@ export class BeeGameSessionManager {
 
     void this.runDirectTurn(
       record,
-      buildBeeGamePromptInput({
-        text,
-        language: record.language,
-        attachments: display?.attachments,
-      }),
+      preparedPrompt.prompt,
       display?.thinkingMode,
       creditReservation,
       creditPolicy,
+      preparedPrompt.attachmentDirectory,
     )
     return cloneSession(record.session)
   }
@@ -795,6 +835,7 @@ export class BeeGameSessionManager {
     thinkingMode: BeeGameChatThinkingMode | undefined,
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
+    attachmentDirectory?: string,
   ): Promise<void> {
     let shouldRefundReservation = Boolean(creditReservation)
     try {
@@ -872,6 +913,9 @@ export class BeeGameSessionManager {
       cleanupRuntimeLayout({
         dataDir: record.userDataRoot ?? this.dashboardDataRoot,
       })
+      if (attachmentDirectory) {
+        await rm(attachmentDirectory, { recursive: true, force: true })
+      }
       record.currentTurnId = null
       record.abortController = null
       record.session.updatedAt = new Date()
@@ -1961,15 +2005,29 @@ function withSessionLanguageContract(
   return `${instruction}\n\n${prompt}`
 }
 
-function buildBeeGamePromptInput(input: {
+async function prepareBeeGamePromptInput(input: {
   text: string
   language?: BeeGameSessionLanguage
-  attachments?: BeeGameImageAttachment[]
-}): BeeGamePromptInput {
-  const promptText = withSessionLanguageContract(input.text, input.language)
+  workspace: string
+  attachments?: BeeGameAttachment[]
+}): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
-  if (images.length === 0) return promptText
-  return [
+  const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
+  const materializedFiles = files.length > 0
+    ? await materializeBeeGameFileAttachments(input.workspace, files)
+    : []
+  const documentContext = materializedFiles.length > 0
+    ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
+    : ''
+  const promptText = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
+  if (images.length === 0) {
+    return {
+      prompt: promptText,
+      ...(materializedFiles.length > 0 ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') } : {}),
+    }
+  }
+  return {
+    prompt: [
     { type: 'text', text: promptText || 'Analyze the attached image.' },
     ...images.map(image => ({
       type: 'image' as const,
@@ -1979,7 +2037,45 @@ function buildBeeGamePromptInput(input: {
         data: image.data,
       },
     })),
-  ]
+    ],
+    ...(materializedFiles.length > 0 ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') } : {}),
+  }
+}
+
+export async function materializeBeeGameFileAttachments(
+  workspace: string,
+  attachments: BeeGameFileAttachment[],
+): Promise<MaterializedBeeGameFileAttachment[]> {
+  if (attachments.length === 0) return []
+  const attachmentDirectory = join(workspace, '.beegame-attachments')
+  await mkdir(attachmentDirectory, { recursive: true })
+
+  try {
+    return await Promise.all(attachments.map(async (attachment) => {
+      const filename = basename(attachment.filename)
+      const extension = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+      const allowedTypes = DOCUMENT_ATTACHMENT_TYPES[extension]
+      if (!filename || !allowedTypes || !allowedTypes.includes(attachment.mediaType)) {
+        throw new Error(`Unsupported document attachment: ${attachment.filename}`)
+      }
+      const data = Buffer.from(attachment.data, 'base64')
+      if (data.length === 0 || data.length > MAX_BEEGAME_ATTACHMENT_BYTES) {
+        throw new Error(`Invalid document attachment size: ${attachment.filename}`)
+      }
+      const safeFilename = filename.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'attachment'
+      const storedFilename = `${randomUUID()}-${safeFilename}`
+      const storedPath = join(attachmentDirectory, storedFilename)
+      await writeFile(storedPath, data, { flag: 'wx' })
+      return {
+        relativePath: relative(workspace, storedPath),
+        filename,
+        mediaType: attachment.mediaType,
+      }
+    }))
+  } catch (error) {
+    await rm(attachmentDirectory, { recursive: true, force: true })
+    throw error
+  }
 }
 
 function isBeeGameImageAttachment(
@@ -1993,12 +2089,23 @@ function isBeeGameImageAttachment(
     attachment.data.trim().length > 0
 }
 
+function isBeeGameFileAttachment(
+  value: unknown,
+): value is BeeGameFileAttachment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const attachment = value as Partial<BeeGameFileAttachment>
+  return attachment.type === 'file' &&
+    typeof attachment.mediaType === 'string' &&
+    typeof attachment.filename === 'string' &&
+    typeof attachment.data === 'string' &&
+    attachment.data.trim().length > 0
+}
+
 function isSupportedBeeGameImageMediaType(
   mediaType: unknown,
 ): mediaType is BeeGameImageAttachment['mediaType'] {
   return mediaType === 'image/png' ||
     mediaType === 'image/jpeg' ||
-    mediaType === 'image/gif' ||
     mediaType === 'image/webp'
 }
 
