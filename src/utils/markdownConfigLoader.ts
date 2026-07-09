@@ -24,6 +24,7 @@ import {
 } from './settings/constants.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import { isRestrictedToPluginOnly } from './settings/pluginOnlyPolicy.js'
+import { getRuntimeScopedCacheKey } from './runtimeScopeCacheKey.js'
 
 // Claude configuration directory names
 export const CLAUDE_CONFIG_DIRECTORIES = [
@@ -443,8 +444,9 @@ export const loadMarkdownFilesForSubdir = memoize(
 
     return deduplicatedFiles
   },
-  // Custom resolver creates cache key from both subdir and cwd parameters
-  (subdir: ClaudeConfigDirectory, cwd: string) => `${subdir}:${cwd}`,
+  // Custom resolver creates cache key from both path scope and runtime config scope.
+  (subdir: ClaudeConfigDirectory, cwd: string) =>
+    getRuntimeScopedCacheKey(subdir, cwd),
 )
 
 /**

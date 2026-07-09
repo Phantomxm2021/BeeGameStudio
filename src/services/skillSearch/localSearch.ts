@@ -1,4 +1,5 @@
 import { logForDebugging } from '../../utils/debug.js'
+import { getRuntimeScopedCacheKey } from '../../utils/runtimeScopeCacheKey.js'
 
 export interface SkillIndexEntry {
   name: string
@@ -286,17 +287,18 @@ function splitHyphenatedName(name: string): string[] {
 
 let cachedIndex: SkillIndexEntry[] | null = null
 let cachedIdf: Map<string, number> | null = null
-let cachedCwd: string | null = null
+let cachedScopeKey: string | null = null
 
 export function clearSkillIndexCache(): void {
   cachedIndex = null
   cachedIdf = null
-  cachedCwd = null
+  cachedScopeKey = null
   logForDebugging('[skill-search] index cache cleared')
 }
 
 export async function getSkillIndex(cwd: string): Promise<SkillIndexEntry[]> {
-  if (cachedIndex && cachedCwd === cwd) return cachedIndex
+  const scopeKey = getRuntimeScopedCacheKey(cwd)
+  if (cachedIndex && cachedScopeKey === scopeKey) return cachedIndex
 
   const { getCommands } = await import('../../commands.js')
   const commands = await getCommands(cwd)
@@ -373,7 +375,7 @@ export async function getSkillIndex(cwd: string): Promise<SkillIndexEntry[]> {
 
   cachedIndex = entries
   cachedIdf = idf
-  cachedCwd = cwd
+  cachedScopeKey = scopeKey
   logForDebugging(
     `[skill-search] indexed ${entries.length} skills from ${commands.length} commands`,
   )

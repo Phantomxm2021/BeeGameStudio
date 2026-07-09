@@ -208,6 +208,7 @@ import provider from './commands/provider.js'
 import { logError } from './utils/log.js'
 import { toError } from './utils/errors.js'
 import { logForDebugging } from './utils/debug.js'
+import { getRuntimeScopedCacheKey } from './utils/runtimeScopeCacheKey.js'
 import {
   getSkillDirCommands,
   clearSkillCaches,
@@ -530,30 +531,33 @@ export function meetsAvailabilityRequirement(cmd: Command): boolean {
 }
 
 /**
- * Loads all command sources (skills, plugins, workflows). Memoized by cwd
- * because loading is expensive (disk I/O, dynamic imports).
+ * Loads all command sources (skills, plugins, workflows). Memoized by runtime
+ * scope because loading is expensive and BeeGame user skills are config-scoped.
  */
-const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
-  const [
-    { skillDirCommands, pluginSkills, bundledSkills, builtinPluginSkills },
-    pluginCommands,
-    workflowCommands,
-  ] = await Promise.all([
-    getSkills(cwd),
-    getPluginCommands(),
-    getWorkflowCommands ? getWorkflowCommands(cwd) : Promise.resolve([]),
-  ])
+const loadAllCommands = memoize(
+  async (cwd: string): Promise<Command[]> => {
+    const [
+      { skillDirCommands, pluginSkills, bundledSkills, builtinPluginSkills },
+      pluginCommands,
+      workflowCommands,
+    ] = await Promise.all([
+      getSkills(cwd),
+      getPluginCommands(),
+      getWorkflowCommands ? getWorkflowCommands(cwd) : Promise.resolve([]),
+    ])
 
-  return [
-    ...bundledSkills,
-    ...builtinPluginSkills,
-    ...skillDirCommands,
-    ...(workflowCommands as Command[]),
-    ...(pluginCommands as Command[]),
-    ...pluginSkills,
-    ...COMMANDS(),
-  ]
-})
+    return [
+      ...bundledSkills,
+      ...builtinPluginSkills,
+      ...skillDirCommands,
+      ...(workflowCommands as Command[]),
+      ...(pluginCommands as Command[]),
+      ...pluginSkills,
+      ...COMMANDS(),
+    ]
+  },
+  cwd => getRuntimeScopedCacheKey(cwd),
+)
 
 /**
  * Returns commands available to the current user. The expensive loading is
@@ -665,6 +669,7 @@ export const getSkillToolCommands = memoize(
           cmd.whenToUse),
     )
   },
+  cwd => getRuntimeScopedCacheKey(cwd),
 )
 
 // Filters commands to include only skills. Skills are commands that provide
@@ -692,6 +697,7 @@ export const getSlashCommandToolSkills = memoize(
       return []
     }
   },
+  cwd => getRuntimeScopedCacheKey(cwd),
 )
 
 /**

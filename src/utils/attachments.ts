@@ -114,6 +114,7 @@ import {
 } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
 import { getDefaultFileReadingLimits } from '@bee-game-studio/builtin-tools/tools/FileReadTool/limits.js'
 import { cacheKeys, type FileStateCache } from './fileStateCache.js'
+import { getRuntimeScopedCacheKey } from './runtimeScopeCacheKey.js'
 import {
   createAbortController,
   createChildAbortController,
@@ -2675,6 +2676,10 @@ async function getDynamicSkillAttachments(
 // every subagent's filterToBundledAndMcp result to dedup to empty.
 const sentSkillNames = new Map<string, Set<string>>()
 
+function getSkillListingScopeKey(agentId: string | undefined): string {
+  return getRuntimeScopedCacheKey(getProjectRoot(), agentId ?? '')
+}
+
 // Called when the skill set genuinely changes (plugin reload, skill file
 // change on disk) so new skills get announced. NOT called on compact —
 // post-compact re-injection costs ~4K tokens/event for marginal benefit.
@@ -2778,7 +2783,7 @@ async function getSkillListingAttachments(
     allCommands = filterToBundledAndMcp(allCommands)
   }
 
-  const agentKey = toolUseContext.agentId ?? ''
+  const agentKey = getSkillListingScopeKey(toolUseContext.agentId)
   let sent = sentSkillNames.get(agentKey)
   if (!sent) {
     sent = new Set()

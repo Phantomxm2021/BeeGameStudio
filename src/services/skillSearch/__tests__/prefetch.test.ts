@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clearCommandsCache } from '../../../commands.js'
 import { getTurnZeroSkillDiscovery } from '../prefetch.js'
-import { clearSkillIndexCache } from '../localSearch.js'
+import { clearSkillIndexCache, getSkillIndex } from '../localSearch.js'
 
 let root: string
 let previousCwd: string
@@ -97,5 +97,55 @@ describe('skill search prefetch', () => {
     expect(attachment.skills).toEqual([])
     expect(attachment.gap?.status).toBe('pending')
     expect(attachment.gap?.draftPath).toBeUndefined()
+  })
+
+  test('keeps skill index scoped by CLAUDE_CONFIG_DIR for the same cwd', async () => {
+    const cwd = join(root, 'game')
+    const userAConfigDir = join(root, 'user-a-runtime')
+    const userBConfigDir = join(root, 'user-b-runtime')
+    mkdirSync(join(userAConfigDir, 'skills', 'user-a-index-skill'), {
+      recursive: true,
+    })
+    mkdirSync(join(userBConfigDir, 'skills', 'user-b-index-skill'), {
+      recursive: true,
+    })
+    mkdirSync(cwd, { recursive: true })
+    writeFileSync(
+      join(userAConfigDir, 'skills', 'user-a-index-skill', 'SKILL.md'),
+      [
+        '---',
+        'name: user-a-index-skill',
+        'description: Indexed skill only visible to user A.',
+        '---',
+        '',
+        '# User A Index Skill',
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(userBConfigDir, 'skills', 'user-b-index-skill', 'SKILL.md'),
+      [
+        '---',
+        'name: user-b-index-skill',
+        'description: Indexed skill only visible to user B.',
+        '---',
+        '',
+        '# User B Index Skill',
+      ].join('\n'),
+    )
+
+    process.env.CLAUDE_CONFIG_DIR = userAConfigDir
+    const userAIndex = await getSkillIndex(cwd)
+
+    process.env.CLAUDE_CONFIG_DIR = userBConfigDir
+    const userBIndex = await getSkillIndex(cwd)
+
+    expect(userAIndex.map(skill => skill.name)).toContain('user-a-index-skill')
+    expect(userAIndex.map(skill => skill.name)).not.toContain(
+      'user-b-index-skill',
+    )
+    expect(userBIndex.map(skill => skill.name)).toContain('user-b-index-skill')
+    expect(userBIndex.map(skill => skill.name)).not.toContain(
+      'user-a-index-skill',
+    )
   })
 })

@@ -47,6 +47,7 @@ import {
 import { getFsImplementation } from '../utils/fsOperations.js'
 import { isPathGitignored } from '../utils/git/gitignore.js'
 import { logError } from '../utils/log.js'
+import { getRuntimeScopedCacheKey } from '../utils/runtimeScopeCacheKey.js'
 import {
   extractDescriptionFromMarkdown,
   getProjectConfigDirectoryNames,
@@ -804,6 +805,7 @@ export const getSkillDirCommands = memoize(
 
     return unconditionalSkills
   },
+  cwd => getRuntimeScopedCacheKey(cwd),
 )
 
 function getSkillsDirsForConfigBase(baseDir: string, configDirName: string): string[] {
