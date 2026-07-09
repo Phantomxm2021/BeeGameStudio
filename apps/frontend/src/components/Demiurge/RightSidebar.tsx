@@ -103,6 +103,7 @@ export function RightSidebar({
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts' | 'assets'>('chat');
     const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [chatThinkingMode, setChatThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [imageAttachments, setImageAttachments] = useState<ChatImageAttachmentPayload[]>([]);
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
@@ -157,6 +158,19 @@ export function RightSidebar({
         onSendMessage(chatInput, undefined, imageAttachments, chatThinkingMode);
         setChatInput('');
         setImageAttachments([]);
+        setEditingMessageId(null);
+    };
+
+    const handleEditMessage = (message: ChatDisplayMessage) => {
+        if (isComposerLocked || !canSendMessage) return;
+        setChatInput(message.content);
+        setEditingMessageId(message.id);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+
+    const handleCancelEdit = () => {
+        setEditingMessageId(null);
+        setChatInput('');
     };
 
     const handleDownloadArtifact = async (artifactId: string, title: string) => {
@@ -410,6 +424,9 @@ export function RightSidebar({
                                 onChatInputChange={setChatInput}
                                 onSend={handleSend}
                                 onSendMessage={onSendMessage}
+                                onEditMessage={!isLoading ? handleEditMessage : undefined}
+                                editingMessageId={editingMessageId}
+                                onCancelEdit={handleCancelEdit}
                                 imageAttachments={imageAttachments}
                                 thinkingMode={chatThinkingMode}
                                 onThinkingModeChange={setChatThinkingMode}

@@ -32,6 +32,9 @@ interface ChatPanelProps {
     onChatInputChange: (val: string) => void;
     onSend: () => void;
     onSendMessage?: (message: string) => void;
+    onEditMessage?: (message: ChatDisplayMessage) => void;
+    editingMessageId?: string | null;
+    onCancelEdit?: () => void;
     imageAttachments?: ChatImageAttachmentPayload[];
     thinkingMode?: BeeGameThinkingMode;
     onThinkingModeChange?: (mode: BeeGameThinkingMode) => void;
@@ -242,6 +245,9 @@ export const ChatPanel = memo(({
     onChatInputChange,
     onSend,
     onSendMessage,
+    onEditMessage,
+    editingMessageId = null,
+    onCancelEdit,
     imageAttachments = [],
     thinkingMode = 'disabled',
     onThinkingModeChange,
@@ -387,6 +393,7 @@ export const ChatPanel = memo(({
                                     currentUserDisplayName={currentUserDisplayName}
                                     currentUserEmail={currentUserEmail}
                                     currentUserAvatarUrl={currentUserAvatarUrl}
+                                    onEditMessage={onEditMessage}
                                 />
                                 {pendingReviews.map((review: ReviewDisplayModel) => {
                                     const isManifestReview = review?.type === 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
@@ -538,6 +545,22 @@ export const ChatPanel = memo(({
             )}
 
             <div className={composerShellClassName}>
+                {editingMessageId ? (
+                    <div
+                        data-testid="beegame-editing-message-banner"
+                        className="mb-3 flex items-center justify-between rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.055] px-3 py-2 text-zinc-300"
+                    >
+                        <span className="type-footnote">Editing message</span>
+                        <button
+                            type="button"
+                            aria-label="Cancel edit"
+                            onClick={onCancelEdit}
+                            className="type-footnote rounded-lg px-2 py-1 text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                ) : null}
                 {shouldShowWaitingBanner && (
                     <div className="glass-control type-footnote mb-3 rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-zinc-300 backdrop-blur-2xl">
                         {waitingApproval.message}

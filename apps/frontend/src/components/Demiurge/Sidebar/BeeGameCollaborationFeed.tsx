@@ -3,6 +3,7 @@ import {
     ChevronDown,
     ChevronRight,
     LoaderCircle,
+    Pencil,
 } from 'lucide-react';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatComponents';
@@ -19,6 +20,7 @@ type BeeGameCollaborationFeedProps = {
     currentUserDisplayName?: string;
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
+    onEditMessage?: (message: ChatDisplayMessage) => void;
 };
 
 type ToolFeedMessage = ChatDisplayMessage & {
@@ -213,6 +215,7 @@ export const BeeGameCollaborationFeed = memo(({
     messages,
     projectStatus,
     lang = 'en',
+    onEditMessage,
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
@@ -229,6 +232,7 @@ export const BeeGameCollaborationFeed = memo(({
                         <UserMessageCard
                             message={entry.message}
                             lang={lang}
+                            onEdit={onEditMessage}
                         />
                     </MessageScrollerItem>
                 ) : entry.kind === 'thinking' ? (
@@ -329,22 +333,37 @@ function ContextUpdateSeparator({ text }: { text: BeeGameText }) {
 function UserMessageCard({
     message,
     lang,
+    onEdit,
 }: {
     message: ChatDisplayMessage;
     lang: Language;
+    onEdit?: (message: ChatDisplayMessage) => void;
 }) {
     return (
         <section
             data-testid={`beegame-user-message-${message.id}`}
             className="w-full max-w-[46rem] rounded-3xl border border-emerald-300/15 bg-emerald-300/[0.055] px-4 py-3 text-zinc-100 shadow-sm shadow-emerald-950/10 backdrop-blur-2xl"
         >
-            <MarkdownRenderer
-                content={message.content}
-                isUser
-                messageId={message.id}
-                variant="beegame"
-                lang={lang}
-            />
+            <div className="group/message relative">
+                <MarkdownRenderer
+                    content={message.content}
+                    isUser
+                    messageId={message.id}
+                    variant="beegame"
+                    lang={lang}
+                />
+                {onEdit ? (
+                    <button
+                        type="button"
+                        aria-label="Edit message"
+                        title="Edit message"
+                        onClick={() => onEdit(message)}
+                        className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-zinc-950/90 text-zinc-400 opacity-0 shadow-lg transition-opacity hover:text-zinc-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 group-hover/message:opacity-100"
+                    >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                ) : null}
+            </div>
         </section>
     );
 }
