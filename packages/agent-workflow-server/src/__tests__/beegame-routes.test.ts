@@ -966,7 +966,7 @@ describe('beegame session routes', () => {
       const ownerARuntimeSettings = await (await ownerAApp.request('/api/runtime-settings')).json()
       const ownerBRuntimeSettings = await (await ownerBApp.request('/api/runtime-settings')).json()
       expect(ownerARuntimeSettings).toEqual({ skillSearchEnabled: true })
-      expect(ownerBRuntimeSettings).toEqual({})
+      expect(ownerBRuntimeSettings).toEqual({ skillSearchEnabled: true })
 
       const ownerAMcpServers = await (await ownerAApp.request('/api/mcp-servers')).json()
       const ownerBMcpServers = await (await ownerBApp.request('/api/mcp-servers')).json()
@@ -2434,6 +2434,13 @@ describe('beegame session routes', () => {
               SKILL_SEARCH_ENABLED: '1',
               FEATURE_WEB_BROWSER_TOOL: '1',
               FEATURE_BASH_CLASSIFIER: '1',
+              BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({
+                autoMemoryEnabled: false,
+                autoDreamEnabled: true,
+                skillSearchEnabled: true,
+                webBrowserToolEnabled: true,
+                bashClassifierEnabled: true,
+              }),
             },
           })
         }
@@ -2535,6 +2542,18 @@ describe('beegame session routes', () => {
         FEATURE_WEB_BROWSER_TOOL: '1',
         FEATURE_BASH_CLASSIFIER: '1',
       }))
+      expect(fake.starts[0]?.env.BEEGAME_RUNTIME_SETTINGS_JSON).toBeUndefined()
+      await expect(readFile(
+        join(
+          projectsRoot,
+          'users',
+          '00000000-0000-0000-0000-000000000001',
+          '.runtime',
+          'core',
+          'settings.json',
+        ),
+        'utf8',
+      )).resolves.toContain('"autoDreamEnabled": true')
     } finally {
       globalThis.fetch = originalFetch
       if (originalUrl === undefined) {

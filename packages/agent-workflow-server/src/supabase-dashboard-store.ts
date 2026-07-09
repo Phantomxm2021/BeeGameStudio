@@ -50,6 +50,7 @@ import type {
 } from './web-tools-store'
 
 type Env = Record<string, string | undefined>
+const PLATFORM_RUNTIME_SETTINGS_KEY = 'runtime_settings'
 
 type SupabaseConfig = {
   url: string
@@ -79,6 +80,12 @@ type SupabaseModelConfigRow = {
 type SupabaseRuntimeSettingsRow = {
   owner_id: string
   settings: JsonObject
+  updated_at: string
+}
+
+type SupabasePlatformSettingsRow = {
+  key: string
+  config: JsonObject
   updated_at: string
 }
 
@@ -537,6 +544,26 @@ export class SupabaseDashboardStore {
       settings: normalized,
       updated_at: new Date().toISOString(),
     }, 'owner_id')
+    return normalized
+  }
+
+  async loadPlatformRuntimeSettings(): Promise<RuntimeSettingsConfig> {
+    const rows = await this.rest<SupabasePlatformSettingsRow[]>(
+      `/rest/v1/beegame_platform_settings?key=eq.${q(PLATFORM_RUNTIME_SETTINGS_KEY)}&select=config&limit=1`,
+    )
+    return normalizeRuntimeSettings(rows[0]?.config ?? {})
+  }
+
+  async savePlatformRuntimeSettings(
+    config: RuntimeSettingsConfig,
+  ): Promise<RuntimeSettingsConfig> {
+    const previous = await this.loadPlatformRuntimeSettings()
+    const normalized = normalizeRuntimeSettings({ ...previous, ...config })
+    await this.upsert('beegame_platform_settings', {
+      key: PLATFORM_RUNTIME_SETTINGS_KEY,
+      config: normalized,
+      updated_at: new Date().toISOString(),
+    }, 'key')
     return normalized
   }
 

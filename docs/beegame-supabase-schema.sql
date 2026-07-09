@@ -230,6 +230,12 @@ create table if not exists public.beegame_runtime_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_platform_settings (
+  key text primary key,
+  config jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.beegame_web_tools (
   owner_id uuid primary key references auth.users(id) on delete cascade,
   config jsonb not null default '{}'::jsonb,
@@ -576,6 +582,14 @@ begin
   );
 end
 $$;
+
+insert into public.beegame_platform_settings (key, config, updated_at)
+select 'runtime_settings', s.settings, s.updated_at
+from public.beegame_runtime_settings s
+where public.beegame_is_platform_owner_id(s.owner_id)
+order by s.updated_at desc, s.owner_id
+limit 1
+on conflict (key) do nothing;
 
 create or replace function public.beegame_role_permissions(role_name text)
 returns text[]
@@ -1000,6 +1014,7 @@ declare
   model_row public.beegame_model_configs%rowtype;
   web_row public.beegame_web_tools%rowtype;
   settings_row public.beegame_runtime_settings%rowtype;
+  platform_settings jsonb := '{}'::jsonb;
   model_env jsonb := '{}'::jsonb;
   web_env jsonb := '{}'::jsonb;
   settings_env jsonb := '{}'::jsonb;
@@ -1007,8 +1022,6 @@ declare
   base_config_dir text;
   runtime_root_dir text;
   config_owner_id uuid;
-  runtime_settings_owner_id uuid;
-  platform_owner_with_runtime_settings uuid;
 begin
   if p_user_id is null then
     raise exception 'User id is required';
@@ -1017,15 +1030,6 @@ begin
     raise exception 'Forbidden';
   end if;
   config_owner_id := public.beegame_model_config_owner_id(p_user_id);
-
-  select s.owner_id
-  into platform_owner_with_runtime_settings
-  from public.beegame_runtime_settings s
-  where public.beegame_is_platform_owner_id(s.owner_id)
-  order by s.updated_at desc, s.owner_id
-  limit 1;
-
-  runtime_settings_owner_id := coalesce(platform_owner_with_runtime_settings, config_owner_id);
 
   base_config_dir := trim(trailing '/' from coalesce(p_data_dir, ''));
   if base_config_dir <> '' then
@@ -1108,23 +1112,39 @@ begin
     );
   end if;
 
-  select *
-  into settings_row
-  from public.beegame_runtime_settings
-  where owner_id = runtime_settings_owner_id
+  select coalesce(config, '{}'::jsonb)
+  into platform_settings
+  from public.beegame_platform_settings
+  where key = 'runtime_settings'
   limit 1;
 
-  if found then
-    if settings_row.settings ? 'skillSearchEnabled' then
+  if platform_settings = '{}'::jsonb then
+    select *
+    into settings_row
+    from public.beegame_runtime_settings
+    where owner_id = config_owner_id
+    limit 1;
+
+    if found then
+      platform_settings := coalesce(settings_row.settings, '{}'::jsonb);
+    end if;
+  end if;
+
+  if platform_settings <> '{}'::jsonb then
+    settings_env := settings_env || jsonb_build_object(
+      'BEEGAME_RUNTIME_SETTINGS_JSON',
+      platform_settings::text
+    );
+    if platform_settings ? 'skillSearchEnabled' then
       settings_env := settings_env || jsonb_build_object(
         'SKILL_SEARCH_ENABLED',
-        case when (settings_row.settings->>'skillSearchEnabled')::boolean then '1' else '0' end
+        case when (platform_settings->>'skillSearchEnabled')::boolean then '1' else '0' end
       );
     end if;
-    if settings_row.settings ? 'autoMemoryEnabled' then
+    if platform_settings ? 'autoMemoryEnabled' then
       settings_env := settings_env || jsonb_build_object(
         'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
-        case when (settings_row.settings->>'autoMemoryEnabled')::boolean then '0' else '1' end
+        case when (platform_settings->>'autoMemoryEnabled')::boolean then '0' else '1' end
       );
       if base_config_dir <> '' then
         settings_env := settings_env || jsonb_build_object(
@@ -1133,16 +1153,22 @@ begin
         );
       end if;
     end if;
-    if (settings_row.settings->>'treeSitterBashEnabled')::boolean is true then
+    if platform_settings ? 'autoDreamEnabled' and base_config_dir <> '' then
+      settings_env := settings_env || jsonb_build_object(
+        'CLAUDE_CONFIG_DIR',
+        runtime_root_dir || '/core'
+      );
+    end if;
+    if (platform_settings->>'treeSitterBashEnabled')::boolean is true then
       settings_env := settings_env || jsonb_build_object('FEATURE_TREE_SITTER_BASH', '1');
     end if;
-    if (settings_row.settings->>'webBrowserToolEnabled')::boolean is true then
+    if (platform_settings->>'webBrowserToolEnabled')::boolean is true then
       settings_env := settings_env || jsonb_build_object('FEATURE_WEB_BROWSER_TOOL', '1');
     end if;
-    if (settings_row.settings->>'bashClassifierEnabled')::boolean is true then
+    if (platform_settings->>'bashClassifierEnabled')::boolean is true then
       settings_env := settings_env || jsonb_build_object('FEATURE_BASH_CLASSIFIER', '1');
     end if;
-    if (settings_row.settings->>'mcpSkillsEnabled')::boolean is true then
+    if (platform_settings->>'mcpSkillsEnabled')::boolean is true then
       settings_env := settings_env || jsonb_build_object('FEATURE_MCP_SKILLS', '1');
     end if;
   end if;
@@ -1818,6 +1844,7 @@ alter table public.beegame_projects enable row level security;
 alter table public.beegame_sessions enable row level security;
 alter table public.beegame_model_configs enable row level security;
 alter table public.beegame_runtime_settings enable row level security;
+alter table public.beegame_platform_settings enable row level security;
 alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_assets enable row level security;
@@ -1895,6 +1922,14 @@ create policy "runtime settings managed by platform owner" on public.beegame_run
   with check (
     owner_id = auth.uid() and public.beegame_is_platform_owner()
   );
+
+drop policy if exists "platform settings authenticated read" on public.beegame_platform_settings;
+drop policy if exists "platform settings managed by platform owner" on public.beegame_platform_settings;
+create policy "platform settings authenticated read" on public.beegame_platform_settings
+  for select using (auth.uid() is not null);
+create policy "platform settings managed by platform owner" on public.beegame_platform_settings
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
 
 drop policy if exists "web tools owner access" on public.beegame_web_tools;
 drop policy if exists "web tools readable by effective owner" on public.beegame_web_tools;

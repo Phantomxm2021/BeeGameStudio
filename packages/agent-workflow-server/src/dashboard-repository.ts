@@ -58,6 +58,7 @@ import {
   loadRuntimeSettingsConfig,
   mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
+  syncRuntimeSettingsToDedicatedRuntimeConfig,
   type RuntimeSettingsConfig,
 } from './runtime-settings-store'
 import {
@@ -181,6 +182,16 @@ type CreateModelConfigInput = {
 type UpdateModelConfigInput = Partial<CreateModelConfigInput>
 
 const DEFAULT_MAX_PROJECTS_PER_USER = 100
+const RUNTIME_SETTINGS_ENV_KEY = 'BEEGAME_RUNTIME_SETTINGS_JSON'
+const RUNTIME_SETTING_FIELDS: Array<keyof RuntimeSettingsConfig> = [
+  'autoMemoryEnabled',
+  'autoDreamEnabled',
+  'skillSearchEnabled',
+  'treeSitterBashEnabled',
+  'webBrowserToolEnabled',
+  'bashClassifierEnabled',
+  'mcpSkillsEnabled',
+]
 
 export class ProjectQuotaExceededError extends Error {
   constructor(
@@ -480,10 +491,8 @@ export class DashboardRepository {
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
     return supabase
-      ? supabase.loadRuntimeSettings(user.id)
-      : loadRuntimeSettingsConfig({
-          dataDir: this.options.getUserDataRoot(request),
-        })
+      ? supabase.loadPlatformRuntimeSettings()
+      : this.loadLocalPlatformRuntimeSettings(request)
   }
 
   async saveRuntimeSettings(
@@ -493,9 +502,9 @@ export class DashboardRepository {
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
     return supabase
-      ? supabase.saveRuntimeSettings(user.id, input)
+      ? supabase.savePlatformRuntimeSettings(input)
       : saveRuntimeSettingsConfig(input, {
-          dataDir: this.options.getUserDataRoot(request),
+          dataDir: this.options.dashboardDataRoot,
         })
   }
 
@@ -984,19 +993,62 @@ export class DashboardRepository {
           'Supabase runtime env must be provided by RLS/RPC; the local runtime host does not use service-role Supabase credentials',
         )
       }
-      return client.loadRuntimeEnv({
+      const env = await client.loadRuntimeEnv({
         userId,
         dataDir,
         authToken: this.requireAuthToken(authToken),
         ...(modelConfigId ? { modelConfigId } : {}),
       })
+      this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
+      return env
     }
     return {
       ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
-      ...mapRuntimeSettingsToEnv(loadRuntimeSettingsConfig({ dataDir }), {
-        dataDir,
-      }),
+      ...this.mapLocalPlatformRuntimeSettingsToEnv(dataDir),
     }
+  }
+
+  private loadLocalPlatformRuntimeSettings(
+    request: Request,
+  ): RuntimeSettingsConfig {
+    const platformSettings = loadRuntimeSettingsConfig({
+      dataDir: this.options.dashboardDataRoot,
+    })
+    if (Object.keys(platformSettings).length > 0) return platformSettings
+    return loadRuntimeSettingsConfig({
+      dataDir: this.options.getUserDataRoot(request),
+    })
+  }
+
+  private mapLocalPlatformRuntimeSettingsToEnv(
+    dataDir: string,
+  ): Record<string, string> {
+    const platformSettings = loadRuntimeSettingsConfig({
+      dataDir: this.options.dashboardDataRoot,
+    })
+    const settings = Object.keys(platformSettings).length > 0
+      ? platformSettings
+      : loadRuntimeSettingsConfig({ dataDir })
+    syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
+    return mapRuntimeSettingsToEnv(settings, {
+        dataDir,
+      })
+  }
+
+  private syncRuntimeSettingsFromRuntimeEnv(
+    env: Record<string, string>,
+    dataDir: string,
+  ): void {
+    const raw = env[RUNTIME_SETTINGS_ENV_KEY]
+    delete env[RUNTIME_SETTINGS_ENV_KEY]
+    if (!raw) return
+    const parsed = safeParseJsonObject(raw)
+    if (!parsed) return
+    const settings: RuntimeSettingsConfig = {}
+    for (const field of RUNTIME_SETTING_FIELDS) {
+      if (typeof parsed[field] === 'boolean') settings[field] = parsed[field]
+    }
+    syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
   }
 
   private persistLocalModelConfigs(): void {
@@ -1128,6 +1180,17 @@ function toProjectLifecycleRetentionRun(
 
 function numberFromMetadata(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function safeParseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function metadataString(

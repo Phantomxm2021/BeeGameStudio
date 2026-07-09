@@ -690,7 +690,7 @@ export function createAgentWorkflowApp(
       input,
     )
     syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
-      dataDir: getCurrentUserDataRoot(c.req.raw),
+      dataDir: dashboardDataRoot,
     })
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,

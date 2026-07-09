@@ -302,6 +302,23 @@ describe('SupabaseDashboardStore', () => {
         ])
       }
 
+      if (requestUrl.includes('/beegame_platform_settings')) {
+        if (init?.method === 'POST') {
+          return Response.json([JSON.parse(String(init.body))])
+        }
+        return Response.json([
+          {
+            key: 'runtime_settings',
+            config: {
+              skillSearchEnabled: true,
+              webBrowserToolEnabled: true,
+              ignored: true,
+            },
+            updated_at: '2026-06-27T00:00:00.000Z',
+          },
+        ])
+      }
+
       if (requestUrl.includes('/beegame_web_tools')) {
         if (init?.method === 'POST') {
           return Response.json([JSON.parse(String(init.body))])
@@ -650,6 +667,17 @@ describe('SupabaseDashboardStore', () => {
     })
     expect(await store.loadRuntimeSettings(ownerId)).toEqual({
       skillSearchEnabled: true,
+    })
+    expect(await store.loadPlatformRuntimeSettings()).toEqual({
+      skillSearchEnabled: true,
+      webBrowserToolEnabled: true,
+    })
+    expect(await store.savePlatformRuntimeSettings({
+      bashClassifierEnabled: true,
+    })).toEqual({
+      skillSearchEnabled: true,
+      webBrowserToolEnabled: true,
+      bashClassifierEnabled: true,
     })
     expect(await store.saveWebTools(ownerId, {
       webSearchAdapter: 'brave',

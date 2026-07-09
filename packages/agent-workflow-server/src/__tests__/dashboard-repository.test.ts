@@ -6,6 +6,78 @@ import { DashboardRepository } from '../dashboard-repository'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('reads and writes platform runtime settings through the global Supabase table', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => join(dataRoot, 'users', 'owner-auth-user'),
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        authToken: 'user-token',
+        fetchImpl: (async (
+          input: Parameters<typeof fetch>[0],
+          init?: Parameters<typeof fetch>[1],
+        ) => {
+          const url = String(input)
+          calls.push({
+            url,
+            method: init?.method ?? 'GET',
+            ...(init?.body
+              ? { body: JSON.parse(String(init.body)) as unknown }
+              : {}),
+          })
+          if (url.includes('/beegame_platform_settings')) {
+            if (init?.method === 'POST') {
+              return Response.json([JSON.parse(String(init.body))])
+            }
+            return Response.json([
+              {
+                key: 'runtime_settings',
+                config: { skillSearchEnabled: true },
+                updated_at: '2026-07-09T00:00:00.000Z',
+              },
+            ])
+          }
+          return new Response('not found', { status: 404 })
+        }) as unknown as typeof fetch,
+      }),
+    })
+    const request = new Request('http://beegame.test/api/runtime-settings', {
+      headers: { authorization: 'Bearer user-token' },
+    })
+    const user = { id: 'owner-auth-user', role: 'owner' as const }
+
+    try {
+      await expect(repository.loadRuntimeSettings(request, user)).resolves.toEqual({
+        skillSearchEnabled: true,
+      })
+      await expect(repository.saveRuntimeSettings(request, user, {
+        webBrowserToolEnabled: true,
+      })).resolves.toEqual({
+        skillSearchEnabled: true,
+        webBrowserToolEnabled: true,
+      })
+
+      expect(calls.some(call =>
+        call.url.includes('/rest/v1/beegame_platform_settings') &&
+        call.url.includes('key=eq.runtime_settings'),
+      )).toBe(true)
+      expect(calls.some(call =>
+        call.url.includes('/rest/v1/beegame_runtime_settings') ||
+        call.url.includes('owner_id=eq.owner-auth-user'),
+      )).toBe(false)
+      expect(calls.some(call =>
+        call.method === 'POST' &&
+        call.url.includes('/rest/v1/beegame_platform_settings') &&
+        call.url.includes('on_conflict=key'),
+      )).toBe(true)
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('delegates credit mutations to remote credit control when configured', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ operation: string; userId: string; input: unknown }> = []
