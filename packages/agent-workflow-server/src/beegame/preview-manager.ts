@@ -13,6 +13,9 @@ export type BeeGamePreviewStatus =
 export type BeeGamePreviewSnapshot = {
   sessionId: string
   workspacePath: string
+  kind: 'web'
+  engine: 'web'
+  generation: number
   status: BeeGamePreviewStatus
   url: string
   port?: number
@@ -115,6 +118,7 @@ export class BeeGamePreviewManager {
       return { ...existing.snapshot }
     }
 
+    const generation = (existing?.snapshot.generation ?? 0) + 1
     this.stop(options.sessionId, workspacePath)
 
     const publicPath = this.publicPath(options.sessionId)
@@ -126,6 +130,7 @@ export class BeeGamePreviewManager {
     )
     if (!plan.supported) {
       const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
+        generation,
         message: plan.message,
       })
       this.records.set(options.sessionId, { snapshot })
@@ -134,6 +139,7 @@ export class BeeGamePreviewManager {
 
     const startedAt = new Date().toISOString()
     const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
+      generation,
       url: '',
       port: plan.port,
       command: plan.command.join(' '),
@@ -240,6 +246,9 @@ export class BeeGamePreviewManager {
     return {
       sessionId,
       workspacePath,
+      kind: 'web',
+      engine: 'web',
+      generation: 0,
       status,
       url: '',
       updatedAt: new Date().toISOString(),
