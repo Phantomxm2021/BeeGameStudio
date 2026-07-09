@@ -556,19 +556,19 @@ class FakeBeeGameRuntime {
       return
     }
     if (this.mode === 'runtime_empty_dirs') {
-      const coreDir = this.env.CLAUDE_CONFIG_DIR
+      const configDir = this.env.CLAUDE_CONFIG_DIR
       const appDir = this.env.BEEGAME_CONFIG_DIR
-      if (coreDir) {
-        await mkdir(join(coreDir, 'modes'), { recursive: true })
-        await mkdir(join(coreDir, 'plans'), { recursive: true })
-        await mkdir(join(coreDir, 'session-env', 'session-empty'), {
+      if (configDir) {
+        await mkdir(join(configDir, 'modes'), { recursive: true })
+        await mkdir(join(configDir, 'plans'), { recursive: true })
+        await mkdir(join(configDir, 'session-env', 'session-empty'), {
           recursive: true,
         })
-        await mkdir(join(coreDir, 'projects', 'project-with-files'), {
+        await mkdir(join(configDir, 'projects', 'project-with-files'), {
           recursive: true,
         })
         await writeFile(
-          join(coreDir, 'projects', 'project-with-files', 'run.jsonl'),
+          join(configDir, 'projects', 'project-with-files', 'run.jsonl'),
           '{}\n',
         )
       }
@@ -1452,6 +1452,7 @@ describe('beegame session routes', () => {
           cwd: resolvedWorkspace,
           env: expect.objectContaining({
             BEEGAME_CONFIG_DIR: expect.stringContaining('.runtime/app'),
+            CLAUDE_CONFIG_DIR: expect.stringContaining('.runtime/app'),
             BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
             [`${legacyRuntimeEnvPrefix}OPENAI`]: '1',
             OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
@@ -1460,7 +1461,7 @@ describe('beegame session routes', () => {
           }),
         }),
       ])
-      expect(fake.starts[0]?.env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
+      expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toBe(fake.starts[0]?.env.BEEGAME_CONFIG_DIR)
       expect(fake.runtimes[0].submits[0].prompt).toBe(
         'Build a tiny puzzle game.',
       )
@@ -2338,7 +2339,7 @@ describe('beegame session routes', () => {
         FEATURE_BASH_CLASSIFIER: '1',
         FEATURE_MCP_SKILLS: '1',
       }))
-      expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('.runtime/core')
+      expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('.runtime/app')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).not.toMatch(/claude/i)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -2400,12 +2401,12 @@ describe('beegame session routes', () => {
       expect(
         await fsPathExists(join(runtimeRoot, 'app', '.dashboard-write-test')),
       ).toBe(false)
-      expect(await fsPathExists(join(runtimeRoot, 'core', 'modes'))).toBe(false)
-      expect(await fsPathExists(join(runtimeRoot, 'core', 'plans'))).toBe(false)
-      expect(await fsPathExists(join(runtimeRoot, 'core', 'session-env'))).toBe(false)
+      expect(await fsPathExists(join(runtimeRoot, 'app', 'modes'))).toBe(false)
+      expect(await fsPathExists(join(runtimeRoot, 'app', 'plans'))).toBe(false)
+      expect(await fsPathExists(join(runtimeRoot, 'app', 'session-env'))).toBe(false)
       expect(
         await readFile(
-          join(runtimeRoot, 'core', 'projects', 'project-with-files', 'run.jsonl'),
+          join(runtimeRoot, 'app', 'projects', 'project-with-files', 'run.jsonl'),
           'utf8',
         ),
       ).toBe('{}\n')
@@ -2549,7 +2550,7 @@ describe('beegame session routes', () => {
           'users',
           '00000000-0000-0000-0000-000000000001',
           '.runtime',
-          'core',
+          'app',
           'settings.json',
         ),
         'utf8',

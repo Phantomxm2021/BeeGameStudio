@@ -100,16 +100,11 @@ export function mapRuntimeSettingsToEnv(
   migrateLegacyRuntimeLayout(options)
   const env: Record<string, string> = {
     BEEGAME_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
+    CLAUDE_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
     BEEGAME_PROJECT_CONFIG_DIR_NAME: '.beegame',
   }
   if (config.skillSearchEnabled !== undefined) {
     env.SKILL_SEARCH_ENABLED = config.skillSearchEnabled ? '1' : '0'
-  }
-  if (
-    config.autoMemoryEnabled !== undefined ||
-    config.autoDreamEnabled !== undefined
-  ) {
-    env.CLAUDE_CONFIG_DIR = getCoreRuntimeConfigDir(options)
   }
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
@@ -140,7 +135,7 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   ) {
     return
   }
-  const filePath = join(getCoreRuntimeConfigDir(options), 'settings.json')
+  const filePath = join(getBeeGameRuntimeConfigDir(options), 'settings.json')
   mkdirSync(dirname(filePath), { recursive: true })
   const previous = readJsonObject(filePath)
   const next = {
@@ -200,15 +195,17 @@ export function cleanupRuntimeLayout(
   const coreDir = getCoreRuntimeConfigDir(options)
 
   removeRuntimeProbePath(join(appDir, '.dashboard-write-test'))
-  removeEmptyDirectory(appDir)
-  removeEmptyDirectory(join(coreDir, 'modes'))
-  removeEmptyDirectory(join(coreDir, 'plans'))
-  removeEmptyDescendantDirectories(join(coreDir, 'session-env'), {
-    removeRoot: true,
-  })
-  removeEmptyDescendantDirectories(join(coreDir, 'projects'), {
-    removeRoot: false,
-  })
+  for (const configDir of new Set([appDir, coreDir])) {
+    removeEmptyDirectory(join(configDir, 'modes'))
+    removeEmptyDirectory(join(configDir, 'plans'))
+    removeEmptyDescendantDirectories(join(configDir, 'session-env'), {
+      removeRoot: true,
+    })
+    removeEmptyDescendantDirectories(join(configDir, 'projects'), {
+      removeRoot: false,
+    })
+    removeEmptyDirectory(configDir)
+  }
 }
 
 function moveLegacyDirectory(from: string, to: string): void {

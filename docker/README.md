@@ -259,8 +259,10 @@ Generated projects are stored in the `beegame-projects` Docker volume at
 Runtime config is stored in the `beegame-config` Docker volume at
 `/home/bun/.beegame`.
 
-The runtime image seeds the checked-in `.beegame/skills` into that volume on the
-first start if the volume does not already contain a `skills` directory.
+The runtime image seeds the checked-in `.beegame/skills/builtinskills` into that
+volume on the first start if the volume does not already contain built-in skills.
+Uploaded user skills are managed separately by the skills service under
+`.beegame/skills/<user_id>`.
 
 ## Current Scope
 

@@ -1,5 +1,6 @@
 import type { Hono } from 'hono'
 import {
+  BeeGameSkillDuplicateError,
   BeeGameSkillValidationError,
   type BeeGameSkillsRepository,
   type BeeGameSkillsUserContext,
@@ -44,6 +45,9 @@ export function registerBeeGameSkillsRoutes(
       })
       return c.json(toUserSkillResponse(saved))
     } catch (err) {
+      if (err instanceof BeeGameSkillDuplicateError) {
+        return c.json({ error: 'Duplicate skill', message: err.message }, 409)
+      }
       if (err instanceof BeeGameSkillValidationError) {
         return c.json({ error: 'Validation failed', message: err.message }, 400)
       }

@@ -269,6 +269,15 @@ export function getProjectDirsUpToHome(
       } catch (e: unknown) {
         if (!isFsInaccessible(e)) throw e
       }
+      if (subdir === 'skills' && configDirName === '.beegame') {
+        const builtinSkillsSubdir = join(configSubdir, 'builtinskills')
+        try {
+          statSync(builtinSkillsSubdir)
+          dirs.push(builtinSkillsSubdir)
+        } catch (e: unknown) {
+          if (!isFsInaccessible(e)) throw e
+        }
+      }
     }
 
     // Stop after processing the git root directory - this prevents commands from parent

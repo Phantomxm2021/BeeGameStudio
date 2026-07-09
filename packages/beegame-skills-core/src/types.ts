@@ -51,3 +51,11 @@ export class BeeGameSkillValidationError extends Error {
     Object.setPrototypeOf(this, BeeGameSkillValidationError.prototype)
   }
 }
+
+export class BeeGameSkillDuplicateError extends BeeGameSkillValidationError {
+  constructor(message = 'Skill already exists') {
+    super(message)
+    this.name = 'BeeGameSkillDuplicateError'
+    Object.setPrototypeOf(this, BeeGameSkillDuplicateError.prototype)
+  }
+}

@@ -29,10 +29,12 @@ describe('BeeGame project config discovery', () => {
     try {
       const cwd = join(root, 'Projects', 'snake-game')
       const skillsDir = join(root, '.beegame', 'skills')
+      const builtinSkillsDir = join(skillsDir, 'builtinskills')
       await mkdir(cwd, { recursive: true })
-      await mkdir(skillsDir, { recursive: true })
+      await mkdir(builtinSkillsDir, { recursive: true })
 
       expect(getProjectDirsUpToHome('skills', cwd)).toContain(skillsDir)
+      expect(getProjectDirsUpToHome('skills', cwd)).toContain(builtinSkillsDir)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

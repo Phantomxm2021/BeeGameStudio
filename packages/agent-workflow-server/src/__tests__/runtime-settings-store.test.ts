@@ -43,7 +43,7 @@ describe('runtime settings store', () => {
       )
 
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
-      expect(env.CLAUDE_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'core'))
+      expect(env.CLAUDE_CONFIG_DIR).toBe(join(dataDir, '.runtime', 'app'))
       expect(existsSync(join(dataDir, 'beegame-config'))).toBe(false)
       expect(existsSync(join(dataDir, 'claude-config'))).toBe(false)
       expect(

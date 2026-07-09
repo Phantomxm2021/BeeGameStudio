@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Bot, Brain, BookOpenText, Cpu, FolderOpen, Globe, KeyRound, MoreHorizontal, Network, Plus, Plus as FaPlus, ReceiptText, Search, ShieldCheck, Ticket, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
+import { Switch } from '../../ui/switch';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import {
     getBeeGameSubagentsEnabled,
@@ -77,6 +78,7 @@ import {
     type BeeGameProjectRetentionResult,
 } from '../../../services/projectLifecycleApi';
 import { useSystemStore } from '../../../store/systemStore';
+import { useToastContext } from '../../../contexts/ToastContext';
 interface SettingsMenuProps {
     isOpen: boolean;
     lang: Language;
@@ -155,6 +157,7 @@ export function SettingsMenu({
     const billingCopy = getBillingSettingsCopy(translateSettings);
     const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
     const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
+    const { showError, showSuccess } = useToastContext();
     const currentUser = useSystemStore(state => state.currentUser);
     const hasPermission = useSystemStore(state => state.hasPermission);
     const canOpenPlatformSettings = currentUser?.role === 'owner';
@@ -210,7 +213,6 @@ export function SettingsMenu({
     const [testingMcpServerId, setTestingMcpServerId] = useState('');
     const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
     const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
-    const [userSkillsStatus, setUserSkillsStatus] = useState('');
     const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
@@ -345,13 +347,12 @@ export function SettingsMenu({
             void listUserSkills()
                 .then((skills) => {
                     if (cancelled) return;
-                    setUserSkills(skills);
-                    setUserSkillsStatus('');
+                    setUserSkills(uniqueUserSkills(skills));
                 })
                 .catch((error) => {
                     if (!cancelled) {
                         setUserSkills([]);
-                        setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.unavailable);
+                        showError(error instanceof Error ? error.message : userSkillsCopy.unavailable);
                     }
                 });
         }
@@ -415,6 +416,7 @@ export function SettingsMenu({
         billingCopy.auditUnavailable,
         billingCopy.billingUnavailable,
         projectLifecycleCopy.unavailable,
+        showError,
         text.webToolsReadFailed,
         text.workspaceReadFailed,
         userSkillsCopy.unavailable,
@@ -676,20 +678,19 @@ export function SettingsMenu({
 
     const handleImportUserSkill = async (file: File) => {
         if (!file.name.toLowerCase().endsWith('.zip')) {
-            setUserSkillsStatus('');
+            showError(userSkillsCopy.importFailed);
             return;
         }
-        setUserSkillsStatus('');
         setIsSavingUserSkill(true);
         try {
             const saved = await importUserSkillPackage(file);
-            setUserSkills((current) => [
+            setUserSkills((current) => uniqueUserSkills([
                 saved,
                 ...current.filter((skill) => skill.id !== saved.id),
-            ].sort((left, right) => left.name.localeCompare(right.name)));
-            setUserSkillsStatus(userSkillsCopy.imported(file.name));
-        } catch {
-            setUserSkillsStatus('');
+            ]));
+            showSuccess(userSkillsCopy.imported(file.name));
+        } catch (error) {
+            showError(error instanceof Error ? error.message : userSkillsCopy.importFailed);
         } finally {
             setIsSavingUserSkill(false);
         }
@@ -702,27 +703,25 @@ export function SettingsMenu({
     };
 
     const handleToggleUserSkill = async (skill: UserSkill) => {
-        setUserSkillsStatus('');
         setIsSavingUserSkill(true);
         try {
             const saved = await updateUserSkillEnabled(skill.id, !skill.enabled);
-            setUserSkills((current) => current.map((item) => item.id === saved.id ? saved : item));
+            setUserSkills((current) => uniqueUserSkills(current.map((item) => item.id === saved.id ? saved : item)));
         } catch (error) {
-            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
+            showError(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
         } finally {
             setIsSavingUserSkill(false);
         }
     };
 
     const handleDeleteUserSkill = async (skill: UserSkill) => {
-        setUserSkillsStatus('');
         setIsSavingUserSkill(true);
         try {
             await deleteUserSkill(skill.id);
             setUserSkills((current) => current.filter((item) => item.id !== skill.id));
-            setUserSkillsStatus(userSkillsCopy.deleted);
+            showSuccess(userSkillsCopy.deleted);
         } catch (error) {
-            setUserSkillsStatus(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
+            showError(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
         } finally {
             setIsSavingUserSkill(false);
         }
@@ -1491,7 +1490,6 @@ export function SettingsMenu({
                                     <UserSkillsSettingsPanel
                                         copy={userSkillsCopy}
                                         skills={userSkills}
-                                        status={userSkillsStatus}
                                         isSaving={isSavingUserSkill}
                                         onImport={(file) => void handleImportUserSkill(file)}
                                         onToggle={(skill) => void handleToggleUserSkill(skill)}
@@ -1985,31 +1983,6 @@ function getMcpHealthClass(
 	    return health.ok ? 'text-emerald-400' : 'text-red-400';
 }
 
-function Switch({
-    checked,
-    label,
-    onClick,
-}: {
-    checked: boolean;
-    label: string;
-    onClick: () => void;
-}) {
-    return (
-        <button
-            type="button"
-            role="switch"
-            aria-label={label}
-            aria-checked={checked}
-            onClick={onClick}
-            className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${checked ? 'border-emerald-300/60 bg-emerald-400' : 'border-white/15 bg-white/[0.04]'}`}
-        >
-            <span
-                className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
-            />
-        </button>
-    );
-}
-
 function InvitationSettingsPanel({
     copy,
     required,
@@ -2056,7 +2029,7 @@ function InvitationSettingsPanel({
                             {copy.description}
                         </div>
                     </div>
-                    <Switch checked={required} label={copy.title} onClick={onToggleRequired} />
+                    <Switch checked={required} aria-label={copy.title} onCheckedChange={onToggleRequired} />
                 </div>
 
                 <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr]">
@@ -2162,7 +2135,6 @@ function InvitationSettingsPanel({
 function UserSkillsSettingsPanel({
     copy,
     skills,
-    status,
     isSaving,
     onImport,
     onToggle,
@@ -2170,7 +2142,6 @@ function UserSkillsSettingsPanel({
 }: {
     copy: UserSkillsSettingsCopy;
     skills: UserSkill[];
-    status: string;
     isSaving: boolean;
     onImport: (file: File) => void;
     onToggle: (skill: UserSkill) => void;
@@ -2196,10 +2167,6 @@ function UserSkillsSettingsPanel({
     };
     return (
         <div className="space-y-4 py-2">
-            {status ? (
-                <div className="type-footnote text-amber-300">{status}</div>
-            ) : null}
-
             <section
                 data-testid="user-skills-drop-zone"
                 onDragOver={handleDragOver}
@@ -2225,22 +2192,21 @@ function UserSkillsSettingsPanel({
                                         </div>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => onToggle(skill)}
+                                        <Switch
+                                            checked={skill.enabled}
+                                            aria-label={skill.enabled ? copy.disabled : copy.enabled}
                                             disabled={isSaving}
-                                            className="type-button h-8 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {skill.enabled ? copy.disabled : copy.enabled}
-                                        </button>
+                                            onCheckedChange={() => onToggle(skill)}
+                                        />
                                         <button
                                             type="button"
+                                            aria-label={copy.delete}
+                                            title={copy.delete}
                                             onClick={() => onDelete(skill)}
                                             disabled={isSaving}
-                                            className="type-button inline-flex h-8 items-center gap-2 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             <Trash2 className="h-4 w-4" />
-                                            {copy.delete}
                                         </button>
                                     </div>
                                 </div>
@@ -2259,6 +2225,18 @@ function UserSkillsSettingsPanel({
             </section>
         </div>
     );
+}
+
+function uniqueUserSkills(skills: UserSkill[]): UserSkill[] {
+    const seen = new Set<string>();
+    const unique: UserSkill[] = [];
+    for (const skill of skills) {
+        const key = skill.slug || skill.name;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(skill);
+    }
+    return unique.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function McpSettingsPanel({
@@ -2542,7 +2520,7 @@ function McpServerFormPopover({
 
                             <div className="flex items-center justify-between gap-3 py-3">
                                 <span className="type-footnote text-zinc-100">{copy.form.enabled}</span>
-                                <Switch checked={form.enabled} label={copy.form.enabled} onClick={() => update({ enabled: !form.enabled })} />
+                                <Switch checked={form.enabled} aria-label={copy.form.enabled} onCheckedChange={() => update({ enabled: !form.enabled })} />
                             </div>
 
                             <label className="grid gap-2 py-3">

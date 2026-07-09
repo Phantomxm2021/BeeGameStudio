@@ -40,6 +40,8 @@ const {
     deleteUserSkill,
     planProjectRetention,
     runProjectRetention,
+    showError,
+    showSuccess,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
     createInvitation: vi.fn(),
@@ -75,6 +77,8 @@ const {
     deleteUserSkill: vi.fn(),
     planProjectRetention: vi.fn(),
     runProjectRetention: vi.fn(),
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -140,6 +144,18 @@ vi.mock('../../../services/userSkillsApi', () => ({
     importUserSkillPackage,
     updateUserSkillEnabled,
     deleteUserSkill,
+}));
+
+vi.mock('../../../contexts/ToastContext', () => ({
+    useToastContext: () => ({
+        showError,
+        showSuccess,
+        showWarning: vi.fn(),
+        showToast: vi.fn(),
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+        toasts: [],
+    }),
 }));
 
 const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
@@ -222,6 +238,8 @@ describe('SettingsMenu model settings', () => {
         updateUserSkillEnabled.mockReset();
         deleteUserSkill.mockReset();
         deleteUserSkill.mockResolvedValue({ deleted: true });
+        showError.mockReset();
+        showSuccess.mockReset();
         createModelConfig.mockReset();
         getBeeGameSubagentsEnabled.mockReturnValue(true);
         setBeeGameSubagentsEnabled.mockReset();
@@ -445,7 +463,8 @@ describe('SettingsMenu model settings', () => {
 
         await waitFor(() => expect(deleteUserSkill).toHaveBeenCalledWith('skill_1'));
         expect(screen.queryByText('movement-contracts')).not.toBeInTheDocument();
-        expect(await screen.findByText('技能已删除。')).toBeInTheDocument();
+        expect(showSuccess).toHaveBeenCalledWith('技能已删除。');
+        expect(screen.queryByText('技能已删除。')).not.toBeInTheDocument();
     });
 
     it('imports zipped skills without exposing an editing draft', async () => {
@@ -480,7 +499,8 @@ describe('SettingsMenu model settings', () => {
 
         await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
         expect(await screen.findByText('imported-movement-contracts')).toBeInTheDocument();
-        expect(await screen.findByText('已导入：imported-movement-contracts.zip')).toBeInTheDocument();
+        expect(showSuccess).toHaveBeenCalledWith('已导入：imported-movement-contracts.zip');
+        expect(screen.queryByText('已导入：imported-movement-contracts.zip')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Skill markdown 内容')).not.toBeInTheDocument();
     });
 
@@ -516,7 +536,8 @@ describe('SettingsMenu model settings', () => {
 
         await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
         expect(await screen.findByText('dropped-skill')).toBeInTheDocument();
-        expect(await screen.findByText('已导入：dropped-skill.zip')).toBeInTheDocument();
+        expect(showSuccess).toHaveBeenCalledWith('已导入：dropped-skill.zip');
+        expect(screen.queryByText('已导入：dropped-skill.zip')).not.toBeInTheDocument();
     });
 
     it('keeps the empty skills state clean when import validation fails', async () => {
@@ -529,10 +550,58 @@ describe('SettingsMenu model settings', () => {
         await userEvent.upload(screen.getByLabelText('导入 Skill zip 文件'), file);
 
         await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
+        expect(showError).toHaveBeenCalledWith('Skill zip file is required');
         expect(screen.queryByText('Skill zip file is required')).not.toBeInTheDocument();
         expect(screen.queryByText('请选择 .zip skill 包。')).not.toBeInTheDocument();
         expect(screen.getByText('还没有用户技能。')).toBeInTheDocument();
         expect(screen.getByText('导入 Skill zip 文件后，已保存的技能会显示在这里。')).toBeInTheDocument();
+    });
+
+    it('shows duplicate skill import errors from the server in toast', async () => {
+        importUserSkillPackage.mockRejectedValue(new Error('Skill already exists'));
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        const file = new File(['duplicate-zip'], 'duplicate-skill.zip', { type: 'application/zip' });
+        await userEvent.upload(screen.getByLabelText('导入 Skill zip 文件'), file);
+
+        await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
+        expect(showError).toHaveBeenCalledWith('Skill already exists');
+        expect(screen.queryByText('Skill already exists')).not.toBeInTheDocument();
+    });
+
+    it('shows each user skill slug once even when stored data contains duplicates', async () => {
+        listUserSkills.mockResolvedValue([
+            {
+                id: 'skill_1',
+                slug: 'threejs-fundamentals',
+                name: 'threejs-fundamentals',
+                description: 'Three.js scene setup.',
+                enabled: true,
+                content: '',
+                references: [],
+                createdAt: '2026-07-09T00:00:00.000Z',
+                updatedAt: '2026-07-09T00:00:00.000Z',
+            },
+            {
+                id: 'skill_2',
+                slug: 'threejs-fundamentals',
+                name: 'threejs-fundamentals',
+                description: 'Duplicate should not render.',
+                enabled: true,
+                content: '',
+                references: [],
+                createdAt: '2026-07-09T00:01:00.000Z',
+                updatedAt: '2026-07-09T00:01:00.000Z',
+            },
+        ]);
+
+        renderSettings();
+        await openUserSkillsSettings();
+
+        await waitFor(() => expect(listUserSkills).toHaveBeenCalledWith());
+        expect(screen.getAllByText('threejs-fundamentals')).toHaveLength(1);
     });
 
     it('shows private skills without exposing platform administration', async () => {

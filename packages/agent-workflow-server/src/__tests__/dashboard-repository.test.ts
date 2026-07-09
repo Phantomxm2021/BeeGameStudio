@@ -56,13 +56,15 @@ describe('DashboardRepository Supabase boundaries', () => {
     }) as typeof fetch
 
     try {
-      await repository.getRuntimeEnv(userRoot, 'owner-user')
+      const env = await repository.getRuntimeEnv(userRoot, 'owner-user')
 
       expect(calls).toEqual([
         'http://skills.test/api/internal/user-skills/enabled?userId=owner-user',
       ])
+      expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
+      expect(env.CLAUDE_CONFIG_DIR).toBe(env.BEEGAME_CONFIG_DIR)
       await expect(readFile(
-        join(userRoot, '.runtime', 'app', 'skills', 'user-runtime-skill', 'SKILL.md'),
+        join(env.CLAUDE_CONFIG_DIR, 'skills', 'user-runtime-skill', 'SKILL.md'),
         'utf8',
       )).resolves.toContain('Runtime Skill')
     } finally {
