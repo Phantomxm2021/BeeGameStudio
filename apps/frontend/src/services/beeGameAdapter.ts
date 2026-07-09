@@ -3,7 +3,6 @@ import type {
   BeeGameAssetUploadPayload,
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
-  BeeGamePreviewAccessPayload,
   ContinueTaskResponse,
   PendingUserReviewItem,
   ProjectBaselineStatusPayload,
@@ -658,10 +657,6 @@ export const beeGameAdapter = {
 
   async getProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
     return getJson(`/api/projects/${encodeURIComponent(projectId)}/preview`);
-  },
-
-  async getProjectPreviewAccess(projectId: string): Promise<BeeGamePreviewAccessPayload> {
-    return getJson(`/api/projects/${encodeURIComponent(projectId)}/preview/access`);
   },
 
   async startProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {

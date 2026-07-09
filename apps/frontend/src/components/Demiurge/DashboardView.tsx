@@ -100,7 +100,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
     const [isDeployingProject, setDeployingProject] = useState(false);
     const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
-    const [previewAccessUrl, setPreviewAccessUrl] = useState('');
     const hasSentInitialPrompt = useRef(false);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -330,20 +329,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         await loadProjectStatus(projectId);
     };
 
-    const refreshPreviewAccess = async () => {
-        try {
-            const access = await api.getProjectPreviewAccess(projectId);
-            setPreviewAccessUrl(access.status === 'ready' ? String(access.accessUrl || '') : '');
-        } catch {
-            setPreviewAccessUrl('');
-        }
-    };
-
     const handleStartPreview = async () => {
         if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.startProjectPreview(projectId);
-            await refreshPreviewAccess();
             setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
@@ -355,7 +344,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.restartProjectPreview(projectId);
-            await refreshPreviewAccess();
             setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
@@ -367,7 +355,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.stopProjectPreview(projectId);
-            setPreviewAccessUrl('');
             setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
@@ -552,14 +539,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         }
     }, [currentStatus, isBeeGameMode, projectStatus?.build_report?.build_url]);
 
-    useEffect(() => {
-        if (!isBeeGameMode || !projectStatus?.build_report?.build_url) {
-            setPreviewAccessUrl('');
-            return;
-        }
-        void refreshPreviewAccess();
-    }, [isBeeGameMode, projectId, projectStatus?.build_report?.build_url, previewRefreshNonce]);
-
     // Logging Token Usage and Progress
     useEffect(() => {
         const projectTokenUsage = tokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -631,7 +610,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 isSyncing={isSyncing}
                 isInteractionLocked={isProjectInteractionLocked}
                 buildReport={projectStatus?.build_report || null}
-                previewAccessUrl={previewAccessUrl}
                 deployments={deploymentHistory}
                 previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}

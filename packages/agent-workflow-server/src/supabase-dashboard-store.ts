@@ -1855,9 +1855,6 @@ function previewSnapshotToMetadata(
 ): JsonObject {
   return {
     workspacePath: snapshot.workspacePath,
-    kind: snapshot.kind,
-    engine: snapshot.engine,
-    generation: snapshot.generation,
     ...(snapshot.port !== undefined ? { port: snapshot.port } : {}),
     ...(snapshot.command ? { command: snapshot.command } : {}),
     ...(snapshot.script ? { script: snapshot.script } : {}),
@@ -1872,9 +1869,6 @@ function rowToPreviewSnapshot(row: SupabasePreviewRow): BeeGamePreviewSnapshot {
   return {
     sessionId: row.id,
     workspacePath: trimString(metadata.workspacePath),
-    kind: metadata.kind === 'web' ? 'web' : 'web',
-    engine: metadata.engine === 'web' ? 'web' : 'web',
-    generation: Number.isInteger(metadata.generation) ? Number(metadata.generation) : 0,
     status: normalizePreviewStatus(row.status),
     url: row.url ?? '',
     ...(Number.isInteger(metadata.port) ? { port: Number(metadata.port) } : {}),

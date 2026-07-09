@@ -232,12 +232,6 @@ export class BeeGamePreviewManager {
     return record.internalUrl
   }
 
-  runningSnapshot(sessionId: string): BeeGamePreviewSnapshot | undefined {
-    const record = this.records.get(sessionId)
-    if (!record || record.snapshot.status !== 'running') return undefined
-    return { ...record.snapshot }
-  }
-
   expectsPublicPath(sessionId: string): boolean {
     const record = this.records.get(sessionId)
     return Boolean(record?.expectsPublicPath)

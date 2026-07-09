@@ -201,13 +201,6 @@ export interface BeeGamePreviewPayload {
   updatedAt: string;
 }
 
-export interface BeeGamePreviewAccessPayload {
-  status: 'ready' | 'unavailable'
-  accessUrl?: string
-  expiresAt?: string
-  message?: string
-}
-
 export interface BeeGameDeploymentPayload {
   id: string;
   sessionId: string;
@@ -1039,13 +1032,6 @@ export const api = {
       return beeGameAdapter.getProjectPreview(projectId);
     }
     throw new Error('Project preview is only available for BeeGame projects');
-  },
-
-  getProjectPreviewAccess: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.getProjectPreviewAccess(projectId);
-    }
-    throw new Error('Project preview access is only available for BeeGame projects');
   },
 
   startProjectPreview: (projectId: string) => {
