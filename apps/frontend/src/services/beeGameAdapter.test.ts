@@ -39,6 +39,39 @@ describe('beeGameAdapter prompt rules', () => {
     vi.restoreAllMocks();
   });
 
+  it('analyzes uploaded attachments without converting them into intake options', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      analysisId: 'analysis_gdd',
+      sourceType: 'gdd',
+      completeness: 'complete',
+      confirmedFacts: [],
+      inferredDesign: [],
+      missingFields: [],
+      conflicts: [],
+      gddDraft: '# Confirmed GDD',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const analysis = await beeGameAdapter.analyzeAttachmentBuild({
+      attachments: [{
+        type: 'file',
+        mediaType: 'text/markdown',
+        data: 'I0dE',
+        filename: 'game-design.md',
+      }],
+      language: 'zh',
+      thinkingMode: 'disabled',
+      clientRequestId: 'attachment-analysis-1',
+    });
+
+    expect(analysis.completeness).toBe('complete');
+    expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/analyze-attachments', expect.objectContaining({ method: 'POST' }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(expect.objectContaining({
+      clientRequestId: 'attachment-analysis-1',
+      attachments: expect.any(Array),
+    }));
+  });
+
   it('loads projects from the BeeGame metadata API when available', async () => {
     localStorage.setItem('beegame-adapter-projects', JSON.stringify([
       { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },

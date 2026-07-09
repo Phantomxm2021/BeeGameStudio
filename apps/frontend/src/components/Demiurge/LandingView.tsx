@@ -40,6 +40,8 @@ import {
 } from '../../services/supabaseAuthApi';
 import { getInvitationPublicSettings } from '../../services/invitationApi';
 import { listModelConfigs } from '../../services/modelConfigApi';
+import type { ChatAttachmentPayload } from '../../services/api';
+import type { AttachmentBuildAnalysis } from '../../services/attachmentBuild';
 
 type IntakePhase =
     | 'idle'
@@ -48,6 +50,8 @@ type IntakePhase =
     | 'configuring_details'
     | 'confirming_brief'
     | 'starting_build';
+
+type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'failed';
 
 type ProductionSettingOptions = {
     platforms: string[];
@@ -599,6 +603,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(restoredIntakeFlow?.selectedOption || null);
     const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings || null);
     const [intakeError, setIntakeError] = useState('');
+    const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
+    const [attachmentBuildPhase, setAttachmentBuildPhase] = useState<AttachmentBuildPhase>('idle');
+    const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
     const [thinkingMode, setThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
@@ -696,15 +703,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         () => buildProductionSettingOptions(intakeOptions),
         [intakeOptions],
     );
-    const shouldShowIntakeModal = intakePhase !== 'idle' && intakePhase !== 'generating_options';
-    const modalTitle = intakePhase === 'options_ready'
+    const shouldShowIntakeModal = (intakePhase !== 'idle' && intakePhase !== 'generating_options') || attachmentBuildPhase !== 'idle';
+    const modalTitle = attachmentBuildPhase !== 'idle'
+        ? 'Review uploaded design'
+        : intakePhase === 'options_ready'
         ? intakeText.modal.chooseOption
         : intakePhase === 'configuring_details'
             ? selectedOption?.title || intakeText.modal.productionSettings
             : intakePhase === 'confirming_brief'
                 ? selectedOption?.title || intakeText.modal.confirmBuildBrief
                 : intakeText.modal.startBuild;
-    const intakeModalWidthClass = intakePhase === 'options_ready'
+    const intakeModalWidthClass = attachmentBuildPhase !== 'idle' || intakePhase === 'options_ready'
         ? 'max-w-5xl'
         : 'max-w-[34rem]';
 
@@ -933,7 +942,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const handleStart = async (event: React.FormEvent) => {
         event.preventDefault();
         const idea = projectName.trim();
-        if (!idea || isTransitioning || isPreparing) return;
+        if ((!idea && attachmentBuildAttachments.length === 0) || isTransitioning || isPreparing) return;
         writePendingIdeaDraftState(idea);
         clearPendingIntakeFlowState();
         setIntakeError('');
@@ -941,6 +950,26 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         const canGenerate = await ensureGenerationAccess();
         if (!canGenerate) {
             setIsPreparing(false);
+            return;
+        }
+        if (attachmentBuildAttachments.length > 0) {
+            setAttachmentBuildPhase('analyzing');
+            try {
+                const analysis = await beeGameAdapter.analyzeAttachmentBuild({
+                    idea,
+                    attachments: attachmentBuildAttachments,
+                    language: lang,
+                    thinkingMode,
+                    clientRequestId: `landing_attachment_${Date.now()}`,
+                });
+                setAttachmentBuildAnalysis(analysis);
+                setAttachmentBuildPhase(analysis.completeness === 'partial' ? 'needs_input' : 'needs_confirmation');
+            } catch (error) {
+                setAttachmentBuildPhase('failed');
+                setIntakeError(error instanceof Error ? error.message : 'Attachment analysis failed');
+            } finally {
+                setIsPreparing(false);
+            }
             return;
         }
         await requestIntakeCreditConfirmation(idea);
@@ -1136,6 +1165,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setSettings(null);
         setIsInputMenuOpen(false);
         setIntakeError('');
+        setAttachmentBuildPhase('idle');
+        setAttachmentBuildAnalysis(null);
+        setAttachmentBuildAttachments([]);
         clearIntakeRecoveryState();
     };
 
@@ -1626,6 +1658,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onChange={handleProjectNameChange}
                     onThinkingModeChange={setThinkingMode}
                     onSubmit={handleStart}
+                    attachments={attachmentBuildAttachments}
+                    onAttachmentsChange={setAttachmentBuildAttachments}
                 />
 
                 {shouldShowIntakeModal ? (
@@ -1655,6 +1689,35 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                             </button>
                         </div>
                         <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+
+                    {attachmentBuildPhase !== 'idle' ? (
+                        <div className="space-y-4" data-testid="attachment-build-analysis">
+                            <p className="type-callout text-zinc-300">
+                                {attachmentBuildPhase === 'analyzing'
+                                    ? '正在分析上传的 GDD 和图片…'
+                                    : attachmentBuildPhase === 'failed'
+                                        ? '附件分析失败，请重试或移除附件。'
+                                        : attachmentBuildPhase === 'needs_input'
+                                            ? '设计信息还不完整，请补充缺失内容。'
+                                            : '请确认分析结果后继续构建。'}
+                            </p>
+                            {attachmentBuildAnalysis ? (
+                                <>
+                                    <textarea
+                                        aria-label="Confirmed GDD"
+                                        value={attachmentBuildAnalysis.gddDraft}
+                                        onChange={event => setAttachmentBuildAnalysis({ ...attachmentBuildAnalysis, gddDraft: event.target.value })}
+                                        className="glass-control min-h-64 w-full rounded-3xl p-4 text-sm text-zinc-200 outline-none"
+                                    />
+                                    {attachmentBuildAnalysis.missingFields.length > 0 ? (
+                                        <ul className="space-y-2 rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm text-amber-100">
+                                            {attachmentBuildAnalysis.missingFields.map(item => <li key={item.field}>{item.field}: {item.reason}</li>)}
+                                        </ul>
+                                    ) : null}
+                                </>
+                            ) : null}
+                        </div>
+                    ) : null}
 
                     {intakePhase === 'options_ready' ? (
                         <div className="space-y-4" data-testid="intake-options">

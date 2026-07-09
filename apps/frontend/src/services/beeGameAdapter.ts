@@ -15,6 +15,7 @@ import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
 import type { BeeGameCreditTaskType } from './creditsApi';
 import { getSupabaseAccessToken, getSupabaseSessionUser } from './supabaseAuthApi';
+import { normalizeAttachmentBuildAnalysis, type AttachmentBuildAnalysis } from './attachmentBuild';
 
 type BeeGameSession = {
   id: string;
@@ -302,6 +303,23 @@ export const beeGameAdapter = {
       throw new Error('BeeGame intake did not return game mode options');
     }
     return intake;
+  },
+
+  async analyzeAttachmentBuild(data: {
+    idea?: string;
+    attachments: ChatAttachmentPayload[];
+    language: string;
+    thinkingMode: BeeGameThinkingMode;
+    clientRequestId: string;
+  }): Promise<AttachmentBuildAnalysis> {
+    const response = await postJson<unknown>('/api/beegame-intake/analyze-attachments', {
+      idea: data.idea,
+      attachments: data.attachments,
+      language: data.language,
+      thinkingMode: data.thinkingMode,
+      clientRequestId: data.clientRequestId,
+    });
+    return normalizeAttachmentBuildAnalysis(response);
   },
 
   async generateIntakeOptions(data: BeeGameIdeaIntakeRequest): Promise<BeeGameIntakeOption[]> {

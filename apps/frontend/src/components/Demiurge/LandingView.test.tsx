@@ -13,6 +13,9 @@ const { generateIntakeOptions } = vi.hoisted(() => ({
 const { runIdeaIntake } = vi.hoisted(() => ({
     runIdeaIntake: vi.fn(),
 }));
+const { analyzeAttachmentBuild } = vi.hoisted(() => ({
+    analyzeAttachmentBuild: vi.fn(),
+}));
 const {
     createStripeCheckoutSession,
     getBillingCreditPacks,
@@ -155,6 +158,7 @@ vi.mock('../../services/beeGameAdapter', () => ({
     beeGameAdapter: {
         generateIntakeOptions,
         runIdeaIntake,
+        analyzeAttachmentBuild,
     },
     getBeeGameWorkspaceSettings: vi.fn().mockResolvedValue({
         workspacePath: '/tmp/beegame-projects',
@@ -364,6 +368,17 @@ beforeEach(() => {
         detectedConstraints: [],
         recommendedNextStep: 'choose_direction',
         options,
+    });
+    analyzeAttachmentBuild.mockReset();
+    analyzeAttachmentBuild.mockResolvedValue({
+        analysisId: 'analysis_default',
+        sourceType: 'gdd',
+        completeness: 'complete',
+        confirmedFacts: [],
+        inferredDesign: [],
+        missingFields: [],
+        conflicts: [],
+        gddDraft: '# Confirmed GDD',
     });
     mockProjects = [];
     mockDeleteProject.mockReset();
@@ -1691,6 +1706,21 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
         expect(screen.getByPlaceholderText('What game do you want to make? e.g. a mobile puzzle game')).toBeInTheDocument();
         expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
+    });
+
+    it('accepts a GDD attachment from the landing prompt', async () => {
+        renderLanding();
+
+        const input = document.getElementById('landing-attachment-upload') as HTMLInputElement;
+        expect(input.accept).toContain('.md');
+        expect(input.accept).toContain('.jsonl');
+        expect(input.accept).not.toContain('image/gif');
+
+        fireEvent.change(input, {
+            target: { files: [new File(['# Game Design'], 'game-design.md', { type: 'text/markdown' })] },
+        });
+
+        expect(await screen.findByText('game-design.md')).toBeInTheDocument();
     });
 
     it('renders the video landing background', () => {
