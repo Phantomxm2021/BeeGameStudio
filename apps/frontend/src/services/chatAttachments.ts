@@ -40,6 +40,8 @@ const ALLOWED_ATTACHMENTS: Record<string, AllowedAttachment> = {
     '.jsonl': { kind: 'file', mediaTypes: ['application/jsonl', 'application/x-ndjson', 'text/jsonl'] },
 };
 
+const GENERIC_UNKNOWN_MEDIA_TYPES = new Set(['', 'application/octet-stream']);
+
 export const CHAT_ATTACHMENT_ACCEPT = Object.entries(ALLOWED_ATTACHMENTS)
     .flatMap(([extension, definition]) => [extension, ...definition.mediaTypes])
     .join(',');
@@ -52,8 +54,9 @@ const getExtension = (filename: string): string => {
 const getAllowedAttachment = (file: File): AllowedAttachment | undefined => {
     const definition = ALLOWED_ATTACHMENTS[getExtension(file.name)];
     if (!definition || file.size > MAX_CHAT_ATTACHMENT_BYTES) return undefined;
-    if (!file.type) return definition;
-    return definition.mediaTypes.includes(file.type) ? definition : undefined;
+    const mediaType = file.type.trim().toLowerCase();
+    if (GENERIC_UNKNOWN_MEDIA_TYPES.has(mediaType)) return definition;
+    return definition.mediaTypes.includes(mediaType) ? definition : undefined;
 };
 
 export const isSupportedChatFile = (file: File): boolean => Boolean(getAllowedAttachment(file));
