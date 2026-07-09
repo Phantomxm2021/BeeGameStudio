@@ -1446,12 +1446,92 @@ describe('agent workflow server routes', () => {
       viewerApp.request('/api/mcp-servers/server-id', {
         method: 'DELETE',
       }),
+      viewerApp.request('/api/user-skills'),
+      viewerApp.request('/api/user-skills', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: [
+            '---',
+            'name: viewer-skill',
+            'description: Viewer skill.',
+            '---',
+            '',
+            '# Viewer Skill',
+          ].join('\n'),
+        }),
+      }),
+      viewerApp.request('/api/user-skills/user-skill-id', {
+        method: 'DELETE',
+      }),
     ]
 
     for (const response of await Promise.all(requests)) {
       expect(response.status).toBe(403)
       expect(await response.json()).toEqual({ error: 'Forbidden' })
     }
+  })
+
+  test('creates updates lists and deletes user skills for owner users', async () => {
+    const createRes = await app.request('/api/user-skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        content: [
+          '---',
+          'name: interaction-contracts',
+          'description: Shared interaction contracts.',
+          '---',
+          '',
+          '# Interaction Contracts',
+        ].join('\n'),
+        references: [{
+          path: 'references/xr.md',
+          content: '# XR\n\nKeep comfort controls explicit.',
+        }],
+      }),
+    })
+    expect(createRes.status).toBe(200)
+    const created = await createRes.json() as { id: string; slug: string; enabled: boolean }
+    expect(created.slug).toBe('interaction-contracts')
+    expect(created.enabled).toBe(true)
+
+    const updateRes = await app.request(`/api/user-skills/${created.id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        enabled: false,
+        content: [
+          '---',
+          'name: interaction-contracts',
+          'description: Shared interaction contracts.',
+          '---',
+          '',
+          '# Interaction Contracts',
+          '',
+          'Updated.',
+        ].join('\n'),
+      }),
+    })
+    expect(updateRes.status).toBe(200)
+    const updated = await updateRes.json() as { enabled: boolean; content: string }
+    expect(updated.enabled).toBe(false)
+    expect(updated.content).toContain('Updated.')
+
+    const listRes = await app.request('/api/user-skills')
+    expect(listRes.status).toBe(200)
+    expect(await listRes.json()).toMatchObject([{
+      id: created.id,
+      slug: 'interaction-contracts',
+      enabled: false,
+    }])
+
+    const deleteRes = await app.request(`/api/user-skills/${created.id}`, {
+      method: 'DELETE',
+    })
+    expect(deleteRes.status).toBe(200)
+    expect(await deleteRes.json()).toEqual({ deleted: true })
+    expect(await (await app.request('/api/user-skills')).json()).toEqual([])
   })
 
   test('applies project and workspace route permissions by role', async () => {

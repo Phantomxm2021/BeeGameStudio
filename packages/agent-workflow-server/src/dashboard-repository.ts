@@ -41,6 +41,15 @@ import {
   type McpServerInput,
 } from './mcp-servers-store'
 import {
+  deleteUserSkill,
+  listEnabledUserSkills,
+  listUserSkills,
+  materializeUserSkills,
+  upsertUserSkill,
+  type BeeGameUserSkill,
+  type BeeGameUserSkillInput,
+} from './user-skills-store'
+import {
   BeeGameProjectMetadataStore,
   getBeeGameProjectDatabasePath,
   type BeeGameProjectMetadata,
@@ -455,6 +464,44 @@ export class DashboardRepository {
     return supabase
       ? supabase.deleteMcpServer(user.id, id)
       : deleteMcpServer(id, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async listUserSkills(
+    request: Request,
+    user: BeeGameUserContext,
+  ): Promise<BeeGameUserSkill[]> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.listUserSkills(user.id)
+      : listUserSkills({
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async upsertUserSkill(
+    request: Request,
+    user: BeeGameUserContext,
+    input: BeeGameUserSkillInput,
+  ): Promise<BeeGameUserSkill> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.upsertUserSkill(user.id, input)
+      : upsertUserSkill(input, {
+          dataDir: this.options.getUserDataRoot(request),
+        })
+  }
+
+  async deleteUserSkill(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<boolean> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.deleteUserSkill(user.id, id)
+      : deleteUserSkill(id, {
           dataDir: this.options.getUserDataRoot(request),
         })
   }
@@ -1000,11 +1047,34 @@ export class DashboardRepository {
         ...(modelConfigId ? { modelConfigId } : {}),
       })
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
+      await this.materializeSupabaseUserSkillsSafely(userId, authToken, dataDir)
       return env
     }
+    this.materializeLocalUserSkillsSafely(dataDir)
     return {
       ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
       ...this.mapLocalPlatformRuntimeSettingsToEnv(dataDir),
+    }
+  }
+
+  private materializeLocalUserSkillsSafely(dataDir: string): void {
+    try {
+      materializeUserSkills(listEnabledUserSkills({ dataDir }), { dataDir })
+    } catch (err) {
+      console.warn('[BeeGame] Failed to materialize local user skills:', err)
+    }
+  }
+
+  private async materializeSupabaseUserSkillsSafely(
+    userId: string,
+    authToken: string | undefined,
+    dataDir: string,
+  ): Promise<void> {
+    try {
+      const supabase = this.supabaseForAuthToken(authToken)
+      materializeUserSkills(await supabase.listEnabledUserSkills(userId), { dataDir })
+    } catch (err) {
+      console.warn('[BeeGame] Failed to materialize Supabase user skills:', err)
     }
   }
 

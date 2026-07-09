@@ -28,6 +28,13 @@ import type {
   McpServerScope,
   McpServerTransport,
 } from './mcp-servers-store'
+import {
+  UserSkillValidationError,
+  normalizeUserSkillInput,
+  type BeeGameUserSkill,
+  type BeeGameUserSkillInput,
+  type BeeGameUserSkillReference,
+} from './user-skills-store'
 import type {
   BeeGameProjectMetadata,
   BeeGameProjectRuntimeSnapshot,
@@ -103,6 +110,19 @@ type SupabaseMcpServerRow = {
   // Legacy column name. Values are protected by Supabase RLS and only sent to
   // the local runtime for the authenticated user's session.
   env_ciphertext: JsonObject
+  created_at: string
+  updated_at: string
+}
+
+type SupabaseUserSkillRow = {
+  id: string
+  owner_id: string
+  slug: string
+  name: string
+  description: string
+  enabled: boolean
+  content: string
+  references: JsonObject[]
   created_at: string
   updated_at: string
 }
@@ -635,6 +655,54 @@ export class SupabaseDashboardStore {
 
   async deleteMcpServer(ownerId: string, id: string): Promise<boolean> {
     return this.deleteWhere('beegame_mcp_servers', {
+      owner_id: ownerId,
+      id,
+    })
+  }
+
+  async listUserSkills(ownerId: string): Promise<BeeGameUserSkill[]> {
+    const rows = await this.rest<SupabaseUserSkillRow[]>(
+      `/rest/v1/beegame_user_skills?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
+    )
+    return rows.map(rowToUserSkill)
+  }
+
+  async listEnabledUserSkills(ownerId: string): Promise<BeeGameUserSkill[]> {
+    const rows = await this.rest<SupabaseUserSkillRow[]>(
+      `/rest/v1/beegame_user_skills?owner_id=eq.${q(ownerId)}&enabled=eq.true&select=*&order=created_at.asc`,
+    )
+    return rows.map(rowToUserSkill)
+  }
+
+  async upsertUserSkill(
+    ownerId: string,
+    input: BeeGameUserSkillInput,
+  ): Promise<BeeGameUserSkill> {
+    const existing = input.id
+      ? await this.getUserSkill(ownerId, input.id)
+      : undefined
+    const normalized = normalizeUserSkillInput(input, existing)
+    const duplicate = await this.getUserSkillBySlug(ownerId, normalized.slug)
+    if (duplicate && duplicate.id !== normalized.id) {
+      throw new UserSkillValidationError(`Skill name already exists: ${normalized.name}`)
+    }
+    const row = await this.upsert<SupabaseUserSkillRow>('beegame_user_skills', {
+      id: normalized.id,
+      owner_id: ownerId,
+      slug: normalized.slug,
+      name: normalized.name,
+      description: normalized.description,
+      enabled: normalized.enabled,
+      content: normalized.content,
+      references: normalized.references as unknown as JsonObject[],
+      created_at: normalized.createdAt,
+      updated_at: normalized.updatedAt,
+    }, 'id')
+    return rowToUserSkill(row)
+  }
+
+  async deleteUserSkill(ownerId: string, id: string): Promise<boolean> {
+    return this.deleteWhere('beegame_user_skills', {
       owner_id: ownerId,
       id,
     })
@@ -1215,6 +1283,26 @@ export class SupabaseDashboardStore {
     return rows[0] ? rowToMcpServer(rows[0]) : undefined
   }
 
+  private async getUserSkill(
+    ownerId: string,
+    id: string,
+  ): Promise<BeeGameUserSkill | undefined> {
+    const rows = await this.rest<SupabaseUserSkillRow[]>(
+      `/rest/v1/beegame_user_skills?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
+    )
+    return rows[0] ? rowToUserSkill(rows[0]) : undefined
+  }
+
+  private async getUserSkillBySlug(
+    ownerId: string,
+    slug: string,
+  ): Promise<BeeGameUserSkill | undefined> {
+    const rows = await this.rest<SupabaseUserSkillRow[]>(
+      `/rest/v1/beegame_user_skills?owner_id=eq.${q(ownerId)}&slug=eq.${q(slug)}&select=*&limit=1`,
+    )
+    return rows[0] ? rowToUserSkill(rows[0]) : undefined
+  }
+
   private async ensureCreditAccount(
     ownerId: string,
   ): Promise<SupabaseCreditAccountRow> {
@@ -1544,6 +1632,44 @@ function rowToMcpServer(
     env: normalizeEnvFromUnknown(envPayload.env),
     autoStart: config.autoStart !== false,
   })
+}
+
+function rowToUserSkill(
+  row: SupabaseUserSkillRow,
+): BeeGameUserSkill {
+  const normalized = normalizeUserSkillInput({
+    id: row.id,
+    enabled: row.enabled,
+    content: row.content,
+    references: normalizeUserSkillReferences(row.references),
+  }, {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    enabled: row.enabled,
+    content: row.content,
+    references: normalizeUserSkillReferences(row.references),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  })
+  return {
+    ...normalized,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function normalizeUserSkillReferences(
+  value: unknown,
+): BeeGameUserSkillReference[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(isObject)
+    .map(item => ({
+      path: typeof item.path === 'string' ? item.path : '',
+      content: typeof item.content === 'string' ? item.content : '',
+    }))
 }
 
 function normalizeMcpServerInput(

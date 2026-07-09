@@ -17,6 +17,7 @@ export type BeeGamePermission =
   | 'assets.integrate'
   | 'model_config.manage'
   | 'mcp.manage'
+  | 'skills.manage'
   | 'runtime_settings.manage'
   | 'secrets.manage'
   | 'audit.read'
@@ -385,6 +386,7 @@ const OWNER_PERMISSIONS = new Set<BeeGamePermission>([
   'project.delete',
   'model_config.manage',
   'mcp.manage',
+  'skills.manage',
   'runtime_settings.manage',
   'secrets.manage',
   'audit.read',

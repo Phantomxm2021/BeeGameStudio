@@ -58,6 +58,10 @@ import {
   type McpServerTransport,
 } from './mcp-servers-store'
 import {
+  UserSkillValidationError,
+  type BeeGameUserSkillReference,
+} from './user-skills-store'
+import {
   discoverActiveMcpServers,
   parsePortList,
   testMcpServerConnection,
@@ -811,6 +815,94 @@ export function createAgentWorkflowApp(
     return c.json({
       deleted,
     })
+  })
+
+  app.get('/api/user-skills', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'skills.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    return c.json(await dashboardRepository.listUserSkills(c.req.raw, user))
+  })
+
+  app.post('/api/user-skills', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'skills.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const saved = await dashboardRepository.upsertUserSkill(
+        c.req.raw,
+        user,
+        toUserSkillInput(await readJson(c.req.raw)),
+      )
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'user_skill.upserted',
+        targetType: 'user_skill',
+        targetId: saved.id,
+        metadata: {
+          slug: saved.slug,
+          enabled: saved.enabled,
+        },
+      })
+      return c.json(saved)
+    } catch (err) {
+      if (err instanceof UserSkillValidationError) {
+        return c.json({ error: 'Validation failed', message: err.message }, 400)
+      }
+      throw err
+    }
+  })
+
+  app.put('/api/user-skills/:id', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'skills.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const saved = await dashboardRepository.upsertUserSkill(
+        c.req.raw,
+        user,
+        {
+          ...toUserSkillInput(await readJson(c.req.raw)),
+          id: c.req.param('id'),
+        },
+      )
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'user_skill.upserted',
+        targetType: 'user_skill',
+        targetId: saved.id,
+        metadata: {
+          slug: saved.slug,
+          enabled: saved.enabled,
+        },
+      })
+      return c.json(saved)
+    } catch (err) {
+      if (err instanceof UserSkillValidationError) {
+        return c.json({ error: 'Validation failed', message: err.message }, 400)
+      }
+      throw err
+    }
+  })
+
+  app.delete('/api/user-skills/:id', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'skills.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    const deleted = await dashboardRepository.deleteUserSkill(
+      c.req.raw,
+      user,
+      c.req.param('id'),
+    )
+    if (deleted) {
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'user_skill.deleted',
+        targetType: 'user_skill',
+        targetId: c.req.param('id'),
+      })
+    }
+    return c.json({ deleted })
   })
 
   app.get('/api/filesystem/directories', async c => {
@@ -4180,6 +4272,22 @@ function toMcpServerInput(body: JsonObject) {
         }
       : {}),
     autoStart: body.autoStart !== false,
+  }
+}
+
+function toUserSkillInput(body: JsonObject) {
+  return {
+    ...(typeof body.id === 'string' ? { id: body.id } : {}),
+    enabled: body.enabled !== false,
+    content: typeof body.content === 'string' ? body.content : '',
+    references: Array.isArray(body.references)
+      ? body.references
+        .filter(isObject)
+        .map(item => ({
+          path: typeof item.path === 'string' ? item.path : '',
+          content: typeof item.content === 'string' ? item.content : '',
+        } satisfies BeeGameUserSkillReference))
+      : [],
   }
 }
 

@@ -1,11 +1,42 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
+import { upsertUserSkill } from '../user-skills-store'
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('materializes enabled local user skills before runtime env is returned', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const userRoot = join(dataRoot, 'users', 'owner-user')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => userRoot,
+    })
+    upsertUserSkill({
+      content: [
+        '---',
+        'name: runtime-skill',
+        'description: Runtime injected skill.',
+        '---',
+        '',
+        '# Runtime Skill',
+      ].join('\n'),
+    }, { dataDir: userRoot })
+
+    try {
+      await repository.getRuntimeEnv(userRoot)
+
+      await expect(readFile(
+        join(userRoot, '.runtime', 'app', 'skills', 'user-runtime-skill', 'SKILL.md'),
+        'utf8',
+      )).resolves.toContain('Runtime Skill')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('reads and writes platform runtime settings through the global Supabase table', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ url: string; method: string; body?: unknown }> = []

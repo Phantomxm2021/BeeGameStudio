@@ -254,6 +254,20 @@ create table if not exists public.beegame_mcp_servers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_user_skills (
+  id text primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  slug text not null,
+  name text not null,
+  description text not null,
+  enabled boolean not null default true,
+  content text not null,
+  references jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_id, slug)
+);
+
 create table if not exists public.beegame_assets (
   id text primary key,
   project_id text not null references public.beegame_projects(id) on delete cascade,
@@ -616,6 +630,7 @@ as $$
       'assets.integrate',
       'model_config.manage',
       'mcp.manage',
+      'skills.manage',
       'runtime_settings.manage',
       'secrets.manage',
       'audit.read'
@@ -1847,6 +1862,7 @@ alter table public.beegame_runtime_settings enable row level security;
 alter table public.beegame_platform_settings enable row level security;
 alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
+alter table public.beegame_user_skills enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
@@ -1949,6 +1965,10 @@ create policy "web tools managed by platform owner" on public.beegame_web_tools
 
 drop policy if exists "mcp server owner access" on public.beegame_mcp_servers;
 create policy "mcp server owner access" on public.beegame_mcp_servers
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists "user skill owner access" on public.beegame_user_skills;
+create policy "user skill owner access" on public.beegame_user_skills
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 drop policy if exists "asset owner access" on public.beegame_assets;
