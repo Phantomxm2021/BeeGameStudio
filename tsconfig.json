@@ -14,37 +14,49 @@
     "types": ["bun"],
     "paths": {
       "src/*": ["./src/*"],
-      "@claude-code-best/builtin-tools/*": ["./packages/builtin-tools/src/*"],
-      "@claude-code-best/builtin-tools": [
+      "@bee-game-studio/builtin-tools/*": ["./packages/builtin-tools/src/*"],
+      "@bee-game-studio/builtin-tools": [
         "./packages/builtin-tools/src/index.ts"
       ],
-      "@claude-code-best/mcp-client/*": ["./packages/mcp-client/src/*"],
-      "@claude-code-best/mcp-client": ["./packages/mcp-client/src/index.ts"],
-      "@claude-code-best/agent-tools/*": ["./packages/agent-tools/src/*"],
-      "@claude-code-best/agent-tools": ["./packages/agent-tools/src/index.ts"],
-      "@claude-code-best/weixin/*": ["./packages/weixin/src/*"],
-      "@claude-code-best/weixin": ["./packages/weixin/src/index.ts"],
-      "@claude-code-best/workflow-engine/*": [
+      "@bee-game-studio/mcp-client/*": ["./packages/mcp-client/src/*"],
+      "@bee-game-studio/mcp-client": ["./packages/mcp-client/src/index.ts"],
+      "@bee-game-studio/agent-tools/*": ["./packages/agent-tools/src/*"],
+      "@bee-game-studio/agent-tools": ["./packages/agent-tools/src/index.ts"],
+      "@bee-game-studio/weixin/*": ["./packages/weixin/src/*"],
+      "@bee-game-studio/weixin": ["./packages/weixin/src/index.ts"],
+      "@bee-game-studio/workflow-engine/*": [
         "./packages/workflow-engine/src/*"
       ],
-      "@claude-code-best/workflow-engine": [
+      "@bee-game-studio/workflow-engine": [
         "./packages/workflow-engine/src/index.ts"
       ],
-      "@claude-code-best/agent-workflow/*": ["./packages/agent-workflow/src/*"],
-      "@claude-code-best/agent-workflow": [
+      "@bee-game-studio/agent-workflow/*": ["./packages/agent-workflow/src/*"],
+      "@bee-game-studio/agent-workflow": [
         "./packages/agent-workflow/src/index.ts"
       ],
-      "@claude-code-best/agent-workflow-server/*": [
+      "@bee-game-studio/agent-workflow-server/*": [
         "./packages/agent-workflow-server/src/*"
       ],
-      "@claude-code-best/agent-workflow-server": [
+      "@bee-game-studio/agent-workflow-server": [
         "./packages/agent-workflow-server/src/index.ts"
       ],
-      "@claude-code-best/beegame-billing-server/*": [
+      "@bee-game-studio/beegame-billing-server/*": [
         "./packages/beegame-billing-server/src/*"
       ],
-      "@claude-code-best/beegame-billing-server": [
+      "@bee-game-studio/beegame-billing-server": [
         "./packages/beegame-billing-server/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-billing-core/*": [
+        "./packages/beegame-billing-core/src/*"
+      ],
+      "@bee-game-studio/beegame-billing-core": [
+        "./packages/beegame-billing-core/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-skills-core/*": [
+        "./packages/beegame-skills-core/src/*"
+      ],
+      "@bee-game-studio/beegame-skills-core": [
+        "./packages/beegame-skills-core/src/index.ts"
       ]
     }
   },

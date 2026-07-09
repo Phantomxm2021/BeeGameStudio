@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import {
   listNamedWorkflows,
   WORKFLOW_DIR_NAME,
-} from '@claude-code-best/workflow-engine'
+} from '@bee-game-studio/workflow-engine'
 import type { Command } from '../types/command.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 

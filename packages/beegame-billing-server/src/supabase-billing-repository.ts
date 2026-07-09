@@ -6,7 +6,7 @@ import type {
   BeeGameBillingRouteRepository,
   BeeGameCreditGrant,
   BeeGameManualCreditGrantInput,
-} from '@claude-code-best/beegame-billing-core/billing-ports'
+} from '@bee-game-studio/beegame-billing-core/billing-ports'
 import type {
   BeeGameCreditBalance,
   BeeGameCreditControlExpireInput,
@@ -16,7 +16,7 @@ import type {
   BeeGameCreditReservation,
   BeeGameCreditSettlement,
   BeeGameStaleCreditReservationExpiry,
-} from '@claude-code-best/beegame-billing-core/credit-control-client'
+} from '@bee-game-studio/beegame-billing-core/credit-control-client'
 
 type JsonObject = Record<string, unknown>
 

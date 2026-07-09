@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ModelConfigSnapshotRecord } from '@claude-code-best/agent-workflow'
+import type { ModelConfigSnapshotRecord } from '@bee-game-studio/agent-workflow'
 import { exportMcpServersSnapshot, type McpServerConfig } from './mcp-servers-store'
 import {
   BeeGameProjectMetadataStore,

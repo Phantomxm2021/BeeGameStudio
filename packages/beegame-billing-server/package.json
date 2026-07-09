@@ -1,5 +1,5 @@
 {
-  "name": "@claude-code-best/beegame-billing-server",
+  "name": "@bee-game-studio/beegame-billing-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,6 +16,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@claude-code-best/beegame-billing-core": "workspace:*"
+    "@bee-game-studio/beegame-billing-core": "workspace:*"
   }
 }

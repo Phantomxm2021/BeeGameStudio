@@ -17,7 +17,7 @@ import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
 
-const DEFAULT_TAVILY_EXTRACT_URL = 'https://tavily.claude-code-best.win/extract'
+const DEFAULT_TAVILY_EXTRACT_URL = 'https://tavily.bee-game-studio.win/extract'
 
 // Custom error class for egress proxy blocks
 class EgressBlockedError extends Error {

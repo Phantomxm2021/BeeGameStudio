@@ -11,7 +11,7 @@ import {
   exportModelConfigSnapshot,
   importModelConfigSnapshot,
   type ModelConfigSnapshotRecord,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 
 const STORE_FILE = 'model-configs.json'
 

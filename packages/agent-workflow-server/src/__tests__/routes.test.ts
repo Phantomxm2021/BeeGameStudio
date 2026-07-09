@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto'
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resetAgentWorkflow } from '@claude-code-best/agent-workflow'
+import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
 import { createAgentWorkflowApp } from '../app'
 import {
   getCreditBalance,

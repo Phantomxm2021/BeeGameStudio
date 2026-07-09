@@ -1,1 +1,1 @@
-export * from '@claude-code-best/beegame-billing-core/credit-control-client'
+export * from '@bee-game-studio/beegame-billing-core/credit-control-client'

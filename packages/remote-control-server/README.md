@@ -20,7 +20,7 @@ docker run -d \
   -p 3000:3000 \
   -e RCS_API_KEYS=your-api-key-here \
   -v rcs-data:/app/data \
-  ghcr.io/claude-code-best/remote-control-server:latest
+  ghcr.io/bee-game-studio/remote-control-server:latest
 ```
 
 ## 环境变量

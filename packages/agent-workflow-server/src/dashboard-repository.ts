@@ -4,7 +4,7 @@ import {
   listModelConfigs,
   updateModelConfig,
   type ModelProviderKind,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
@@ -42,14 +42,14 @@ import {
 } from './mcp-servers-store'
 import {
   fetchEnabledUserSkills,
-} from '@claude-code-best/beegame-skills-core/client'
+} from '@bee-game-studio/beegame-skills-core/client'
 import {
   resolveBeeGameSkillsConfig,
   type BeeGameSkillsConfig,
-} from '@claude-code-best/beegame-skills-core/config'
+} from '@bee-game-studio/beegame-skills-core/config'
 import {
   materializeUserSkills,
-} from '@claude-code-best/beegame-skills-core/store'
+} from '@bee-game-studio/beegame-skills-core/store'
 import {
   BeeGameProjectMetadataStore,
   getBeeGameProjectDatabasePath,
@@ -93,12 +93,12 @@ import {
   type WebToolsConfig,
 } from './web-tools-store'
 import { getUserDashboardDataRoot } from './local-runtime-service'
-import type { BeeGameCreditControlClient } from '@claude-code-best/beegame-billing-core/credit-control-client'
+import type { BeeGameCreditControlClient } from '@bee-game-studio/beegame-billing-core/credit-control-client'
 import type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
   BeeGameBillingEventInput,
-} from '@claude-code-best/beegame-billing-core/billing-ports'
+} from '@bee-game-studio/beegame-billing-core/billing-ports'
 
 export type DashboardRepositoryOptions = {
   dashboardDataRoot: string
@@ -177,7 +177,7 @@ export type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
   BeeGameBillingEventInput,
-} from '@claude-code-best/beegame-billing-core/billing-ports'
+} from '@bee-game-studio/beegame-billing-core/billing-ports'
 type CreateModelConfigInput = {
   name: string
   provider: ModelProviderKind

@@ -1,4 +1,4 @@
-import { AgentAdapterRegistry } from '@claude-code-best/workflow-engine'
+import { AgentAdapterRegistry } from '@bee-game-studio/workflow-engine'
 import { claudeCodeBackend } from './backends/claudeCodeBackend.js'
 
 /**

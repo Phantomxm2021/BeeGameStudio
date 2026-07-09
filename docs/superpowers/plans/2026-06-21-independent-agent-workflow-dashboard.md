@@ -36,7 +36,7 @@
 - Create `packages/agent-workflow-server/src/__tests__/routes.test.ts`
 
 - [ ] Write failing route tests for models, projects, runs, run detail, events, artifacts, and worker summaries.
-- [ ] Implement Hono routes backed by `@claude-code-best/agent-workflow`.
+- [ ] Implement Hono routes backed by `@bee-game-studio/agent-workflow`.
 - [ ] Run server tests and typecheck.
 - [ ] Commit `feat: add agent workflow server`.
 

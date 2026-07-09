@@ -3,10 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-code-best",
+      "name": "bee-game-studio",
       "dependencies": {
         "@agentclientprotocol/sdk": "^0.19.0",
-        "@claude-code-best/mcp-chrome-bridge": "^3.0.1",
+        "@bee-game-studio/mcp-chrome-bridge": "^3.0.1",
         "highlight.js": "^11.11.1",
         "ws": "^8.20.0",
       },
@@ -32,10 +32,10 @@
         "@aws-sdk/credential-providers": "^3.1037.0",
         "@azure/identity": "^4.13.1",
         "@biomejs/biome": "^2.4.12",
-        "@claude-code-best/agent-tools": "workspace:*",
-        "@claude-code-best/builtin-tools": "workspace:*",
-        "@claude-code-best/mcp-client": "workspace:*",
-        "@claude-code-best/weixin": "workspace:*",
+        "@bee-game-studio/agent-tools": "workspace:*",
+        "@bee-game-studio/builtin-tools": "workspace:*",
+        "@bee-game-studio/mcp-client": "workspace:*",
+        "@bee-game-studio/weixin": "workspace:*",
         "@commander-js/extra-typings": "^14.0.0",
         "@growthbook/growthbook": "^1.6.5",
         "@langfuse/otel": "^5.1.0",
@@ -275,24 +275,24 @@
       },
     },
     "packages/agent-tools": {
-      "name": "@claude-code-best/agent-tools",
+      "name": "@bee-game-studio/agent-tools",
       "version": "1.0.0",
       "dependencies": {
         "zod": "^3.25.0",
       },
     },
     "packages/agent-workflow": {
-      "name": "@claude-code-best/agent-workflow",
+      "name": "@bee-game-studio/agent-workflow",
       "version": "0.1.0",
     },
     "packages/agent-workflow-server": {
-      "name": "@claude-code-best/agent-workflow-server",
+      "name": "@bee-game-studio/agent-workflow-server",
       "version": "0.1.0",
       "dependencies": {
-        "@claude-code-best/agent-workflow": "workspace:*",
-        "@claude-code-best/beegame-billing-core": "workspace:*",
-        "@claude-code-best/beegame-skills-core": "workspace:*",
-        "@claude-code-best/workflow-engine": "workspace:*",
+        "@bee-game-studio/agent-workflow": "workspace:*",
+        "@bee-game-studio/beegame-billing-core": "workspace:*",
+        "@bee-game-studio/beegame-skills-core": "workspace:*",
+        "@bee-game-studio/workflow-engine": "workspace:*",
         "hono": "^4.12.15",
       },
     },
@@ -301,21 +301,21 @@
       "version": "1.0.0",
     },
     "packages/beegame-billing-core": {
-      "name": "@claude-code-best/beegame-billing-core",
+      "name": "@bee-game-studio/beegame-billing-core",
       "version": "0.1.0",
       "dependencies": {
         "hono": "^4.12.15",
       },
     },
     "packages/beegame-billing-server": {
-      "name": "@claude-code-best/beegame-billing-server",
+      "name": "@bee-game-studio/beegame-billing-server",
       "version": "0.1.0",
       "dependencies": {
-        "@claude-code-best/beegame-billing-core": "workspace:*",
+        "@bee-game-studio/beegame-billing-core": "workspace:*",
       },
     },
     "packages/beegame-skills-core": {
-      "name": "@claude-code-best/beegame-skills-core",
+      "name": "@bee-game-studio/beegame-skills-core",
       "version": "0.1.0",
       "dependencies": {
         "fflate": "^0.8.2",
@@ -323,17 +323,17 @@
       },
     },
     "packages/beegame-skills-server": {
-      "name": "@claude-code-best/beegame-skills-server",
+      "name": "@bee-game-studio/beegame-skills-server",
       "version": "0.1.0",
       "dependencies": {
-        "@claude-code-best/beegame-skills-core": "workspace:*",
+        "@bee-game-studio/beegame-skills-core": "workspace:*",
       },
     },
     "packages/builtin-tools": {
-      "name": "@claude-code-best/builtin-tools",
+      "name": "@bee-game-studio/builtin-tools",
       "version": "1.0.0",
       "dependencies": {
-        "@claude-code-best/agent-tools": "workspace:*",
+        "@bee-game-studio/agent-tools": "workspace:*",
       },
     },
     "packages/cloud-artifacts": {
@@ -362,10 +362,10 @@
       },
     },
     "packages/mcp-client": {
-      "name": "@claude-code-best/mcp-client",
+      "name": "@bee-game-studio/mcp-client",
       "version": "1.0.0",
       "dependencies": {
-        "@claude-code-best/agent-tools": "workspace:*",
+        "@bee-game-studio/agent-tools": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "lodash-es": "^4.17.21",
         "lru-cache": "^10.0.0",
@@ -434,14 +434,14 @@
       "version": "1.0.0",
     },
     "packages/weixin": {
-      "name": "@claude-code-best/weixin",
+      "name": "@bee-game-studio/weixin",
       "version": "1.0.0",
       "dependencies": {
         "qrcode": "^1.5.4",
       },
     },
     "packages/workflow-engine": {
-      "name": "@claude-code-best/workflow-engine",
+      "name": "@bee-game-studio/workflow-engine",
       "version": "0.1.0",
       "dependencies": {
         "ajv": "^8.18.0",
@@ -711,29 +711,29 @@
 
     "@chevrotain/utils": ["@chevrotain/utils@12.0.0", "https://registry.npmmirror.com/@chevrotain/utils/-/utils-12.0.0.tgz", {}, "sha512-lB59uJoaGIfOOL9knQqQRfhl9g7x8/wqFkp13zTdkRu1huG9kg6IJs1O8hqj9rs6h7orGxHJUKb+mX3rPbWGhA=="],
 
-    "@claude-code-best/agent-tools": ["@claude-code-best/agent-tools@workspace:packages/agent-tools"],
+    "@bee-game-studio/agent-tools": ["@bee-game-studio/agent-tools@workspace:packages/agent-tools"],
 
-    "@claude-code-best/agent-workflow": ["@claude-code-best/agent-workflow@workspace:packages/agent-workflow"],
+    "@bee-game-studio/agent-workflow": ["@bee-game-studio/agent-workflow@workspace:packages/agent-workflow"],
 
-    "@claude-code-best/agent-workflow-server": ["@claude-code-best/agent-workflow-server@workspace:packages/agent-workflow-server"],
+    "@bee-game-studio/agent-workflow-server": ["@bee-game-studio/agent-workflow-server@workspace:packages/agent-workflow-server"],
 
-    "@claude-code-best/beegame-billing-core": ["@claude-code-best/beegame-billing-core@workspace:packages/beegame-billing-core"],
+    "@bee-game-studio/beegame-billing-core": ["@bee-game-studio/beegame-billing-core@workspace:packages/beegame-billing-core"],
 
-    "@claude-code-best/beegame-billing-server": ["@claude-code-best/beegame-billing-server@workspace:packages/beegame-billing-server"],
+    "@bee-game-studio/beegame-billing-server": ["@bee-game-studio/beegame-billing-server@workspace:packages/beegame-billing-server"],
 
-    "@claude-code-best/beegame-skills-core": ["@claude-code-best/beegame-skills-core@workspace:packages/beegame-skills-core"],
+    "@bee-game-studio/beegame-skills-core": ["@bee-game-studio/beegame-skills-core@workspace:packages/beegame-skills-core"],
 
-    "@claude-code-best/beegame-skills-server": ["@claude-code-best/beegame-skills-server@workspace:packages/beegame-skills-server"],
+    "@bee-game-studio/beegame-skills-server": ["@bee-game-studio/beegame-skills-server@workspace:packages/beegame-skills-server"],
 
-    "@claude-code-best/builtin-tools": ["@claude-code-best/builtin-tools@workspace:packages/builtin-tools"],
+    "@bee-game-studio/builtin-tools": ["@bee-game-studio/builtin-tools@workspace:packages/builtin-tools"],
 
-    "@claude-code-best/mcp-chrome-bridge": ["@claude-code-best/mcp-chrome-bridge@3.0.1", "https://registry.npmmirror.com/@claude-code-best/mcp-chrome-bridge/-/mcp-chrome-bridge-3.0.1.tgz", { "dependencies": { "@hono/node-server": "^1.19.13", "@modelcontextprotocol/sdk": "^1.11.0", "commander": "^13.1.0", "hono": "^4.12.12", "is-admin": "^4.0.0" }, "bin": { "mcp-chrome-bridge": "dist/cli.js", "mcp-chrome-stdio": "dist/mcp/mcp-server-stdio.js" } }, "sha512-ozeLHVOdckTUsWKJneJAL+CclrUlwVyBpfzFxgsrSL9f0LvjlJXE7+VcF5OmjDPwmZy6QNorvtg3/8NT2cIlzA=="],
+    "@bee-game-studio/mcp-chrome-bridge": ["@bee-game-studio/mcp-chrome-bridge@3.0.1", "https://registry.npmmirror.com/@bee-game-studio/mcp-chrome-bridge/-/mcp-chrome-bridge-3.0.1.tgz", { "dependencies": { "@hono/node-server": "^1.19.13", "@modelcontextprotocol/sdk": "^1.11.0", "commander": "^13.1.0", "hono": "^4.12.12", "is-admin": "^4.0.0" }, "bin": { "mcp-chrome-bridge": "dist/cli.js", "mcp-chrome-stdio": "dist/mcp/mcp-server-stdio.js" } }, "sha512-ozeLHVOdckTUsWKJneJAL+CclrUlwVyBpfzFxgsrSL9f0LvjlJXE7+VcF5OmjDPwmZy6QNorvtg3/8NT2cIlzA=="],
 
-    "@claude-code-best/mcp-client": ["@claude-code-best/mcp-client@workspace:packages/mcp-client"],
+    "@bee-game-studio/mcp-client": ["@bee-game-studio/mcp-client@workspace:packages/mcp-client"],
 
-    "@claude-code-best/weixin": ["@claude-code-best/weixin@workspace:packages/weixin"],
+    "@bee-game-studio/weixin": ["@bee-game-studio/weixin@workspace:packages/weixin"],
 
-    "@claude-code-best/workflow-engine": ["@claude-code-best/workflow-engine@workspace:packages/workflow-engine"],
+    "@bee-game-studio/workflow-engine": ["@bee-game-studio/workflow-engine@workspace:packages/workflow-engine"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "https://registry.npmmirror.com/@cloudflare/kv-asset-handler/-/kv-asset-handler-0.5.0.tgz", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
@@ -3801,15 +3801,15 @@
 
     "@babel/traverse/@babel/parser": ["@babel/parser@7.29.2", "https://registry.npmmirror.com/@babel/parser/-/parser-7.29.2.tgz", { "dependencies": { "@babel/types": "^7.29.0" }, "bin": "./bin/babel-parser.js" }, "sha512-4GgRzy/+fsBa72/RZVJmGKPmZu9Byn8o4MoLpmNe1m8ZfYnz5emHLQz3U4gLud6Zwl0RZIcgiLD7Uq7ySFuDLA=="],
 
-    "@claude-code-best/agent-tools/zod": ["zod@3.25.76", "https://registry.npmmirror.com/zod/-/zod-3.25.76.tgz", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+    "@bee-game-studio/agent-tools/zod": ["zod@3.25.76", "https://registry.npmmirror.com/zod/-/zod-3.25.76.tgz", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
-    "@claude-code-best/mcp-chrome-bridge/@hono/node-server": ["@hono/node-server@1.19.13", "https://registry.npmmirror.com/@hono/node-server/-/node-server-1.19.13.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ=="],
+    "@bee-game-studio/mcp-chrome-bridge/@hono/node-server": ["@hono/node-server@1.19.13", "https://registry.npmmirror.com/@hono/node-server/-/node-server-1.19.13.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ=="],
 
-    "@claude-code-best/mcp-client/lru-cache": ["lru-cache@10.4.3", "https://registry.npmmirror.com/lru-cache/-/lru-cache-10.4.3.tgz", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
+    "@bee-game-studio/mcp-client/lru-cache": ["lru-cache@10.4.3", "https://registry.npmmirror.com/lru-cache/-/lru-cache-10.4.3.tgz", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
-    "@claude-code-best/mcp-client/p-map": ["p-map@4.0.0", "https://registry.npmmirror.com/p-map/-/p-map-4.0.0.tgz", { "dependencies": { "aggregate-error": "^3.0.0" } }, "sha512-/bjOqmgETBYB5BoEeGVea8dmvHb2m9GLy1E9W43yeyfP6QQCZGFNa+XRceJEuDB6zqr+gKpIAmlLebMpykw/MQ=="],
+    "@bee-game-studio/mcp-client/p-map": ["p-map@4.0.0", "https://registry.npmmirror.com/p-map/-/p-map-4.0.0.tgz", { "dependencies": { "aggregate-error": "^3.0.0" } }, "sha512-/bjOqmgETBYB5BoEeGVea8dmvHb2m9GLy1E9W43yeyfP6QQCZGFNa+XRceJEuDB6zqr+gKpIAmlLebMpykw/MQ=="],
 
-    "@claude-code-best/mcp-client/zod": ["zod@3.25.76", "https://registry.npmmirror.com/zod/-/zod-3.25.76.tgz", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+    "@bee-game-studio/mcp-client/zod": ["zod@3.25.76", "https://registry.npmmirror.com/zod/-/zod-3.25.76.tgz", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "@cspotcode/source-map-support/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "https://registry.npmmirror.com/@jridgewell/trace-mapping/-/trace-mapping-0.3.9.tgz", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
 

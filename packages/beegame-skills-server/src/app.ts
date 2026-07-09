@@ -2,7 +2,7 @@ import {
   createBeeGameSkillsApp,
   LocalBeeGameSkillsRepository,
   type BeeGameSkillsUserContext,
-} from '@claude-code-best/beegame-skills-core'
+} from '@bee-game-studio/beegame-skills-core'
 import {
   createBeeGameSkillsAuthContext,
   createConfiguredSkillsUserResolver,

@@ -1,1 +1,1 @@
-export * from '@claude-code-best/beegame-billing-core/stripe-store-admin-routes'
+export * from '@bee-game-studio/beegame-billing-core/stripe-store-admin-routes'

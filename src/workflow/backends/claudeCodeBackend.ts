@@ -6,15 +6,15 @@ import {
   type AgentRunParams,
   type AgentRunResult,
   WorkflowAbortedError,
-} from '@claude-code-best/workflow-engine'
+} from '@bee-game-studio/workflow-engine'
 import { assembleToolPool } from '../../tools.js'
-import { finalizeAgentTool } from '@claude-code-best/builtin-tools/tools/AgentTool/agentToolUtils.js'
-import { runAgent } from '@claude-code-best/builtin-tools/tools/AgentTool/runAgent.js'
+import { finalizeAgentTool } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentToolUtils.js'
+import { runAgent } from '@bee-game-studio/builtin-tools/tools/AgentTool/runAgent.js'
 import {
   isBuiltInAgent,
   type AgentDefinition,
   type BuiltInAgentDefinition,
-} from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+} from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { createUserMessage, extractTextContent } from '../../utils/messages.js'
 import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { createHash } from 'node:crypto'

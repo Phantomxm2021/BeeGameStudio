@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import {
   createModelConfig,
   resetAgentWorkflow,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 import {
   createAgentWorkflowApp as createAgentWorkflowAppBase,
   type AgentWorkflowAppOptions,

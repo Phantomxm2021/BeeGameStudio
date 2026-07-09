@@ -1,5 +1,5 @@
 {
-  "name": "@claude-code-best/builtin-tools",
+  "name": "@bee-game-studio/builtin-tools",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,6 @@
     "./utils": "./src/utils.ts"
   },
   "dependencies": {
-    "@claude-code-best/agent-tools": "workspace:*"
+    "@bee-game-studio/agent-tools": "workspace:*"
   }
 }

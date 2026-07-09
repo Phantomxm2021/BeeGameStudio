@@ -11,7 +11,7 @@ describe('BeeGame billing server package', () => {
       dependencies?: Record<string, string>
     }
     expect(packageJson.dependencies).not.toHaveProperty(
-      '@claude-code-best/agent-workflow-server',
+      '@bee-game-studio/agent-workflow-server',
     )
   })
 

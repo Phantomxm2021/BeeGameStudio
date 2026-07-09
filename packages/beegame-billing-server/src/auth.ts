@@ -1,6 +1,6 @@
 import type {
   BeeGameBillingUserContext,
-} from '@claude-code-best/beegame-billing-core/billing-route-types'
+} from '@bee-game-studio/beegame-billing-core/billing-route-types'
 
 type BillingUserResolver = (
   request: Request,

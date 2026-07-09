@@ -10,10 +10,10 @@ import {
 import {
   resolveBeeGameBillingConfig,
   type BeeGameBillingConfig,
-} from '@claude-code-best/beegame-billing-core/billing-config'
+} from '@bee-game-studio/beegame-billing-core/billing-config'
 import {
   resolveBeeGameSkillsConfig,
-} from '@claude-code-best/beegame-skills-core/config'
+} from '@bee-game-studio/beegame-skills-core/config'
 import type {
   BeeGameBillingAppFactoryOptions,
 } from './billing-app-factory'

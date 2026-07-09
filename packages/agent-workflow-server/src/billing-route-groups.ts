@@ -1,1 +1,1 @@
-export * from '@claude-code-best/beegame-billing-core/billing-route-groups'
+export * from '@bee-game-studio/beegame-billing-core/billing-route-groups'

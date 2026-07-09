@@ -160,9 +160,9 @@ function getConfigFields(adapter: AdapterMeta): ConfigField[] {
       fields.push({
         key: 'tavilyEndpointUrl',
         label: 'Endpoint URL',
-        placeholder: 'https://tavily.claude-code-best.win',
+        placeholder: 'https://tavily.bee-game-studio.win',
         maskInput: false,
-        getValue: s => s.tavilyEndpointUrl ?? 'https://tavily.claude-code-best.win',
+        getValue: s => s.tavilyEndpointUrl ?? 'https://tavily.bee-game-studio.win',
         setValue: (s, v) => ({ ...s, tavilyEndpointUrl: v || undefined }),
       });
       break;

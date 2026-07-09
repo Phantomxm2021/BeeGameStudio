@@ -1,13 +1,13 @@
 import {
   createBeeGameBillingRouteApp,
-} from '@claude-code-best/beegame-billing-core/billing-app-factory'
+} from '@bee-game-studio/beegame-billing-core/billing-app-factory'
 import {
   resolveBeeGameBillingConfig,
   type BeeGameBillingConfig,
-} from '@claude-code-best/beegame-billing-core/billing-config'
+} from '@bee-game-studio/beegame-billing-core/billing-config'
 import type {
   BeeGameBillingUserContext,
-} from '@claude-code-best/beegame-billing-core/billing-route-types'
+} from '@bee-game-studio/beegame-billing-core/billing-route-types'
 import {
   createBeeGameBillingAuthContext,
   createConfiguredBillingUserResolver,

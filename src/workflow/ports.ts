@@ -2,7 +2,7 @@ import {
   createFileJournalStore,
   type ProgressEvent,
   type WorkflowPorts,
-} from '@claude-code-best/workflow-engine'
+} from '@bee-game-studio/workflow-engine'
 import { logForDebugging } from '../utils/debug.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { getRunsDir } from './persistence.js'

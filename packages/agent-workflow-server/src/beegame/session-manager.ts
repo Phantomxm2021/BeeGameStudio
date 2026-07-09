@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 import {
   refundCreditReservation,
   reserveCredits,

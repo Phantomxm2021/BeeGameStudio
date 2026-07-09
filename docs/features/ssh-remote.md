@@ -259,7 +259,7 @@ bun install -g .
 # 创建的命令：
 #   ccb            → dist/cli-node.js
 #   ccb-bun        → dist/cli-bun.js
-#   claude-code-best → dist/cli-node.js
+#   bee-game-studio → dist/cli-node.js
 
 # 安装位置：~/.bun/bin/ccb
 ```

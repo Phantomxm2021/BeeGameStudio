@@ -1,16 +1,16 @@
 {
-  "name": "claude-code-best",
+  "name": "bee-game-studio",
   "version": "2.8.0",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
-  "author": "claude-code-best <claude-code-best@proton.me>",
+  "author": "bee-game-studio <bee-game-studio@proton.me>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/claude-code-best/claude-code.git"
+    "url": "git+https://github.com/bee-game-studio/claude-code.git"
   },
-  "homepage": "https://github.com/claude-code-best/claude-code#readme",
+  "homepage": "https://github.com/bee-game-studio/claude-code#readme",
   "bugs": {
-    "url": "https://github.com/claude-code-best/claude-code/issues"
+    "url": "https://github.com/bee-game-studio/claude-code/issues"
   },
   "keywords": [
     "claude",
@@ -27,7 +27,7 @@
   "bin": {
     "ccb": "dist/cli-node.js",
     "ccb-bun": "dist/cli-bun.js",
-    "claude-code-best": "dist/cli-node.js"
+    "bee-game-studio": "dist/cli-node.js"
   },
   "workspaces": [
     "apps/*",
@@ -85,7 +85,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.19.0",
-    "@claude-code-best/mcp-chrome-bridge": "^3.0.1", 
+    "@bee-game-studio/mcp-chrome-bridge": "^3.0.1", 
     "highlight.js": "^11.11.1", 
     "ws": "^8.20.0"
   },
@@ -111,10 +111,10 @@
     "@aws-sdk/credential-providers": "^3.1037.0",
     "@azure/identity": "^4.13.1",
     "@biomejs/biome": "^2.4.12",
-    "@claude-code-best/agent-tools": "workspace:*",
-    "@claude-code-best/builtin-tools": "workspace:*",
-    "@claude-code-best/mcp-client": "workspace:*",
-    "@claude-code-best/weixin": "workspace:*",
+    "@bee-game-studio/agent-tools": "workspace:*",
+    "@bee-game-studio/builtin-tools": "workspace:*",
+    "@bee-game-studio/mcp-client": "workspace:*",
+    "@bee-game-studio/weixin": "workspace:*",
     "@commander-js/extra-typings": "^14.0.0",
     "@growthbook/growthbook": "^1.6.5",
     "@langfuse/otel": "^5.1.0",

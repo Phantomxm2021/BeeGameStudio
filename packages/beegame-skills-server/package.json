@@ -1,5 +1,5 @@
 {
-  "name": "@claude-code-best/beegame-skills-server",
+  "name": "@bee-game-studio/beegame-skills-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@claude-code-best/beegame-skills-core": "workspace:*"
+    "@bee-game-studio/beegame-skills-core": "workspace:*"
   }
 }

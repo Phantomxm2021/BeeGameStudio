@@ -13,7 +13,7 @@ import {
   getImageProcessor,
   type SharpFunction,
   type SharpInstance,
-} from '@claude-code-best/builtin-tools/tools/FileReadTool/imageProcessor.js'
+} from '@bee-game-studio/builtin-tools/tools/FileReadTool/imageProcessor.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { formatFileSize } from './format.js'

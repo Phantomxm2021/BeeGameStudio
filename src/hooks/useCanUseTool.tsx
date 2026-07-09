@@ -13,8 +13,8 @@ import type { ToolPermissionContext, Tool as ToolType, ToolUseContext } from '..
 import {
   consumeSpeculativeClassifierCheck,
   peekSpeculativeClassifierCheck,
-} from '@claude-code-best/builtin-tools/tools/BashTool/bashPermissions.js';
-import { BASH_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/BashTool/toolName.js';
+} from '@bee-game-studio/builtin-tools/tools/BashTool/bashPermissions.js';
+import { BASH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/BashTool/toolName.js';
 import type { AssistantMessage } from '../types/message.js';
 import { recordAutoModeDenial } from '../utils/autoModeDenials.js';
 import {

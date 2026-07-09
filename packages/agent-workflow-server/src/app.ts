@@ -8,7 +8,7 @@ import {
   listModelConfigs,
   mapModelConfigToRuntime,
   type ModelProviderKind,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 import {
   BeeGameSessionManager,
   deleteSessionArtifactsFromTranscript,
@@ -105,21 +105,21 @@ import {
 } from './supabase-runtime-env-client'
 import {
   resolveBeeGameBillingConfig,
-} from '@claude-code-best/beegame-billing-core/billing-config'
+} from '@bee-game-studio/beegame-billing-core/billing-config'
 import {
   createRemoteCreditControlClient,
-} from '@claude-code-best/beegame-billing-core/credit-control-client'
+} from '@bee-game-studio/beegame-billing-core/credit-control-client'
 import {
   registerBeeGameBillingPublicRoutes,
   registerBeeGameBillingStoreRoutes,
 } from './billing-routes'
 import {
   proxyBeeGameSkillsRequest,
-} from '@claude-code-best/beegame-skills-core/client'
+} from '@bee-game-studio/beegame-skills-core/client'
 import {
   resolveBeeGameSkillsConfig,
   type BeeGameSkillsConfig,
-} from '@claude-code-best/beegame-skills-core/config'
+} from '@bee-game-studio/beegame-skills-core/config'
 
 type JsonObject = Record<string, unknown>
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # cloud-artifacts 端到端测试脚本
 # 用法：
-#   WORKER_URL=https://cloud-artifacts.claude-code-best.workers.dev \
-#   TOKEN=claude-code-best \
+#   WORKER_URL=https://cloud-artifacts.bee-game-studio.workers.dev \
+#   TOKEN=bee-game-studio \
 #   bash scripts/test.sh
 #
 # 如本机连不上 workers.dev，可通过代理：
@@ -10,8 +10,8 @@
 
 set -uo pipefail
 
-WORKER_URL="${WORKER_URL:-https://cloud-artifacts.claude-code-best.win}"
-TOKEN="${TOKEN:-claude-code-best}"
+WORKER_URL="${WORKER_URL:-https://cloud-artifacts.bee-game-studio.win}"
+TOKEN="${TOKEN:-bee-game-studio}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

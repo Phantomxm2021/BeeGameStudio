@@ -4,7 +4,7 @@ import type {
   ModelConfigSnapshotRecord,
   ModelConfigUpdate,
   PublicModelConfig,
-} from '@claude-code-best/agent-workflow'
+} from '@bee-game-studio/agent-workflow'
 import {
   CREDIT_UNIT_WEIGHTED_TOKENS,
   getCreditEstimates,

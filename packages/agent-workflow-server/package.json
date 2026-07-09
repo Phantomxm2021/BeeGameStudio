@@ -1,5 +1,5 @@
 {
-  "name": "@claude-code-best/agent-workflow-server",
+  "name": "@bee-game-studio/agent-workflow-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,10 +18,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@claude-code-best/agent-workflow": "workspace:*",
-    "@claude-code-best/beegame-billing-core": "workspace:*",
-    "@claude-code-best/beegame-skills-core": "workspace:*",
-    "@claude-code-best/workflow-engine": "workspace:*",
+    "@bee-game-studio/agent-workflow": "workspace:*",
+    "@bee-game-studio/beegame-billing-core": "workspace:*",
+    "@bee-game-studio/beegame-skills-core": "workspace:*",
+    "@bee-game-studio/workflow-engine": "workspace:*",
     "hono": "^4.12.15"
   }
 }

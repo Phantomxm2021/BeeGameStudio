@@ -1,6 +1,6 @@
 import type {
   BeeGameSkillsUserContext,
-} from '@claude-code-best/beegame-skills-core/types'
+} from '@bee-game-studio/beegame-skills-core/types'
 
 export type SkillsUserResolver = (
   request: Request,
