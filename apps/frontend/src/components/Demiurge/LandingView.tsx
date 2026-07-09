@@ -8,6 +8,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
+import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
 import { LandingActions } from './Landing/LandingActions';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
@@ -51,7 +52,7 @@ type IntakePhase =
     | 'confirming_brief'
     | 'starting_build';
 
-type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'failed';
+type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'ready_to_build' | 'failed';
 
 type ProductionSettingOptions = {
     platforms: string[];
@@ -345,6 +346,58 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
     );
 }
 
+function buildAttachmentBrief(
+    analysis: AttachmentBuildAnalysis,
+    idea: string,
+    language: Language,
+): BeeGameBuildBrief {
+    const title = idea.trim() || 'Uploaded game';
+    const option = {
+        id: `attachment-${analysis.analysisId}`,
+        title,
+        pitch: 'Build directly from the user-confirmed attachment design.',
+        gameplay: analysis.gddDraft,
+        coreGameplayHypothesis: analysis.gddDraft,
+        experienceSnapshot: analysis.gddDraft,
+        playerFirstMinute: analysis.gddDraft,
+        whyFitsIdea: analysis.gddDraft,
+        playablePrototype: analysis.gddDraft,
+        validationTarget: analysis.gddDraft,
+        coreMechanic: analysis.gddDraft,
+        firstBuild: analysis.gddDraft,
+        validationGoal: analysis.gddDraft,
+        risk: 'Resolve only genuinely blocking gaps during implementation.',
+        fit: 'Attachment-confirmed design',
+        firstPlayableValidation: analysis.gddDraft,
+        riskComplexity: 'Review confirmed GDD against implementation.',
+        recommendedPlatform: '',
+        recommendedEngine: '',
+        recommendedDimension: '',
+        recommendedGenre: '',
+        recommendedStyle: '',
+        recommendedInputs: [],
+        scope: 'Attachment-defined scope',
+    } satisfies BeeGameIntakeOption;
+    return {
+        idea,
+        option,
+        settings: {
+            platform: '',
+            engine: '',
+            visualStyle: '',
+            dimension: '',
+            genre: '',
+            inputs: [],
+            scope: option.scope,
+        },
+        language,
+        title,
+        confirmedGdd: analysis.gddDraft,
+        buildSource: analysis.sourceType,
+        analysisId: analysis.analysisId,
+    };
+}
+
 function normalizeEngine(value: string | undefined): string {
     return value === 'Unreal Engine' ? 'Unreal' : value || '';
 }
@@ -606,6 +659,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [attachmentBuildPhase, setAttachmentBuildPhase] = useState<AttachmentBuildPhase>('idle');
     const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
+    const [attachmentBuildConflictSelections, setAttachmentBuildConflictSelections] = useState<Record<string, 'gdd' | 'image' | 'custom'>>({});
+    const [isAttachmentBuildSubmitting, setIsAttachmentBuildSubmitting] = useState(false);
     const [thinkingMode, setThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
@@ -939,6 +994,63 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }
     };
 
+    const runAttachmentBuildAnalysis = async () => {
+        setAttachmentBuildPhase('analyzing');
+        setIsPreparing(true);
+        setIntakeError('');
+        try {
+            const analysis = await beeGameAdapter.analyzeAttachmentBuild({
+                idea: projectName.trim(),
+                attachments: attachmentBuildAttachments,
+                language: lang,
+                thinkingMode,
+                clientRequestId: `landing_attachment_${Date.now()}`,
+            });
+            setAttachmentBuildAnalysis(analysis);
+            setAttachmentBuildConflictSelections({});
+            setAttachmentBuildPhase(analysis.completeness === 'partial' ? 'needs_input' : 'needs_confirmation');
+        } catch (error) {
+            setAttachmentBuildPhase('failed');
+            setIntakeError(error instanceof Error ? error.message : 'Attachment analysis failed');
+        } finally {
+            setIsPreparing(false);
+        }
+    };
+
+    const handleConfirmAttachmentBuild = async () => {
+        if (!attachmentBuildAnalysis) return;
+        const unresolvedConflict = attachmentBuildAnalysis.conflicts.find(item => !attachmentBuildConflictSelections[item.field]);
+        if (unresolvedConflict) {
+            setIntakeError(`请先确认冲突字段：${unresolvedConflict.field}`);
+            return;
+        }
+        const brief = buildAttachmentBrief(attachmentBuildAnalysis, projectName.trim(), lang);
+        setIsAttachmentBuildSubmitting(true);
+        setIsPreparing(true);
+        setIntakeError('');
+        try {
+            const quote = await getCreditQuote('full_build');
+            if (!quote.canStart) {
+                setIsAttachmentBuildSubmitting(false);
+                setIntakeError(intakeText.errors.insufficientCredits(
+                    intakeText.credits.buildTask,
+                    quote.reservedCredits,
+                    quote.balanceCredits,
+                ));
+                return;
+            }
+            setPendingBuildBrief(brief);
+            setBuildCreditQuote(quote);
+            writePendingCreditState({ kind: 'build', brief, quote });
+            setAttachmentBuildPhase('ready_to_build');
+        } catch (error) {
+            setIsAttachmentBuildSubmitting(false);
+            setIntakeError(error instanceof Error ? error.message : intakeText.errors.quoteFailed);
+        } finally {
+            setIsPreparing(false);
+        }
+    };
+
     const handleStart = async (event: React.FormEvent) => {
         event.preventDefault();
         const idea = projectName.trim();
@@ -953,23 +1065,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             return;
         }
         if (attachmentBuildAttachments.length > 0) {
-            setAttachmentBuildPhase('analyzing');
-            try {
-                const analysis = await beeGameAdapter.analyzeAttachmentBuild({
-                    idea,
-                    attachments: attachmentBuildAttachments,
-                    language: lang,
-                    thinkingMode,
-                    clientRequestId: `landing_attachment_${Date.now()}`,
-                });
-                setAttachmentBuildAnalysis(analysis);
-                setAttachmentBuildPhase(analysis.completeness === 'partial' ? 'needs_input' : 'needs_confirmation');
-            } catch (error) {
-                setAttachmentBuildPhase('failed');
-                setIntakeError(error instanceof Error ? error.message : 'Attachment analysis failed');
-            } finally {
-                setIsPreparing(false);
-            }
+            await runAttachmentBuildAnalysis();
             return;
         }
         await requestIntakeCreditConfirmation(idea);
@@ -1198,6 +1294,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             setIsTransitioning(true);
         } catch (error) {
             setIsPreparing(false);
+            setIsAttachmentBuildSubmitting(false);
             setIntakePhase('confirming_brief');
             setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
             console.error('Failed to start confirmed project:', error);
@@ -1253,6 +1350,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setBuildCreditQuote(null);
         setPendingBuildBrief(null);
         clearPendingCreditState();
+        setIsAttachmentBuildSubmitting(false);
     };
 
     const handleSelectProject = async (id: string) => {
@@ -1691,32 +1789,21 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
 
                     {attachmentBuildPhase !== 'idle' ? (
-                        <div className="space-y-4" data-testid="attachment-build-analysis">
-                            <p className="type-callout text-zinc-300">
-                                {attachmentBuildPhase === 'analyzing'
-                                    ? '正在分析上传的 GDD 和图片…'
-                                    : attachmentBuildPhase === 'failed'
-                                        ? '附件分析失败，请重试或移除附件。'
-                                        : attachmentBuildPhase === 'needs_input'
-                                            ? '设计信息还不完整，请补充缺失内容。'
-                                            : '请确认分析结果后继续构建。'}
-                            </p>
-                            {attachmentBuildAnalysis ? (
-                                <>
-                                    <textarea
-                                        aria-label="Confirmed GDD"
-                                        value={attachmentBuildAnalysis.gddDraft}
-                                        onChange={event => setAttachmentBuildAnalysis({ ...attachmentBuildAnalysis, gddDraft: event.target.value })}
-                                        className="glass-control min-h-64 w-full rounded-3xl p-4 text-sm text-zinc-200 outline-none"
-                                    />
-                                    {attachmentBuildAnalysis.missingFields.length > 0 ? (
-                                        <ul className="space-y-2 rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm text-amber-100">
-                                            {attachmentBuildAnalysis.missingFields.map(item => <li key={item.field}>{item.field}: {item.reason}</li>)}
-                                        </ul>
-                                    ) : null}
-                                </>
-                            ) : null}
-                        </div>
+                        attachmentBuildAnalysis ? (
+                            <AttachmentBuildReview
+                                analysis={attachmentBuildAnalysis}
+                                lang={lang}
+                                isSubmitting={isAttachmentBuildSubmitting}
+                                onChangeDraft={draft => setAttachmentBuildAnalysis({ ...attachmentBuildAnalysis, gddDraft: draft })}
+                                onSelectConflict={(field, choice) => setAttachmentBuildConflictSelections(current => ({ ...current, [field]: choice }))}
+                                onRetry={() => void runAttachmentBuildAnalysis()}
+                                onConfirm={handleConfirmAttachmentBuild}
+                            />
+                        ) : (
+                            <div data-testid="attachment-build-analysis" className="type-callout text-zinc-300">
+                                {attachmentBuildPhase === 'analyzing' ? '正在分析上传的 GDD 和图片…' : '附件分析失败，请重试或移除附件。'}
+                            </div>
+                        )
                     ) : null}
 
                     {intakePhase === 'options_ready' ? (

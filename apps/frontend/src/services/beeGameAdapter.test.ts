@@ -610,6 +610,42 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).not.toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
   });
 
+  it('sends a confirmed attachment GDD as the direct build source', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/filesystem/default-workspace') return jsonResponse({ path: '/tmp/beegame-projects' });
+      if (path === '/api/model-configs') return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
+        return jsonResponse({ id: 'beegame_gdd', cwd: body.workspacePath, status: 'running', turnStatus: 'idle' });
+      }
+      if (path === '/api/beegame-sessions/beegame_gdd/input' && init?.method === 'POST') {
+        return jsonResponse({ id: 'beegame_gdd', cwd: '/tmp/beegame-projects/confirmed-gdd', status: 'running', turnStatus: 'running' });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await beeGameAdapter.bootstrapProjectFromBrief({
+      idea: 'uploaded design',
+      title: 'Confirmed GDD',
+      option: makeLlmOption({ title: 'Confirmed GDD' }),
+      settings: { platform: '', visualStyle: '', dimension: '', genre: '', inputs: [], scope: '' },
+      language: 'en',
+      confirmedGdd: '# Rules\n- Solve the puzzle to win.',
+      buildSource: 'gdd',
+      analysisId: 'analysis_direct_build',
+    });
+
+    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
+      String(path) === '/api/beegame-sessions/beegame_gdd/input' && init?.method === 'POST'
+    ));
+    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
+    expect(body.text).toContain('Save it as docs/GDD.md first');
+    expect(body.text).toContain('# Rules');
+    expect(body.text).toContain('Do not regenerate a game plan');
+  });
+
   it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
