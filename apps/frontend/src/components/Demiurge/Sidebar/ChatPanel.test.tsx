@@ -300,7 +300,12 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByTestId('beegame-message-scroller')).toBeInTheDocument();
-        expect(screen.getByTestId('beegame-message-scroller-viewport')).toHaveClass('scroll-fade', 'scroll-fade-y');
+        expect(screen.getByTestId('beegame-message-scroller-viewport')).toHaveClass(
+            'scroll-fade',
+            'scroll-fade-y',
+            'scrollbar-premium',
+            'overscroll-contain',
+        );
         expect(screen.getByTestId('beegame-message-scroller-content')).toBeInTheDocument();
         const outline = screen.getByTestId('message-scroller-outline');
         expect(outline).toBeInTheDocument();
@@ -310,9 +315,34 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
         expect(screen.queryByTestId('message-scroller-outline-card')).not.toBeInTheDocument();
         const firstOutlineLine = screen.getAllByTestId('message-scroller-outline-line')[0];
+        const outlineNavigation = screen.getByRole('navigation', { name: 'Transcript outline' });
+        vi.spyOn(outlineNavigation, 'getBoundingClientRect').mockReturnValue({
+            top: 20,
+            bottom: 140,
+            left: 0,
+            right: 40,
+            width: 40,
+            height: 120,
+            x: 0,
+            y: 20,
+            toJSON: () => ({}),
+        });
+        vi.spyOn(firstOutlineLine, 'getBoundingClientRect').mockReturnValue({
+            top: 68,
+            bottom: 80,
+            left: 0,
+            right: 40,
+            width: 40,
+            height: 12,
+            x: 0,
+            y: 68,
+            toJSON: () => ({}),
+        });
         fireEvent.mouseEnter(firstOutlineLine);
         expect(firstOutlineLine).toHaveAttribute('data-length', 'full');
-        expect(screen.getByTestId('message-scroller-outline-card')).toHaveTextContent('请构建首个可玩版本');
+        const outlineCard = screen.getByTestId('message-scroller-outline-card');
+        expect(outlineCard).toHaveTextContent('请构建首个可玩版本');
+        expect(outlineCard).toHaveStyle({ top: '74px' });
         expect(document.querySelector('[data-message-id="m_user"]')).toBeInTheDocument();
         expect(document.querySelector('[data-message-id="m_user"]')).toHaveAttribute('data-scroll-anchor', 'false');
         expect(document.querySelector('[data-message-id="m_user"]')).toHaveClass('pl-12');

@@ -4,7 +4,7 @@ import {
     useMessageScrollerVisibility,
 } from '@shadcn/react/message-scroller';
 import { ArrowDown } from 'lucide-react';
-import { useState, type ComponentProps } from 'react';
+import { useRef, useState, type ComponentProps } from 'react';
 
 const cx = (...values: Array<string | undefined | false>) => values.filter(Boolean).join(' ');
 
@@ -39,7 +39,10 @@ export function MessageScroller({ className, ...props }: MessageScrollerProps) {
 export function MessageScrollerViewport({ className, ...props }: MessageScrollerViewportProps) {
     return (
         <BaseMessageScroller.Viewport
-            className={cx('scroll-fade scroll-fade-y relative min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4', className)}
+            className={cx(
+                'scroll-fade scroll-fade-y scrollbar-premium relative min-h-0 flex-1 overscroll-contain overflow-y-auto scroll-smooth px-4 pt-4 pb-4',
+                className,
+            )}
             {...props}
         />
     );
@@ -75,6 +78,9 @@ export function MessageScrollerButton({ className, ...props }: MessageScrollerBu
 
 export function MessageScrollerOutline({ items, className }: MessageScrollerOutlineProps) {
     const [hoveredId, setHoveredId] = useState<string | null>(null);
+    const [hoveredTop, setHoveredTop] = useState(0);
+    const outlineRef = useRef<HTMLDivElement | null>(null);
+    const hoveredElementRef = useRef<HTMLElement | null>(null);
     const { scrollToMessage } = useMessageScroller();
     const { currentAnchorId, visibleMessageIds } = useMessageScrollerVisibility();
 
@@ -84,18 +90,33 @@ export function MessageScrollerOutline({ items, className }: MessageScrollerOutl
     const hoveredIndex = items.findIndex((item) => item.id === hoveredId);
     const hoveredItem = hoveredIndex >= 0 ? items[hoveredIndex] : null;
 
+    const updateHoveredPosition = (element: HTMLElement | null) => {
+        const outline = outlineRef.current;
+        if (!outline || !element) return;
+        const outlineRect = outline.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        setHoveredTop(elementRect.top - outlineRect.top + elementRect.height / 2);
+    };
+
+    const clearHoveredItem = () => {
+        hoveredElementRef.current = null;
+        setHoveredId(null);
+    };
+
     return (
         <div
+            ref={outlineRef}
             data-testid="message-scroller-outline"
             className={cx('absolute left-4 top-1/2 z-30 -translate-y-1/2', className)}
-            onMouseLeave={() => setHoveredId(null)}
+            onMouseLeave={clearHoveredItem}
             onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) setHoveredId(null);
+                if (!event.currentTarget.contains(event.relatedTarget)) clearHoveredItem();
             }}
         >
             <div
                 role="navigation"
                 aria-label="Transcript outline"
+                onScroll={() => updateHoveredPosition(hoveredElementRef.current)}
                 className="flex max-h-72 w-10 flex-col items-start justify-center gap-1 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                 style={{
                     WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 14%, black 86%, transparent 100%)',
@@ -103,24 +124,36 @@ export function MessageScrollerOutline({ items, className }: MessageScrollerOutl
                 }}
             >
                 {items.map((item, index) => {
-                    const active = currentAnchorId === item.id || visibleIds.has(item.id);
-                    const presentation = getOutlineLinePresentation(index, hoveredIndex, active);
+                    const isCurrent = currentAnchorId === item.id || (!currentAnchorId && visibleMessageIds[0] === item.id);
+                    const isVisible = visibleIds.has(item.id);
+                    const presentation = getOutlineLinePresentation(index, hoveredIndex, isCurrent, isVisible);
                     return (
                         <button
                             key={item.id}
                             type="button"
                             aria-label={`Jump to message ${index + 1}`}
+                            aria-current={isCurrent ? 'location' : undefined}
                             data-testid="message-scroller-outline-line"
+                            data-active={isCurrent ? 'true' : 'false'}
                             data-length={presentation.length}
                             data-cascade={presentation.cascade}
-                            onMouseEnter={() => setHoveredId(item.id)}
-                            onFocus={() => setHoveredId(item.id)}
+                            onMouseEnter={(event) => {
+                                hoveredElementRef.current = event.currentTarget;
+                                setHoveredId(item.id);
+                                updateHoveredPosition(event.currentTarget);
+                            }}
+                            onFocus={(event) => {
+                                hoveredElementRef.current = event.currentTarget;
+                                setHoveredId(item.id);
+                                updateHoveredPosition(event.currentTarget);
+                            }}
                             onClick={() => scrollToMessage(item.id, { align: 'start', behavior: 'smooth' })}
-                            className="group flex h-2.5 w-10 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
+                            title={item.label}
+                            className="group flex h-3 w-10 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
                         >
                             <span
                                 className={cx(
-                                    'block h-1 rounded-full transition-all duration-200',
+                                    'block h-1 rounded-full transition-[width,background-color,box-shadow] duration-200',
                                     presentation.widthClassName,
                                     presentation.colorClassName,
                                 )}
@@ -134,10 +167,10 @@ export function MessageScrollerOutline({ items, className }: MessageScrollerOutl
                 <div
                     role="tooltip"
                     data-testid="message-scroller-outline-card"
-                    className="pointer-events-none absolute left-9 top-1/2 w-80 -translate-y-1/2 rounded-3xl border border-white/10 bg-zinc-900/90 px-4 py-3 text-zinc-100 shadow-2xl shadow-black/35 backdrop-blur-2xl"
+                    style={{ top: `${hoveredTop}px` }}
+                    className="pointer-events-none absolute left-11 top-1/2 w-64 -translate-y-1/2 rounded-2xl border border-white/10 bg-zinc-900/90 px-3.5 py-2.5 text-zinc-100 shadow-2xl shadow-black/35 backdrop-blur-2xl"
                 >
-                    <div className="type-callout truncate text-zinc-50">{hoveredItem.label}</div>
-                    <div className="type-muted mt-2 line-clamp-2 text-muted-foreground">{hoveredItem.label}</div>
+                    <div className="type-callout line-clamp-2 text-zinc-50">{hoveredItem.label}</div>
                 </div>
             ) : null}
         </div>
@@ -147,7 +180,8 @@ export function MessageScrollerOutline({ items, className }: MessageScrollerOutl
 const getOutlineLinePresentation = (
     index: number,
     hoveredIndex: number,
-    isActive: boolean,
+    isCurrent: boolean,
+    isVisible: boolean,
 ): {
     cascade: string;
     length: 'short' | 'near-3' | 'near-2' | 'near-1' | 'full';
@@ -174,8 +208,10 @@ const getOutlineLinePresentation = (
         cascade: '',
         length: 'short',
         widthClassName: 'w-3',
-        colorClassName: isActive
+        colorClassName: isCurrent
             ? 'bg-emerald-300/90 shadow-[0_0_12px_rgba(110,231,183,0.24)]'
-            : 'bg-zinc-600/70',
+            : isVisible
+                ? 'bg-emerald-300/45'
+                : 'bg-zinc-600/70',
     };
 };
