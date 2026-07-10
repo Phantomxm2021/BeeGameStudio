@@ -273,6 +273,13 @@ export interface BeeGameAssetUploadPayload {
   message: string;
 }
 
+export interface BeeGameResourceBindingPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  selection: { slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; score: number; reasons: string[] };
+  path?: string;
+}
+
 export interface ExecutionEvidencePayload {
   execution_id?: string;
   project_id?: string;
@@ -1099,6 +1106,11 @@ export const api = {
       return beeGameAdapter.uploadProjectAsset(projectId, slotId, file);
     }
     throw new Error('Project asset upload is only available for BeeGame projects');
+  },
+
+  bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement);
+    throw new Error('Project resource binding is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

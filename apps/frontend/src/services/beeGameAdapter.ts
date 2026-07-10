@@ -1,6 +1,7 @@
 import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
+  BeeGameResourceBindingPayload,
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
   ContinueTaskResponse,
@@ -727,6 +728,13 @@ export const beeGameAdapter = {
     return postForm<BeeGameAssetUploadPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/upload`,
       form,
+    );
+  },
+
+  async bindProjectResource(projectId: string, slotId: string, requirement: Record<string, unknown>): Promise<BeeGameResourceBindingPayload> {
+    return postJson<BeeGameResourceBindingPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
+      { requirement },
     );
   },
 
