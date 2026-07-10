@@ -1,4 +1,14 @@
 import { randomBytes } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { Hono } from 'hono'
 import type { BeeGameUserContext } from './user-context'
 import { decryptSecret, encryptSecret } from '../security/secret-crypto'
@@ -22,6 +32,7 @@ export type BeeGameSessionRouteOptions = {
   supabaseUrl?: string
   supabaseAnonKey?: string
   fetchImpl?: SessionFetch
+  sessionStorePath?: string
 }
 
 export type BeeGameSessionAuth = {
@@ -49,25 +60,38 @@ export function registerBeeGameSessionRoutes(
       ''
   ).trim()
   const fetchImpl = options.fetchImpl ?? fetch
-  const records = new Map<string, string>()
+  const sessionStorePath = resolveSessionStorePath(options.sessionStorePath)
 
   const getRecord = (request: Request): { id: string; record: SessionRecord } | undefined => {
     const id = readCookie(request, SESSION_COOKIE_NAME)
     if (!id) return undefined
-    const encrypted = records.get(id)
+    const records = loadRecords(sessionStorePath)
+    const encrypted = records[id]
     if (!encrypted) return undefined
     try {
       const record = JSON.parse(decryptSecret(encrypted, SESSION_RECORD_TYPE)) as SessionRecord
-      if (!record.accessToken || !record.refreshToken || !record.user?.id) return undefined
+      if (!isValidSessionRecord(record)) {
+        delete records[id]
+        persistRecords(sessionStorePath, records)
+        return undefined
+      }
+      if (record.expiresAt <= Date.now()) {
+        delete records[id]
+        persistRecords(sessionStorePath, records)
+        return undefined
+      }
       return { id, record }
     } catch {
-      records.delete(id)
+      delete records[id]
+      persistRecords(sessionStorePath, records)
       return undefined
     }
   }
 
   const saveRecord = (record: SessionRecord, id = randomBytes(32).toString('base64url')): string => {
-    records.set(id, encryptSecret(JSON.stringify(record), SESSION_RECORD_TYPE))
+    const records = loadRecords(sessionStorePath)
+    records[id] = encryptSecret(JSON.stringify(record), SESSION_RECORD_TYPE)
+    persistRecords(sessionStorePath, records)
     return id
   }
 
@@ -130,7 +154,7 @@ export function registerBeeGameSessionRoutes(
       body: JSON.stringify({ refresh_token: current.record.refreshToken }),
     })
     if (!response.ok) {
-      records.delete(current.id)
+      deleteRecord(sessionStorePath, current.id)
       return clearSessionResponse(401)
     }
     const value = await response.json() as Record<string, unknown>
@@ -152,7 +176,7 @@ export function registerBeeGameSessionRoutes(
     const csrfError = validateOrigin(request)
     if (csrfError) return csrfError
     const id = readCookie(request, SESSION_COOKIE_NAME)
-    if (id) records.delete(id)
+    if (id) deleteRecord(sessionStorePath, id)
     return clearSessionResponse(200)
   }
   app.post('/api/auth/session/logout', c => logout(c.req.raw))
@@ -245,4 +269,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value
+}
+
+function resolveSessionStorePath(path?: string): string {
+  const explicitPath = path?.trim()
+  if (explicitPath) return explicitPath
+  const dataDir = process.env.AGENT_WORKFLOW_DATA_DIR?.trim()
+  return dataDir
+    ? join(dataDir, 'auth-sessions.json')
+    : join(homedir(), '.beegame', 'dashboard', 'auth-sessions.json')
+}
+
+function loadRecords(path: string): Record<string, string> {
+  if (!existsSync(path)) return {}
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (!isRecord(value)) return {}
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] =>
+        typeof entry[0] === 'string' && typeof entry[1] === 'string'),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function persistRecords(path: string, records: Record<string, string>): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temporaryPath = `${path}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+  try {
+    writeFileSync(temporaryPath, JSON.stringify(records), { encoding: 'utf8', mode: 0o600 })
+    renameSync(temporaryPath, path)
+  } catch (error) {
+    try {
+      unlinkSync(temporaryPath)
+    } catch {
+      // Preserve the original persistence error.
+    }
+    throw error
+  }
+}
+
+function deleteRecord(path: string, id: string): void {
+  const records = loadRecords(path)
+  if (!(id in records)) return
+  delete records[id]
+  persistRecords(path, records)
+}
+
+function isValidSessionRecord(value: unknown): value is SessionRecord {
+  return isRecord(value) &&
+    typeof value.accessToken === 'string' && value.accessToken.length > 0 &&
+    typeof value.refreshToken === 'string' && value.refreshToken.length > 0 &&
+    typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt) &&
+    isRecord(value.user) && typeof value.user.id === 'string' && value.user.id.length > 0
 }

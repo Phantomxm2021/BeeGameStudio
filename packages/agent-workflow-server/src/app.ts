@@ -240,6 +240,7 @@ export type AgentWorkflowAppOptions = {
   deploymentPublisher?: BeeGameDeploymentPublisher
   modelConfigStore?: ModelConfigStoreOptions | false
   dashboardDataRoot?: string
+  sessionStorePath?: string
   defaultWorkspacePath?: string
   currentUser?: BeeGameUserContext
   currentUserResolver?: BeeGameUserResolver
@@ -304,7 +305,9 @@ export function createAgentWorkflowApp(
     ? createSupabaseRuntimeEnvClientFromEnv()
     : undefined
   const configuredUserResolver = createConfiguredUserResolver()
-  const sessionAuth = registerHttpOnlySessionRoutes(app)
+  const sessionAuth = registerHttpOnlySessionRoutes(app, {
+    sessionStorePath: options.sessionStorePath,
+  })
   const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
   const requestUserResolver = sessionAuth
     ? async (request: Request) => {
