@@ -15,6 +15,18 @@ const repository = createInMemoryResourceRepository({
 })
 
 describe('resource service app', () => {
+  test('allows browser cross-origin requests and preflight checks', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+    const preflight = await app.fetch(new Request('http://resource.test/api/resource-packs', { method: 'OPTIONS' }))
+    expect(preflight.status).toBe(204)
+    expect(preflight.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs'))
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+  })
+
   test('lists Pack summaries for an Admin user', async () => {
     const app = createBeeGameResourceServerApp({
       repository,

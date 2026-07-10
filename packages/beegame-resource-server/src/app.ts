@@ -14,6 +14,7 @@ export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
+  corsOrigin?: string
 }
 
 export function createBeeGameResourceServerApp(
@@ -22,12 +23,13 @@ export function createBeeGameResourceServerApp(
   const resolveUser = options.currentUserResolver ?? createLocalResourceUserResolver()
   return {
     fetch: async (request: Request): Promise<Response> => {
+      if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const user = options.currentUser ?? await resolveUser(request)
-      if (!user) return jsonError(401, 'unauthorized', 'Authenticated resource user is required')
+      if (!user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
       if (!hasResourceAdminPermission(user)) {
-        return jsonError(403, 'forbidden', 'Resource library administration is not allowed')
+        return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
-      return routeRequest(request, options.repository)
+      return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
     },
   }
 }
@@ -67,4 +69,13 @@ function parseCategory(value: string | null): ResourceCategory | undefined {
 
 function jsonError(status: number, code: string, message: string): Response {
   return Response.json({ error: { code, message } }, { status })
+}
+
+function corsResponse(response: Response, origin = '*'): Response {
+  const headers = new Headers(response.headers)
+  headers.set('Access-Control-Allow-Origin', origin)
+  headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With')
+  headers.set('Access-Control-Max-Age', '86400')
+  return new Response(response.body, { status: response.status, headers })
 }
