@@ -17,6 +17,39 @@ describe('Supabase resource repository', () => {
     expect(requests[0]?.headers.get('authorization')).toBe('Bearer secret-key')
   })
 
+  test('normalizes relative signed Pack cover URLs before returning them to the browser', async () => {
+    let call = 0
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async () => {
+        call += 1
+        if (call === 1) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'preview.png', element_count: 0 }])
+        return Response.json({ signedURL: '/object/sign/beegame-resource-packs/pack-1/preview.png?token=short-lived' })
+      },
+    })
+    await expect(repository.listPacks()).resolves.toEqual([expect.objectContaining({
+      coverPath: 'https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/preview.png?token=short-lived',
+    })])
+  })
+
+  test('does not duplicate a legacy Pack prefix when signing a cover path', async () => {
+    const requests: string[] = []
+    let call = 0
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
+      fetchImpl: async request => {
+        call += 1
+        requests.push(String(request))
+        if (call === 1) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'pack-1/preview.png', element_count: 0 }])
+        return Response.json({ signedURL: 'https://cdn.test/preview.png' })
+      },
+    })
+    await repository.listPacks()
+    expect(requests[1]).toContain('/pack-1/preview.png')
+    expect(requests[1]).not.toContain('/pack-1/pack-1/')
+  })
+
   test('filters elements by Pack and category using encoded query values', async () => {
     const requests: Request[] = []
     const repository = createSupabaseResourceRepository({

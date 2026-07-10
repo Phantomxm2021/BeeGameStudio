@@ -80,7 +80,7 @@ export function createSupabaseResourceRepository(
     })
     if (!response.ok) throw new Error('Failed to sign resource preview URL')
     const body = await response.json() as { signedURL?: string }
-    return body.signedURL || ''
+    return body.signedURL ? normalizeSupabaseSignedObjectUrl(options.baseUrl, body.signedURL) : ''
   }
   const toPack = async (row: PackRow): Promise<PackSummary> => ({
     id: row.id,
@@ -93,7 +93,7 @@ export function createSupabaseResourceRepository(
     license: row.license,
     version: row.version,
     status: row.status,
-    ...(row.cover_path ? { coverPath: await signPath(`${row.id}/${row.cover_path}`) } : {}),
+    ...(row.cover_path ? { coverPath: await signPath(packCoverStoragePath(row.id, row.cover_path)) } : {}),
     elementCount: row.element_count ?? 0,
   })
   const toElement = (row: ElementRow): ResourceElement => ({
@@ -216,6 +216,31 @@ async function supabaseErrorDetail(response: Response): Promise<string> {
   const details = typeof error.details === 'string' ? error.details.trim() : ''
   const hint = typeof error.hint === 'string' ? error.hint.trim() : ''
   return [code && `[${code}]`, message, details, hint].filter(Boolean).join(' ')
+}
+
+function normalizeSupabaseSignedObjectUrl(baseUrl: string, signedURL: string): string {
+  try {
+    new URL(signedURL)
+    return signedURL
+  } catch {
+    // Storage returns relative URLs for some deployments.
+  }
+  if (!signedURL.startsWith('/') || signedURL.startsWith('//')) {
+    throw new Error('Resource URL signing returned an unexpected relative URL')
+  }
+  const relative = new URL(signedURL, 'https://relative-url.invalid')
+  const suffix = `${relative.pathname}${relative.search}${relative.hash}`
+  const normalizedBase = baseUrl.replace(/\/+$/, '')
+  if (relative.pathname.startsWith('/object/')) return `${normalizedBase}/storage/v1${suffix}`
+  if (relative.pathname.startsWith('/storage/v1/')) return `${normalizedBase}${suffix}`
+  throw new Error('Resource URL signing returned an unexpected relative URL')
+}
+
+function packCoverStoragePath(packId: string, coverPath: string): string {
+  const normalized = coverPath.replace(/^\/+/, '')
+  return normalized === packId || normalized.startsWith(`${packId}/`)
+    ? normalized
+    : `${packId}/${normalized}`
 }
 
 export type { ResourceCategory }
