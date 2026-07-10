@@ -154,6 +154,31 @@ export async function bindBeeGameLibraryResourceInWorkspace(
   return result
 }
 
+/** Removes the library provenance only; copied project files deliberately remain intact. */
+export function unbindBeeGameLibraryResource(
+  manifest: BeeGameAssetManifest,
+  slotId: string,
+): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const { resource_binding: _binding, ...slotWithoutBinding } = manifest.slots[slotIndex]
+  const slot: BeeGameAssetSlot = { ...slotWithoutBinding, updated_at: new Date().toISOString() }
+  const slots = [...manifest.slots]
+  slots[slotIndex] = slot
+  return { manifest: { ...manifest, slots }, slot }
+}
+
+export async function unbindBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const result = unbindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId)
+  await writeAssetManifest(root, result.manifest)
+  return result
+}
+
 export async function integrateBeeGameLibraryResourceInWorkspace(
   workspacePath: string,
   slotId: string,

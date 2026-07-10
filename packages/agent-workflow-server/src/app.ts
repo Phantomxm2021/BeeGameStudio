@@ -44,6 +44,7 @@ import {
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
+  unbindBeeGameLibraryResourceInWorkspace,
   integrateBeeGameLibraryResourceInWorkspace,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
@@ -1451,6 +1452,33 @@ export function createAgentWorkflowApp(
       return c.json({ manifest: result.manifest, slot: result.slot, ...(result.path ? { path: result.path } : {}) })
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Resource integration failed' }, 400)
+    }
+  })
+
+  app.delete('/api/projects/:id/assets/:slotId/resource-binding', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const existing = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === c.req.param('slotId'))
+      if (!existing) return c.json({ error: 'Asset slot not found' }, 404)
+      const existingBinding = existing.resource_binding
+      if (!existingBinding) return c.json({ error: 'Asset slot has no library resource binding' }, 409)
+      const result = await unbindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await appendAuditEventBestEffort('resource.unbound', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'resource.unbound',
+        targetType: 'project_asset_slot',
+        targetId: `${project.id}:${c.req.param('slotId')}`,
+        metadata: { packId: existingBinding.pack_id, packVersion: existingBinding.pack_version, elementId: existingBinding.element_id, retainedFiles: existing.uploaded_files ?? [] },
+      }))
+      return c.json({ manifest: result.manifest, slot: result.slot, retained_files: existing.uploaded_files ?? [] })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource unbinding failed' }, 400)
     }
   })
 

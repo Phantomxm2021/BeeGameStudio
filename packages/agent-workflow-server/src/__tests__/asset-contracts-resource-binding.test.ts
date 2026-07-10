@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bindBeeGameLibraryResource, bindBeeGameLibraryResourceInWorkspace, integrateBeeGameLibraryResourceInWorkspace, normalizeBeeGameAssetManifest } from '../beegame/asset-contracts'
+import { bindBeeGameLibraryResource, bindBeeGameLibraryResourceInWorkspace, integrateBeeGameLibraryResourceInWorkspace, normalizeBeeGameAssetManifest, unbindBeeGameLibraryResource } from '../beegame/asset-contracts'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -51,6 +51,19 @@ describe('BeeGame resource bindings', () => {
     expect(() => bindBeeGameLibraryResource({ version: 1, slots: [] }, 'missing', {
       pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://storage.example/signed-oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],
     })).toThrow('Asset slot not found: missing')
+  })
+
+  test('unbinds library provenance without deleting integrated project files', () => {
+    const manifest = normalizeBeeGameAssetManifest({
+      version: 1,
+      slots: [{ id: 'slot-1', status: 'integrated', uploaded_files: ['assets/models/tree.glb'], resource_binding: {
+        pack_id: 'library-pack', pack_version: '1.0.0', element_id: 'tree', source_url: 'https://resource.example/tree.glb', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],
+      } }],
+    })
+    const result = unbindBeeGameLibraryResource(manifest, 'slot-1')
+    expect(result.slot.resource_binding).toBeUndefined()
+    expect(result.slot.uploaded_files).toEqual(['assets/models/tree.glb'])
+    expect(result.slot.status).toBe('integrated')
   })
 
   test('persists a resource binding in the project asset manifest', async () => {

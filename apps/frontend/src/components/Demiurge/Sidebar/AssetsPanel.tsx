@@ -9,6 +9,7 @@ import {
     FileJson,
     Image,
     Music,
+    Unlink,
     Upload,
 } from 'lucide-react';
 import type { BeeGameAssetManifestPayload, BeeGameAssetSlotPayload } from '../../../services/api';
@@ -25,6 +26,7 @@ interface AssetsPanelProps {
     onUpload?: (slotId: string, file: File) => Promise<void>;
     onReintegrate?: (slotId: string) => Promise<void>;
     onAutoBind?: () => Promise<void>;
+    onUnbind?: (slotId: string) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
     lang?: Language;
@@ -41,6 +43,7 @@ export const AssetsPanel = memo(({
     onUpload,
     onReintegrate,
     onAutoBind,
+    onUnbind,
     onRequestIntegration,
     onRequestAllIntegration,
     lang = 'en',
@@ -53,6 +56,9 @@ export const AssetsPanel = memo(({
         return status === 'uploaded';
     });
     const selectableSlots = slots.filter(slot => !slot.resource_binding && slot.resource_requirement && slot.status !== 'integrated');
+    const [unbindSlot, setUnbindSlot] = useState<BeeGameAssetSlotPayload | null>(null);
+    const [isUnbinding, setIsUnbinding] = useState(false);
+    const [unbindError, setUnbindError] = useState('');
 
     if (isLoading && slots.length === 0) {
         return (
@@ -146,10 +152,42 @@ export const AssetsPanel = memo(({
                         isReintegrating={isReintegratingSlotId === slot.id}
                         onUpload={onUpload}
                         onReintegrate={onReintegrate}
+                        onRequestUnbind={onUnbind ? () => { setUnbindError(''); setUnbindSlot(slot); } : undefined}
                         onRequestIntegration={onRequestIntegration}
                     />
                 ))}
             </div>
+            {unbindSlot ? (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm">
+                    <div role="dialog" aria-modal="true" className="glass-panel w-full max-w-md rounded-3xl p-6 text-zinc-100">
+                        <div className="type-title-3 text-white">{text.unbindTitle || 'Disconnect library resource?'}</div>
+                        <p className="type-footnote mt-3 text-zinc-400">
+                            {text.unbindDescription || 'This removes the library binding only. Copied project files remain unchanged.'}
+                        </p>
+                        {unbindError ? <p className="type-footnote mt-3 text-red-300">{unbindError}</p> : null}
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button type="button" disabled={isUnbinding} onClick={() => setUnbindSlot(null)} className="secondary-pill type-button px-4 py-2">
+                                {text.cancel || 'Cancel'}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={isUnbinding || !onUnbind}
+                                onClick={() => {
+                                    if (!onUnbind) return;
+                                    setIsUnbinding(true);
+                                    void onUnbind(unbindSlot.id)
+                                        .then(() => setUnbindSlot(null))
+                                        .catch(err => setUnbindError(err instanceof Error ? err.message : String(err)))
+                                        .finally(() => setIsUnbinding(false));
+                                }}
+                                className="type-button rounded-full border border-red-400/40 bg-red-400/10 px-4 py-2 text-red-200 transition hover:bg-red-400/20 disabled:opacity-60"
+                            >
+                                {isUnbinding ? (text.unbinding || text.uploading) : (text.unbind || 'Disconnect')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 });
@@ -163,6 +201,7 @@ function AssetSlotCard({
     isReintegrating,
     onUpload,
     onReintegrate,
+    onRequestUnbind,
     onRequestIntegration,
 }: {
     slot: BeeGameAssetSlotPayload;
@@ -171,6 +210,7 @@ function AssetSlotCard({
     isReintegrating: boolean;
     onUpload?: (slotId: string, file: File) => Promise<void>;
     onReintegrate?: (slotId: string) => Promise<void>;
+    onRequestUnbind?: () => void;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -287,6 +327,16 @@ function AssetSlotCard({
                             >
                                 <CheckCircle2 className="h-4 w-4" />
                                 {isReintegrating ? text.uploading : text.verifyIntegration}
+                            </button>
+                        ) : null}
+                        {slot.resource_binding && onRequestUnbind ? (
+                            <button
+                                type="button"
+                                onClick={onRequestUnbind}
+                                className="type-button inline-flex items-center gap-2 rounded-full border border-red-400/40 bg-red-400/10 px-4 py-2 text-red-200 transition hover:bg-red-400/20"
+                            >
+                                <Unlink className="h-4 w-4" />
+                                {text.unbind || 'Disconnect'}
                             </button>
                         ) : null}
                     </div>

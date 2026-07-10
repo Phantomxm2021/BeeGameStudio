@@ -307,6 +307,12 @@ export interface BeeGameAutoResourceBindingPayload {
   unmatched_slot_ids: string[];
 }
 
+export interface BeeGameResourceUnbindingPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  retained_files: string[];
+}
+
 export interface ExecutionEvidencePayload {
   execution_id?: string;
   project_id?: string;
@@ -1148,6 +1154,11 @@ export const api = {
   autoBindProjectResources: (projectId: string) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.autoBindProjectResources(projectId);
     throw new Error('Automatic project resource binding is only available for BeeGame projects');
+  },
+
+  unbindProjectResource: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.unbindProjectResource(projectId, slotId);
+    throw new Error('Project resource unbinding is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

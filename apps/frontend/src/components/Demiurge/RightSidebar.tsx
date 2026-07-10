@@ -275,6 +275,12 @@ export function RightSidebar({
         }
     };
 
+    const handleUnbindLibraryResource = async (slotId: string) => {
+        if (!canUploadAssets) return;
+        const result = await api.unbindProjectResource(projectId, slotId);
+        setAssetManifest(result.manifest);
+    };
+
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
         if (!canSendMessage || !canIntegrateAssets) return;
         onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang), 'asset_integration');
@@ -501,6 +507,7 @@ export function RightSidebar({
                                 onUpload={canUploadAssets ? handleUploadAsset : undefined}
                                 onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
                                 onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
+                                onUnbind={canUploadAssets ? handleUnbindLibraryResource : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}
