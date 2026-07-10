@@ -11,6 +11,7 @@
 import axios from 'axios'
 import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { validateOutboundTarget } from '../../../../agent-workflow-server/src/security/outbound-target-policy'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
 const DEFAULT_EXA_MCP_URL = 'https://mcp.exa.ai/mcp'
@@ -45,6 +46,7 @@ export class ExaSearchAdapter implements WebSearchAdapter {
       exaApiKey?: string
     }
     const exaUrl = settings.exaEndpointUrl || DEFAULT_EXA_MCP_URL
+    if (!await validateOutboundTarget(exaUrl)) throw new Error('Outbound URL is not permitted')
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',

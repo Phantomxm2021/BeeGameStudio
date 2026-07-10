@@ -13,6 +13,7 @@ import {
   persistBinaryContent,
 } from 'src/utils/mcpOutputStorage.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { validateOutboundTarget } from '../../../../agent-workflow-server/src/security/outbound-target-policy'
 import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
@@ -328,6 +329,7 @@ export async function getURLMarkdownContent(
   url: string,
   abortController: AbortController,
 ): Promise<FetchedContent | RedirectInfo> {
+  if (!await validateOutboundTarget(url)) throw new Error('Outbound URL is not permitted')
   if (!validateURL(url)) {
     throw new Error('Invalid URL')
   }
@@ -489,6 +491,7 @@ export async function fetchContentWithTavily(
     : baseUrl.endsWith('/extract')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/extract`
+  if (!await validateOutboundTarget(extractUrl)) throw new Error('Outbound URL is not permitted')
 
   const response = await axios.post<{ url: string; raw_content: string }>(
     extractUrl,

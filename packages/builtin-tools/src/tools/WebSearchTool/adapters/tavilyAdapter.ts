@@ -7,6 +7,7 @@
 import axios from 'axios'
 import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { validateOutboundTarget } from '../../../../agent-workflow-server/src/security/outbound-target-policy'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
 const DEFAULT_TAVILY_SEARCH_URL = 'https://tavily.bee-game-studio.win/search'
@@ -48,6 +49,7 @@ export class TavilySearchAdapter implements WebSearchAdapter {
     const searchUrl = baseUrl.endsWith('/search')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/search`
+    if (!await validateOutboundTarget(searchUrl)) throw new Error('Outbound URL is not permitted')
 
     try {
       const response = await axios.post<{

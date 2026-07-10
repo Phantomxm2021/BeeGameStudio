@@ -1755,14 +1755,8 @@ describe('agent workflow server routes', () => {
           sourcePath: join(ownerDataDir, '.mcp.json'),
           exists: false,
         }),
-        expect.objectContaining({
-          name: 'Remote Tools',
-          transport: 'http',
-          url: 'http://127.0.0.1:3030/mcp',
-          sourcePath: join(ownerDataDir, '.mcp.json'),
-          exists: false,
-        }),
       ])
+      expect(JSON.stringify(discovered)).not.toContain('127.0.0.1:3030')
       expect(JSON.stringify(discovered)).not.toContain('local-secret-token')
 
       const importRes = await firstApp.request('/api/mcp-servers', {

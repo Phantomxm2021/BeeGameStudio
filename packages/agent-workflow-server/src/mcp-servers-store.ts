@@ -6,6 +6,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
+import { validateOutboundTarget } from './security/outbound-target-policy'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -99,9 +100,9 @@ export function deleteMcpServer(
   return true
 }
 
-export function discoverMcpServers(
+export async function discoverMcpServers(
   options: McpServersStoreOptions = {},
-): DiscoveredMcpServer[] {
+): Promise<DiscoveredMcpServer[]> {
   const existingServers = loadMcpServers(options)
   const discovered = new Map<string, DiscoveredMcpServer>()
 
@@ -109,6 +110,8 @@ export function discoverMcpServers(
     for (const server of readMcpServersFromJsonFile(filePath)) {
       const normalized = normalizeMcpServerInput(server, undefined)
       const publicInput = toPublicMcpServerInput(normalized)
+      if ((publicInput.transport === 'http' || publicInput.transport === 'sse') &&
+        (!publicInput.url || !await validateOutboundTarget(publicInput.url))) continue
       const key = getMcpServerFingerprint(publicInput)
       if (discovered.has(key)) continue
       discovered.set(key, {

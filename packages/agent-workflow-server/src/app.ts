@@ -743,10 +743,10 @@ export function createAgentWorkflowApp(
     return c.json(await dashboardRepository.listMcpServers(c.req.raw, user))
   })
 
-  app.get('/api/mcp-servers/discover', c => {
+  app.get('/api/mcp-servers/discover', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(discoverMcpServers({
+    return c.json(await discoverMcpServers({
       dataDir: getCurrentUserDataRoot(c.req.raw),
     }))
   })
@@ -2936,6 +2936,7 @@ async function ensureBeeGameProjectSession(input: {
     }
   }
 
+  if (latest?.modelConfigId) await assertPermittedModelConfigRuntime(latest.modelConfigId)
   const session = input.beeGameSessions.start({
     workspacePath,
     projectId: input.project.id,
@@ -3622,6 +3623,7 @@ function registerBeeGameSessionRoutes(
         body.modelConfigId,
         options.modelConfigExists,
       )
+      if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
       const session = beeGameSessions.start({
           workspacePath,
           ...(typeof body.projectId === 'string' && body.projectId
@@ -3755,6 +3757,7 @@ function registerBeeGameSessionRoutes(
         body.modelConfigId,
         options.modelConfigExists,
       )
+      await assertPermittedModelConfigRuntime(modelConfigId)
       return c.json(
         beeGameSessions.updateModel(
           c.req.param('id'),
@@ -4513,6 +4516,12 @@ async function assertPermittedOutboundUrl(value: string): Promise<void> {
   if (!await hasPermittedOutboundUrl(value)) {
     throw new Error('Outbound URL is not permitted')
   }
+}
+
+async function assertPermittedModelConfigRuntime(modelConfigId: string): Promise<void> {
+  const runtime = mapModelConfigToRuntime(modelConfigId)
+  const baseUrl = runtime?.env.OPENAI_BASE_URL
+  if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
 }
 
 function readAllowedOutboundHosts(): string[] {
