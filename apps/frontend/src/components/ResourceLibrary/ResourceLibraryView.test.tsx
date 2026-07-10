@@ -95,6 +95,7 @@ describe('ResourceLibraryView', () => {
     await user.click(await within(fileTree!).findByText('模型'));
     expect(within(fileTree!).getByText('材质')).toBeInTheDocument();
     await user.click(within(fileTree!).getByText('材质'));
+    await waitFor(() => expect(within(fileTree!).getByText('模型')).toBeInTheDocument());
     expect(listElements).toHaveBeenLastCalledWith('pack-1', 'materials', undefined);
   });
 

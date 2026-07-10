@@ -83,6 +83,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const packSessionRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +105,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   }, [apiClient]);
 
   const openPack = async (pack: ResourcePackSummary) => {
+    const session = ++packSessionRef.current;
     openResourcePackRoute(pack.id);
     setError('');
     setLoading(true);
@@ -113,6 +115,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       // The Pack category list may contain legacy folder names from ZIP imports.
       // Initial workspace loading must not treat those values as a validated category filter.
       const nextElements = await apiClient.listElements(pack.id);
+      if (session !== packSessionRef.current) return;
       const category = detail.categories?.find((value) => Object.prototype.hasOwnProperty.call(categoryLabels, value)) || nextElements[0]?.category;
       setSelectedPack(detail);
       setFolders(nextFolders);
@@ -124,7 +127,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包加载失败');
     } finally {
-      setLoading(false);
+      if (session === packSessionRef.current) setLoading(false);
     }
   };
 
@@ -136,18 +139,20 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const selectCategory = async (category?: string, folderPath?: string) => {
     if (!selectedPack) return;
+    const session = packSessionRef.current;
     setActiveCategory(category);
     setActiveFolderPath(folderPath);
     setLoading(true);
     try {
       const nextElements = await apiClient.listElements(selectedPack.id, category, folderPath);
+      if (session !== packSessionRef.current) return;
       setElements(nextElements);
       setLoadedElementCategories((current) => [...new Set([...current, ...nextElements.map((element) => element.category)])]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '元素加载失败');
     } finally {
-      setLoading(false);
+      if (session === packSessionRef.current) setLoading(false);
     }
   };
 
@@ -179,12 +184,14 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const uploadElements = async (files: File[]) => {
     if (!selectedPack || files.length === 0) return;
+    const session = packSessionRef.current;
     const uploadCategory = activeCategory || selectedPack.categories?.[0] || 'environment';
     const uploadFolderPath = activeFolderPath || uploadCategory;
     setElementUpload({ done: 0, total: files.length, failed: [] });
     for (const file of files) {
       try {
         const next = await apiClient.addElement(selectedPack.id, file, uploadCategory, uploadFolderPath);
+        if (session !== packSessionRef.current) continue;
         setElements((current) => [...current, next]);
         setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
         setSelectedElement(next);
@@ -212,10 +219,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         error={error}
         onBack={() => {
           closeResourcePackRoute();
+          packSessionRef.current += 1;
           setSelectedPack(null);
           setSelectedElement(null);
           setLoadedElementCategories([]);
           setFolders([]);
+          setLoading(false);
         }}
         onCategory={selectCategory}
         onElement={setSelectedElement}
