@@ -17,6 +17,23 @@ type ResourceLibraryViewProps = {
   apiClient?: ResourceLibraryApi;
 };
 
+const LOCAL_LIBRARY_KEY = 'beegame.resource-library.local.v1';
+
+type LocalLibrarySnapshot = {
+  packs: ResourcePackSummary[];
+  elementsByPack: Record<string, ResourceElement[]>;
+};
+
+function readLocalLibrary(): LocalLibrarySnapshot {
+  if (typeof window === 'undefined') return { packs: [], elementsByPack: {} };
+  try {
+    const value = JSON.parse(window.localStorage.getItem(LOCAL_LIBRARY_KEY) || '{}') as Partial<LocalLibrarySnapshot>;
+    return { packs: Array.isArray(value.packs) ? value.packs : [], elementsByPack: value.elementsByPack || {} };
+  } catch {
+    return { packs: [], elementsByPack: {} };
+  }
+}
+
 const categoryLabels: Record<string, string> = {
   characters: '角色',
   environment: '环境',
@@ -39,7 +56,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   } : {
     all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
   };
-  const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
+  const [localLibrary, setLocalLibrary] = useState<LocalLibrarySnapshot>(readLocalLibrary);
+  const [packs, setPacks] = useState<ResourcePackSummary[]>(localLibrary.packs);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
   const [elements, setElements] = useState<ResourceElement[]>([]);
   const [selectedElement, setSelectedElement] = useState<ResourceElement | null>(null);
@@ -50,7 +68,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
   const [isRootDragActive, setIsRootDragActive] = useState(false);
-  const [localElementsByPack, setLocalElementsByPack] = useState<Record<string, ResourceElement[]>>({});
+  const [localElementsByPack, setLocalElementsByPack] = useState<Record<string, ResourceElement[]>>(localLibrary.elementsByPack);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem(LOCAL_LIBRARY_KEY, JSON.stringify({ packs: localLibrary.packs, elementsByPack: localLibrary.elementsByPack }));
+  }, [localLibrary]);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -59,7 +81,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     apiClient
       .listPacks()
       .then((result) => {
-        if (!cancelled) setPacks(result);
+        if (!cancelled) setPacks([...localLibrary.packs, ...result.filter((pack) => !localLibrary.packs.some((local) => local.id === pack.id))]);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '资源包加载失败');
@@ -70,7 +92,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     return () => {
       cancelled = true;
     };
-  }, [apiClient]);
+  }, [apiClient, localLibrary.packs]);
 
   const openPack = async (pack: ResourcePackSummary) => {
     setError('');
@@ -163,6 +185,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       });
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
       setLocalElementsByPack((current) => ({ ...current, [parsed.id]: localElements }));
+      setLocalLibrary((current) => ({ packs: [parsed, ...current.packs.filter((pack) => pack.id !== parsed.id)], elementsByPack: { ...current.elementsByPack, [parsed.id]: localElements } }));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包导入失败');
@@ -194,6 +217,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           const updated = { ...selectedPack, name };
           setSelectedPack(updated);
           setPacks((current) => current.map((item) => item.id === updated.id ? { ...item, name } : item));
+          setLocalLibrary((current) => ({ ...current, packs: current.packs.map((item) => item.id === updated.id ? { ...item, name } : item) }));
         }}
         onAddFile={() => {
           const name = window.prompt('文件名', 'new-asset.png')?.trim();
@@ -201,12 +225,16 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name, path: `${activeCategory}/${name}`, category: activeCategory, kind: 'file', specs: {}, dependencies: [], status: 'ready' };
           setElements((current) => [...current, next]);
           setSelectedElement(next);
+          setLocalElementsByPack((current) => ({ ...current, [selectedPack.id]: [...(current[selectedPack.id] || []), next] }));
+          setLocalLibrary((current) => ({ ...current, elementsByPack: { ...current.elementsByPack, [selectedPack.id]: [...(current.elementsByPack[selectedPack.id] || []), next] } }));
         }}
         onDropFile={(file) => {
           if (!activeCategory) return;
           const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name: file.name, path: `${activeCategory}/${file.name}`, category: activeCategory, kind: 'file', specs: { size: file.size, type: file.type }, dependencies: [], status: 'ready' };
           setElements((current) => [...current, next]);
           setSelectedElement(next);
+          setLocalElementsByPack((current) => ({ ...current, [selectedPack.id]: [...(current[selectedPack.id] || []), next] }));
+          setLocalLibrary((current) => ({ ...current, elementsByPack: { ...current.elementsByPack, [selectedPack.id]: [...(current.elementsByPack[selectedPack.id] || []), next] } }));
         }}
       />
     );
