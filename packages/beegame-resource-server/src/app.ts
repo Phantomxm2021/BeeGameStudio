@@ -20,8 +20,11 @@ export type BeeGameResourceServerAppOptions = {
   corsOrigin?: string
   importResourcePack?: (request: Request) => Promise<unknown>
   updateResourcePack?: (packId: string, body: Record<string, unknown>) => Promise<unknown>
+  deleteResourcePack?: (packId: string) => Promise<boolean>
+  uploadPackCover?: (packId: string, request: Request) => Promise<ResourcePack>
   addResourceElement?: (packId: string, request: Request) => Promise<unknown>
   updateResourceElement?: (packId: string, elementId: string, body: Record<string, unknown>) => Promise<unknown>
+  getElementResourceUrl?: (packId: string, elementId: string) => Promise<string>
 }
 
 export function createBeeGameResourceServerApp(
@@ -63,10 +66,25 @@ export function createBeeGameResourceServerApp(
         }
       }
       const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
+      if (request.method === 'DELETE' && patchMatch) {
+        if (!options.deleteResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource deletion is not configured'), options.corsOrigin)
+        await options.deleteResourcePack(decodeURIComponent(patchMatch[1]))
+        return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
+      }
       if (request.method === 'PATCH' && patchMatch) {
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
         return corsResponse(Response.json({ pack: await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body) }), options.corsOrigin)
+      }
+      const coverMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/cover$/)
+      if (request.method === 'POST' && coverMatch) {
+        if (!options.uploadPackCover) return corsResponse(jsonError(503, 'not_configured', 'Resource cover upload is not configured'), options.corsOrigin)
+        const form = await request.clone().formData()
+        const file = form.get('file')
+        if (!(file instanceof File) || !isSupportedCover(file)) {
+          return corsResponse(jsonError(400, 'invalid_cover', 'Cover must be a jpg, jpeg, png, webp, gif, mp4, or webm file'), options.corsOrigin)
+        }
+        return corsResponse(Response.json({ pack: await options.uploadPackCover(decodeURIComponent(coverMatch[1]), request) }), options.corsOrigin)
       }
       const folderMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders$/)
       if (folderMatch && request.method === 'GET') {
@@ -101,6 +119,14 @@ export function createBeeGameResourceServerApp(
         return corsResponse(Response.json({ element: await options.addResourceElement(decodeURIComponent(elementMatch[1]), request) }, { status: 201 }), options.corsOrigin)
       }
       const elementPatchMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)$/)
+      const elementUrlMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)\/resource-url$/)
+      if (request.method === 'GET' && elementUrlMatch) {
+        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Element resource URLs are not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(elementUrlMatch[1])
+        const elementId = decodeURIComponent(elementUrlMatch[2])
+        if (!await options.repository.getElement(packId, elementId)) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        return corsResponse(Response.json({ url: await options.getElementResourceUrl(packId, elementId) }), options.corsOrigin)
+      }
       if (request.method === 'PATCH' && elementPatchMatch) {
         if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
@@ -113,6 +139,11 @@ export function createBeeGameResourceServerApp(
       }
     },
   }
+}
+
+function isSupportedCover(file: File): boolean {
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp4' || extension === 'webm'
 }
 
 async function routeRequest(request: Request, repository: ResourceRepository): Promise<Response> {

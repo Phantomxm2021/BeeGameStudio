@@ -1,8 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import { createInMemoryResourceRepository } from '../../../beegame-resource-core/src'
 import { createBeeGameResourceServerApp } from '../app'
+import { toPackUpdateRow } from '../index'
 
 describe('resource authoring routes', () => {
+  test('maps Pack updates to the editable database columns only', () => {
+    expect(toPackUpdateRow({
+      name: 'Updated Pack', gameTypes: ['puzzle'], primaryCategory: 'ui-kit',
+      internalOnly: true, coverPath: 'should-not-be-patched', id: 'another-pack',
+    })).toEqual({ name: 'Updated Pack', game_types: ['puzzle'], primary_category: 'ui-kit' })
+  })
+
   test('creates a new Pack before it contains any resource elements', async () => {
     const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }), currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
 

@@ -62,6 +62,59 @@ describe('resource service app', () => {
     expect(response.status).toBe(403)
   })
 
+  test('deletes an administrator Pack through the DELETE route', async () => {
+    const deleted: string[] = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      deleteResourcePack: async (id) => { deleted.push(id); return false },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1', { method: 'DELETE' }))
+
+    expect(response.status).toBe(204)
+    expect(deleted).toEqual(['pack-1'])
+  })
+
+  test('uploads a supported cover and rejects an unsupported one', async () => {
+    const uploads: string[] = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      uploadPackCover: async (id, request) => {
+        uploads.push(`${id}:${(await request.formData()).get('file') instanceof File}`)
+        return { ...((await repository.getPack(id))!), coverPath: 'cover/new.png' }
+      },
+    })
+    const good = new FormData()
+    good.set('file', new File(['x'], 'cover.png', { type: 'image/png' }))
+    const accepted = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/cover', { method: 'POST', body: good }))
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toEqual({ pack: expect.objectContaining({ coverPath: 'cover/new.png' }) })
+    expect(uploads).toEqual(['pack-1:true'])
+
+    const bad = new FormData()
+    bad.set('file', new File(['x'], 'cover.exe', { type: 'application/octet-stream' }))
+    const rejected = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/cover', { method: 'POST', body: bad }))
+    expect(rejected.status).toBe(400)
+  })
+
+  test('returns a signed element URL only when the element belongs to the Pack', async () => {
+    const signed: string[] = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      getElementResourceUrl: async (packId, elementId) => { signed.push(`${packId}/${elementId}`); return 'https://signed.test/file' },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/element-1/resource-url'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ url: 'https://signed.test/file' })
+    const missing = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/missing/resource-url'))
+    expect(missing.status).toBe(404)
+    expect(signed).toEqual(['pack-1/element-1'])
+  })
+
   test('returns elements with an explicit category filter', async () => {
     const app = createBeeGameResourceServerApp({
       repository,
