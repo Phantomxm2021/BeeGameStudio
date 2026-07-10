@@ -823,6 +823,60 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('passes each resolved provider target to the runner without resolving it again', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-pinned-runtime-targets-'))
+    const resolvedUrls: string[] = []
+    const starts: BeeGameSessionRunnerStartInput[] = []
+    const manager = new BeeGameSessionManager(
+      {
+        async start(input) {
+          starts.push(input)
+          return new FakeBeeGameRuntime(workspace)
+        },
+      },
+      workspace,
+      () => ({
+        ANTHROPIC_BASE_URL: 'https://anthropic.runtime.test',
+        OPENAI_BASE_URL: 'https://openai.runtime.test',
+        GEMINI_BASE_URL: 'https://gemini.runtime.test',
+        GROK_BASE_URL: 'https://grok.runtime.test',
+      }),
+      undefined,
+      true,
+      {},
+      async value => {
+        resolvedUrls.push(value)
+        return {
+          url: new URL(value),
+          addresses: ['93.184.216.34'],
+          lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+        }
+      },
+    )
+
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Start the task')
+      await waitFor(() => starts.length === 1)
+
+      expect(resolvedUrls).toEqual([
+        'https://anthropic.runtime.test',
+        'https://openai.runtime.test',
+        'https://gemini.runtime.test',
+        'https://grok.runtime.test',
+      ])
+      expect(starts[0]?.approvedOutboundTargets).toEqual(expect.objectContaining({
+        ANTHROPIC_BASE_URL: expect.objectContaining({ url: new URL('https://anthropic.runtime.test') }),
+        OPENAI_BASE_URL: expect.objectContaining({ url: new URL('https://openai.runtime.test') }),
+        GEMINI_BASE_URL: expect.objectContaining({ url: new URL('https://gemini.runtime.test') }),
+        GROK_BASE_URL: expect.objectContaining({ url: new URL('https://grok.runtime.test') }),
+      }))
+      expect(resolvedUrls).toHaveLength(4)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('creates a dashboard session without starting a BeeGame turn', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'build_write_complete')

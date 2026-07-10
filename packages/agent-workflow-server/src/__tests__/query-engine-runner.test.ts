@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  createBeeGamePinnedFetch,
   createBeeGameThinkingFetch,
   ensureBeeGameMacroGlobals,
   sanitizeBeeGameResumeMessages,
@@ -7,8 +8,41 @@ import {
   stopRunningLocalShellTasks,
   toQueryEngineThinkingConfig,
 } from '../beegame/query-engine-runner'
+import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('routes an approved provider origin through its pinned dispatcher without another resolver lookup', async () => {
+    let pinnedLookupCalls = 0
+    const providerUrl = 'https://provider.runtime.test/v1'
+    const target: ApprovedOutboundTarget = {
+      url: new URL(providerUrl),
+      addresses: ['93.184.216.34'],
+      lookup: (hostname, _options, callback) => {
+        pinnedLookupCalls += 1
+        expect(hostname).toBe('provider.runtime.test')
+        callback(null, '93.184.216.34', 4)
+      },
+    }
+    const calls: Array<{ url: string; dispatcher?: unknown }> = []
+    const baseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        dispatcher: (init as RequestInit & { dispatcher?: unknown } | undefined)?.dispatcher,
+      })
+      return new Response('{}')
+    }) as typeof fetch
+    const wrapped = createBeeGamePinnedFetch(baseFetch, {
+      OPENAI_BASE_URL: target,
+    })
+
+    await wrapped('https://provider.runtime.test/v1/chat/completions')
+    await wrapped('https://non-provider.runtime.test/health')
+
+    expect(calls[0]?.dispatcher).toBeDefined()
+    expect(calls[1]?.dispatcher).toBeUndefined()
+    expect(pinnedLookupCalls).toBe(0)
+  })
 
   test('installs MACRO globals before loading root CLI modules', () => {
     const target = globalThis as typeof globalThis & { MACRO?: Record<string, string> }

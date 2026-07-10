@@ -3,7 +3,12 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines'
+import {
+  createPinnedUndiciDispatcher,
+  type ApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import type {
+  BeeGameApprovedOutboundTargets,
   BeeGameChatThinkingMode,
   BeeGamePromptInput,
   BeeGameSessionRunner,
@@ -87,7 +92,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     await serializeRuntimeTurn(async () => {
-      await withRuntimeEnvironment(this.input.cwd, this.input.env, input.thinkingMode, async () => {
+      await withRuntimeEnvironment(
+        this.input.cwd,
+        this.input.env,
+        this.input.approvedOutboundTargets,
+        input.thinkingMode,
+        async () => {
         const thinkingMode = input.thinkingMode ?? 'disabled'
         if (this.engine && this.engineThinkingMode !== thinkingMode) {
           this.engine.interrupt()
@@ -115,7 +125,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           input.signal.removeEventListener('abort', abort)
           this.currentSubmitInput = null
         }
-      })
+        },
+      )
     })
   }
 
@@ -480,12 +491,14 @@ async function serializeRuntimeTurn(fn: () => Promise<void>): Promise<void> {
 async function withRuntimeEnvironment(
   cwd: string,
   env: Record<string, string>,
+  approvedOutboundTargets: BeeGameApprovedOutboundTargets,
   thinkingMode: BeeGameChatThinkingMode | undefined,
   fn: () => Promise<void>,
 ): Promise<void> {
   const previousCwd = process.cwd()
   const previousEnv = new Map<string, string | undefined>()
   const previousFetch = globalThis.fetch
+  const pinnedFetch = createBeeGamePinnedFetch(previousFetch, approvedOutboundTargets)
 
   const runtimeEnv = getBeeGameRuntimeEnvironment(env)
   for (const key of [
@@ -503,7 +516,7 @@ async function withRuntimeEnvironment(
   try {
     process.chdir(cwd)
     globalThis.fetch = createBeeGameThinkingFetch(
-      previousFetch,
+      pinnedFetch,
       runtimeEnv.OPENAI_BASE_URL,
       thinkingMode ?? 'disabled',
     )
@@ -511,6 +524,7 @@ async function withRuntimeEnvironment(
   } finally {
     process.chdir(previousCwd)
     globalThis.fetch = previousFetch
+    await pinnedFetch.close()
     for (const [key, value] of previousEnv) {
       if (value === undefined) {
         delete process.env[key]
@@ -519,6 +533,34 @@ async function withRuntimeEnvironment(
       }
     }
   }
+}
+
+type PinnedRuntimeFetch = typeof fetch & {
+  close(): Promise<void>
+}
+
+export function createBeeGamePinnedFetch(
+  baseFetch: typeof fetch,
+  approvedOutboundTargets: Record<string, ApprovedOutboundTarget>,
+): PinnedRuntimeFetch {
+  const dispatchers = new Map<string, ReturnType<typeof createPinnedUndiciDispatcher>>()
+  for (const target of Object.values(approvedOutboundTargets)) {
+    if (!dispatchers.has(target.url.origin)) {
+      dispatchers.set(target.url.origin, createPinnedUndiciDispatcher(target))
+    }
+  }
+
+  const pinnedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const origin = getFetchRequestOrigin(input)
+    const dispatcher = origin ? dispatchers.get(origin) : undefined
+    return dispatcher
+      ? baseFetch(input, { ...init, dispatcher } as RequestInit)
+      : baseFetch(input, init)
+  }) as PinnedRuntimeFetch
+  pinnedFetch.close = async () => {
+    await Promise.all([...dispatchers.values()].map(dispatcher => dispatcher.close()))
+  }
+  return pinnedFetch
 }
 
 export function createBeeGameThinkingFetch(
@@ -573,6 +615,14 @@ function getFetchRequestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input
   if (input instanceof URL) return input.href
   return input.url
+}
+
+function getFetchRequestOrigin(input: RequestInfo | URL): string | undefined {
+  try {
+    return new URL(getFetchRequestUrl(input)).origin
+  } catch {
+    return undefined
+  }
 }
 
 function shouldInjectBeeGameThinking(

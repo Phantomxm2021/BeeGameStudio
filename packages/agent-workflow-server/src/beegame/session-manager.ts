@@ -9,6 +9,7 @@ import {
 } from '@bee-game-studio/agent-workflow'
 import {
   resolveApprovedOutboundTarget,
+  type ApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
@@ -173,7 +174,21 @@ export type BeeGameSessionRunnerStartInput = {
   resumeSessionId?: string
   cwd: string
   env: Record<string, string>
+  approvedOutboundTargets: BeeGameApprovedOutboundTargets
 }
+
+const RUNTIME_PROVIDER_URL_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'OPENAI_BASE_URL',
+  'GEMINI_BASE_URL',
+  'GROK_BASE_URL',
+] as const
+
+export type BeeGameRuntimeProviderUrlKey = (typeof RUNTIME_PROVIDER_URL_KEYS)[number]
+
+export type BeeGameApprovedOutboundTargets = Partial<
+  Record<BeeGameRuntimeProviderUrlKey, ApprovedOutboundTarget>
+>
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
@@ -856,12 +871,13 @@ export class BeeGameSessionManager {
           record.session.modelConfigId,
         ),
       )
-      await this.assertPermittedRuntimeEndpoints(env)
+      const approvedOutboundTargets = await this.resolveRuntimeOutboundTargets(env)
       const runner = record.runner ?? await this.runner.start({
         sessionId: record.session.id,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
         env,
+        approvedOutboundTargets,
       })
       record.runner = runner
       try {
@@ -930,20 +946,23 @@ export class BeeGameSessionManager {
     }
   }
 
-  private async assertPermittedRuntimeEndpoints(
+  private async resolveRuntimeOutboundTargets(
     env: Record<string, string>,
-  ): Promise<void> {
-    for (const key of [
-      'ANTHROPIC_BASE_URL',
-      'OPENAI_BASE_URL',
-      'GEMINI_BASE_URL',
-      'GROK_BASE_URL',
-    ] as const) {
+  ): Promise<BeeGameApprovedOutboundTargets> {
+    const targets: BeeGameApprovedOutboundTargets = {}
+    for (const key of RUNTIME_PROVIDER_URL_KEYS) {
       const value = env[key]
-      if (value && !await this.resolveOutboundTarget(value, this.outboundTargetPolicyOptions)) {
+      if (!value) continue
+      const target = await this.resolveOutboundTarget(
+        value,
+        this.outboundTargetPolicyOptions,
+      )
+      if (!target) {
         throw new Error('Outbound URL is not permitted')
       }
+      targets[key] = target
     }
+    return targets
   }
 
   private async submitToRunner(
