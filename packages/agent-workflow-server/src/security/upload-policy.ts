@@ -7,6 +7,7 @@ import type {
 export const MAX_BEEGAME_ATTACHMENTS = 8
 export const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
 export const MAX_BEEGAME_ATTACHMENTS_BYTES = 32 * 1024 * 1024
+export const MAX_BEEGAME_REQUEST_BYTES = 48 * 1024 * 1024
 
 const MIME_EXTENSIONS: Record<string, readonly string[]> = {
   'image/png': ['.png'],

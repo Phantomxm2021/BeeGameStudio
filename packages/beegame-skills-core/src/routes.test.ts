@@ -1,11 +1,36 @@
 import { describe, expect, test } from 'bun:test'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, Zip, ZipPassThrough, zipSync } from 'fflate'
 import { createBeeGameSkillsApp } from './app'
+import { parseSkillZipPackage } from './store'
 import type { BeeGameUserSkill } from './types'
 
 function skillZip(files: Record<string, string>): File {
   const archive = zipSync(Object.fromEntries(Object.entries(files).map(([path, value]) => [path, strToU8(value)])))
   return new File([new Blob([archive as unknown as BlobPart])], 'skill.zip', { type: 'application/zip' })
+}
+
+function duplicateSkillZip(): File {
+  const chunks: Uint8Array[] = []
+  const archive = new Zip((error, chunk) => {
+    if (error) throw error
+    chunks.push(chunk)
+  })
+  for (const content of [
+    '---\nname: first\ndescription: first\n---',
+    '---\nname: second\ndescription: second\n---',
+  ]) {
+    const entry = new ZipPassThrough('SKILL.md')
+    archive.add(entry)
+    entry.push(strToU8(content), true)
+  }
+  archive.end()
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new File([bytes], 'duplicate-skill.zip', { type: 'application/zip' })
 }
 
 function makeApp() {
@@ -50,5 +75,46 @@ describe('BeeGame skill import routes', () => {
     const body = new FormData()
     body.append('skill', skillZip({ 'SKILL.md': '---\nname: route-skill\ndescription: route test\n---' }))
     expect((await app.request('/api/user-skills/import', { method: 'POST', body })).status).toBe(200)
+  })
+
+  test('returns a generic traced error and logs sanitized import details', async () => {
+    const app = makeApp()
+    const body = new FormData()
+    const secretPath = '../private/secret.md'
+    body.append('skill', skillZip({
+      'SKILL.md': '---\nname: route-skill\ndescription: route test\n---',
+      [secretPath]: 'payload-secret',
+    }))
+    const originalWarn = console.warn
+    const warnings: unknown[] = []
+    console.warn = (...args) => warnings.push(args)
+    try {
+      const response = await app.request('/api/user-skills/import', { method: 'POST', body })
+      const payload = await response.json()
+      expect(response.status).toBe(400)
+      expect(payload).toEqual({ error: 'Skill import failed', traceId: expect.any(String) })
+      expect(JSON.stringify(payload)).not.toContain(secretPath)
+      expect(JSON.stringify(warnings)).not.toContain(secretPath)
+      expect(JSON.stringify(warnings)).not.toContain('payload-secret')
+      expect(JSON.stringify(warnings)).toContain(payload.traceId)
+    } finally {
+      console.warn = originalWarn
+    }
+  })
+
+  test('rejects oversized multipart input before parsing it', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/user-skills/import', {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=unused', 'content-length': String(13 * 1024 * 1024) },
+      body: 'not-buffered',
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'Skill import failed', traceId: expect.any(String) })
+  })
+
+  test('rejects duplicate normalized ZIP entries before object-map collapse', async () => {
+    const bytes = await duplicateSkillZip().arrayBuffer()
+    expect(() => parseSkillZipPackage(bytes)).toThrow()
   })
 })

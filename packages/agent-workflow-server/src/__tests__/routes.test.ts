@@ -3738,6 +3738,35 @@ describe('agent workflow server routes', () => {
     expect(body.traceId).toEqual(expect.any(String))
     expect(JSON.stringify(body)).not.toContain(payload)
   })
+
+  test('logs upload policy rejections with the response trace id and no payload', async () => {
+    const payload = 'private-attachment-payload'
+    const originalWarn = console.warn
+    const warnings: unknown[] = []
+    console.warn = (...args) => warnings.push(args)
+    try {
+      const response = await app.request('/api/beegame-intake/analyze-attachments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ attachments: [{ type: 'image', mediaType: 'image/png', filename: 'concept.png', data: payload }] }),
+      })
+      const body = await response.json()
+      expect(body.traceId).toEqual(expect.any(String))
+      expect(JSON.stringify(warnings)).toContain(body.traceId)
+      expect(JSON.stringify(warnings)).not.toContain(payload)
+    } finally {
+      console.warn = originalWarn
+    }
+  })
+
+  test('rejects oversized attachment JSON before parsing the request body', async () => {
+    const response = await app.request('/api/beegame-intake/analyze-attachments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(49 * 1024 * 1024) },
+      body: '{}',
+    })
+    expect(response.status).toBe(400)
+  })
 })
 
 function signStripePayload(payload: string, secret: string, timestamp = 1720000000): string {

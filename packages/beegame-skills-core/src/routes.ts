@@ -1,4 +1,5 @@
 import type { Hono } from 'hono'
+import { randomUUID } from 'node:crypto'
 import {
   BeeGameSkillDuplicateError,
   BeeGameSkillValidationError,
@@ -6,6 +7,8 @@ import {
   type BeeGameSkillsUserContext,
 } from './types'
 import { parseSkillZipPackage } from './store'
+import { MAX_SKILL_REQUEST_BYTES } from './client'
+import { readRequestBytes, RequestBodyLimitError } from './request-body'
 
 export type BeeGameSkillsRouteDeps = {
   repository: BeeGameSkillsRepository
@@ -29,14 +32,19 @@ export function registerBeeGameSkillsRoutes(
     const user = deps.getCurrentUser(c.req.raw)
     const forbidden = requireSkillsPermission(user, deps)
     if (forbidden) return c.json(forbidden, 403)
+    const traceId = randomUUID()
     try {
-      const body = await c.req.parseBody()
-      const file = body.skill
+      const body = await new Request(c.req.raw.url, {
+        method: c.req.raw.method,
+        headers: c.req.raw.headers,
+        body: new Blob([await readRequestBytes(c.req.raw, MAX_SKILL_REQUEST_BYTES)]),
+      }).formData()
+      const file = body.get('skill')
       if (!(file instanceof File)) {
-        return c.json({ error: 'Validation failed', message: 'Skill zip file is required' }, 400)
+        throw new BeeGameSkillValidationError('Skill zip file is required')
       }
       if (!file.name.toLowerCase().endsWith('.zip')) {
-        return c.json({ error: 'Validation failed', message: 'Skill import requires a .zip file' }, 400)
+        throw new BeeGameSkillValidationError('Skill import requires a .zip file')
       }
       const files = parseSkillZipPackage(await file.arrayBuffer())
       const saved = await deps.repository.importUserSkill(user.id, {
@@ -45,13 +53,8 @@ export function registerBeeGameSkillsRoutes(
       })
       return c.json(toUserSkillResponse(saved))
     } catch (err) {
-      if (err instanceof BeeGameSkillDuplicateError) {
-        return c.json({ error: 'Duplicate skill', message: err.message }, 409)
-      }
-      if (err instanceof BeeGameSkillValidationError) {
-        return c.json({ error: 'Validation failed', message: err.message }, 400)
-      }
-      throw err
+      logSkillImportFailure(traceId, err)
+      return c.json({ error: 'Skill import failed', traceId }, 400)
     }
   })
 
@@ -92,6 +95,17 @@ export function registerBeeGameSkillsRoutes(
     }
     return c.json((await deps.repository.listEnabledUserSkills(userId)).map(toUserSkillResponse))
   })
+}
+
+function logSkillImportFailure(traceId: string, error: unknown): void {
+  const reason = error instanceof RequestBodyLimitError
+    ? 'request_too_large'
+    : error instanceof BeeGameSkillDuplicateError
+      ? 'duplicate_skill'
+      : error instanceof BeeGameSkillValidationError
+        ? 'validation_failed'
+        : 'unexpected_error'
+  console.warn('[BeeGameSkills] skill import failed', { traceId, reason })
 }
 
 function requireSkillsPermission(

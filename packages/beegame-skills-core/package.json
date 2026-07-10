@@ -11,6 +11,7 @@
     "./client": "./src/client.ts",
     "./config": "./src/config.ts",
     "./routes": "./src/routes.ts",
+    "./request-body": "./src/request-body.ts",
     "./store": "./src/store.ts",
     "./types": "./src/types.ts",
     "./package.json": "./package.json"

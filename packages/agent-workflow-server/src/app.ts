@@ -121,7 +121,9 @@ import {
 } from './billing-routes'
 import {
   proxyBeeGameSkillsRequest,
+  MAX_SKILL_REQUEST_BYTES,
 } from '@bee-game-studio/beegame-skills-core/client'
+import { readRequestBytes, RequestBodyLimitError } from '@bee-game-studio/beegame-skills-core/request-body'
 import {
   resolveBeeGameSkillsConfig,
   type BeeGameSkillsConfig,
@@ -134,6 +136,7 @@ import {
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
 import {
   BeeGameUploadPolicyError,
+  MAX_BEEGAME_REQUEST_BYTES,
   validateBeeGameAttachments,
 } from './security/upload-policy'
 
@@ -898,7 +901,19 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/user-skills/import', async c => {
-    return proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills/import')
+    try {
+      return await proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills/import')
+    } catch (err) {
+      const traceId = randomUUID()
+      console.warn('[BeeGame] skill import proxy failed', {
+        traceId,
+        reason: err instanceof RequestBodyLimitError ? 'request_too_large' : 'upstream_unavailable',
+      })
+      return new Response(JSON.stringify({ error: 'Skill import failed', traceId }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
   })
 
   app.put('/api/user-skills/:id/enabled', async c => {
@@ -1675,13 +1690,13 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     try {
-      const body = await readJson(c.req.raw)
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const attachments = validateBeeGameAttachments(body.attachments)
       const analysis = await runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
       return c.json(analysis)
     } catch (err) {
       if (err instanceof HttpError) return c.json(err.body, err.status)
-      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse(err)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1691,7 +1706,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     try {
-      const body = await readJson(c.req.raw)
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const attachments = validateBeeGameAttachments(body.attachments)
       const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
       const now = Date.now()
@@ -1710,7 +1725,7 @@ export function createAgentWorkflowApp(
       })
       return c.json({ jobId, status: 'running' }, 202)
     } catch (err) {
-      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse(err)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -4195,7 +4210,7 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
-      const body = await readJson(c.req.raw)
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const attachments = body.attachments === undefined
         ? []
         : validateBeeGameAttachments(body.attachments)
@@ -4242,7 +4257,7 @@ function registerBeeGameSessionRoutes(
         }),
       )
     } catch (err) {
-      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse(err)
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -4511,8 +4526,10 @@ function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectM
   }
 }
 
-async function readJson(request: Request): Promise<JsonObject> {
-  const value = await request.json()
+async function readJson(request: Request, maxBytes?: number): Promise<JsonObject> {
+  const value = maxBytes === undefined
+    ? await request.json()
+    : JSON.parse(new TextDecoder().decode(await readRequestBytes(request, maxBytes))) as unknown
   return isObject(value) ? value : {}
 }
 
@@ -4649,9 +4666,12 @@ function isBeeGameSessionLanguage(
     value === 'ko'
 }
 
-function uploadPolicyResponse(): Response {
-  const traceId = randomUUID()
-  console.warn(`[BeeGame] upload policy rejected request ${traceId}`)
+export function uploadPolicyResponse(error: BeeGameUploadPolicyError, traceId: string = randomUUID()): Response {
+  console.warn('[BeeGame] upload policy rejected request', {
+    traceId,
+    reason: 'attachment_policy_rejected',
+    error: error.name,
+  })
   return new Response(JSON.stringify({
     error: 'Attachment validation failed',
     traceId,

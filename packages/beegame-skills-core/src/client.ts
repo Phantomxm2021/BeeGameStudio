@@ -4,6 +4,9 @@ import type {
 import type {
   BeeGameUserSkill,
 } from './types'
+import { readRequestBytes } from './request-body'
+
+export const MAX_SKILL_REQUEST_BYTES = 12 * 1024 * 1024
 
 export async function fetchEnabledUserSkills(
   config: BeeGameSkillsConfig,
@@ -42,7 +45,7 @@ export async function proxyBeeGameSkillsRequest(
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     if (contentType) headers.set('content-type', contentType)
-    init.body = await request.arrayBuffer()
+    init.body = new Blob([await readRequestBytes(request, MAX_SKILL_REQUEST_BYTES)])
   }
   const response = await fetch(`${config.apiBaseUrl}${path}`, init)
   return new Response(response.body, {

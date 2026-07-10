@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { uploadPolicyResponse } from '../app'
 import { validateBeeGameAttachments, BeeGameUploadPolicyError } from '../security/upload-policy'
 
 const encoded = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64')
@@ -21,5 +22,22 @@ describe('BeeGame upload policy', () => {
   test('returns normalized metadata for valid UTF-8 JSON', () => {
     const result = validateBeeGameAttachments([{ type: 'file', filename: '../state.json', mediaType: 'application/json', data: encoded(new TextEncoder().encode('{"ok":true}')) }])
     expect(result[0]).toMatchObject({ filename: 'state.json', byteLength: 11, mediaType: 'application/json' })
+  })
+
+  test('logs a traced, payload-free policy rejection response', async () => {
+    const originalWarn = console.warn
+    const warnings: unknown[] = []
+    console.warn = (...args) => warnings.push(args)
+    try {
+      const payload = 'secret-attachment-data'
+      const response = uploadPolicyResponse(new BeeGameUploadPolicyError('invalid payload'), 'trace-123')
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ error: 'Attachment validation failed', traceId: 'trace-123' })
+      expect(JSON.stringify(warnings)).toContain('trace-123')
+      expect(JSON.stringify(warnings)).not.toContain(payload)
+      expect(JSON.stringify(warnings)).not.toContain('invalid payload')
+    } finally {
+      console.warn = originalWarn
+    }
   })
 })

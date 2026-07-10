@@ -83,6 +83,7 @@ export function parseSkillZipPackage(input: ArrayBuffer | Uint8Array): BeeGameSk
   rejectZipSymlinks(bytes)
   let entryCount = 0
   let uncompressedBytes = 0
+  const normalizedPaths = new Set<string>()
   const entries = unzipSync(bytes, {
     filter: info => {
       entryCount += 1
@@ -91,7 +92,11 @@ export function parseSkillZipPackage(input: ArrayBuffer | Uint8Array): BeeGameSk
         throw new BeeGameSkillValidationError('Skill package exceeds archive limits')
       }
       if (info.name.endsWith('/')) return false
-      normalizePackagePath(info.name)
+      const normalizedPath = normalizePackagePath(info.name)
+      if (normalizedPaths.has(normalizedPath)) {
+        throw new BeeGameSkillValidationError('Skill package contains duplicate entries')
+      }
+      normalizedPaths.add(normalizedPath)
       return true
     },
   })
