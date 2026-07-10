@@ -34,6 +34,7 @@
         "@bee-game-studio/agent-tools": "workspace:*",
         "@bee-game-studio/builtin-tools": "workspace:*",
         "@bee-game-studio/mcp-client": "workspace:*",
+        "@bee-game-studio/security-core": "workspace:*",
         "@bee-game-studio/weixin": "workspace:*",
         "@biomejs/biome": "^2.4.12",
         "@commander-js/extra-typings": "^14.0.0",

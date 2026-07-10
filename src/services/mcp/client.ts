@@ -57,6 +57,11 @@ import {
 } from '@bee-game-studio/builtin-tools/tools/MCPTool/MCPTool.js'
 import { createMcpAuthTool } from '@bee-game-studio/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@bee-game-studio/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
+import {
+  createPinnedUndiciDispatcher,
+  resolveApprovedOutboundTarget,
+  type ApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { createAbortController } from '../../utils/abortController.js'
 import { count } from '../../utils/array.js'
 import {
@@ -471,6 +476,72 @@ const MCP_REQUEST_TIMEOUT_MS = 60000
  */
 const MCP_STREAMABLE_HTTP_ACCEPT = 'application/json, text/event-stream'
 
+type DispatcherRequestInit = RequestInit & { dispatcher?: unknown }
+
+export type RemoteMcpConnectionDependencies = {
+  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
+  createPinnedUndiciDispatcher: typeof createPinnedUndiciDispatcher
+}
+
+type PinnedRemoteMcpConnection = {
+  url: URL
+  requestInit: DispatcherRequestInit
+  fetch: (baseFetch: FetchLike) => FetchLike
+  eventSourceFetch: (baseFetch: FetchLike) => FetchLike
+  close: () => Promise<void>
+}
+
+const remoteMcpConnectionDependencies: RemoteMcpConnectionDependencies = {
+  resolveApprovedOutboundTarget,
+  createPinnedUndiciDispatcher,
+}
+
+/**
+ * Resolves an MCP URL once immediately before connecting and ensures every
+ * transport request uses the resulting pinned dispatcher. The original URL is
+ * retained so HTTP Host and TLS SNI continue to identify the configured host.
+ */
+export async function createPinnedRemoteMcpConnection(
+  value: string,
+  dependencies: RemoteMcpConnectionDependencies = remoteMcpConnectionDependencies,
+): Promise<PinnedRemoteMcpConnection> {
+  const target = await dependencies.resolveApprovedOutboundTarget(value)
+  if (!target) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      'Outbound URL is not permitted',
+      'Outbound URL is not permitted',
+    )
+  }
+
+  return createPinnedRemoteMcpConnectionForTarget(target, dependencies)
+}
+
+function createPinnedRemoteMcpConnectionForTarget(
+  target: ApprovedOutboundTarget,
+  dependencies: RemoteMcpConnectionDependencies,
+): PinnedRemoteMcpConnection {
+  const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
+  const requestInit: DispatcherRequestInit = { dispatcher }
+  let isClosed = false
+  const withDispatcher = (init?: RequestInit): DispatcherRequestInit => ({
+    ...init,
+    dispatcher,
+  })
+
+  return {
+    url: target.url,
+    requestInit,
+    fetch: baseFetch => (url, init) => baseFetch(url, withDispatcher(init)),
+    eventSourceFetch: baseFetch => (url, init) =>
+      baseFetch(url, withDispatcher(init)),
+    close: async () => {
+      if (isClosed) return
+      isClosed = true
+      await dispatcher.close()
+    },
+  }
+}
+
 /**
  * Wraps a fetch function to apply a fresh timeout signal to each request.
  * This avoids the bug where a single AbortSignal.timeout() created at connection
@@ -610,6 +681,7 @@ export const connectToServer = memoize(
     let inProcessServer:
       | { connect(t: Transport): Promise<void>; close(): Promise<void> }
       | undefined
+    let closePinnedRemoteMcpConnection: (() => Promise<void>) | undefined
     try {
       let transport
 
@@ -618,6 +690,11 @@ export const connectToServer = memoize(
       const sessionIngressToken = getSessionIngressAuthToken()
 
       if (serverRef.type === 'sse') {
+        const remoteConnection = await createPinnedRemoteMcpConnection(
+          serverRef.url,
+        )
+        closePinnedRemoteMcpConnection = remoteConnection.close
+
         // Create an auth provider for this server
         const authProvider = new ClaudeAuthProvider(name, serverRef)
 
@@ -631,9 +708,13 @@ export const connectToServer = memoize(
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
           fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
+            wrapFetchWithStepUpDetection(
+              remoteConnection.fetch(createFetchWithInit()),
+              authProvider,
+            ),
           ),
           requestInit: {
+            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...combinedHeaders,
@@ -646,6 +727,7 @@ export const connectToServer = memoize(
         // to receive server-sent events), so applying a 60-second timeout would kill it.
         // The timeout is only meant for individual API requests (POST, auth refresh), not
         // the persistent SSE stream.
+        const eventSourceFetch = remoteConnection.eventSourceFetch(fetch)
         transportOptions.eventSourceInit = {
           fetch: async (url: string | URL, init?: RequestInit) => {
             // Get auth headers from the auth provider
@@ -657,7 +739,7 @@ export const connectToServer = memoize(
 
             const proxyOptions = getProxyFetchOptions()
             // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-            return fetch(url, {
+            return eventSourceFetch(url, {
               ...init,
               ...proxyOptions,
               headers: {
@@ -672,7 +754,7 @@ export const connectToServer = memoize(
         }
 
         transport = new SSEClientTransport(
-          new URL(serverRef.url),
+          remoteConnection.url,
           transportOptions,
         )
         logMCPDebug(name, `SSE transport initialized, awaiting connection`)
@@ -800,6 +882,10 @@ export const connectToServer = memoize(
         )
 
         // Create an auth provider for this server
+        const remoteConnection = await createPinnedRemoteMcpConnection(
+          serverRef.url,
+        )
+        closePinnedRemoteMcpConnection = remoteConnection.close
         const authProvider = new ClaudeAuthProvider(name, serverRef)
 
         // Get combined headers (static + dynamic)
@@ -825,10 +911,16 @@ export const connectToServer = memoize(
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
           fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
+            wrapFetchWithStepUpDetection(
+              remoteConnection.fetch(
+                createFetchWithInit(undefined, proxyOptions),
+              ),
+              authProvider,
+            ),
           ),
           requestInit: {
             ...proxyOptions,
+            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...(sessionIngressToken &&
@@ -860,7 +952,7 @@ export const connectToServer = memoize(
         )
 
         transport = new StreamableHTTPClientTransport(
-          new URL(serverRef.url),
+          remoteConnection.url,
           transportOptions,
         )
         logMCPDebug(name, `HTTP transport created successfully`)
@@ -1068,6 +1160,7 @@ export const connectToServer = memoize(
             inProcessServer.close().catch(() => {})
           }
           transport.close().catch(() => {})
+          void closePinnedRemoteMcpConnection?.()
           reject(
             new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
               `MCP server "${name}" connection timed out after ${getConnectionTimeoutMs()}ms`,
@@ -1159,6 +1252,7 @@ export const connectToServer = memoize(
           inProcessServer.close().catch(() => {})
         }
         transport.close().catch(() => {})
+        await closePinnedRemoteMcpConnection?.()
         if (stderrOutput) {
           logMCPError(name, `Server stderr: ${stderrOutput}`)
         }
@@ -1383,6 +1477,7 @@ export const connectToServer = memoize(
 
       // Enhanced close handler with connection drop context
       client.onclose = () => {
+        void closePinnedRemoteMcpConnection?.()
         const uptime = Date.now() - connectionStartTime
         const transportType = serverRef.type ?? 'unknown'
 

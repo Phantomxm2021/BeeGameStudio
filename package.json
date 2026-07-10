@@ -115,6 +115,7 @@
     "@bee-game-studio/agent-tools": "workspace:*",
     "@bee-game-studio/builtin-tools": "workspace:*",
     "@bee-game-studio/mcp-client": "workspace:*",
+    "@bee-game-studio/security-core": "workspace:*",
     "@bee-game-studio/weixin": "workspace:*",
     "@commander-js/extra-typings": "^14.0.0",
     "@growthbook/growthbook": "^1.6.5",
