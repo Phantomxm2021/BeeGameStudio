@@ -21,8 +21,10 @@ interface AssetsPanelProps {
     isLoading: boolean;
     isUploadingSlotId?: string | null;
     isReintegratingSlotId?: string | null;
+    isAutoBinding?: boolean;
     onUpload?: (slotId: string, file: File) => Promise<void>;
     onReintegrate?: (slotId: string) => Promise<void>;
+    onAutoBind?: () => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
     lang?: Language;
@@ -35,8 +37,10 @@ export const AssetsPanel = memo(({
     isLoading,
     isUploadingSlotId = null,
     isReintegratingSlotId = null,
+    isAutoBinding = false,
     onUpload,
     onReintegrate,
+    onAutoBind,
     onRequestIntegration,
     onRequestAllIntegration,
     lang = 'en',
@@ -48,6 +52,7 @@ export const AssetsPanel = memo(({
         const status = slot.status || (slot.placeholder === false ? 'uploaded' : 'placeholder');
         return status === 'uploaded';
     });
+    const selectableSlots = slots.filter(slot => !slot.resource_binding && slot.resource_requirement && slot.status !== 'integrated');
 
     if (isLoading && slots.length === 0) {
         return (
@@ -105,6 +110,18 @@ export const AssetsPanel = memo(({
                     </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                    {selectableSlots.length > 0 && onAutoBind ? (
+                        <button
+                            type="button"
+                            disabled={isAutoBinding}
+                            onClick={() => void onAutoBind()}
+                            className="type-button rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1 text-sky-100 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {isAutoBinding
+                                ? (text.autoSelecting || text.uploading)
+                                : (text.autoSelectLibrary || text.requestIntegration)}
+                        </button>
+                    ) : null}
                     {pendingSlots.length && onRequestAllIntegration ? (
                         <button
                             type="button"

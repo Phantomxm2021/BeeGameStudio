@@ -657,6 +657,8 @@
       "uploading": "上傳中...",
       "requestIntegration": "讓 BeeGame 整合",
       "verifyIntegration": "重新整合 / 驗證",
+      "autoSelectLibrary": "自動選擇資源庫資源",
+      "autoSelecting": "正在選擇…",
       "integrateAllPending": "整合所有待處理",
       "required": "必需",
       "optional": "可選",

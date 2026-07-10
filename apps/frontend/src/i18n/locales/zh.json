@@ -854,6 +854,8 @@
       "uploading": "上传中...",
       "requestIntegration": "让 BeeGame 集成",
       "verifyIntegration": "重新集成 / 验证",
+      "autoSelectLibrary": "自动选择资源库资源",
+      "autoSelecting": "正在选择…",
       "integrateAllPending": "集成所有待处理",
       "required": "必需",
       "optional": "可选",

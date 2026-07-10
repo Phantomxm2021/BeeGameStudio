@@ -114,6 +114,7 @@ export function RightSidebar({
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
     const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
     const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
+    const [isAutoBindingResources, setIsAutoBindingResources] = useState(false);
     const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -260,6 +261,17 @@ export function RightSidebar({
             setAssetManifest(result.manifest);
         } finally {
             setReintegratingAssetSlotId(null);
+        }
+    };
+
+    const handleAutoBindLibraryResources = async () => {
+        if (!canUploadAssets) return;
+        setIsAutoBindingResources(true);
+        try {
+            const result = await api.autoBindProjectResources(projectId);
+            setAssetManifest(result.manifest);
+        } finally {
+            setIsAutoBindingResources(false);
         }
     };
 
@@ -485,8 +497,10 @@ export function RightSidebar({
                                 isLoading={isAssetsLoading}
                                 isUploadingSlotId={uploadingAssetSlotId}
                                 isReintegratingSlotId={reintegratingAssetSlotId}
+                                isAutoBinding={isAutoBindingResources}
                                 onUpload={canUploadAssets ? handleUploadAsset : undefined}
                                 onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
+                                onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}

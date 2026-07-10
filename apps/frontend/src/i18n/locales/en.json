@@ -854,6 +854,8 @@
       "uploading": "Uploading...",
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
+      "autoSelectLibrary": "Auto-select library assets",
+      "autoSelecting": "Selecting…",
       "integrateAllPending": "Integrate all pending",
       "required": "Required",
       "optional": "Optional",
