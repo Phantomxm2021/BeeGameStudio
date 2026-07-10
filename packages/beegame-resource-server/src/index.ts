@@ -8,6 +8,7 @@ export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
 
 if (import.meta.main) {
+  await loadResourceSupabaseEnv()
   const { host, port } = resolveBeeGameResourceListenOptions()
   const baseUrl = process.env.BEEGAME_SUPABASE_URL
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
@@ -36,6 +37,18 @@ if (import.meta.main) {
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)
+}
+
+async function loadResourceSupabaseEnv(): Promise<void> {
+  for (const path of ['.env.billing', 'docker/.env.billing', '.env.local']) {
+    const file = Bun.file(path)
+    if (!(await file.exists())) continue
+    const text = await file.text()
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^\s*(BEEGAME_SUPABASE_(?:URL|SERVICE_ROLE_KEY|ANON_KEY))\s*=\s*(.*)\s*$/)
+      if (match?.[1] && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '')
+    }
+  }
 }
 
 function createConfiguredResourceRepository(
