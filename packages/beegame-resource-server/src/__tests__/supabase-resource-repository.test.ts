@@ -48,6 +48,20 @@ describe('Supabase resource repository', () => {
     expect(createBody).toMatchObject({ primary_category: 'ui-kit' })
   })
 
+  test('preserves Supabase mutation diagnostics for actionable schema failures', async () => {
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async () => Response.json({
+        code: 'PGRST204',
+        message: "Could not find the 'primary_category' column",
+        hint: 'Reload the schema cache after applying the migration.',
+      }, { status: 400 }),
+    })
+    await expect(repository.createPack({ id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'ui-kit', categories: ['ui'], license: 'internal', version: '1.0.0', status: 'draft' }))
+      .rejects.toThrow("[PGRST204] Could not find the 'primary_category' column")
+  })
+
   test('treats an unapplied folders migration as an empty folder tree', async () => {
     const repository = createSupabaseResourceRepository({
       baseUrl: 'https://supabase.test',

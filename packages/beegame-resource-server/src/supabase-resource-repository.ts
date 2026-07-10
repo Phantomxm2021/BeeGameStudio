@@ -51,7 +51,7 @@ export function createSupabaseResourceRepository(
         accept: 'application/json',
       },
     }))
-    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository request failed (${response.status})`)
+    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository request failed (${response.status}): ${await supabaseErrorDetail(response)}`)
     return await response.json() as T[]
   }
   const mutate = async <T>(table: string, init: RequestInit, params: Record<string, string> = {}): Promise<T[]> => {
@@ -69,7 +69,7 @@ export function createSupabaseResourceRepository(
         ...(init.headers || {}),
       },
     })
-    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository mutation failed (${response.status})`)
+    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository mutation failed (${response.status}): ${await supabaseErrorDetail(response)}`)
     return await response.json() as T[]
   }
   const signPath = async (path: string): Promise<string> => {
@@ -205,6 +205,17 @@ export function createSupabaseResourceRepository(
       return rows.length > 0
     },
   }
+}
+
+async function supabaseErrorDetail(response: Response): Promise<string> {
+  const body = await response.json().catch(() => undefined)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return response.statusText || 'Unknown Supabase error'
+  const error = body as Record<string, unknown>
+  const code = typeof error.code === 'string' ? error.code.trim() : ''
+  const message = typeof error.message === 'string' ? error.message.trim() : ''
+  const details = typeof error.details === 'string' ? error.details.trim() : ''
+  const hint = typeof error.hint === 'string' ? error.hint.trim() : ''
+  return [code && `[${code}]`, message, details, hint].filter(Boolean).join(' ')
 }
 
 export type { ResourceCategory }

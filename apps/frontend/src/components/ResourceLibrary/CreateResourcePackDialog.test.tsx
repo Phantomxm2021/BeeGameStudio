@@ -68,4 +68,17 @@ describe('CreateResourcePackDialog', () => {
     await user.click(screen.getByRole('button', { name: '创建 Pack' }))
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ primaryCategory: 'ui-kit', categories: [] }))
   })
+
+  test('renders newly added custom styles and game types as selected chips', async () => {
+    const user = userEvent.setup()
+    render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
+
+    await user.type(screen.getByPlaceholderText('添加自定义风格'), 'Watercolor')
+    await user.click(screen.getAllByRole('button', { name: '添加' })[0])
+    await user.type(screen.getByPlaceholderText('添加自定义类型'), 'Rhythm')
+    await user.click(screen.getAllByRole('button', { name: '添加' })[1])
+
+    expect(screen.getByRole('button', { name: 'Watercolor' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Rhythm' })).toHaveAttribute('aria-pressed', 'true')
+  })
 })
