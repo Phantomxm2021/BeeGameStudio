@@ -84,8 +84,8 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Resource update failed (${response.status})`, response.status, result.error?.code || 'resource_update_failed')
       return result.pack
     },
-    async addElement(packId: string, file: File, category: string): Promise<ResourceElement> {
-      const form = new FormData(); form.set('file', file); form.set('category', category)
+    async addElement(packId: string, file: File, category: string, folderPath?: string): Promise<ResourceElement> {
+      const form = new FormData(); form.set('file', file); form.set('category', category); if (folderPath) form.set('folderPath', folderPath)
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`, { method: 'POST', body: form })
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element upload failed (${response.status})`, response.status, result.error?.code || 'element_upload_failed')
