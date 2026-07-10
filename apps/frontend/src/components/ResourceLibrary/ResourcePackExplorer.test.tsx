@@ -55,4 +55,22 @@ describe('ResourcePackExplorer', () => {
 
     expect(onElement).toHaveBeenCalledWith(knight)
   })
+
+  test('moves focus through the tree and activates only files with Enter', async () => {
+    const user = userEvent.setup()
+    const onElement = vi.fn()
+    render(<ResourcePackExplorer tree={tree} onElement={onElement} />)
+
+    const models = screen.getByRole('treeitem', { name: 'Models' })
+    await user.click(models)
+    expect(models).toHaveFocus()
+
+    await user.keyboard('{ArrowRight}')
+    const file = screen.getByRole('treeitem', { name: 'knight.glb' })
+    expect(file).toHaveFocus()
+    expect(file).not.toHaveAttribute('aria-expanded')
+
+    await user.keyboard('{Enter}')
+    expect(onElement).toHaveBeenCalledWith(knight)
+  })
 })

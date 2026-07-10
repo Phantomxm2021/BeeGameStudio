@@ -60,7 +60,8 @@ export function ResourcePackExplorer({
 
 function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<ExplorerNode>) {
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault()
+    event.stopPropagation()
+    node.focus()
     if (node.data.kind === 'folder') {
       node.toggle()
       return
@@ -69,15 +70,22 @@ function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<Explo
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Enter') return
+    if (event.key !== 'Enter' || node.data.kind !== 'file') return
     event.preventDefault()
-    if (node.data.kind === 'folder') node.toggle()
-    else node.handleClick(event as unknown as MouseEvent<HTMLDivElement>)
+    event.stopPropagation()
+    node.handleClick(event as unknown as MouseEvent<HTMLDivElement>)
   }
+
+  const rowAttributes = node.data.kind === 'file'
+    ? (() => {
+        const { 'aria-expanded': _ariaExpanded, ...fileAttributes } = attrs
+        return fileAttributes
+      })()
+    : attrs
 
   return (
     <div
-      {...attrs}
+      {...rowAttributes}
       ref={innerRef}
       className="focus:outline-none"
       onClick={onClick}
