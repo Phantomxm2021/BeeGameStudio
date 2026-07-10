@@ -5,6 +5,11 @@ the staged HttpOnly session migration.
 
 ## Required configuration
 
+Set `BEEGAME_HTTPONLY_SESSIONS` on the backend and
+`VITE_BEEGAME_HTTPONLY_SESSIONS` on the frontend to the same value. These flags
+must be deployed atomically; a mixed deployment can send clients to a session
+mode the server does not support.
+
 Set `BEEGAME_CONFIG_ENCRYPTION_KEY` to a base64-encoded 32-byte key in every
 environment that persists secrets. Store it in the deployment secret manager;
 do not commit it, print it, or reuse a development key in production. The
@@ -33,22 +38,28 @@ do not treat separate local files as a shared session store.
 1. Generate and install the environment-specific encryption key. Verify the
    dashboard data directory exists, is persistent across restarts, and is not
    exposed as a static download path.
-2. Deploy with `BEEGAME_HTTPONLY_SESSIONS=0` and verify normal login, logout,
+2. Deploy `BEEGAME_HTTPONLY_SESSIONS=0` and
+   `VITE_BEEGAME_HTTPONLY_SESSIONS=0` together. Verify normal login, logout,
    refresh, outbound policy, and upload policy behavior.
-3. In staging, enable `BEEGAME_HTTPONLY_SESSIONS=1`; verify the cookie is
-   `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`, and verify refresh works
-   after route registration or process restart.
-4. Enable the flag for internal users first. Monitor authentication failures,
+3. In staging, deploy both flags as `1` together; verify the cookie is
+   `Secure`, `HttpOnly`, `SameSite=Lax`, and `Path=/`, verify legacy migration
+   only removes browser storage after an authenticated follow-up
+   `GET /api/auth/session`, and verify refresh works after route registration
+   or process restart.
+4. Enable both flags for internal users first. Monitor authentication failures,
    refresh failures, cookie delivery, and store write errors without logging
    tokens or cookie values.
 5. Expand gradually after the staging and internal checks pass. Keep the
-   legacy path available for the migration window so rollback is a flag change.
+   legacy path available for the migration window so rollback is one atomic
+   change to both flags.
 6. After the release window, remove the legacy path only after confirming no
    supported client still depends on browser-persisted refresh tokens.
 
-For rollback, disable the flag, preserve the encrypted store for investigation,
-and do not rotate or delete the encryption key until any required recovery is
-complete. A key rotation requires an explicit decrypt-and-re-encrypt migration.
+For rollback, atomically set both `BEEGAME_HTTPONLY_SESSIONS=0` and
+`VITE_BEEGAME_HTTPONLY_SESSIONS=0`, then redeploy/restart the backend and
+frontend together. Preserve the encrypted store for investigation, and do not
+rotate or delete the encryption key until any required recovery is complete. A
+key rotation requires an explicit decrypt-and-re-encrypt migration.
 
 ## CSRF and cookie checks
 
@@ -79,7 +90,7 @@ Run the package typecheck and focused session tests with the project’s require
 Conda environment:
 
 ```sh
-conda run -n xrmoddemiurge bun --cwd packages/agent-workflow-server run typecheck
+conda run -n xrmoddemiurge bun run --cwd packages/agent-workflow-server typecheck
 conda run -n xrmoddemiurge bun test packages/agent-workflow-server/src/__tests__/session-routes.test.ts
 git diff --check
 ```

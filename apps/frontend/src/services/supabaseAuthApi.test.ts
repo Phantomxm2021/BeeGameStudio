@@ -80,6 +80,10 @@ describe('supabaseAuthApi', () => {
       .mockResolvedValueOnce(Response.json({
         authenticated: true,
         user: { id: 'user-1', email: 'user@example.com' },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        authenticated: true,
+        user: { id: 'user-1', email: 'user@example.com' },
       }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -91,10 +95,33 @@ describe('supabaseAuthApi', () => {
       method: 'POST',
       credentials: 'include',
     });
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/session');
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ credentials: 'include' });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
       access_token: 'access-token',
       refresh_token: 'refresh-token',
     });
+  });
+
+  it('keeps legacy storage when the migration POST succeeds but the cookie session is not authenticated', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+        expires_in: 3600,
+        user: { id: 'user-1', email: 'user@example.com' },
+      }))
+      .mockResolvedValueOnce(Response.json({ authenticated: true }))
+      .mockResolvedValueOnce(Response.json({ authenticated: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await signInWithSupabasePassword({ email: 'user@example.com', password: 'secret-password' });
+
+    expect(localStorage.getItem('beegame_supabase_session')).toContain('refresh-token');
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/session');
   });
 
   it('signs up with email/password and stores the returned session when available', async () => {

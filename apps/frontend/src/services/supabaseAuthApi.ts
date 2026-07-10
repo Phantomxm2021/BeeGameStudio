@@ -488,9 +488,20 @@ async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<
     }),
   });
   if (response.ok) {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    httpOnlySessionUser = session.user;
-    return;
+    try {
+      const verificationResponse = await fetch(buildSameOriginApiUrl('/api/auth/session'), {
+        credentials: 'include',
+      });
+      if (verificationResponse.ok) {
+        const value = await verificationResponse.json() as unknown;
+        const cookieSession = toCookieSession(value);
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        httpOnlySessionUser = cookieSession.user;
+        return;
+      }
+    } catch {
+      // Keep the legacy session when the server cannot prove cookie auth.
+    }
   }
   saveSupabaseSession(session);
 }
