@@ -80,6 +80,31 @@ export type ResourceElement = {
   dimensionOverride?: ResourceDimension
 }
 
+export type ResourceSlotRequirement = {
+  slotId: string
+  category?: ResourceCategory
+  dimension?: ResourceDimension
+  acceptedFormats?: readonly string[]
+  styles?: readonly string[]
+  gameTypes?: readonly string[]
+  purpose?: string
+}
+
+export type ResourceSelection = {
+  slotId: string
+  packId: string
+  packVersion: string
+  elementId: string
+  elementPath: string
+  score: number
+  reasons: readonly string[]
+}
+
+export type ResourceSelectionManifest = {
+  selections: readonly ResourceSelection[]
+  unmatchedSlotIds: readonly string[]
+}
+
 export type PackSummary = ResourcePack & {
   elementCount: number
 }
