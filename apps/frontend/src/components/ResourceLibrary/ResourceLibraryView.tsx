@@ -27,7 +27,7 @@ type ResourceLibraryViewProps = {
   initialPackId?: string;
 };
 
-type UploadDestination = { category: string; folderPath: string; label: string };
+type UploadDestination = { category: string; folderPath: string };
 
 
 const categoryLabels: Record<string, string> = {
@@ -187,6 +187,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         if (session !== packSessionRef.current) continue;
         setElements((current) => [...current, next]);
         setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
+        setSelectedPack((current) => current ? { ...current, elementCount: current.elementCount + 1 } : current);
+        setPacks((current) => current.map((pack) => pack.id === selectedPack.id ? { ...pack, elementCount: pack.elementCount + 1 } : pack));
         setSelectedElement(next);
       } catch (err) {
         setElementUpload((current) => current ? { ...current, failed: [...current.failed, file.name] } : current);
@@ -201,7 +203,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   if (selectedPack) {
     return (
       <>
-      {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => apiClient.uploadPackCover(selectedPack.id, file)} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setEditDialogOpen(false); setLoading(false); }} /> : null}
+      {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setEditDialogOpen(false); setLoading(false); }} /> : null}
       <PackBrowser
         apiClient={apiClient}
         pack={selectedPack}
@@ -443,20 +445,17 @@ function PackBrowser({
     const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value);
     if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics } });
   }, [onUpdateElement, selectedElement]);
-  const filesFor = (folder: string) => elements.filter(element => element.category === folder || element.path.startsWith(`${folder}/`));
-  const destinations = useMemo<UploadDestination[]>(() => {
-    const categoryDestinations = categories.map(category => ({ category, folderPath: category, label: categoryLabels[category] || category }));
-    const fallbackCategory = categoryDestinations[0]?.category || 'environment';
-    const folderDestinations = folders.map(folder => ({
-      category: elements.find(element => element.path.startsWith(`${folder.path}/`))?.category || fallbackCategory,
-      folderPath: folder.path,
-      label: `文件夹：${folder.path}`,
-    }));
-    return [...categoryDestinations, ...folderDestinations];
-  }, [categories, elements, folders]);
-  const [destinationKey, setDestinationKey] = useState('');
-  const selectedDestination = destinations.find((_, index) => String(index) === destinationKey) || destinations[0] || { category: 'environment', folderPath: 'environment', label: '环境' };
-  useEffect(() => { if (!destinations.some((_, index) => String(index) === destinationKey)) setDestinationKey('0'); }, [destinationKey, destinations]);
+  const categoryFiles = (category: string) => elements.filter(element => element.category === category && !folders.some(folder => element.path.startsWith(`${folder.path}/`)));
+  const uploadCategories = categories.length > 0 ? categories : ['environment'];
+  const [uploadCategory, setUploadCategory] = useState('');
+  const [uploadTarget, setUploadTarget] = useState('');
+  useEffect(() => {
+    if (!uploadCategories.includes(uploadCategory)) setUploadCategory(uploadCategories[0]);
+    const validTargets = new Set([...uploadCategories.map(category => `category:${category}`), ...folders.map(folder => `folder:${folder.id}`)]);
+    if (!validTargets.has(uploadTarget)) setUploadTarget(`category:${uploadCategories[0]}`);
+  }, [folders, uploadCategories, uploadCategory, uploadTarget]);
+  const selectedFolder = uploadTarget.startsWith('folder:') ? folders.find(folder => folder.id === uploadTarget.slice('folder:'.length)) : undefined;
+  const selectedDestination: UploadDestination = { category: uploadCategory || uploadCategories[0], folderPath: selectedFolder?.path || (uploadTarget.startsWith('category:') ? uploadTarget.slice('category:'.length) : uploadCategories[0]) };
   const folderPaths = new Set(folders.map(folder => folder.path));
   const categoryOnly = categories.filter(category => !folderPaths.has(category));
   return (
@@ -483,9 +482,15 @@ function PackBrowser({
           <button type="button" className="secondary-pill type-button rounded-none border-0 px-3 py-1.5" onClick={onEditPack}>编辑 Pack</button>
           <button type="button" disabled={pack.status === 'published'} className="secondary-pill type-button rounded-none border-0 border-l border-white/10 px-3 py-1.5 disabled:opacity-50" onClick={() => void onPublish()}>发布</button>
           </div>
+          <label className="type-caption-2 flex items-center gap-2 text-zinc-400">上传分类
+            <select aria-label="上传分类" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
+              {uploadCategories.map(category => <option key={category} value={category}>{categoryLabels[category] || category}</option>)}
+            </select>
+          </label>
           <label className="type-caption-2 flex items-center gap-2 text-zinc-400">上传目标
-            <select aria-label="上传目标" value={destinationKey} onChange={(event) => setDestinationKey(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
-              {destinations.map((destination, index) => <option key={`${destination.category}:${destination.folderPath}`} value={index}>{destination.label}</option>)}
+            <select aria-label="上传目标" value={uploadTarget} onChange={(event) => setUploadTarget(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
+              {uploadCategories.map(category => <option key={category} value={`category:${category}`}>{categoryLabels[category] || category}</option>)}
+              {folders.map(folder => <option key={folder.id} value={`folder:${folder.id}`}>文件夹：{folder.path}</option>)}
             </select>
           </label>
           <label className="primary-pill type-button cursor-pointer px-3 py-1.5">
@@ -505,32 +510,11 @@ function PackBrowser({
             onClick={() => toggleExpanded('root')}
           />
           {expandedPaths.has('root') ? <div className="mt-1">
-            {folders.map((folder) => (
-              <div key={folder.id}>
-                <TreeRow
-                  icon={<Folder className="h-4 w-4 text-orange-300" />}
-                  label={folder.path}
-                  expanded={expandedPaths.has(`folder:${folder.path}`)}
-                  onClick={() => toggleExpanded(`folder:${folder.path}`)}
-                />
-                {expandedPaths.has(`folder:${folder.path}`)
-                  ? filesFor(folder.path).map((element) => (
-                      <TreeRow
-                        key={element.id}
-                        icon={<File className="h-4 w-4 text-zinc-600" />}
-                        label={element.name}
-                        ariaLabel={`文件 ${element.name}`}
-                        active={selectedElement?.id === element.id}
-                        onClick={() => onElement(element)}
-                      />
-                    ))
-                  : null}
-              </div>
-            ))}
+            {folders.filter(folder => !folder.parentId).map((folder) => <FolderTreeNode key={folder.id} folder={folder} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={toggleExpanded} onElement={onElement} selectedElementId={selectedElement?.id} />)}
             {categoryOnly.map((category) => (
               <div key={category}>
-                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={filesFor(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
-                {expandedPaths.has(`category:${category}`) ? filesFor(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
+                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={categoryFiles(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
+                {expandedPaths.has(`category:${category}`) ? categoryFiles(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
               </div>
             ))}
           </div> : null}
@@ -538,7 +522,7 @@ function PackBrowser({
         <main className="relative min-h-0 min-w-0 overflow-hidden p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), selectedDestination); }}>
           {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
-            <div role="alert" className="type-callout mb-4 rounded-xl bg-red-400/10 p-3 text-red-200">
+            <div role="alert" className="type-callout absolute left-4 right-4 top-4 z-30 rounded-xl bg-red-400/10 p-3 text-red-200 shadow-xl">
               {error}
             </div>
           ) : null}
@@ -553,6 +537,33 @@ function PackBrowser({
       </div>
     </section>
   );
+}
+
+function FolderTreeNode({ folder, folders, elements, expandedPaths, onToggle, onElement, selectedElementId }: {
+  folder: ResourceFolder;
+  folders: ResourceFolder[];
+  elements: ResourceElement[];
+  expandedPaths: Set<string>;
+  onToggle: (path: string) => void;
+  onElement: (element: ResourceElement) => void;
+  selectedElementId?: string;
+}) {
+  const key = `folder:${folder.id}`;
+  const isExpanded = expandedPaths.has(key);
+  const directFiles = elements.filter(element => parentPath(element.path) === folder.path);
+  const children = folders.filter(candidate => candidate.parentId === folder.id);
+  return <div>
+    <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.name} expanded={isExpanded} onClick={() => onToggle(key)} />
+    {isExpanded ? <div className="ml-3">
+      {directFiles.map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElementId === element.id} onClick={() => onElement(element)} />)}
+      {children.map(child => <FolderTreeNode key={child.id} folder={child} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={onToggle} onElement={onElement} selectedElementId={selectedElementId} />)}
+    </div> : null}
+  </div>;
+}
+
+function parentPath(path: string) {
+  const separator = path.lastIndexOf('/');
+  return separator >= 0 ? path.slice(0, separator) : '';
 }
 
 function TreeRow({
@@ -645,7 +656,7 @@ function ResourceInspectorOverlay({
   const [dimensionOverride, setDimensionOverride] = useState(element.dimensionOverride || 'agnostic');
   const [saving, setSaving] = useState(false);
   useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); }, [element]);
-  const save = async () => { setSaving(true); try { await onSave(element.id, { kind, category, styleOverride: styleOverride || undefined, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'] }); } finally { setSaving(false); } };
+  const save = async () => { setSaving(true); try { await onSave(element.id, { kind, category, styleOverride: styleOverride || null, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'] }); } finally { setSaving(false); } };
   return (
     <aside
       role="complementary"

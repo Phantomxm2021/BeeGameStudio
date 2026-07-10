@@ -53,7 +53,7 @@ export type ResourceElement = {
   specs: Record<string, string | number | boolean | null>
   dependencies: readonly string[]
   status: string
-  styleOverride?: string
+  styleOverride?: string | null
   dimensionOverride?: '2D' | '3D' | 'agnostic'
 }
 

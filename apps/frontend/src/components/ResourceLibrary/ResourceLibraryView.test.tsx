@@ -38,7 +38,7 @@ const api = {
   listFolders: async () => [],
   createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
   addElement: async (_packId: string, file: File, category: string, path?: string) => ({ ...element, id: file.name, name: file.name, category, path: path || category }),
-  updateElement: async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes }),
+  updateElement: vi.fn(async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes })),
   getElementResourceUrl: async () => 'https://signed.example/character-idle.png',
   publishPack: async () => ({ ...pack, status: 'published' }),
   listPacks: async () => [pack],
@@ -107,6 +107,10 @@ describe('ResourceLibraryView', () => {
     expect(within(inspector).getByText('Stylized')).toBeInTheDocument();
     expect(within(inspector).getByText('2D', { selector: 'span' })).toBeInTheDocument();
     expect(within(inspector).getByRole('button', { name: '保存更改' })).toBeInTheDocument();
+    await user.type(within(inspector).getByLabelText(/风格覆盖/), 'Hand painted');
+    await user.clear(within(inspector).getByLabelText(/风格覆盖/));
+    await user.click(within(inspector).getByRole('button', { name: '保存更改' }));
+    await waitFor(() => expect(api.updateElement).toHaveBeenLastCalledWith('pack-1', 'element-1', expect.objectContaining({ styleOverride: null })));
     await user.click(within(inspector).getByRole('button', { name: '关闭元素信息' }));
     expect(screen.getByRole('button', { name: '显示元素信息' })).toBeInTheDocument();
   });
@@ -146,6 +150,37 @@ describe('ResourceLibraryView', () => {
     expect(screen.getByLabelText('上传目标')).toHaveTextContent('模型');
     await user.upload(screen.getByLabelText('选择要添加的文件'), new File(['asset'], 'new.png', { type: 'image/png' }));
     await waitFor(() => expect(addElement).toHaveBeenCalledWith('pack-1', expect.any(File), 'models', 'models'));
+    expect(screen.getByText((_, node) => node?.tagName === 'P' && node.textContent?.includes('2 个元素') === true)).toBeInTheDocument();
+  });
+
+  test('requires an explicit category when uploading to an empty folder', async () => {
+    const user = userEvent.setup();
+    const addElement = vi.fn(api.addElement);
+    const apiClient = { ...api, addElement, listFolders: async () => [{ id: 'folder-empty', packId: 'pack-1', name: 'Empty', path: 'Empty' }] };
+    render(<ResourceLibraryView apiClient={apiClient} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    await user.selectOptions(screen.getByLabelText('上传目标'), 'folder:folder-empty');
+    await user.selectOptions(screen.getByLabelText('上传分类'), 'models');
+    await user.upload(screen.getByLabelText('选择要添加的文件'), new File(['asset'], 'new.png', { type: 'image/png' }));
+    await waitFor(() => expect(addElement).toHaveBeenCalledWith('pack-1', expect.any(File), 'models', 'Empty'));
+  });
+
+  test('renders nested folders only below their parent and keeps files direct', async () => {
+    const user = userEvent.setup();
+    const child = { id: 'folder-child', packId: 'pack-1', name: 'Child', parentId: 'folder-parent', path: 'Parent/Child' };
+    const parent = { id: 'folder-parent', packId: 'pack-1', name: 'Parent', path: 'Parent' };
+    const directFile = { ...element, id: 'direct', name: 'Direct', category: 'models', path: 'Parent/direct.png' };
+    const nestedFile = { ...element, id: 'nested', name: 'Nested', category: 'models', path: 'Parent/Child/nested.png' };
+    render(<ResourceLibraryView apiClient={{ ...api, listFolders: async () => [parent, child], listElements: async () => [directFile, nestedFile] }} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const explorer = screen.getByText('Pack 文件').closest('aside')!;
+    expect(within(explorer).getByText('Parent')).toBeInTheDocument();
+    expect(within(explorer).queryByText('Child')).not.toBeInTheDocument();
+    await user.click(within(explorer).getByText('Parent'));
+    expect(within(explorer).getByRole('button', { name: '文件 Direct' })).toBeInTheDocument();
+    expect(within(explorer).queryByRole('button', { name: '文件 Nested' })).not.toBeInTheDocument();
+    await user.click(within(explorer).getByText('Child'));
+    expect(within(explorer).getByRole('button', { name: '文件 Nested' })).toBeInTheDocument();
   });
 
   test('shows a retryable error when a signed resource URL cannot be loaded', async () => {
