@@ -82,7 +82,9 @@ function isBlockedIpv6(address: string): boolean {
     : ''
   if (mappedIpv4.includes('.') && isIP(mappedIpv4) === 4) return isBlockedIpv4(mappedIpv4)
   const segments = expandIpv6(normalized)
-  if (segments && segments.slice(0, 5).every(segment => segment === 0) && segments[5] === 0xffff) {
+  if (segments &&
+    ((segments.slice(0, 5).every(segment => segment === 0) && segments[5] === 0xffff) ||
+      segments.slice(0, 6).every(segment => segment === 0))) {
     return isBlockedIpv4([
       segments[6] >> 8,
       segments[6] & 0xff,

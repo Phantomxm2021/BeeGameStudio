@@ -22,6 +22,14 @@ describe('validateOutboundTarget', () => {
       .resolves.toBe(false)
   })
 
+  test.each([
+    'https://[::127.0.0.1]/api',
+    'https://[::10.0.0.1]/api',
+    'https://[::c0a8:1]/api',
+  ])('rejects IPv4-compatible IPv6 private targets: %s', async target => {
+    await expect(validateOutboundTarget(target, publicResolvers)).resolves.toBe(false)
+  })
+
   test('rejects non-HTTP URL schemes', async () => {
     await expect(validateOutboundTarget('file:///etc/passwd', publicResolvers))
       .resolves.toBe(false)
