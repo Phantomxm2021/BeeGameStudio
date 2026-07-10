@@ -5,6 +5,14 @@ import userEvent from '@testing-library/user-event';
 import { AssetsPanel } from './AssetsPanel';
 
 describe('AssetsPanel', () => {
+    it('shows the Pack and element selected from the resource library', () => {
+        render(<AssetsPanel manifest={{ version: 1, slots: [{
+            id: 'tree', resource_binding: { pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://signed.example/oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['category:models'], },
+        }] }} isLoading={false} />);
+
+        expect(screen.getByText('fantasy-pack · oak-glb')).toBeInTheDocument();
+    });
+
     it('uses shadcn skeletons while asset data loads', () => {
         render(
             <AssetsPanel

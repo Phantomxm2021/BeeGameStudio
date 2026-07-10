@@ -205,6 +205,13 @@ function AssetSlotCard({
                         </div>
                     ) : null}
 
+                    {slot.resource_binding ? (
+                        <div className="type-footnote mt-3 rounded-xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-sky-100">
+                            <div className="type-caption-1 text-sky-300">Library</div>
+                            <div className="mt-1 truncate">{slot.resource_binding.pack_id} · {slot.resource_binding.element_id}</div>
+                        </div>
+                    ) : null}
+
                     {status === 'uploaded' ? (
                         <div className="type-footnote mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">
                             {text.uploadedHint}
