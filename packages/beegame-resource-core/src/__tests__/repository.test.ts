@@ -11,6 +11,7 @@ const pack: ResourcePack = {
   style: 'Stylized',
   gameTypes: ['adventure'],
   dimension: '2D',
+  primaryCategory: 'ui-kit',
   categories: ['characters', 'ui'],
   license: 'internal',
   version: '1.0.0',

@@ -6,7 +6,7 @@ describe('resource pack authoring domain', () => {
     const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
     const pack = await repository.createPack({
       id: 'pack-1', name: 'Forest', style: 'Painterly', gameTypes: ['adventure'],
-      dimension: 'agnostic', categories: ['environment'], license: 'internal', version: '0.1.0', status: 'draft',
+      dimension: 'agnostic', primaryCategory: 'world-scene', categories: ['environment'], license: 'internal', version: '0.1.0', status: 'draft',
     })
     const root = await repository.createFolder(pack.id, { id: 'folder-root', name: 'Environment' })
     await repository.createFolder(pack.id, { id: 'folder-child', name: 'Trees', parentId: root.id })
@@ -24,7 +24,7 @@ describe('resource pack authoring domain', () => {
     }] })
     await repository.createPack({
       id: 'pack-2', name: 'UI', style: 'Clean', gameTypes: ['puzzle'],
-      dimension: '2D', categories: ['ui'], license: 'internal', version: '0.1.0', status: 'draft',
+      dimension: '2D', primaryCategory: 'ui-kit', categories: ['ui'], license: 'internal', version: '0.1.0', status: 'draft',
     })
     await expect(repository.publishPack('pack-2')).rejects.toThrow('incomplete uploads')
   })

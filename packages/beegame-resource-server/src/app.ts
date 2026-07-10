@@ -45,6 +45,7 @@ export function createBeeGameResourceServerApp(
             name: String(body.name || ''), style: String(body.style || ''),
             gameTypes: Array.isArray(body.gameTypes) ? body.gameTypes.map(String) : [],
             dimension: body.dimension as ResourceDimension,
+            primaryCategory: body.primaryCategory as ResourcePack['primaryCategory'],
             categories: Array.isArray(body.categories) ? body.categories as ResourceCategory[] : [],
             license: typeof body.license === 'string' ? body.license : 'unassigned',
             version: typeof body.version === 'string' ? body.version : '0.1.0', status: 'draft',

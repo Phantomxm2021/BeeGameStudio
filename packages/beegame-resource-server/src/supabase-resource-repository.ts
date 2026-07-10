@@ -14,8 +14,9 @@ type SupabaseResourceRepositoryOptions = {
   storageBucket?: string
 }
 
-type PackRow = Omit<ResourcePack, 'gameTypes' | 'coverPath'> & {
+type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath'> & {
   game_types: string[]
+  primary_category: ResourcePack['primaryCategory']
   cover_path?: string | null
   element_count?: number
 }
@@ -87,6 +88,7 @@ export function createSupabaseResourceRepository(
     style: row.style,
     gameTypes: row.game_types,
     dimension: row.dimension,
+    primaryCategory: row.primary_category,
     categories: row.categories,
     license: row.license,
     version: row.version,
@@ -136,7 +138,7 @@ export function createSupabaseResourceRepository(
       return rows[0] ? toElement(rows[0]) : undefined
     },
     async createPack(pack) {
-      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0 }) })
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, primary_category: pack.primaryCategory, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0 }) })
       return await toPack(rows[0])
     },
     async listFolders(packId) {

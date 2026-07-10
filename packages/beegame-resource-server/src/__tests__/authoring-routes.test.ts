@@ -8,10 +8,10 @@ describe('resource authoring routes', () => {
     const app = createBeeGameResourceServerApp({ repository, currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
     const packResponse = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'pack-1', name: 'Forest', style: 'Painterly', dimension: 'agnostic', gameTypes: ['adventure'], categories: ['environment'] }),
+      body: JSON.stringify({ id: 'pack-1', name: 'Forest', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['environment'] }),
     }))
     expect(packResponse.status).toBe(201)
-    expect((await packResponse.json()).pack).toMatchObject({ id: 'pack-1', status: 'draft' })
+    expect((await packResponse.json()).pack).toMatchObject({ id: 'pack-1', primaryCategory: 'world-scene', status: 'draft' })
 
     const folderResponse = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/folders', {
       method: 'POST', headers: { 'content-type': 'application/json' },

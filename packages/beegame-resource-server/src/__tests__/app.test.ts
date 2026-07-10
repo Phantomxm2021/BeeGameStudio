@@ -5,7 +5,7 @@ import { createBeeGameResourceServerApp } from '../app'
 const repository = createInMemoryResourceRepository({
   packs: [{
     id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'],
-    dimension: '2D', categories: ['characters'], license: 'internal', version: '1.0.0', status: 'published',
+    dimension: '2D', primaryCategory: '2d-art', categories: ['characters'], license: 'internal', version: '1.0.0', status: 'published',
   }],
   elements: [{
     id: 'element-1', packId: 'pack-1', name: 'Character Idle', path: 'characters/idle.png',
