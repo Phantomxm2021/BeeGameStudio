@@ -33,6 +33,13 @@ describe('resource library API', () => {
     expect(requests[0]).toBe('/api/resource-packs/pack%2F1/elements?category=characters')
   })
 
+  test('encodes folder path filters separately from category', async () => {
+    const requests: string[] = []
+    const api = createResourceLibraryApi(async input => { requests.push(String(input)); return new Response(JSON.stringify({ elements: [] }), { status: 200 }) })
+    await api.listElements('pack-1', undefined, 'kenney_food-kit')
+    expect(requests[0]).toBe('/api/resource-packs/pack-1/elements?folderPath=kenney_food-kit')
+  })
+
   test('lists Pack folders through the authoring API', async () => {
     const api = createResourceLibraryApi(async () => new Response(JSON.stringify({ folders: [{ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }] }), { status: 200 }))
     await expect(api.listFolders('pack-1')).resolves.toHaveLength(1)

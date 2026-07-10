@@ -126,8 +126,11 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
       return result.folder
     },
-    async listElements(packId: string, category?: string): Promise<ResourceElement[]> {
-      const query = category ? `?category=${encodeURIComponent(category)}` : ''
+    async listElements(packId: string, category?: string, folderPath?: string): Promise<ResourceElement[]> {
+      const params = new URLSearchParams()
+      if (category) params.set('category', category)
+      if (folderPath) params.set('folderPath', folderPath)
+      const query = params.toString() ? `?${params.toString()}` : ''
       const result = await request<{ elements: ResourceElement[] }>(
         `/api/resource-packs/${encodeURIComponent(packId)}/elements${query}`,
       )

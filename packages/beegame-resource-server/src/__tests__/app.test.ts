@@ -72,6 +72,16 @@ describe('resource service app', () => {
     expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
   })
 
+  test('filters elements by folder path without treating it as a category', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements?folderPath=characters'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
+  })
+
   test('keeps CORS headers when a folder repository read fails', async () => {
     const failingRepository = { ...repository, listFolders: async () => { throw new Error('folders unavailable') } }
     const app = createBeeGameResourceServerApp({

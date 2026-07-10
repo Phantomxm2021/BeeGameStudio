@@ -132,7 +132,11 @@ async function routeRequest(request: Request, repository: ResourceRepository): P
     if (url.searchParams.has('category') && !category) {
       return jsonError(400, 'invalid_category', 'Resource category is unsupported')
     }
-    return Response.json({ elements: await repository.listElements(packId, category) })
+    const elements = await repository.listElements(packId, category)
+    const folderPath = url.searchParams.get('folderPath')
+    if (!folderPath) return Response.json({ elements })
+    const normalizedPath = folderPath.split('/').filter(Boolean).join('/')
+    return Response.json({ elements: elements.filter((element) => element.path === normalizedPath || element.path.startsWith(`${normalizedPath}/`)) })
   }
   const element = await repository.getElement(packId, parts[4])
   return element

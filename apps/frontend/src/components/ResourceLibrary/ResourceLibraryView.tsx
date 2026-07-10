@@ -50,6 +50,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [folders, setFolders] = useState<ResourceFolder[]>([]);
   const [selectedElement, setSelectedElement] = useState<ResourceElement | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
+  const [activeFolderPath, setActiveFolderPath] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -93,6 +94,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       setSelectedPack(detail);
       setFolders(nextFolders);
       setActiveCategory(category);
+      setActiveFolderPath(undefined);
       setElements(nextElements);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
@@ -102,12 +104,13 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     }
   };
 
-  const selectCategory = async (category: string) => {
+  const selectCategory = async (category?: string, folderPath?: string) => {
     if (!selectedPack) return;
     setActiveCategory(category);
+    setActiveFolderPath(folderPath);
     setLoading(true);
     try {
-      const nextElements = await apiClient.listElements(selectedPack.id, category);
+      const nextElements = await apiClient.listElements(selectedPack.id, category, folderPath);
       setElements(nextElements);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
@@ -144,11 +147,13 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   };
 
   const uploadElements = async (files: File[]) => {
-    if (!selectedPack || !activeCategory || files.length === 0) return;
+    if (!selectedPack || files.length === 0) return;
+    const uploadCategory = activeCategory || selectedPack.categories?.[0] || 'environment';
+    const uploadFolderPath = activeFolderPath || uploadCategory;
     setElementUpload({ done: 0, total: files.length, failed: [] });
     for (const file of files) {
       try {
-        const next = await apiClient.addElement(selectedPack.id, file, activeCategory, activeCategory);
+        const next = await apiClient.addElement(selectedPack.id, file, uploadCategory, uploadFolderPath);
         setElements((current) => [...current, next]);
         setSelectedElement(next);
       } catch (err) {
@@ -168,6 +173,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         elements={elements}
         selectedElement={selectedElement}
         activeCategory={activeCategory}
+        activeFolderPath={activeFolderPath}
         loading={loading}
         error={error}
         onBack={() => {
@@ -334,6 +340,7 @@ function PackBrowser({
   elements,
   selectedElement,
   activeCategory,
+  activeFolderPath,
   loading,
   error,
   onBack,
@@ -355,7 +362,8 @@ function PackBrowser({
   loading: boolean;
   error: string;
   onBack: () => void;
-  onCategory: (category: string) => void;
+  onCategory: (category?: string, folderPath?: string) => void;
+  activeFolderPath?: string;
   onElement: (element: ResourceElement) => void;
   onEditPack: (name: string) => void;
   onAddFiles: (files: File[]) => void;
@@ -424,7 +432,7 @@ function PackBrowser({
           />
           <div className="mt-1">
             {folders.length > 0 ? folders.map((folder) => (
-              <TreeRow key={folder.id} icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.path} active={folder.name === activeCategory} onClick={() => onCategory(folder.name)} />
+              <TreeRow key={folder.id} icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.path} active={folder.path === activeFolderPath} onClick={() => onCategory(undefined, folder.path)} />
             )) : categories.map((category) => (
               <div key={category}>
                 <TreeRow
@@ -456,7 +464,7 @@ function PackBrowser({
             <div className="type-footnote text-zinc-500">
               {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
               <span className="text-zinc-200">
-                {categoryLabels[activeCategory || ''] || activeCategory}
+                {activeFolderPath || categoryLabels[activeCategory || ''] || activeCategory}
               </span>
             </div>
             <div className="flex gap-1">
