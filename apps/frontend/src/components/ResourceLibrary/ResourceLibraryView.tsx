@@ -50,6 +50,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
   const [isRootDragActive, setIsRootDragActive] = useState(false);
+  const [localElementsByPack, setLocalElementsByPack] = useState<Record<string, ResourceElement[]>>({});
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -75,6 +76,16 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     setError('');
     setLoading(true);
     try {
+      const localElements = localElementsByPack[pack.id];
+      if (localElements) {
+        const category = pack.categories?.[0];
+        const nextElements = category ? localElements.filter((element) => element.category === category) : localElements;
+        setSelectedPack(pack);
+        setActiveCategory(category);
+        setElements(nextElements);
+        setSelectedElement(nextElements[0] || null);
+        return;
+      }
       const detail = await apiClient.getPack(pack.id);
       const category = detail.categories?.[0];
       const nextElements = await apiClient.listElements(pack.id, category);
@@ -92,6 +103,13 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const selectCategory = async (category: string) => {
     if (!selectedPack) return;
     setActiveCategory(category);
+    const localElements = localElementsByPack[selectedPack.id];
+    if (localElements) {
+      const nextElements = localElements.filter((element) => element.category === category);
+      setElements(nextElements);
+      setSelectedElement(nextElements[0] || null);
+      return;
+    }
     setLoading(true);
     try {
       const nextElements = await apiClient.listElements(selectedPack.id, category);
@@ -137,7 +155,14 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         elementCount: assetPaths.length,
       };
       const parsed = manifestEntry ? { ...generated, ...(JSON.parse(strFromU8(manifestEntry)) as Partial<ResourcePackSummary>) } : generated;
+      const localElements: ResourceElement[] = assetPaths.map((path, index) => {
+        const extension = path.split('.').pop()?.toLowerCase() || '';
+        const category = path.split('/')[0] || 'assets';
+        const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(extension) ? 'model' : ['mp3', 'wav', 'ogg'].includes(extension) ? 'audio' : ['ttf', 'otf', 'woff', 'woff2'].includes(extension) ? 'font' : 'image';
+        return { id: `${parsed.id}-${index}`, packId: parsed.id, name: path.split('/').pop() || path, path, category, kind, specs: {}, dependencies: [], status: 'ready' };
+      });
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
+      setLocalElementsByPack((current) => ({ ...current, [parsed.id]: localElements }));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包导入失败');
