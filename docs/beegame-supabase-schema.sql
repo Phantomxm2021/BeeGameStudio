@@ -333,6 +333,12 @@ create table if not exists public.beegame_resource_folders (
   unique (pack_id, path)
 );
 
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_status_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_status_check
+  check (status in ('queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'));
+
 create index if not exists beegame_resource_folders_pack_parent_idx
   on public.beegame_resource_folders (pack_id, parent_id, path);
 
