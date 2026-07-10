@@ -27,6 +27,8 @@ type ResourceLibraryViewProps = {
   initialPackId?: string;
 };
 
+type UploadDestination = { category: string; folderPath: string; label: string };
+
 
 const categoryLabels: Record<string, string> = {
   sprites: '2D 图像',
@@ -173,11 +175,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     }
   };
 
-  const uploadElements = async (files: File[]) => {
+  const uploadElements = async (files: File[], destination?: UploadDestination) => {
     if (!selectedPack || files.length === 0) return;
     const session = packSessionRef.current;
-    const uploadCategory = activeCategory || 'environment';
-    const uploadFolderPath = activeFolderPath || uploadCategory;
+    const uploadCategory = destination?.category || activeCategory || 'environment';
+    const uploadFolderPath = destination?.folderPath || activeFolderPath || uploadCategory;
     setElementUpload({ done: 0, total: files.length, failed: [] });
     for (const file of files) {
       try {
@@ -221,8 +223,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         }}
         onElement={setSelectedElement}
         onEditPack={() => setEditDialogOpen(true)}
-        onAddFiles={(files) => void uploadElements(files)}
-        onDropFiles={(files) => void uploadElements(files)}
+        onAddFiles={(files, destination) => void uploadElements(files, destination)}
+        onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
@@ -398,8 +400,8 @@ function PackBrowser({
   onBack: () => void;
   onElement: (element: ResourceElement) => void;
   onEditPack: () => void;
-  onAddFiles: (files: File[]) => void;
-  onDropFiles: (files: File[]) => void;
+  onAddFiles: (files: File[], destination: UploadDestination) => void;
+  onDropFiles: (files: File[], destination: UploadDestination) => void;
   folders: ResourceFolder[];
   onCreateFolder: (name: string) => Promise<void>;
   onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
@@ -413,6 +415,8 @@ function PackBrowser({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(['root']));
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [resourceUrl, setResourceUrl] = useState<string>();
+  const [resourceError, setResourceError] = useState('');
+  const [resourceAttempt, setResourceAttempt] = useState(0);
   const toggleExpanded = (path: string) => setExpandedPaths(current => {
     const next = new Set(current);
     if (next.has(path)) next.delete(path); else next.add(path);
@@ -421,11 +425,11 @@ function PackBrowser({
   useEffect(() => { setInspectorOpen(false); }, [selectedElement?.id]);
   useEffect(() => {
     let active = true;
-    setResourceUrl(undefined);
+    setResourceUrl(undefined); setResourceError('');
     if (!selectedElement) return () => { active = false; };
-    void apiClient.getElementResourceUrl(pack.id, selectedElement.id).then(url => { if (active) setResourceUrl(url); }).catch(() => { if (active) setResourceUrl(undefined); });
+    void apiClient.getElementResourceUrl(pack.id, selectedElement.id).then(url => { if (active) setResourceUrl(url); }).catch(() => { if (active) setResourceError('预览资源加载失败'); });
     return () => { active = false; };
-  }, [apiClient, pack.id, selectedElement]);
+  }, [apiClient, pack.id, resourceAttempt, selectedElement]);
   const saveMetrics = useCallback(async (metrics: ModelMetrics) => {
     if (!selectedElement) return;
     const nextMetrics: Record<string, string | number | boolean | null> = {
@@ -440,6 +444,21 @@ function PackBrowser({
     if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics } });
   }, [onUpdateElement, selectedElement]);
   const filesFor = (folder: string) => elements.filter(element => element.category === folder || element.path.startsWith(`${folder}/`));
+  const destinations = useMemo<UploadDestination[]>(() => {
+    const categoryDestinations = categories.map(category => ({ category, folderPath: category, label: categoryLabels[category] || category }));
+    const fallbackCategory = categoryDestinations[0]?.category || 'environment';
+    const folderDestinations = folders.map(folder => ({
+      category: elements.find(element => element.path.startsWith(`${folder.path}/`))?.category || fallbackCategory,
+      folderPath: folder.path,
+      label: `文件夹：${folder.path}`,
+    }));
+    return [...categoryDestinations, ...folderDestinations];
+  }, [categories, elements, folders]);
+  const [destinationKey, setDestinationKey] = useState('');
+  const selectedDestination = destinations.find((_, index) => String(index) === destinationKey) || destinations[0] || { category: 'environment', folderPath: 'environment', label: '环境' };
+  useEffect(() => { if (!destinations.some((_, index) => String(index) === destinationKey)) setDestinationKey('0'); }, [destinationKey, destinations]);
+  const folderPaths = new Set(folders.map(folder => folder.path));
+  const categoryOnly = categories.filter(category => !folderPaths.has(category));
   return (
     <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100">
       <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-white/10 px-5">
@@ -462,11 +481,16 @@ function PackBrowser({
         <div className="flex items-center gap-3">
           <div className="flex overflow-hidden rounded-full border border-white/10">
           <button type="button" className="secondary-pill type-button rounded-none border-0 px-3 py-1.5" onClick={onEditPack}>编辑 Pack</button>
-          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button rounded-none border-0 border-l border-white/10 px-3 py-1.5" onClick={() => void onPublish()}>发布</button> : null}
+          <button type="button" disabled={pack.status === 'published'} className="secondary-pill type-button rounded-none border-0 border-l border-white/10 px-3 py-1.5 disabled:opacity-50" onClick={() => void onPublish()}>发布</button>
           </div>
+          <label className="type-caption-2 flex items-center gap-2 text-zinc-400">上传目标
+            <select aria-label="上传目标" value={destinationKey} onChange={(event) => setDestinationKey(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
+              {destinations.map((destination, index) => <option key={`${destination.category}:${destination.folderPath}`} value={index}>{destination.label}</option>)}
+            </select>
+          </label>
           <label className="primary-pill type-button cursor-pointer px-3 py-1.5">
             ＋ 添加文件
-            <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
+            <input aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), selectedDestination); event.target.value = ''; }} />
           </label>
         </div>
       </header>
@@ -481,15 +505,15 @@ function PackBrowser({
             onClick={() => toggleExpanded('root')}
           />
           {expandedPaths.has('root') ? <div className="mt-1">
-            {folders.length > 0 ? folders.map((folder) => (
+            {folders.map((folder) => (
               <div key={folder.id}>
                 <TreeRow
                   icon={<Folder className="h-4 w-4 text-orange-300" />}
                   label={folder.path}
-                  expanded={expandedPaths.has(folder.path)}
-                  onClick={() => toggleExpanded(folder.path)}
+                  expanded={expandedPaths.has(`folder:${folder.path}`)}
+                  onClick={() => toggleExpanded(`folder:${folder.path}`)}
                 />
-                {expandedPaths.has(folder.path)
+                {expandedPaths.has(`folder:${folder.path}`)
                   ? filesFor(folder.path).map((element) => (
                       <TreeRow
                         key={element.id}
@@ -502,15 +526,16 @@ function PackBrowser({
                     ))
                   : null}
               </div>
-            )) : categories.map((category) => (
+            ))}
+            {categoryOnly.map((category) => (
               <div key={category}>
-                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={filesFor(category).length} expanded={expandedPaths.has(category)} onClick={() => toggleExpanded(category)} />
-                {expandedPaths.has(category) ? filesFor(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
+                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={filesFor(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
+                {expandedPaths.has(`category:${category}`) ? filesFor(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
               </div>
             ))}
           </div> : null}
         </aside>
-        <main className="relative min-h-0 min-w-0 overflow-hidden p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
+        <main className="relative min-h-0 min-w-0 overflow-hidden p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), selectedDestination); }}>
           {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
             <div role="alert" className="type-callout mb-4 rounded-xl bg-red-400/10 p-3 text-red-200">
@@ -519,11 +544,9 @@ function PackBrowser({
           ) : null}
           <div className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-black p-4">
             {selectedElement ? (
-              resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
+              resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
-              <div className="type-footnote text-zinc-600">
-                {loading ? '正在加载…' : '尚未选择文件'}
-              </div>
+              loading ? <div className="type-footnote text-zinc-600">正在加载…</div> : <EmptyPreviewState />
             )}
           </div>
         </main>
@@ -588,7 +611,17 @@ function FileInfoOverlay({ element }: { element: ResourceElement }) {
   const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.includes('.') ? element.name.split('.').pop() : '—';
   const size = typeof element.specs.size === 'number' ? formatFileSize(element.specs.size) : '—';
   const triangles = typeof element.specs.triangles === 'number' ? String(element.specs.triangles) : '—';
-  return <div className="absolute left-4 top-4 z-10 rounded-lg border border-white/10 bg-black/40 px-3 py-2 type-caption-2 text-zinc-300"><div>{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div><div>三角形：{triangles}</div></div>;
+  return <div className="absolute left-4 top-4 z-10 rounded-lg border border-white/10 bg-black/40 px-3 py-2 type-caption-2 text-zinc-300"><div>{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div>{isModelElement(element) ? <div>三角形：{triangles}</div> : null}</div>;
+}
+
+function EmptyPreviewState() {
+  return <div className="flex max-w-sm flex-col items-center text-center"><div className="mb-4 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-zinc-400"><File className="h-5 w-5" /></div><div className="type-headline text-zinc-200">尚未选择文件</div><p className="type-footnote mt-2 text-zinc-500">从左侧资源浏览器选择一个文件以查看预览和属性。</p></div>;
+}
+
+function isModelElement(element: ResourceElement) {
+  if (element.kind.toLowerCase() === 'model') return true;
+  const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.split('.').pop();
+  return ['glb', 'gltf', 'obj', 'fbx'].includes(extension?.toLowerCase() || '');
 }
 
 function formatFileSize(size: number) {
@@ -619,7 +652,7 @@ function ResourceInspectorOverlay({
     <aside
       role="complementary"
       aria-label="元素属性"
-      className="absolute bottom-3 right-3 max-h-[calc(100%-1.5rem)] w-64 rounded-xl border border-white/15 bg-zinc-950/90 p-3 shadow-2xl backdrop-blur-2xl"
+      className="absolute bottom-3 right-3 max-h-[calc(100%-1.5rem)] w-64 overflow-y-auto rounded-xl border border-white/15 bg-zinc-950/90 p-3 shadow-2xl backdrop-blur-2xl"
     >
       <div className="mb-3 flex items-start justify-between">
         <div>

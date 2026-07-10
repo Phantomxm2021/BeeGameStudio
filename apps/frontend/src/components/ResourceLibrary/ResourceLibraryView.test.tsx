@@ -37,6 +37,7 @@ const api = {
   createPack: async () => ({ ...pack, status: 'draft', elementCount: 0 }),
   listFolders: async () => [],
   createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
+  addElement: async (_packId: string, file: File, category: string, path?: string) => ({ ...element, id: file.name, name: file.name, category, path: path || category }),
   updateElement: async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes }),
   getElementResourceUrl: async () => 'https://signed.example/character-idle.png',
   publishPack: async () => ({ ...pack, status: 'published' }),
@@ -79,6 +80,7 @@ describe('ResourceLibraryView', () => {
     render(<ResourceLibraryView apiClient={api} />);
     await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
     expect(screen.getByText('尚未选择文件')).toBeInTheDocument();
+    expect(screen.getByText('从左侧资源浏览器选择一个文件以查看预览和属性。')).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: '元素属性' })).not.toBeInTheDocument();
 
     const explorer = screen.getByText('Pack 文件').closest('aside');
@@ -89,13 +91,14 @@ describe('ResourceLibraryView', () => {
     await user.click(await screen.findByRole('button', { name: '文件 Character Idle' }));
     expect(screen.queryByText('尚未选择文件')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '显示元素信息' })).toBeInTheDocument();
+    expect(screen.queryByText(/三角形：/)).not.toBeInTheDocument();
   });
 
   test('opens the inspector only from the Info control and restores it after close', async () => {
     const user = userEvent.setup();
     render(<ResourceLibraryView apiClient={api} />);
     await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
-    await user.click(screen.getByText('模型'));
+    await user.click(within(screen.getByText('Pack 文件').closest('aside')!).getByText('模型'));
     await user.click(await screen.findByRole('button', { name: '文件 Character Idle' }));
     await user.click(screen.getByRole('button', { name: '显示元素信息' }));
     await waitFor(() => expect(screen.getByRole('complementary', { name: '元素属性' })).toBeInTheDocument());
@@ -118,6 +121,51 @@ describe('ResourceLibraryView', () => {
     expect(explorer?.className).toContain('overflow-y-auto');
     expect(screen.queryByRole('button', { name: /grid|list/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Example Pack.*模型/)).not.toBeInTheDocument();
+  });
+
+  test('shows explicit folders and category-only files in the same explorer', async () => {
+    const user = userEvent.setup();
+    const folderElement = { ...element, id: 'element-environment', name: 'Tree', category: 'environment', path: 'Environment/tree.png' };
+    const apiClient = { ...api, listFolders: async () => [{ id: 'folder-environment', packId: 'pack-1', name: 'Environment', path: 'Environment' }], listElements: async () => [element, folderElement] };
+    render(<ResourceLibraryView apiClient={apiClient} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const explorer = screen.getByText('Pack 文件').closest('aside');
+    expect(within(explorer!).getByText('Environment')).toBeInTheDocument();
+    expect(within(explorer!).getByText('模型')).toBeInTheDocument();
+    await user.click(within(explorer!).getByText('Environment'));
+    expect(within(explorer!).getByRole('button', { name: '文件 Tree' })).toBeInTheDocument();
+    await user.click(within(explorer!).getByText('模型'));
+    expect(within(explorer!).getByRole('button', { name: '文件 Character Idle' })).toBeInTheDocument();
+  });
+
+  test('uses the visible upload destination for category and folder path', async () => {
+    const user = userEvent.setup();
+    const addElement = vi.fn(api.addElement);
+    render(<ResourceLibraryView apiClient={{ ...api, addElement }} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    expect(screen.getByLabelText('上传目标')).toHaveTextContent('模型');
+    await user.upload(screen.getByLabelText('选择要添加的文件'), new File(['asset'], 'new.png', { type: 'image/png' }));
+    await waitFor(() => expect(addElement).toHaveBeenCalledWith('pack-1', expect.any(File), 'models', 'models'));
+  });
+
+  test('shows a retryable error when a signed resource URL cannot be loaded', async () => {
+    const user = userEvent.setup();
+    const getElementResourceUrl = vi.fn().mockRejectedValueOnce(new Error('expired')).mockResolvedValue('https://signed.example/retry.png');
+    render(<ResourceLibraryView apiClient={{ ...api, getElementResourceUrl }} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    await user.click(within(screen.getByText('Pack 文件').closest('aside')!).getByText('模型'));
+    await user.click(screen.getByRole('button', { name: '文件 Character Idle' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览资源加载失败');
+    await user.click(screen.getByRole('button', { name: '重试加载预览' }));
+    await waitFor(() => expect(getElementResourceUrl).toHaveBeenCalledTimes(2));
+  });
+
+  test('keeps the edit and publish group stable for published Packs', async () => {
+    const user = userEvent.setup();
+    render(<ResourceLibraryView apiClient={api} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    expect(screen.getByRole('button', { name: '编辑 Pack' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
   });
 
   test('derives tree categories from loaded elements when Pack metadata is empty', async () => {
