@@ -1,10 +1,21 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
 import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
+
+const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+
+beforeAll(() => {
+  process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 59).toString('base64')
+})
+
+afterAll(() => {
+  if (originalEncryptionKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+  else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalEncryptionKey
+})
 
 describe('DashboardRepository Supabase boundaries', () => {
   test('does not treat user runtime settings as platform runtime capabilities', async () => {
@@ -538,7 +549,7 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
       expect(calls[0]?.url).not.toContain('owner_id=eq.owner-auth-user')
       expect(calls[0]?.body).toEqual(expect.objectContaining({
-        api_key_ciphertext: 'sk-new-secret',
+        api_key_ciphertext: expect.stringMatching(/^v1\./u),
       }))
     } finally {
       await rm(dataRoot, { recursive: true, force: true })

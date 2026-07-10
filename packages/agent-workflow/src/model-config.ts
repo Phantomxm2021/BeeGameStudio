@@ -41,6 +41,7 @@ export type ModelConfigUpdate = Partial<
     'name' | 'provider' | 'baseUrl' | 'apiKey' | 'models'
   > & {
     isDefault: boolean
+    clearSecret: boolean
   }
 >
 
@@ -157,7 +158,8 @@ export function updateModelConfig(
       delete record.baseUrl
     }
   }
-  if (patch.apiKey !== undefined) record.apiKey = patch.apiKey
+  if (patch.clearSecret) record.apiKey = ''
+  else if (patch.apiKey !== undefined && patch.apiKey.trim()) record.apiKey = patch.apiKey
   if (patch.models !== undefined) record.models = { ...patch.models }
   if (patch.isDefault !== undefined) {
     if (patch.isDefault) {

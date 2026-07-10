@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { decryptSecret, encryptSecret } from './security/secret-crypto'
+import { decryptSecret, encryptSecret, isSecretEnvelope } from './security/secret-crypto'
 import type {
   ModelConfigInput,
   ModelConfigSnapshotRecord,
@@ -461,7 +461,9 @@ export class SupabaseDashboardStore {
     if (input.name !== undefined) patch.name = input.name
     if (input.provider !== undefined) patch.provider = input.provider
     if (input.baseUrl !== undefined) patch.base_url = input.baseUrl || null
-    if (input.apiKey !== undefined) {
+    if (input.clearSecret) {
+      patch.api_key_ciphertext = encryptSecret('', 'model-config:api-key')
+    } else if (input.apiKey !== undefined && input.apiKey.trim()) {
       patch.api_key_ciphertext = encryptSecret(input.apiKey, 'model-config:api-key')
     }
     if (input.models !== undefined) patch.models = input.models
@@ -578,6 +580,93 @@ export class SupabaseDashboardStore {
     return normalizeWebTools(decryptWebTools(rows[0]?.config ?? {}))
   }
 
+  async migrateLegacySecrets(ownerId: string): Promise<{
+    modelConfigs: number
+    webTools: number
+    mcpServers: number
+  }> {
+    let modelConfigs = 0
+    let webTools = 0
+    let mcpServers = 0
+    const modelRows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&select=*`,
+    )
+    for (const row of modelRows) {
+      if (!row.api_key_ciphertext || isSecretEnvelope(row.api_key_ciphertext)) continue
+      await this.rest<SupabaseModelConfigRow[]>(
+        `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&id=eq.${q(row.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            api_key_ciphertext: encryptSecret(
+              decryptSecret(row.api_key_ciphertext, 'model-config:api-key'),
+              'model-config:api-key',
+            ),
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )
+      modelConfigs += 1
+    }
+    const webRows = await this.rest<SupabaseWebToolsRow[]>(
+      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=*`,
+    )
+    for (const row of webRows) {
+      const config = isObject(row.config) ? row.config : {}
+      const legacy = (typeof config.braveApiKey === 'string' && !isSecretEnvelope(config.braveApiKey)) ||
+        (typeof config.exaApiKey === 'string' && !isSecretEnvelope(config.exaApiKey))
+      if (!legacy) continue
+      const normalized = normalizeWebTools(decryptWebTools(config))
+      await this.upsert('beegame_web_tools', {
+        owner_id: ownerId,
+        config: encryptWebTools(normalized),
+        updated_at: new Date().toISOString(),
+      }, 'owner_id')
+      webTools += 1
+    }
+    const mcpRows = await this.rest<SupabaseMcpServerRow[]>(
+      `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*`,
+    )
+    for (const row of mcpRows) {
+      const envPayload = isObject(row.env_ciphertext) ? row.env_ciphertext : {}
+      const env = Array.isArray(envPayload.env) ? envPayload.env : []
+      let legacy = false
+      const migratedEnv = env.map(item => {
+        if (!isObject(item) || typeof item.value !== 'string' || isSecretEnvelope(item.value)) return item
+        legacy = true
+        return {
+          ...item,
+          value: encryptSecret(decryptSecret(item.value, `mcp-server:env:${String(item.key)}`), `mcp-server:env:${String(item.key)}`),
+        }
+      })
+      if (!legacy) continue
+      await this.rest<SupabaseMcpServerRow[]>(
+        `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&id=eq.${q(row.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            env_ciphertext: { env: migratedEnv },
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )
+      mcpServers += 1
+    }
+    const count = modelConfigs + webTools + mcpServers
+    if (count > 0) {
+      await this.appendAuditEvent(ownerId, {
+        actorId: ownerId,
+        action: 'secret.migrated',
+        targetType: 'secret',
+        targetId: 'migration',
+        metadata: { modelConfigs, webTools, mcpServers, count },
+      })
+    }
+    return { modelConfigs, webTools, mcpServers }
+  }
+
   async saveWebTools(
     ownerId: string,
     config: WebToolsConfig,
@@ -586,8 +675,8 @@ export class SupabaseDashboardStore {
     const normalized = normalizeWebTools({
       ...previous,
       ...config,
-      braveApiKey: resolveSecretInput(config.braveApiKey, previous.braveApiKey),
-      exaApiKey: resolveSecretInput(config.exaApiKey, previous.exaApiKey),
+      braveApiKey: resolveSecretInput(config.braveApiKey, previous.braveApiKey, config.clearSecret),
+      exaApiKey: resolveSecretInput(config.exaApiKey, previous.exaApiKey, config.clearSecret),
     })
     await this.upsert('beegame_web_tools', {
       owner_id: ownerId,
@@ -1557,9 +1646,11 @@ function decryptWebTools(value: unknown): JsonObject {
 function resolveSecretInput(
   next: string | undefined,
   previous: string | undefined,
+  clearSecret = false,
 ): string | undefined {
+  if (clearSecret) return undefined
   if (next === undefined) return previous
-  return trimString(next) || undefined
+  return trimString(next) || previous
 }
 
 function rowToMcpServer(
@@ -1647,9 +1738,11 @@ function normalizeMcpEnv(
     .map(item => {
       const key = trimString(item.key)
       if (!key) return undefined
-      const nextValue = item.value === undefined
-        ? previous.get(key)
-        : trimString(item.value) || undefined
+      const nextValue = item.clearSecret
+        ? undefined
+        : item.value === undefined
+          ? previous.get(key)
+          : trimString(item.value) || previous.get(key)
       return {
         key,
         ...(nextValue ? { value: nextValue } : {}),

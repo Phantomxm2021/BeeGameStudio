@@ -17,6 +17,7 @@ import {
   encryptSecret,
   isSecretEnvelope,
 } from './security/secret-crypto'
+import { appendAuditEvent } from './audit-events-store'
 
 const STORE_FILE = 'mcp-servers.json'
 
@@ -27,6 +28,7 @@ export type McpServerEnvVar = {
   key: string
   value?: string
   valuePreview?: string
+  clearSecret?: boolean
 }
 
 export type McpServerConfig = {
@@ -159,7 +161,16 @@ function loadMcpServers(options: McpServersStoreOptions): McpServerConfig[] {
     })
     return normalizeMcpServerInput({ ...server, env }, server)
   }).filter(server => server.name)
-  if (hasLegacySecrets) saveMcpServers(servers, options)
+  if (hasLegacySecrets) {
+    saveMcpServers(servers, options)
+    appendAuditEvent({
+      actorId: 'system',
+      action: 'secret.migrated',
+      targetType: 'mcp_server',
+      targetId: 'local',
+      metadata: { count: servers.length },
+    }, { dataDir: options.dataDir })
+  }
   return servers
 }
 
@@ -367,9 +378,11 @@ function normalizeEnv(
     .map(item => {
       const key = trimString(item.key)
       if (!key) return undefined
-      const nextValue = item.value === undefined
-        ? previous.get(key)
-        : trimString(item.value) || undefined
+      const nextValue = item.clearSecret
+        ? undefined
+        : item.value === undefined
+          ? previous.get(key)
+          : trimString(item.value) || previous.get(key)
       return {
         key,
         ...(nextValue ? { value: nextValue } : {}),

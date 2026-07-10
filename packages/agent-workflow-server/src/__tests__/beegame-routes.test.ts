@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -31,6 +31,16 @@ import type {
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
 
 const testDashboardRoots: string[] = []
+const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+
+beforeAll(() => {
+  process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 53).toString('base64')
+})
+
+afterAll(() => {
+  if (originalEncryptionKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+  else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalEncryptionKey
+})
 
 type FakeRuntimeMode =
   | 'messages'

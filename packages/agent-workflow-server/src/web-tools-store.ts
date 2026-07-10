@@ -7,6 +7,8 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { decryptSecret, encryptSecret, isSecretEnvelope } from './security/secret-crypto'
+import { appendAuditEvent } from './audit-events-store'
 
 const STORE_FILE = 'web-tools.json'
 
@@ -23,6 +25,7 @@ export type WebToolsConfig = {
   exaApiKey?: string
   exaEndpointUrl?: string
   webFetchHttpTimeoutMs?: number
+  clearSecret?: boolean
 }
 
 export type WebToolsStoreOptions = {
@@ -52,7 +55,27 @@ export function loadWebToolsConfig(
     throw new Error('Unsupported web tools store format')
   }
 
-  return normalizeWebToolsConfig(payload.config)
+  const config = normalizeWebToolsConfig({
+    ...payload.config,
+    ...(typeof payload.config.braveApiKey === 'string'
+      ? { braveApiKey: decryptSecret(payload.config.braveApiKey, 'web-tools:brave-api-key') }
+      : {}),
+    ...(typeof payload.config.exaApiKey === 'string'
+      ? { exaApiKey: decryptSecret(payload.config.exaApiKey, 'web-tools:exa-api-key') }
+      : {}),
+  })
+  if ((typeof payload.config.braveApiKey === 'string' && !isSecretEnvelope(payload.config.braveApiKey)) ||
+    (typeof payload.config.exaApiKey === 'string' && !isSecretEnvelope(payload.config.exaApiKey))) {
+    persistWebToolsConfig(config, options)
+    appendAuditEvent({
+      actorId: 'system',
+      action: 'secret.migrated',
+      targetType: 'web_tools',
+      targetId: 'local',
+      metadata: { count: 1 },
+    }, { dataDir: options.dataDir })
+  }
+  return config
 }
 
 export function saveWebToolsConfig(
@@ -63,22 +86,38 @@ export function saveWebToolsConfig(
   const normalized = normalizeWebToolsConfig({
     ...previous,
     ...input,
-    braveApiKey: resolveSecretInput(input.braveApiKey, previous.braveApiKey),
-    exaApiKey: resolveSecretInput(input.exaApiKey, previous.exaApiKey),
+    braveApiKey: resolveSecretInput(input.braveApiKey, previous.braveApiKey, input.clearSecret),
+    exaApiKey: resolveSecretInput(input.exaApiKey, previous.exaApiKey, input.clearSecret),
   })
 
+  persistWebToolsConfig(normalized, options)
+
+  return toPublicWebToolsConfig(normalized)
+}
+
+function persistWebToolsConfig(
+  normalized: WebToolsConfig,
+  options: WebToolsStoreOptions,
+): void {
   const filePath = getStoreFilePath(options)
   mkdirSync(dirname(filePath), { recursive: true })
 
   const payload: StorePayload = {
     version: 1,
-    config: normalized,
+    config: {
+      ...normalized,
+      ...(normalized.braveApiKey !== undefined
+        ? { braveApiKey: encryptSecret(normalized.braveApiKey, 'web-tools:brave-api-key') }
+        : {}),
+      ...(normalized.exaApiKey !== undefined
+        ? { exaApiKey: encryptSecret(normalized.exaApiKey, 'web-tools:exa-api-key') }
+        : {}),
+      clearSecret: undefined,
+    },
   }
   const tempPath = `${filePath}.tmp`
   writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
   renameSync(tempPath, filePath)
-
-  return toPublicWebToolsConfig(normalized)
 }
 
 export function toPublicWebToolsConfig(
@@ -86,6 +125,7 @@ export function toPublicWebToolsConfig(
 ): WebToolsConfig {
   return {
     ...config,
+    clearSecret: undefined,
     braveApiKeyPreview: previewSecret(config.braveApiKey),
     braveApiKey: undefined,
     exaApiKeyPreview: previewSecret(config.exaApiKey),
@@ -133,9 +173,11 @@ function normalizeWebToolsConfig(config: WebToolsConfig): WebToolsConfig {
 function resolveSecretInput(
   next: string | undefined,
   previous: string | undefined,
+  clearSecret = false,
 ): string | undefined {
+  if (clearSecret) return undefined
   if (next === undefined) return previous
-  return trimString(next) || undefined
+  return trimString(next) || previous
 }
 
 function previewSecret(secret: string | undefined): string | undefined {

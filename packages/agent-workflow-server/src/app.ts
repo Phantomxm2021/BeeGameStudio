@@ -131,6 +131,7 @@ import {
   resolveApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
+import { validateSecretStorageAtStartup } from './security/secret-crypto'
 
 type JsonObject = Record<string, unknown>
 
@@ -242,6 +243,7 @@ export type AgentWorkflowAppOptions = {
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
+  validateSecretStorageAtStartup()
   const app = new Hono()
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
     ...options.outboundTargetPolicyOptions,
@@ -613,6 +615,7 @@ export function createAgentWorkflowApp(
           : {}),
         ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
         ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
+        ...(body.clearSecret === true ? { clearSecret: true } : {}),
         ...(isObject(body.models) ? { models: toModelMap(body.models) } : {}),
         ...(typeof body.isDefault === 'boolean'
           ? { isDefault: body.isDefault }
@@ -696,6 +699,7 @@ export function createAgentWorkflowApp(
       ...(typeof body.webFetchHttpTimeoutMs === 'number'
         ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
         : {}),
+      ...(body.clearSecret === true ? { clearSecret: true } : {}),
     }
     const saved = await dashboardRepository.saveWebTools(c.req.raw, user, input)
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
@@ -4606,6 +4610,7 @@ function toMcpServerInput(body: JsonObject) {
             .map(item => ({
               key: typeof item.key === 'string' ? item.key : '',
               ...(typeof item.value === 'string' ? { value: item.value } : {}),
+              ...(item.clearSecret === true ? { clearSecret: true } : {}),
             })),
         }
       : {}),

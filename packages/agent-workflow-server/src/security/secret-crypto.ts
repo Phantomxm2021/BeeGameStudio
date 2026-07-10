@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 const VERSION = 'v1'
 const IV_BYTES = 12
 const KEY_BYTES = 32
+let plaintextWarningEmitted = false
 
 export function getSecretEncryptionKey(
   env: Record<string, string | undefined> = process.env,
@@ -23,6 +24,21 @@ export function getSecretEncryptionKey(
     throw new Error('BEEGAME_CONFIG_ENCRYPTION_KEY must decode to 32 bytes')
   }
   return key
+}
+
+export function validateSecretStorageAtStartup(
+  env: Record<string, string | undefined> = process.env,
+  warn: (message: string) => void = message => console.warn(message),
+): void {
+  const key = getSecretEncryptionKey(env)
+  if (!key && env.BEEGAME_ALLOW_PLAINTEXT_SECRETS === '1' && !plaintextWarningEmitted) {
+    plaintextWarningEmitted = true
+    warn('Secret encryption key is not configured; local plaintext secret storage is explicitly enabled.')
+  }
+}
+
+export function resetSecretStorageStartupWarningForTests(): void {
+  plaintextWarningEmitted = false
 }
 
 export function encryptSecret(secret: string, recordType: string): string {

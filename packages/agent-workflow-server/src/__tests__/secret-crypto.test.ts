@@ -3,6 +3,8 @@ import {
   decryptSecret,
   encryptSecret,
   getSecretEncryptionKey,
+  resetSecretStorageStartupWarningForTests,
+  validateSecretStorageAtStartup,
 } from '../security/secret-crypto'
 
 const originalEnv = { ...process.env }
@@ -57,5 +59,19 @@ describe('secret crypto', () => {
 
     expect(encryptSecret('generated-test-secret', 'model.apiKey')).toBe('generated-test-secret')
     expect(decryptSecret('legacy-test-secret', 'model.apiKey')).toBe('legacy-test-secret')
+  })
+
+  test('validates startup configuration and warns once without secret values', () => {
+    process.env.NODE_ENV = 'development'
+    delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+    process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS = '1'
+    resetSecretStorageStartupWarningForTests()
+    const warnings: string[] = []
+    validateSecretStorageAtStartup(process.env, message => warnings.push(message))
+    validateSecretStorageAtStartup(process.env, message => warnings.push(message))
+    expect(warnings).toEqual([
+      'Secret encryption key is not configured; local plaintext secret storage is explicitly enabled.',
+    ])
+    expect(warnings.join(' ')).not.toContain('generated-test-secret')
   })
 })

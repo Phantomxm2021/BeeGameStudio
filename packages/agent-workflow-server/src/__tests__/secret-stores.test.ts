@@ -56,7 +56,7 @@ describe('local secret persistence', () => {
     expect(mcp.env).toEqual([{ key: 'TOKEN', valuePreview: 'gene…cret' }])
   })
 
-  test('preserves omitted secrets and clears them only with an explicit empty value', async () => {
+  test('preserves omitted and empty secrets and clears only with clearSecret', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'beegame-secret-updates-'))
     resetModelConfigs()
     const model = createModelConfig('owner', {
@@ -73,6 +73,10 @@ describe('local secret persistence', () => {
 
     updateModelConfig(model.id, { apiKey: '' })
     saveModelConfigsToStore({ dataDir })
+    expect(readModelConfigSnapshotFromStore({ dataDir })[0]?.apiKey).toBe('generated-model-secret')
+
+    updateModelConfig(model.id, { clearSecret: true })
+    saveModelConfigsToStore({ dataDir })
     expect(readModelConfigSnapshotFromStore({ dataDir })[0]?.apiKey).toBe('')
 
     const first = upsertMcpServer({
@@ -82,6 +86,25 @@ describe('local secret persistence', () => {
     upsertMcpServer({ id: first.id, name: 'MCP', enabled: true, transport: 'stdio', scope: 'beegame', command: 'node', env: [{ key: 'TOKEN' }] }, { dataDir })
     expect(listMcpServers({ dataDir })[0]?.env).toEqual([{ key: 'TOKEN', valuePreview: 'gene…cret' }])
     upsertMcpServer({ id: first.id, name: 'MCP', enabled: true, transport: 'stdio', scope: 'beegame', command: 'node', env: [{ key: 'TOKEN', value: '' }] }, { dataDir })
+    expect(listMcpServers({ dataDir })[0]?.env).toEqual([{ key: 'TOKEN', valuePreview: 'gene…cret' }])
+    upsertMcpServer({ id: first.id, name: 'MCP', enabled: true, transport: 'stdio', scope: 'beegame', command: 'node', env: [{ key: 'TOKEN', clearSecret: true }] }, { dataDir })
     expect(listMcpServers({ dataDir })[0]?.env).toEqual([{ key: 'TOKEN' }])
+  })
+
+  test('encrypts web-tools secrets and rewrites legacy plaintext once', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-web-tools-'))
+    const filePath = join(dataDir, 'web-tools.json')
+    await Bun.write(filePath, JSON.stringify({ version: 1, config: { braveApiKey: 'generated-web-secret' } }))
+    const { loadWebToolsConfig, saveWebToolsConfig } = await import('../web-tools-store')
+
+    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBe('generated-web-secret')
+    const migrated = await readFile(filePath, 'utf8')
+    expect(migrated).not.toContain('generated-web-secret')
+    expect(JSON.parse(migrated).config.braveApiKey).toMatch(/^v1\./u)
+    expect(await readFile(filePath, 'utf8')).toBe(migrated)
+    saveWebToolsConfig({ braveApiKey: '' }, { dataDir })
+    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBe('generated-web-secret')
+    saveWebToolsConfig({ clearSecret: true }, { dataDir })
+    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBeUndefined()
   })
 })

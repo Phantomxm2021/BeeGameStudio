@@ -17,6 +17,7 @@ import {
   encryptSecret,
   isSecretEnvelope,
 } from './security/secret-crypto'
+import { appendAuditEvent } from './audit-events-store'
 
 const STORE_FILE = 'model-configs.json'
 
@@ -49,7 +50,16 @@ export function loadModelConfigsFromStore(
 
   const { configs, hasLegacySecrets } = decryptModelConfigSnapshot(payload.configs)
   importModelConfigSnapshot(configs)
-  if (hasLegacySecrets) saveModelConfigsToStore(options)
+  if (hasLegacySecrets) {
+    saveModelConfigsToStore(options)
+    appendAuditEvent({
+      actorId: 'system',
+      action: 'secret.migrated',
+      targetType: 'model_config',
+      targetId: 'local',
+      metadata: { count: configs.length },
+    }, { dataDir: options.dataDir })
+  }
 }
 
 export function readModelConfigSnapshotFromStore(
@@ -74,6 +84,13 @@ export function readModelConfigSnapshotFromStore(
     const tempPath = `${filePath}.tmp`
     writeFileSync(tempPath, `${JSON.stringify(encryptedPayload, null, 2)}\n`, 'utf8')
     renameSync(tempPath, filePath)
+    appendAuditEvent({
+      actorId: 'system',
+      action: 'secret.migrated',
+      targetType: 'model_config',
+      targetId: 'local',
+      metadata: { count: configs.length },
+    }, { dataDir: options.dataDir })
   }
   return configs
 }
