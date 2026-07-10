@@ -139,6 +139,35 @@ export async function bindBeeGameLibraryResourceInWorkspace(
   return result
 }
 
+export async function integrateBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = fetch,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot; path?: string }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifest = await readBeeGameAssetManifest(root)
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const slot = manifest.slots[slotIndex]
+  const binding = slot.resource_binding
+  if (!binding) throw new Error(`Asset slot has no library resource binding: ${normalizedSlotId}`)
+  const mode = slot.integration_provider?.type || manifest.project_target?.integration_mode || 'filesystem'
+  if (mode !== 'filesystem') return { manifest, slot }
+  const filename = binding.source_url.split('/').at(-1)?.split('?')[0] || binding.element_id
+  const targetPath = resolveUploadTarget(root, slot, filename)
+  const response = await fetchImpl(binding.source_url)
+  if (!response.ok) throw new Error(`Resource download failed (${response.status})`)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  await mkdir(resolve(targetPath, '..'), { recursive: true })
+  await writeFile(targetPath, bytes)
+  const relativePath = normalizeRelativePath(root, targetPath)
+  const updatedSlot: BeeGameAssetSlot = { ...slot, status: 'integrated', placeholder: false, uploaded_files: [...new Set([...(slot.uploaded_files ?? []), relativePath])], updated_at: new Date().toISOString() }
+  manifest.slots[slotIndex] = updatedSlot
+  await writeAssetManifest(root, manifest)
+  return { manifest, slot: updatedSlot, path: relativePath }
+}
+
 export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid asset manifest')

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bindBeeGameLibraryResource, bindBeeGameLibraryResourceInWorkspace, normalizeBeeGameAssetManifest } from '../beegame/asset-contracts'
+import { bindBeeGameLibraryResource, bindBeeGameLibraryResourceInWorkspace, integrateBeeGameLibraryResourceInWorkspace, normalizeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -41,5 +41,16 @@ describe('BeeGame resource bindings', () => {
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
+  })
+
+  test('copies a bound filesystem resource and marks the slot integrated', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-integration-'))
+    try {
+      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, slots: [{ id: 'tree', target: { path: 'assets/environment' }, integration_provider: { type: 'filesystem' } }] }))
+      await bindBeeGameLibraryResourceInWorkspace(workspace, 'tree', { pack_id: 'fantasy', pack_version: '1', element_id: 'oak', source_url: 'https://storage.example/oak.glb', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] })
+      const result = await integrateBeeGameLibraryResourceInWorkspace(workspace, 'tree', async () => new Response(new Uint8Array([1, 2, 3])))
+      expect(result.slot.status).toBe('integrated')
+      await expect(readFile(join(workspace, 'assets/environment/oak.glb'))).resolves.toEqual(Buffer.from([1, 2, 3]))
+    } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 })
