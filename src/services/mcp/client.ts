@@ -1079,8 +1079,13 @@ export const connectToServer = memoize(
 
         logMCPDebug(name, `Using claude.ai proxy at ${proxyUrl}`)
 
+        const remoteConnection = await createPinnedRemoteMcpConnection(proxyUrl)
+        closePinnedRemoteMcpConnection = remoteConnection.close
+
         // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-        const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
+        const fetchWithAuth = createClaudeAiProxyFetch(
+          remoteConnection.fetch(globalThis.fetch),
+        )
 
         const proxyOptions = getProxyFetchOptions()
         const transportOptions: StreamableHTTPClientTransportOptions = {
@@ -1088,6 +1093,7 @@ export const connectToServer = memoize(
           fetch: wrapFetchWithTimeout(fetchWithAuth),
           requestInit: {
             ...proxyOptions,
+            ...remoteConnection.requestInit,
             headers: {
               'User-Agent': getMCPUserAgent(),
               'X-Mcp-Client-Session-Id': getSessionId(),
@@ -1096,7 +1102,7 @@ export const connectToServer = memoize(
         }
 
         transport = new StreamableHTTPClientTransport(
-          new URL(proxyUrl),
+          remoteConnection.url,
           transportOptions,
         )
         logMCPDebug(name, `claude.ai proxy transport created successfully`)
@@ -1778,6 +1784,8 @@ export const connectToServer = memoize(
           await client.close()
         } catch (error) {
           logMCPDebug(name, `Error closing client: ${error}`)
+        } finally {
+          await closePinnedRemoteMcpConnection?.()
         }
       }
 
@@ -1841,6 +1849,7 @@ export const connectToServer = memoize(
       if (inProcessServer) {
         inProcessServer.close().catch(() => {})
       }
+      await closePinnedRemoteMcpConnection?.()
       return {
         name,
         type: 'failed' as const,

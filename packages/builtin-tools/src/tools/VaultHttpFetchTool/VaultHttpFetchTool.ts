@@ -1,4 +1,9 @@
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { z } from 'zod/v4'
 import { getSecret } from 'src/services/localVault/store.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
@@ -363,24 +368,36 @@ export const VaultHttpFetchTool = buildTool({
     })
 
     try {
-      const resp = await axios.request({
-        url: input.url,
-        method: input.method,
-        headers,
-        data: input.body,
-        timeout: REQUEST_TIMEOUT_MS,
-        maxContentLength: RESPONSE_BODY_CAP_BYTES,
-        // No redirects: a 30x to a different origin would re-send Authorization
-        // unless we strip it — and stripping is fragile. Refuse to follow.
-        maxRedirects: 0,
-        // Don't throw on 4xx/5xx; the body still needs scrubbing in those
-        // success-path responses.
-        validateStatus: () => true,
-        // Avoid axios trying to transform / parse JSON; we want to scrub the
-        // raw body first.
-        transformResponse: [(data: unknown) => data],
-        responseType: 'text',
-      })
+      const target = await resolveApprovedOutboundTarget(input.url)
+      if (!target) throw new Error('Outbound URL is not permitted')
+      const httpAgent = createPinnedHttpAgent(target)
+      const httpsAgent = createPinnedHttpsAgent(target)
+      let resp
+      try {
+        resp = await axios.request({
+          url: input.url,
+          method: input.method,
+          headers,
+          data: input.body,
+          timeout: REQUEST_TIMEOUT_MS,
+          maxContentLength: RESPONSE_BODY_CAP_BYTES,
+          // No redirects: a 30x to a different origin would re-send Authorization
+          // unless we strip it — and stripping is fragile. Refuse to follow.
+          maxRedirects: 0,
+          // Don't throw on 4xx/5xx; the body still needs scrubbing in those
+          // success-path responses.
+          validateStatus: () => true,
+          // Avoid axios trying to transform / parse JSON; we want to scrub the
+          // raw body first.
+          transformResponse: [(data: unknown) => data],
+          responseType: 'text',
+          httpAgent,
+          httpsAgent,
+        })
+      } finally {
+        httpAgent.destroy()
+        httpsAgent.destroy()
+      }
 
       // Body might be a Buffer when Content-Type is binary; coerce safely.
       const rawBody =

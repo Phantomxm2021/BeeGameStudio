@@ -1,4 +1,9 @@
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import memoize from 'lodash-es/memoize.js'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import {
@@ -79,15 +84,28 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
 
       logForDebugging(`[claudeai-mcp] Fetching from ${url}`)
 
-      const response = await axios.get<ClaudeAIMcpServersResponse>(url, {
-        headers: {
-          Authorization: `Bearer ${tokens.accessToken}`,
-          'Content-Type': 'application/json',
-          'anthropic-beta': MCP_SERVERS_BETA_HEADER,
-          'anthropic-version': '2023-06-01',
-        },
-        timeout: FETCH_TIMEOUT_MS,
-      })
+      const target = await resolveApprovedOutboundTarget(url)
+      if (!target) throw new Error('Outbound URL is not permitted')
+      const httpAgent = createPinnedHttpAgent(target)
+      const httpsAgent = createPinnedHttpsAgent(target)
+      let response
+      try {
+        response = await axios.get<ClaudeAIMcpServersResponse>(url, {
+          headers: {
+            Authorization: `Bearer ${tokens.accessToken}`,
+            'Content-Type': 'application/json',
+            'anthropic-beta': MCP_SERVERS_BETA_HEADER,
+            'anthropic-version': '2023-06-01',
+          },
+          timeout: FETCH_TIMEOUT_MS,
+          maxRedirects: 0,
+          httpAgent,
+          httpsAgent,
+        })
+      } finally {
+        httpAgent.destroy()
+        httpsAgent.destroy()
+      }
 
       const configs: Record<string, ScopedMcpServerConfig> = {}
       // Track used normalized names to detect collisions and assign (2), (3), etc. suffixes.

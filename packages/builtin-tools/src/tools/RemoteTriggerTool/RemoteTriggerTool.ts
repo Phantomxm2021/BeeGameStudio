@@ -1,4 +1,9 @@
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { z } from 'zod/v4'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -139,15 +144,28 @@ export const RemoteTriggerTool = buildTool({
           break
       }
 
-      const res = await axios.request({
-        method,
-        url,
-        headers,
-        data,
-        timeout: 20_000,
-        signal: context.abortController.signal,
-        validateStatus: () => true,
-      })
+      const target = await resolveApprovedOutboundTarget(url)
+      if (!target) throw new Error('Outbound URL is not permitted')
+      const httpAgent = createPinnedHttpAgent(target)
+      const httpsAgent = createPinnedHttpsAgent(target)
+      let res
+      try {
+        res = await axios.request({
+          method,
+          url,
+          headers,
+          data,
+          timeout: 20_000,
+          signal: context.abortController.signal,
+          validateStatus: () => true,
+          maxRedirects: 0,
+          httpAgent,
+          httpsAgent,
+        })
+      } finally {
+        httpAgent.destroy()
+        httpsAgent.destroy()
+      }
       const audit = await appendRemoteTriggerAuditRecord({
         ...auditBase,
         ok: res.status >= 200 && res.status < 300,

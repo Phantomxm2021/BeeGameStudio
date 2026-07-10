@@ -1,4 +1,9 @@
 import { feature } from 'bun:bundle'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { z } from 'zod/v4'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
@@ -96,37 +101,50 @@ Requires Remote Control to be configured. Respects user notification settings (t
           if (token && sessionId) {
             const baseUrl = getBridgeBaseUrl()
             const axios = (await import('axios')).default
-            const response = await axios.post(
-              `${baseUrl}/v1/sessions/${sessionId}/events`,
-              {
-                events: [
-                  {
-                    type: 'push_notification',
-                    title: input.title,
-                    body: input.body,
-                    priority: input.priority ?? 'normal',
-                  },
-                ],
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                  'anthropic-version': '2023-06-01',
+            const url = `${baseUrl}/v1/sessions/${sessionId}/events`
+            const target = await resolveApprovedOutboundTarget(url)
+            if (!target) throw new Error('Outbound URL is not permitted')
+            const httpAgent = createPinnedHttpAgent(target)
+            const httpsAgent = createPinnedHttpsAgent(target)
+            try {
+              const response = await axios.post(
+                url,
+                {
+                  events: [
+                    {
+                      type: 'push_notification',
+                      title: input.title,
+                      body: input.body,
+                      priority: input.priority ?? 'normal',
+                    },
+                  ],
                 },
-                timeout: 10_000,
-                validateStatus: (s: number) => s < 500,
-              },
-            )
-            if (response.status >= 200 && response.status < 300) {
-              logForDebugging(
-                `[PushNotification] delivered via bridge session=${sessionId}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'anthropic-version': '2023-06-01',
+                  },
+                  timeout: 10_000,
+                  validateStatus: (s: number) => s < 500,
+                  maxRedirects: 0,
+                  httpAgent,
+                  httpsAgent,
+                },
               )
-              return { data: { sent: true } }
+              if (response.status >= 200 && response.status < 300) {
+                logForDebugging(
+                  `[PushNotification] delivered via bridge session=${sessionId}`,
+                )
+                return { data: { sent: true } }
+              }
+              logForDebugging(
+                `[PushNotification] bridge delivery failed: status=${response.status}`,
+              )
+            } finally {
+              httpAgent.destroy()
+              httpsAgent.destroy()
             }
-            logForDebugging(
-              `[PushNotification] bridge delivery failed: status=${response.status}`,
-            )
           }
         } catch (e) {
           logForDebugging(`[PushNotification] bridge delivery error: ${e}`)

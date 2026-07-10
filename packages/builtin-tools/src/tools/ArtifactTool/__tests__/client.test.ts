@@ -29,7 +29,7 @@ describe('uploadArtifact', () => {
     const result = await uploadArtifact({
       html: '<h1>hello</h1>',
       token: 'test-token',
-      uploadUrl: 'https://example.test/upload',
+      uploadUrl: 'https://93.184.216.34/upload',
     })
 
     expect(result).toEqual({
@@ -50,7 +50,7 @@ describe('uploadArtifact', () => {
     await uploadArtifact({
       html: '<p>x</p>',
       token: 't',
-      uploadUrl: 'https://example.test/upload',
+      uploadUrl: 'https://93.184.216.34/upload',
       hash: 'my-id',
     })
 
@@ -71,7 +71,7 @@ describe('uploadArtifact', () => {
     await uploadArtifact({
       html: '<p>x</p>',
       token: 't',
-      uploadUrl: 'https://example.test/upload',
+      uploadUrl: 'https://93.184.216.34/upload',
       ttl: 30,
     })
 
@@ -88,7 +88,7 @@ describe('uploadArtifact', () => {
       uploadArtifact({
         html: 'x'.repeat(100),
         token: 't',
-        uploadUrl: 'https://example.test/upload',
+        uploadUrl: 'https://93.184.216.34/upload',
       }),
     ).rejects.toThrow(/payload_too_large/)
   })
@@ -102,8 +102,29 @@ describe('uploadArtifact', () => {
       uploadArtifact({
         html: '<p/>',
         token: 't',
-        uploadUrl: 'https://example.test/upload',
+        uploadUrl: 'https://93.184.216.34/upload',
       }),
     ).rejects.toThrow()
+  })
+
+  test('cancels the response body when parsing fails', async () => {
+    const cancel = mock(async () => {})
+    globalThis.fetch = mock((_u: string | URL | Request) =>
+      Promise.resolve({
+        status: 500,
+        text: async () => 'Internal Server Error',
+        body: { cancel },
+      }),
+    ) as unknown as typeof fetch
+
+    await expect(
+      uploadArtifact({
+        html: '<p/>',
+        token: 't',
+        uploadUrl: 'https://93.184.216.34/upload',
+      }),
+    ).rejects.toThrow()
+
+    expect(cancel).toHaveBeenCalledTimes(1)
   })
 })

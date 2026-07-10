@@ -1,4 +1,8 @@
 import { z } from 'zod/v4'
+import {
+  createPinnedUndiciDispatcher,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -24,6 +28,17 @@ type BrowserOutput = {
   url: string
   content?: string
   screenshot?: string
+}
+
+async function closeDispatcher(dispatcher: {
+  close?: () => Promise<void>
+  destroy?: () => void
+}): Promise<void> {
+  if (dispatcher.close) {
+    await dispatcher.close()
+  } else {
+    dispatcher.destroy?.()
+  }
 }
 
 export const WebBrowserTool = buildTool({
@@ -90,61 +105,73 @@ Use this for:
     if (action === 'navigate' || action === 'screenshot') {
       // Fetch the page content via HTTP
       try {
-        const response = await fetch(input.url, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept:
-              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          redirect: 'follow',
-        })
-
-        if (!response.ok) {
-          return {
-            data: {
-              title: `HTTP ${response.status}`,
-              url: input.url,
-              content: `Error: ${response.status} ${response.statusText}`,
+        const target = await resolveApprovedOutboundTarget(input.url)
+        if (!target) throw new Error('Outbound URL is not permitted')
+        const dispatcher = createPinnedUndiciDispatcher(target)
+        try {
+          const response = await fetch(target.url, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Accept:
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
+            redirect: 'error',
+            dispatcher,
+          } as RequestInit)
+
+          try {
+            if (!response.ok) {
+              return {
+                data: {
+                  title: `HTTP ${response.status}`,
+                  url: input.url,
+                  content: `Error: ${response.status} ${response.statusText}`,
+                },
+              }
+            }
+
+            const html = await response.text()
+
+            // Extract title
+            const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i)
+            const title = titleMatch?.[1]?.trim() ?? ''
+
+            // Extract text content (strip HTML tags, scripts, styles)
+            let textContent = html
+              .replace(/<script[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[\s\S]*?<\/style>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+
+            // Truncate to reasonable size
+            if (textContent.length > 50_000) {
+              textContent = textContent.slice(0, 50_000) + '\n[truncated]'
+            }
+
+            if (action === 'screenshot') {
+              return {
+                data: {
+                  title,
+                  url: response.url,
+                  content: `[Text snapshot — visual screenshots require Chrome browser tools]\n\n${textContent}`,
+                },
+              }
+            }
+
+            return {
+              data: {
+                title,
+                url: response.url,
+                content: textContent,
+              },
+            }
+          } finally {
+            await response.body?.cancel().catch(() => {})
           }
-        }
-
-        const html = await response.text()
-
-        // Extract title
-        const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i)
-        const title = titleMatch?.[1]?.trim() ?? ''
-
-        // Extract text content (strip HTML tags, scripts, styles)
-        let textContent = html
-          .replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-
-        // Truncate to reasonable size
-        if (textContent.length > 50_000) {
-          textContent = textContent.slice(0, 50_000) + '\n[truncated]'
-        }
-
-        if (action === 'screenshot') {
-          return {
-            data: {
-              title,
-              url: response.url,
-              content: `[Text snapshot — visual screenshots require Chrome browser tools]\n\n${textContent}`,
-            },
-          }
-        }
-
-        return {
-          data: {
-            title,
-            url: response.url,
-            content: textContent,
-          },
+        } finally {
+          await closeDispatcher(dispatcher)
         }
       } catch (err) {
         return {

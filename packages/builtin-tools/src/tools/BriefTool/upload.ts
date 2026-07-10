@@ -14,6 +14,11 @@
 
 import { feature } from 'bun:bundle'
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { randomUUID } from 'crypto'
 import { readFile } from 'fs/promises'
 import { basename, extname } from 'path'
@@ -137,34 +142,46 @@ export async function uploadBriefAttachment(
     ])
 
     try {
-      const response = await axios.post(url, body, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length.toString(),
-        },
-        timeout: UPLOAD_TIMEOUT_MS,
-        signal: ctx.signal,
-        validateStatus: () => true,
-      })
+      const target = await resolveApprovedOutboundTarget(url)
+      if (!target) throw new Error('Outbound URL is not permitted')
+      const httpAgent = createPinnedHttpAgent(target)
+      const httpsAgent = createPinnedHttpsAgent(target)
+      try {
+        const response = await axios.post(url, body, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length.toString(),
+          },
+          timeout: UPLOAD_TIMEOUT_MS,
+          signal: ctx.signal,
+          validateStatus: () => true,
+          maxRedirects: 0,
+          httpAgent,
+          httpsAgent,
+        })
 
-      if (response.status !== 201) {
-        debug(
-          `upload failed for ${fullPath}: status=${response.status} body=${jsonStringify(response.data).slice(0, 200)}`,
-        )
-        return undefined
+        if (response.status !== 201) {
+          debug(
+            `upload failed for ${fullPath}: status=${response.status} body=${jsonStringify(response.data).slice(0, 200)}`,
+          )
+          return undefined
+        }
+
+        const parsed = uploadResponseSchema().safeParse(response.data)
+        if (!parsed.success) {
+          debug(
+            `unexpected response shape for ${fullPath}: ${parsed.error.message}`,
+          )
+          return undefined
+        }
+
+        debug(`uploaded ${fullPath} → ${parsed.data.file_uuid} (${size} bytes)`)
+        return parsed.data.file_uuid
+      } finally {
+        httpAgent.destroy()
+        httpsAgent.destroy()
       }
-
-      const parsed = uploadResponseSchema().safeParse(response.data)
-      if (!parsed.success) {
-        debug(
-          `unexpected response shape for ${fullPath}: ${parsed.error.message}`,
-        )
-        return undefined
-      }
-
-      debug(`uploaded ${fullPath} → ${parsed.data.file_uuid} (${size} bytes)`)
-      return parsed.data.file_uuid
     } catch (e) {
       debug(`upload threw for ${fullPath}: ${e}`)
       return undefined

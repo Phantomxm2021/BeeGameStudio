@@ -11,6 +11,18 @@ import {
 import { authMock } from '../../../../../../tests/mocks/auth'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
 
+const securityCore = await import('@bee-game-studio/security-core')
+mock.module('@bee-game-studio/security-core', () => ({
+  ...securityCore,
+  resolveApprovedOutboundTarget: async (value: string) => ({
+    url: new URL(value),
+    addresses: ['93.184.216.34'],
+    lookup: () => {},
+  }),
+  createPinnedHttpAgent: () => ({ destroy: () => {} }),
+  createPinnedHttpsAgent: () => ({ destroy: () => {} }),
+}))
+
 let requestStatus = 200
 const auditRecords: Record<string, unknown>[] = []
 

@@ -10,6 +10,18 @@ import {
 } from 'bun:test'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
 
+const securityCore = await import('@bee-game-studio/security-core')
+mock.module('@bee-game-studio/security-core', () => ({
+  ...securityCore,
+  resolveApprovedOutboundTarget: async (value: string) => ({
+    url: new URL(value),
+    addresses: ['93.184.216.34'],
+    lookup: () => {},
+  }),
+  createPinnedHttpAgent: () => ({ destroy: () => {} }),
+  createPinnedHttpsAgent: () => ({ destroy: () => {} }),
+}))
+
 // After this suite finishes, switch our getSecret override off so localVault's
 // own store.test.ts (running in the same process) sees the real impl. Also
 // flip the axios stub flag off so the spread mock falls through to real axios
