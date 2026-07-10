@@ -31,7 +31,7 @@ export function CreateResourcePackDialog({ open, onClose, onCreate }: Props) {
       onClose()
     } catch (cause) { setError(cause instanceof Error ? cause.message : '创建 Pack 失败') } finally { setSaving(false) }
   }
-  const chipClass = (selected: boolean) => `type-caption-2 inline-flex h-8 items-center rounded-full border px-3 transition-colors ${selected ? 'border-orange-200/45 bg-orange-200/10 text-orange-100' : 'border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-200'}`
+  const chipClass = (selected: boolean) => `type-caption-2 rounded-full border px-3 py-1.5 transition-colors ${selected ? 'border-orange-200/45 bg-orange-200/10 text-orange-100' : 'border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-200'}`
   const categoryOptions = [['sprites', '2D 图像'], ['tilemaps', 'Tilemap'], ['models', '3D 模型'], ['materials', '材质'], ['textures', '贴图'], ['animation', '动画与骨骼'], ['ui', 'UI'], ['vfx', '特效'], ['audio', '音频'], ['fonts', '字体'], ['scenes', '场景与地图']] as const
   return <div role="dialog" aria-modal="true" aria-label="创建 Pack" className="fixed inset-0 z-[260] flex items-center justify-center bg-zinc-950/60 p-4 backdrop-blur-sm">
     <form onSubmit={submit} className="input-surface relative w-full max-w-lg rounded-3xl border border-white/15 p-6 shadow-2xl shadow-black/50">
