@@ -39,6 +39,8 @@ export type ResourceElement = {
   dimensionOverride?: '2D' | '3D' | 'agnostic'
 }
 
+export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string }
+
 export class ResourceLibraryApiError extends Error {
   readonly status: number
   readonly code: string
@@ -107,6 +109,16 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     async getPack(packId: string): Promise<ResourcePackSummary> {
       const result = await request<{ pack: ResourcePackSummary }>(`/api/resource-packs/${encodeURIComponent(packId)}`)
       return result.pack
+    },
+    async listFolders(packId: string): Promise<ResourceFolder[]> {
+      const result = await request<{ folders: ResourceFolder[] }>(`/api/resource-packs/${encodeURIComponent(packId)}/folders`)
+      return result.folders
+    },
+    async createFolder(packId: string, input: { id?: string; name: string; parentId?: string }): Promise<ResourceFolder> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
+      return result.folder
     },
     async listElements(packId: string, category?: string): Promise<ResourceElement[]> {
       const query = category ? `?category=${encodeURIComponent(category)}` : ''

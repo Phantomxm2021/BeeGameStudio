@@ -33,6 +33,11 @@ describe('resource library API', () => {
     expect(requests[0]).toBe('/api/resource-packs/pack%2F1/elements?category=characters')
   })
 
+  test('lists Pack folders through the authoring API', async () => {
+    const api = createResourceLibraryApi(async () => new Response(JSON.stringify({ folders: [{ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }] }), { status: 200 }))
+    await expect(api.listFolders('pack-1')).resolves.toHaveLength(1)
+  })
+
   test('turns a forbidden response into a typed error', async () => {
     const api = createResourceLibraryApi(async () => new Response(
       JSON.stringify({ error: { code: 'forbidden', message: 'No access' } }),

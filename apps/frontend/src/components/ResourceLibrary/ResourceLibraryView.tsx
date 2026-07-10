@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } fro
 import {
   resourceLibraryApi,
   type ResourceElement,
+  type ResourceFolder,
   type ResourcePackSummary,
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
@@ -11,7 +12,7 @@ import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
-  | 'createPack'
+  | 'createPack' | 'listFolders' | 'createFolder'
 >;
 
 type ResourceLibraryViewProps = {
@@ -44,6 +45,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
   const [elements, setElements] = useState<ResourceElement[]>([]);
+  const [folders, setFolders] = useState<ResourceFolder[]>([]);
   const [selectedElement, setSelectedElement] = useState<ResourceElement | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -82,9 +84,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     setLoading(true);
     try {
       const detail = await apiClient.getPack(pack.id);
+      const nextFolders = await apiClient.listFolders(pack.id);
       const category = detail.categories?.[0];
       const nextElements = await apiClient.listElements(pack.id, category);
       setSelectedPack(detail);
+      setFolders(nextFolders);
       setActiveCategory(category);
       setElements(nextElements);
       setSelectedElement(nextElements[0] || null);
@@ -148,6 +152,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         onBack={() => {
           setSelectedPack(null);
           setSelectedElement(null);
+          setFolders([]);
         }}
         onCategory={selectCategory}
         onElement={setSelectedElement}
@@ -162,6 +167,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           if (!activeCategory) return;
           void apiClient.addElement(selectedPack.id, file, activeCategory).then((next) => { setElements((current) => [...current, next]); setSelectedElement(next); }).catch((err) => setError(err instanceof Error ? err.message : '元素上传失败'));
         }}
+        folders={folders}
+        onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
       />
     );
   }
@@ -314,6 +321,8 @@ function PackBrowser({
   onEditPack,
   onAddFile,
   onDropFile,
+  folders,
+  onCreateFolder,
 }: {
   pack: ResourcePackSummary;
   elements: ResourceElement[];
@@ -327,6 +336,8 @@ function PackBrowser({
   onEditPack: (name: string) => void;
   onAddFile: (file: File) => void;
   onDropFile: (file: File) => void;
+  folders: ResourceFolder[];
+  onCreateFolder: (name: string) => Promise<void>;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -376,7 +387,7 @@ function PackBrowser({
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)] border-y border-white/10">
         <aside className="border-r border-white/10 py-4 pr-3">
-          <div className="type-caption-1 mb-3 px-3 text-zinc-500">Pack 文件</div>
+          <div className="mb-3 flex items-center justify-between px-3"><div className="type-caption-1 text-zinc-500">Pack 文件</div><button type="button" aria-label="新建文件夹" className="type-caption-2 text-zinc-500 hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}>＋</button></div>
           <TreeRow
             icon={<Folder className="h-4 w-4 text-orange-300" />}
             label={pack.name}
@@ -384,7 +395,9 @@ function PackBrowser({
             active
           />
           <div className="mt-1">
-            {categories.map((category) => (
+            {folders.length > 0 ? folders.map((folder) => (
+              <TreeRow key={folder.id} icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.path} active={folder.name === activeCategory} onClick={() => onCategory(folder.name)} />
+            )) : categories.map((category) => (
               <div key={category}>
                 <TreeRow
                   icon={<Folder className="h-4 w-4 text-orange-300" />}

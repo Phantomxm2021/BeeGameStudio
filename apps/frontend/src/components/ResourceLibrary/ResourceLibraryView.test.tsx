@@ -31,6 +31,8 @@ const element: ResourceElement = {
 
 const api = {
   createPack: async () => ({ ...pack, status: 'draft', elementCount: 0 }),
+  listFolders: async () => [],
+  createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
   listPacks: async () => [pack],
   getPack: async () => pack,
   listElements: async () => [element],
