@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, persistModelMetrics } from './ModelPreview'
+import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -60,6 +60,13 @@ describe('renderPreview', () => {
     const sunPosition = sky.material.uniforms.sunPosition.value as THREE.Vector3
     expect(sunPosition.length()).toBeGreaterThan(0)
     expect(sky.material.uniforms.turbidity.value).toBeGreaterThan(0)
+  })
+
+  test('keeps the procedural sky in an offscreen scene instead of the camera-visible stage', () => {
+    const { scene, sky } = createProceduralSkyScene()
+
+    expect(scene.children).toContain(sky)
+    expect(scene.background).toBeNull()
   })
 
   test('selects PDF, text, and document-card fallbacks safely from extensions', () => {

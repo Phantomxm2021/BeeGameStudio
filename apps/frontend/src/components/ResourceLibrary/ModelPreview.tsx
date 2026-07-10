@@ -140,6 +140,15 @@ export function configureProceduralSky(sky: Sky): void {
   uniforms.sunPosition.value.setFromSphericalCoords(1, Math.PI / 2 - elevation, azimuth)
 }
 
+export function createProceduralSkyScene(): { scene: THREE.Scene; sky: Sky } {
+  const scene = new THREE.Scene()
+  const sky = new Sky()
+  sky.scale.setScalar(10000)
+  configureProceduralSky(sky)
+  scene.add(sky)
+  return { scene, sky }
+}
+
 async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<THREE.Object3D> {
   const normalized = extension.toLowerCase()
   if (normalized === 'glb' || normalized === 'gltf') return (await new GLTFLoader().loadAsync(url)).scene
@@ -176,14 +185,9 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.1
     const pmremGenerator = new THREE.PMREMGenerator(renderer)
-    const sky = new Sky()
-    sky.scale.setScalar(10000)
-    configureProceduralSky(sky)
-    const environmentScene = new THREE.Scene()
-    environmentScene.add(sky)
+    const { scene: environmentScene, sky } = createProceduralSkyScene()
     const environmentTarget = pmremGenerator.fromScene(environmentScene, 0.04)
     scene.environment = environmentTarget.texture
-    scene.add(sky)
     const controls = new OrbitControls(camera, renderer.domElement)
     const hemisphere = new THREE.HemisphereLight(0xf6f1e7, 0x171a21, 1.5)
     const key = new THREE.DirectionalLight(0xfff4dd, 3.1)
