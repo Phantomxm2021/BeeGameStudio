@@ -168,8 +168,8 @@ const BeeGamePermissionPanel = ({
             </div>
             <div className="space-y-3 px-5 py-4">
                 <div>
-                    <div className="type-caption-2 mb-2 uppercase tracking-[0.16em] text-zinc-500">{command ? text.permissionCommandLabel : text.permissionTargetLabel}</div>
-                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-black/35 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-100 [overflow-wrap:anywhere]">
+                    <div className="type-caption-2 mb-2 uppercase text-zinc-500">{command ? text.permissionCommandLabel : text.permissionTargetLabel}</div>
+                    <pre className="type-code max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-zinc-100 [overflow-wrap:anywhere]">
                         {target}
                     </pre>
                 </div>
@@ -635,7 +635,7 @@ export const ChatPanel = memo(({
                                         ) : (
                                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-zinc-300" title={attachment.filename}>
                                                 <FileText className="h-5 w-5" />
-                                                <span className="w-full truncate text-center text-[9px]">{attachment.filename}</span>
+                                                <span className="type-caption-2 w-full truncate text-center">{attachment.filename}</span>
                                             </div>
                                         )}
                                         <button

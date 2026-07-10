@@ -18,15 +18,10 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 let showToastError: ((message: string) => void) | null = null;
 
-const getEnvFlag = (value: unknown): boolean => value === true || value === '1' || value === 'true';
-
-const isDevAuthTokenAllowed = (): boolean => (
-  import.meta.env.MODE !== 'production' ||
-  getEnvFlag(import.meta.env.VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN)
-);
-
 const getEnvAuthToken = (): string => {
-  if (!isDevAuthTokenAllowed()) return '';
+  // VITE_* values are bundled into the browser. Never treat a deployment token
+  // as a production secret or allow it to authorize production requests.
+  if (import.meta.env.MODE === 'production') return '';
   return String(import.meta.env.VITE_API_AUTH_TOKEN ?? '').trim();
 };
 
@@ -63,14 +58,14 @@ export const authenticatedFetch = (
   const nextInput = typeof input === 'string' ? buildApiUrl(input) : input;
   const response = await fetch(nextInput, {
     ...init,
-    headers: await buildAuthHeadersAsync(init.headers),
+    headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
   if (response.status !== 401 || (!getSupabaseAccessToken() && getEnvAuthToken())) return response;
   const refreshed = await refreshSupabaseSession();
   if (!refreshed) return response;
   return fetch(nextInput, {
     ...init,
-    headers: await buildAuthHeadersAsync(init.headers),
+    headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
 })();
 
@@ -177,13 +172,27 @@ apiClient.interceptors.response.use(
 
 const BEEGAME_AUTH_RETRY_HEADER = 'X-BeeGame-Auth-Retry';
 
-const buildAuthHeadersAsync = async (headers?: HeadersInit): Promise<Headers> => {
+const buildAuthHeadersAsync = async (headers?: HeadersInit, attachAuth = true): Promise<Headers> => {
   const nextHeaders = new Headers(headers);
+  if (!attachAuth) return nextHeaders;
   const token = await resolveAuthTokenAsync();
   if (token && !nextHeaders.has('Authorization')) {
     nextHeaders.set('Authorization', `Bearer ${token}`);
   }
   return nextHeaders;
+};
+
+const isTrustedApiRequest = (input: RequestInfo | URL): boolean => {
+  const raw = typeof input === 'string' ? input : input.toString();
+  try {
+    const pageOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+    const requestUrl = new URL(raw, pageOrigin);
+    if (!API_BASE_URL) return requestUrl.origin === pageOrigin;
+    const apiUrl = new URL(API_BASE_URL, pageOrigin);
+    return requestUrl.origin === apiUrl.origin;
+  } catch {
+    return false;
+  }
 };
 
 const isRetriedRequest = (config: InternalAxiosRequestConfig): boolean => (

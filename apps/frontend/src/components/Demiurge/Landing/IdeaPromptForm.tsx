@@ -69,7 +69,7 @@ export function IdeaPromptForm({
                 {attachments.length > 0 ? (
                     <div className="flex gap-2 overflow-x-auto px-4 pt-3" data-testid="landing-attachments">
                         {attachments.map((attachment, index) => (
-                            <div key={`${attachment.filename || attachment.type}-${index}`} className="flex shrink-0 items-center gap-2 rounded-2xl border border-white/15 bg-black/20 px-3 py-2 text-xs text-zinc-200">
+                            <div key={`${attachment.filename || attachment.type}-${index}`} className="type-caption-2 flex shrink-0 items-center gap-2 rounded-2xl border border-white/15 bg-black/20 px-3 py-2 text-zinc-200">
                                 {attachment.type === 'image' ? <img src={`data:${attachment.mediaType};base64,${attachment.data}`} alt={attachment.filename || 'image'} className="h-8 w-8 rounded-lg object-cover" /> : <FileText className="h-4 w-4 text-zinc-400" />}
                                 <span className="max-w-40 truncate">{attachment.filename}</span>
                                 <button type="button" aria-label={`Remove ${attachment.filename || 'attachment'}`} onClick={() => onAttachmentsChange(attachments.filter((_, itemIndex) => itemIndex !== index))} className="text-zinc-400 hover:text-white"><X className="h-3.5 w-3.5" /></button>

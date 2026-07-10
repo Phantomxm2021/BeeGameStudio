@@ -2090,7 +2090,7 @@ function InvitationSettingsPanel({
                                             </span>
                                         </div>
                                         {invitationCode ? (
-                                            <div className="type-footnote mt-1 truncate pl-4 font-mono text-zinc-300">{copy.codeValue(invitationCode)}</div>
+                                            <div className="type-code mt-1 truncate pl-4 text-zinc-300">{copy.codeValue(invitationCode)}</div>
                                         ) : null}
                                         <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
                                             {copy.usedCount(invitation.usedCount, invitation.maxUses)}
@@ -2960,7 +2960,7 @@ function CreditAuditPanel({
                     </div>
                     <button
                         type="button"
-                        className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-300/40 hover:text-amber-100 disabled:opacity-50"
+                        className="type-button shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100 disabled:opacity-50"
                         disabled={isSavingPack}
                         onClick={onSavePack}
                     >
@@ -2969,20 +2969,20 @@ function CreditAuditPanel({
                 </div>
                 <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
                     <input
-                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
                         placeholder={copy.priceId}
                         value={packForm.priceId}
                         onChange={(event) => onPackFormChange({ ...packForm, priceId: event.target.value })}
                     />
                     <input
-                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
                         placeholder={copy.credits}
                         inputMode="numeric"
                         value={packForm.credits}
                         onChange={(event) => onPackFormChange({ ...packForm, credits: event.target.value })}
                     />
                     <input
-                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50 sm:col-span-2 xl:col-span-1"
+                        className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50 sm:col-span-2 xl:col-span-1"
                         placeholder={copy.displayName}
                         value={packForm.displayName}
                         onChange={(event) => onPackFormChange({ ...packForm, displayName: event.target.value })}
@@ -2990,13 +2990,13 @@ function CreditAuditPanel({
                 </div>
                 <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,10rem)_auto] sm:items-center">
                     <input
-                        className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-amber-300/50"
+                        className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
                         placeholder={copy.sortOrder}
                         inputMode="numeric"
                         value={packForm.sortOrder}
                         onChange={(event) => onPackFormChange({ ...packForm, sortOrder: event.target.value })}
                     />
-                    <label className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-zinc-300">
+                    <label className="type-callout flex min-w-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-zinc-300">
                         <input
                             type="checkbox"
                             checked={packForm.enabled}
@@ -3087,7 +3087,7 @@ function BillingCreditPackRow({
             <div className="type-caption-1 text-zinc-400">{pack.enabled ? copy.enabled : copy.disabled}</div>
             <button
                 type="button"
-                className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:border-amber-300/40 hover:text-amber-100"
+                className="type-button rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100"
                 onClick={onEdit}
             >
                 {copy.edit}

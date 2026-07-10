@@ -514,7 +514,7 @@ export function BeeGameLivePreviewPage({
                                         <span>{labels.fixBuildErrors}</span>
                                     </button>
                                 </div>
-                                <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-5 text-red-200/85">
+                                <pre className="type-code-sm max-h-28 overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-red-200/85">
                                     {buildErrorLog}
                                 </pre>
                             </div>
@@ -714,7 +714,7 @@ function DeploymentDialog({
                                     <span>{labels.fixBuildErrors}</span>
                                 </button>
                             </div>
-                            <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-red-100/80">
+                                <pre className="type-code-sm max-h-36 overflow-auto whitespace-pre-wrap break-words text-red-100/80">
                                 {failureLog}
                             </pre>
                         </div>

@@ -1,4 +1,6 @@
 export const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_CHAT_ATTACHMENTS = 8;
+export const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 32 * 1024 * 1024;
 
 export type ChatImageAttachmentPayload = {
     type: 'image';
@@ -98,6 +100,14 @@ const fileToChatAttachment = (file: File): Promise<ChatAttachmentPayload | null>
 };
 
 export const filesToChatAttachments = async (files: File[]): Promise<ChatAttachmentPayload[]> => {
-    const attachments = await Promise.all(files.map(fileToChatAttachment));
+    const selectedFiles: File[] = [];
+    let totalBytes = 0;
+    for (const file of files) {
+        if (selectedFiles.length >= MAX_CHAT_ATTACHMENTS) break;
+        if (totalBytes + file.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) break;
+        selectedFiles.push(file);
+        totalBytes += file.size;
+    }
+    const attachments = await Promise.all(selectedFiles.map(fileToChatAttachment));
     return attachments.filter((item): item is ChatAttachmentPayload => Boolean(item));
 };

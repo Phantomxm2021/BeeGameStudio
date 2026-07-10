@@ -296,7 +296,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 p: (props) => (
                                     <p
                                         className={isBeeGameVariant
-                                            ? 'mb-3 text-[15px] leading-7 font-normal text-zinc-200/90 last:mb-0 break-words [overflow-wrap:anywhere]'
+                                            ? 'type-body mb-3 text-zinc-200/90 last:mb-0 break-words [overflow-wrap:anywhere]'
                                             : 'type-p mb-3 last:mb-0 opacity-90 break-words [overflow-wrap:anywhere]'}
                                         {...props}
                                     />
@@ -304,7 +304,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 ul: (props) => (
                                     <ul
                                         className={isBeeGameVariant
-                                            ? 'my-3 ml-5 list-disc space-y-1 text-[15px] leading-7 text-zinc-200/90'
+                                            ? 'type-body my-3 ml-5 list-disc space-y-1 text-zinc-200/90'
                                             : 'type-list list-disc opacity-90'}
                                         {...props}
                                     />
@@ -312,7 +312,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 ol: (props) => (
                                     <ol
                                         className={isBeeGameVariant
-                                            ? 'my-3 ml-5 list-decimal space-y-1 text-[15px] leading-7 text-zinc-200/90'
+                                            ? 'type-body my-3 ml-5 list-decimal space-y-1 text-zinc-200/90'
                                             : 'type-list list-decimal opacity-90'}
                                         {...props}
                                     />
@@ -322,7 +322,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 h1: (props) => (
                                     <h1
                                         className={isBeeGameVariant
-                                            ? 'mb-4 border-b border-white/10 pb-2 text-[22px] leading-snug font-semibold text-white'
+                                            ? 'type-title-2 mb-4 border-b border-white/10 pb-2 text-white'
                                             : 'type-title-2 border-b border-zinc-200 pb-2 mb-4 dark:border-zinc-700'}
                                         {...props}
                                     />
@@ -330,7 +330,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 h2: (props) => (
                                     <h2
                                         className={isBeeGameVariant
-                                            ? 'mt-6 mb-3 text-[18px] leading-snug font-semibold text-white'
+                                            ? 'type-title-3 mt-6 mb-3 text-white'
                                             : 'type-title-3 mt-6 mb-3'}
                                         {...props}
                                     />
@@ -338,7 +338,7 @@ export const MarkdownRenderer = memo(({ content, isUser, messageId = 'unknown', 
                                 h3: (props) => (
                                     <h3
                                         className={isBeeGameVariant
-                                            ? 'mt-5 mb-2 text-[16px] leading-snug font-semibold text-white'
+                                            ? 'type-headline mt-5 mb-2 text-white'
                                             : 'type-headline mt-4 mb-2'}
                                         {...props}
                                     />
@@ -769,7 +769,7 @@ export const MessageItem = memo(({
                                         ) : (
                                             <div
                                                 key={`${attachment.filename || 'file'}-${index}`}
-                                                className="flex min-w-52 items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-3 text-sm text-zinc-200"
+                                                className="type-callout flex min-w-52 items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-3 text-zinc-200"
                                                 title={attachment.mediaType}
                                             >
                                                 <FileText className="h-5 w-5 shrink-0 text-zinc-400" />

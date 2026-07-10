@@ -504,7 +504,7 @@ export const beeGameAdapter = {
 
   async stopTask(data: { task_id: string; project_id?: string }): Promise<StopTaskResponse> {
     const sessionId = resolveStopSessionId(data);
-    await postJson(`/api/beegame-sessions/${sessionId}/stop`, {});
+    await postJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/stop`, {});
     return {
       command_id: sessionId,
       task_id: sessionId,
@@ -1062,7 +1062,7 @@ async function getDefaultModelConfigId(): Promise<string> {
 
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
   const params = new URLSearchParams({ workspacePath: binding.workspacePath });
-  return authenticatedFetch(`/api/beegame-sessions/${binding.sessionId}/package?${params.toString()}`);
+  return authenticatedFetch(`/api/beegame-sessions/${encodeURIComponent(binding.sessionId)}/package?${params.toString()}`);
 }
 
 async function fetchBeeGameDiscoveredArtifactsIfAvailable(
@@ -1070,7 +1070,7 @@ async function fetchBeeGameDiscoveredArtifactsIfAvailable(
 ): Promise<BeeGameDiscoveredArtifact[]> {
   try {
     return await getJson(
-      `/api/beegame-sessions/${binding.sessionId}/artifact-index?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
+      `/api/beegame-sessions/${encodeURIComponent(binding.sessionId)}/artifact-index?workspacePath=${encodeURIComponent(binding.workspacePath)}`,
     );
   } catch {
     return [];
@@ -1083,7 +1083,7 @@ async function fetchBeeGameArtifactContent(
 ): Promise<{ path: string; content: string }> {
   const params = new URLSearchParams({ path: artifactRef.path });
   if (binding?.workspacePath) params.set('workspacePath', binding.workspacePath);
-  return getJson(`/api/beegame-sessions/${artifactRef.sessionId}/artifacts?${params.toString()}`);
+  return getJson(`/api/beegame-sessions/${encodeURIComponent(artifactRef.sessionId)}/artifacts?${params.toString()}`);
 }
 
 async function getResponseErrorMessage(response: Response): Promise<string> {
@@ -1103,7 +1103,7 @@ async function updateBeeGameSessionModel(
   sessionId: string,
   modelConfigId: string,
 ): Promise<BeeGameSession> {
-  return patchJson(`/api/beegame-sessions/${sessionId}/model`, {
+  return patchJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/model`, {
     modelConfigId,
   });
 }
@@ -1130,7 +1130,7 @@ async function sendBeeGameInput(
     thinkingMode?: BeeGameThinkingMode;
   },
 ): Promise<BeeGameSession> {
-  return postJson(`/api/beegame-sessions/${sessionId}/input`, {
+  return postJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/input`, {
     text,
     ...(display?.displayText ? { displayText: display.displayText } : {}),
     ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
@@ -1153,7 +1153,7 @@ async function deleteBeeGameSession(
   if (workspacePath) params.set('workspacePath', workspacePath);
   const query = params.toString() ? `?${params.toString()}` : '';
   try {
-    await deleteJson(`/api/beegame-sessions/${sessionId}${query}`);
+    await deleteJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}${query}`);
   } catch (error) {
     if (isDeleteAlreadyGoneError(error) || isDeleteStaleWorkspacePathError(error)) return;
     throw error;
@@ -1166,7 +1166,7 @@ async function fetchBeeGameEvents(
   workspacePath?: string,
 ): Promise<BeeGameEvent[]> {
   const response = await authenticatedFetch(
-    `/api/beegame-sessions/${sessionId}/events?after=${after}`,
+    `/api/beegame-sessions/${encodeURIComponent(sessionId)}/events?after=${encodeURIComponent(String(after))}`,
     workspacePath
       ? { headers: { 'x-beegame-workspace-path': workspacePath } }
       : undefined,
@@ -1175,7 +1175,7 @@ async function fetchBeeGameEvents(
 }
 
 async function fetchBeeGameTranscript(sessionId: string, workspacePath: string): Promise<BeeGameEvent[]> {
-  return getJson(`/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`);
+  return getJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`);
 }
 
 async function fetchBeeGameEventsForBinding(
@@ -2558,7 +2558,7 @@ async function runIdeaIntakeJob(requestBody: BeeGameIdeaIntakeRequest): Promise<
   if (createResponse.status === 404) return undefined;
   const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);
   for (let index = 0; index < BEEGAME_INTAKE_JOB_MAX_POLLS; index += 1) {
-    const poll = await getJson<BeeGameIntakeJobPoll>(`/api/beegame-intake/jobs/${created.jobId}`);
+    const poll = await getJson<BeeGameIntakeJobPoll>(`/api/beegame-intake/jobs/${encodeURIComponent(created.jobId)}`);
     if (poll.status === 'completed') return poll.result;
     if (poll.status === 'failed') throw new Error(poll.error || 'BeeGame intake failed');
     await sleep(BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS);

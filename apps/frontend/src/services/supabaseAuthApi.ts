@@ -48,6 +48,8 @@ export type SupabaseOAuthSignInOptions = {
 const SESSION_STORAGE_KEY = 'beegame_supabase_session';
 const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
 const OAUTH_START_FUNCTION_PATH = '/functions/v1/beegame-oauth-start';
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 let pendingRedirectConsumption: {
   key: string;
   promise: Promise<boolean>;
@@ -206,8 +208,11 @@ export async function uploadSupabaseAvatarImage(file: File): Promise<string> {
   if (!accessToken || !session) {
     throw new Error('Please sign in again before uploading your avatar.');
   }
-  if (!file.type.startsWith('image/')) {
-    throw new Error('Avatar must be an image file.');
+  if (!ALLOWED_AVATAR_TYPES.has(file.type.toLowerCase())) {
+    throw new Error('Avatar must be a PNG, JPEG, or WebP image.');
+  }
+  if (file.size > MAX_AVATAR_BYTES) {
+    throw new Error('Avatar must be 5 MB or smaller.');
   }
   const bucket = getSupabaseAvatarBucket();
   const objectPath = `avatars/${encodeURIComponent(session.user.id)}/${Date.now()}-${slugifyFileName(file.name)}`;
@@ -272,7 +277,7 @@ export async function signInWithSupabaseOAuth(
     if (!isRecord(value) || typeof value.url !== 'string') {
       throw new Error('OAuth invitation start did not return a redirect URL.');
     }
-    redirectUrl = value.url;
+    redirectUrl = validateOAuthRedirectUrl(value.url);
     if (typeof value.nonce === 'string' && value.nonce.trim()) {
       pkceContext.invitationNonce = value.nonce.trim();
     }
@@ -755,6 +760,20 @@ function base64UrlEncode(bytes: Uint8Array): string {
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function validateOAuthRedirectUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const currentOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+    if (url.protocol !== 'https:' && url.origin !== currentOrigin) {
+      throw new Error('OAuth invitation start returned an unsafe redirect URL.');
+    }
+    return url.toString();
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('unsafe redirect')) throw error;
+    throw new Error('OAuth invitation start returned an invalid redirect URL.');
+  }
 }
 
 function slugifyFileName(value: string): string {

@@ -47,7 +47,7 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBeNull();
   });
 
-  it('allows the dev/offline bearer token in production only with explicit override', async () => {
+  it('never uses the dev/offline bearer token in production', async () => {
     vi.stubEnv('MODE', 'production');
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
     vi.stubEnv('VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN', '1');
@@ -57,7 +57,7 @@ describe('apiClient defaults', () => {
     await authenticatedFetch('/api/current-user');
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get('Authorization')).toBe('Bearer runtime-token');
+    expect(headers.get('Authorization')).toBeNull();
   });
 
   it('uses the Supabase session token when no deployment token is configured', async () => {
@@ -161,6 +161,17 @@ describe('apiClient defaults', () => {
     });
 
     expect(headers.get('Authorization')).toBe('Bearer explicit-token');
+  });
+
+  it('does not forward the application bearer token to an external URL', async () => {
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('https://external.example.test/resource');
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBeNull();
   });
 
   it('uses sign-in copy when no auth token is available', () => {

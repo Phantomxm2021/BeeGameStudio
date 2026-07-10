@@ -45,5 +45,5 @@ export const createModelConfig = (input: CreateModelConfigInput): Promise<ModelC
 );
 
 export const updateModelConfig = (id: string, input: UpdateModelConfigInput): Promise<ModelConfig> => (
-  apiClient.patch(`/api/model-configs/${id}`, input)
+  apiClient.patch(`/api/model-configs/${encodeURIComponent(id)}`, input)
 );

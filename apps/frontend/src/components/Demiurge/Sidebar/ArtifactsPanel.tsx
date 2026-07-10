@@ -63,10 +63,10 @@ export const ArtifactsPanel = memo(({
                 <table className="w-full table-fixed border-collapse">
                     <thead>
                         <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                            <th scope="col" className="type-caption-2 px-3 py-2 text-left font-medium text-zinc-500 dark:text-zinc-400">
+                            <th scope="col" className="type-caption-2 px-3 py-2 text-left text-zinc-500 dark:text-zinc-400">
                                 {text.artifactName || 'Name'}
                             </th>
-                            <th scope="col" className="type-caption-2 w-24 px-3 py-2 text-right font-medium text-zinc-500 dark:text-zinc-400">
+                            <th scope="col" className="type-caption-2 w-24 px-3 py-2 text-right text-zinc-500 dark:text-zinc-400">
                                 {text.actions || 'Actions'}
                             </th>
                         </tr>

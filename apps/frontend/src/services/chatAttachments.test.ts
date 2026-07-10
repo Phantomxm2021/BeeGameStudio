@@ -4,6 +4,8 @@ import {
     CHAT_ATTACHMENT_ACCEPT,
     filesToChatAttachments,
     isSupportedChatFile,
+    MAX_CHAT_ATTACHMENTS,
+    MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
     MAX_CHAT_ATTACHMENT_BYTES,
 } from './chatAttachments';
 
@@ -69,5 +71,16 @@ describe('chat attachment policy', () => {
         expect(attachments[0]?.data).toBe('aW1hZ2U=');
         expect(attachments[1]?.data).toBe('aW1hZ2U=');
         expect(attachments[2]?.data).toBe('eyJvayI6dHJ1ZX0K');
+    });
+
+    it('caps attachment count and aggregate input size before Base64 conversion', async () => {
+        const files = Array.from({ length: MAX_CHAT_ATTACHMENTS + 2 }, (_, index) => (
+            new File([`file-${index}`], `file-${index}.txt`, { type: 'text/plain' })
+        ));
+        const attachments = await filesToChatAttachments(files);
+        expect(attachments).toHaveLength(MAX_CHAT_ATTACHMENTS);
+
+        const oversized = new File([new Uint8Array(MAX_CHAT_ATTACHMENT_TOTAL_BYTES)], 'large.txt', { type: 'text/plain' });
+        expect(await filesToChatAttachments([oversized, new File(['second'], 'second.txt', { type: 'text/plain' })])).toHaveLength(0);
     });
 });
