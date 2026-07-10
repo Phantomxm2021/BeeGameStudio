@@ -85,7 +85,7 @@ export function createBeeGameResourceServerApp(
             categories: body.categories as ResourceCategory[],
             license: typeof body.license === 'string' ? body.license : 'unassigned',
             version: typeof body.version === 'string' ? body.version : '0.1.0', status: 'draft',
-          })
+          }, { createdBy: user!.id })
           return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'invalid_pack', error instanceof Error ? error.message : 'Invalid Pack'), options.corsOrigin)

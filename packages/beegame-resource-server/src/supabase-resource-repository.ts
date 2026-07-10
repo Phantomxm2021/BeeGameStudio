@@ -137,8 +137,8 @@ export function createSupabaseResourceRepository(
       })
       return rows[0] ? toElement(rows[0]) : undefined
     },
-    async createPack(pack) {
-      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, primary_category: pack.primaryCategory, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0 }) })
+    async createPack(pack, lifecycle) {
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, primary_category: pack.primaryCategory, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0, ...(lifecycle?.createdBy ? { created_by: lifecycle.createdBy } : {}) }) })
       return await toPack(rows[0])
     },
     async listFolders(packId) {

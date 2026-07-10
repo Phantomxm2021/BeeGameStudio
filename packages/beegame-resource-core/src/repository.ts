@@ -8,7 +8,7 @@ export type ResourceRepository = {
   getPack(packId: string): Promise<PackSummary | undefined>
   listElements(packId: string, category?: ResourceCategory): Promise<ResourceElement[]>
   getElement(packId: string, elementId: string): Promise<ResourceElement | undefined>
-  createPack(pack: ResourcePack): Promise<ResourcePack>
+  createPack(pack: ResourcePack, options?: { createdBy?: string }): Promise<ResourcePack>
   listFolders(packId: string): Promise<ResourceFolder[]>
   createFolder(packId: string, input: { id: string; name: string; parentId?: string }): Promise<ResourceFolder>
   updateFolder(packId: string, folderId: string, input: { name: string }): Promise<ResourceFolder | undefined>

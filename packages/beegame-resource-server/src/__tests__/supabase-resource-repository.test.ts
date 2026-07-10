@@ -76,9 +76,9 @@ describe('Supabase resource repository', () => {
       },
     })
 
-    await repository.createPack({ id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'ui-kit', categories: ['ui'], license: 'internal', version: '1.0.0', status: 'draft' })
+    await repository.createPack({ id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'ui-kit', categories: ['ui'], license: 'internal', version: '1.0.0', status: 'draft' }, { createdBy: '00000000-0000-0000-0000-000000000001' })
 
-    expect(createBody).toMatchObject({ primary_category: 'ui-kit' })
+    expect(createBody).toMatchObject({ primary_category: 'ui-kit', created_by: '00000000-0000-0000-0000-000000000001' })
   })
 
   test('preserves Supabase mutation diagnostics for actionable schema failures', async () => {
