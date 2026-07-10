@@ -765,6 +765,30 @@ describe('beegame session routes', () => {
     } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 
+  test('runs post-turn integration hooks after an Agent turn completes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-post-turn-hook-'))
+    const completed: Array<{ workspacePath: string; projectId?: string }> = []
+    const fake = createFakeRunner()
+    const manager = new BeeGameSessionManager(
+      fake.runner,
+      workspace,
+      undefined,
+      undefined,
+      false,
+      {},
+      undefined,
+      async metadata => { completed.push({ workspacePath: metadata.workspacePath, projectId: metadata.projectId }) },
+    )
+    try {
+      const session = manager.start({ workspacePath: workspace, projectId: 'project-resource-auto-bind', userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Build the project')
+      await waitFor(() => completed.length === 1)
+      expect(completed).toEqual([{ workspacePath: workspace, projectId: 'project-resource-auto-bind' }])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('validates remote runtime provider endpoints before starting the session runner', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-remote-runtime-endpoints-'))
     const resolvedUrls: string[] = []
