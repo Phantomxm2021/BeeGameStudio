@@ -9,15 +9,27 @@
  */
 
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
-import { validateOutboundTarget } from '../../../../../agent-workflow-server/src/security/outbound-target-policy'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
 const DEFAULT_EXA_MCP_URL = 'https://mcp.exa.ai/mcp'
 const FETCH_TIMEOUT_MS = 25_000
 
+export type ExaSearchAdapterOptions = {
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
+}
+
 export class ExaSearchAdapter implements WebSearchAdapter {
+  constructor(private readonly outboundOptions: ExaSearchAdapterOptions = {}) {}
+
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
     const { signal, onProgress, allowedDomains, blockedDomains } = options
 
@@ -46,7 +58,13 @@ export class ExaSearchAdapter implements WebSearchAdapter {
       exaApiKey?: string
     }
     const exaUrl = settings.exaEndpointUrl || DEFAULT_EXA_MCP_URL
-    if (!await validateOutboundTarget(exaUrl)) throw new Error('Outbound URL is not permitted')
+    const target = await (this.outboundOptions.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+      exaUrl,
+      this.outboundOptions.outboundTargetPolicyOptions,
+    )
+    if (!target) throw new Error('Outbound URL is not permitted')
+    const httpAgent = createPinnedHttpAgent(target)
+    const httpsAgent = createPinnedHttpsAgent(target)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
@@ -77,6 +95,9 @@ export class ExaSearchAdapter implements WebSearchAdapter {
         {
           signal: abortController.signal,
           timeout: FETCH_TIMEOUT_MS,
+          maxRedirects: 0,
+          httpAgent,
+          httpsAgent,
           headers,
           responseType: 'text',
         },
@@ -87,6 +108,9 @@ export class ExaSearchAdapter implements WebSearchAdapter {
         throw new AbortError()
       }
       throw e
+    } finally {
+      httpAgent.destroy()
+      httpsAgent.destroy()
     }
 
     if (abortController.signal.aborted) {
