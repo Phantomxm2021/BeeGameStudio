@@ -11,6 +11,7 @@
     "./utils": "./src/utils.ts"
   },
   "dependencies": {
-    "@bee-game-studio/agent-tools": "workspace:*"
+    "@bee-game-studio/agent-tools": "workspace:*",
+    "@bee-game-studio/security-core": "workspace:*"
   }
 }
