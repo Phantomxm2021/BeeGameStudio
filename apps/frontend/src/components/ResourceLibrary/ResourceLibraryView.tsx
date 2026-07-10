@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
@@ -37,6 +37,9 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +93,22 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     }
   };
 
+  const visiblePacks = useMemo(() => packs.filter((pack) => {
+    const matchesQuery = !query.trim() || [pack.name, pack.style, ...pack.gameTypes].join(' ').toLowerCase().includes(query.trim().toLowerCase());
+    return matchesQuery && (dimension === 'all' || pack.dimension === dimension);
+  }), [dimension, packs, query]);
+
+  const importPack = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as ResourcePackSummary;
+      if (!parsed.id || !parsed.name || !parsed.dimension) throw new Error('Pack JSON 缺少 id、name 或 dimension');
+      setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '资源包导入失败');
+    }
+  };
+
   if (selectedPack) {
     return (
       <PackBrowser
@@ -105,6 +124,18 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         }}
         onCategory={selectCategory}
         onElement={setSelectedElement}
+        onEditPack={(name) => {
+          const updated = { ...selectedPack, name };
+          setSelectedPack(updated);
+          setPacks((current) => current.map((item) => item.id === updated.id ? { ...item, name } : item));
+        }}
+        onAddFile={() => {
+          const name = window.prompt('文件名', 'new-asset.png')?.trim();
+          if (!name || !activeCategory) return;
+          const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name, path: `${activeCategory}/${name}`, category: activeCategory, kind: 'file', specs: {}, dependencies: [], status: 'ready' };
+          setElements((current) => [...current, next]);
+          setSelectedElement(next);
+        }}
       />
     );
   }
@@ -117,9 +148,14 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           <h1 className="type-title-2">资源包</h1>
           <p className="type-footnote mt-2 text-zinc-500">按风格、游戏类型与表现维度选择 Pack</p>
         </div>
-        <button type="button" className="primary-pill type-button px-4 py-2">
+        <button type="button" className="primary-pill type-button px-4 py-2" onClick={() => importInputRef.current?.click()}>
           ＋ 导入资源包
         </button>
+        <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importPack(file);
+          event.target.value = '';
+        }} />
       </div>
       <div className="mb-7 flex gap-3">
         <Summary label="已导入" value={String(packs.length)} suffix="个 Pack" />
@@ -143,31 +179,34 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       <div className="mb-5 flex items-center gap-2 border-b border-white/10 pb-4">
         <div className="type-headline">所有资源包</div>
         <div className="flex-1" />
-        <div className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
+        <label className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
           <Search className="h-4 w-4" />
-          搜索资源包
-        </div>
+          <input aria-label="搜索资源包" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资源包" className="min-w-0 flex-1 bg-transparent outline-none" />
+        </label>
         <button
           type="button"
+          onClick={() => setDimension('all')}
           className="type-caption-1 rounded-full border border-orange-300/30 bg-orange-400/10 px-3 py-2 text-orange-200"
         >
           全部
         </button>
         <button
           type="button"
+          onClick={() => setDimension('2D')}
           className="type-caption-1 rounded-full border border-white/10 px-3 py-2 text-zinc-400"
         >
           2D
         </button>
         <button
           type="button"
+          onClick={() => setDimension('3D')}
           className="type-caption-1 rounded-full border border-white/10 px-3 py-2 text-zinc-400"
         >
           3D
         </button>
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {packs.map((pack) => (
+        {visiblePacks.map((pack) => (
           <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
         ))}
       </div>
@@ -254,6 +293,8 @@ function PackBrowser({
   onBack,
   onCategory,
   onElement,
+  onEditPack,
+  onAddFile,
 }: {
   pack: ResourcePackSummary;
   elements: ResourceElement[];
@@ -264,6 +305,8 @@ function PackBrowser({
   onBack: () => void;
   onCategory: (category: string) => void;
   onElement: (element: ResourceElement) => void;
+  onEditPack: (name: string) => void;
+  onAddFile: () => void;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -286,10 +329,13 @@ function PackBrowser({
           </div>
         </div>
         <div className="flex gap-2">
-          <button type="button" className="secondary-pill type-button px-4 py-2">
+          <button type="button" className="secondary-pill type-button px-4 py-2" onClick={() => {
+            const name = window.prompt('Pack 名称', pack.name)?.trim();
+            if (name) onEditPack(name);
+          }}>
             编辑 Pack 信息
           </button>
-          <button type="button" className="primary-pill type-button px-4 py-2">
+          <button type="button" className="primary-pill type-button px-4 py-2" onClick={onAddFile}>
             ＋ 添加文件
           </button>
         </div>
