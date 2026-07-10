@@ -517,12 +517,16 @@ export function createAgentWorkflowApp(
     const userId = c.req.query('userId')?.trim()
     const projectId = c.req.query('projectId')?.trim()
     const reservationId = c.req.query('reservationId')?.trim()
-    return c.json(await dashboardRepository.listCreditAuditLedger(c.req.raw, user, {
-      ...(userId ? { userId } : {}),
-      ...(projectId ? { projectId } : {}),
-      ...(ledgerKind ? { kind: ledgerKind } : {}),
-      ...(reservationId ? { reservationId } : {}),
-    }))
+    try {
+      return c.json(await dashboardRepository.listCreditAuditLedger(c.req.raw, user, {
+        ...(userId ? { userId } : {}),
+        ...(projectId ? { projectId } : {}),
+        ...(ledgerKind ? { kind: ledgerKind } : {}),
+        ...(reservationId ? { reservationId } : {}),
+      }))
+    } catch (error) {
+      return tracedRouteError(c, 'admin.credits.ledger', error)
+    }
   })
 
   app.get('/api/credits', async c => {

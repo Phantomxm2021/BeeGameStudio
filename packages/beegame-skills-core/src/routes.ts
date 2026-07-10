@@ -1,4 +1,4 @@
-import type { Hono } from 'hono'
+import type { Context, Hono } from 'hono'
 import { randomUUID } from 'node:crypto'
 import {
   BeeGameSkillDuplicateError,
@@ -29,7 +29,11 @@ export function registerBeeGameSkillsRoutes(
     const user = deps.getCurrentUser(c.req.raw)
     const forbidden = requireSkillsPermission(user, deps)
     if (forbidden) return c.json(forbidden, 403)
-    return c.json((await deps.repository.listUserSkills(user.id)).map(toUserSkillResponse))
+    try {
+      return c.json((await deps.repository.listUserSkills(user.id)).map(toUserSkillResponse))
+    } catch (error) {
+      return tracedRouteError(c, 'user-skills.list', error)
+    }
   })
 
   app.post('/api/user-skills/import', async c => {
@@ -78,7 +82,7 @@ export function registerBeeGameSkillsRoutes(
       if (err instanceof BeeGameSkillValidationError) {
         return c.json({ error: 'Validation failed', message: err.message }, 400)
       }
-      throw err
+      return tracedRouteError(c, 'user-skills.enable', err)
     }
   })
 
@@ -86,8 +90,12 @@ export function registerBeeGameSkillsRoutes(
     const user = deps.getCurrentUser(c.req.raw)
     const forbidden = requireSkillsPermission(user, deps)
     if (forbidden) return c.json(forbidden, 403)
-    const deleted = await deps.repository.deleteUserSkill(user.id, c.req.param('id'))
-    return c.json({ deleted })
+    try {
+      const deleted = await deps.repository.deleteUserSkill(user.id, c.req.param('id'))
+      return c.json({ deleted })
+    } catch (error) {
+      return tracedRouteError(c, 'user-skills.delete', error)
+    }
   })
 
   app.get('/api/internal/user-skills/enabled', async c => {
@@ -125,11 +133,21 @@ function requireServiceToken(
   request: Request,
   expectedToken: string | undefined,
 ): { error: string; message: string } | null {
-  if (!expectedToken) return null
+  if (!expectedToken) return { error: 'Unauthorized', message: 'invalid service token' }
   const authorization = request.headers.get('authorization')?.trim() ?? ''
   return authorization === `Bearer ${expectedToken}`
     ? null
     : { error: 'Unauthorized', message: 'invalid service token' }
+}
+
+function tracedRouteError(c: Context, route: string, error: unknown): Response {
+  const traceId = randomUUID()
+  console.warn('[BeeGameSkills] route failed', {
+    traceId,
+    route,
+    cause: error instanceof Error ? error.name : 'unknown_error',
+  })
+  return c.json({ error: 'Request failed', traceId }, 500)
 }
 
 function toUserSkillResponse(skill: {

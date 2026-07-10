@@ -54,6 +54,31 @@ function makeApp() {
   })
 }
 
+function makeFailingApp(failure: 'list' | 'enable' | 'delete') {
+  return createBeeGameSkillsApp({
+    requireRequestUser: false,
+    resolveRequestUser: async () => ({ id: 'user-1' }),
+    getCurrentUser: () => ({ id: 'user-1' }),
+    hasPermission: () => true,
+    repository: {
+      listUserSkills: async () => {
+        if (failure === 'list') throw new Error('private list failure')
+        return []
+      },
+      listEnabledUserSkills: async () => [],
+      importUserSkill: async () => { throw new Error('unused') },
+      updateUserSkillEnabled: async () => {
+        if (failure === 'enable') throw new Error('private enable failure')
+        throw new Error('unused')
+      },
+      deleteUserSkill: async () => {
+        if (failure === 'delete') throw new Error('private delete failure')
+        return false
+      },
+    },
+  })
+}
+
 describe('BeeGame skill import routes', () => {
   test('checks skills permission before any repository call', async () => {
     let repositoryCalls = 0
@@ -73,6 +98,23 @@ describe('BeeGame skill import routes', () => {
     const response = await app.request('/api/user-skills')
     expect(response.status).toBe(403)
     expect(repositoryCalls).toBe(0)
+  })
+
+  test('fails closed for internal enabled skills when service token is absent', async () => {
+    const app = makeApp()
+    const response = await app.request('/api/internal/user-skills/enabled?userId=user-1')
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ error: 'Unauthorized', message: 'invalid service token' })
+  })
+
+  test.each([
+    ['list', '/api/user-skills', undefined],
+    ['enable', '/api/user-skills/skill-1/enabled', { method: 'PUT', body: '{}' }],
+    ['delete', '/api/user-skills/skill-1', { method: 'DELETE' }],
+  ] as const)('returns a traced generic error for unexpected %s failures', async (failure, path, init) => {
+    const response = await makeFailingApp(failure).request(path, init)
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Request failed', traceId: expect.any(String) })
   })
   test('rejects traversal before repository import', async () => {
     const app = makeApp()

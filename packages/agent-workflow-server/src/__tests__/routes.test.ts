@@ -1676,6 +1676,24 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('traces unexpected admin credit ledger backend failures', async () => {
+    const brokenRoot = await mkdtemp(join(tmpdir(), 'beegame-ledger-failure-'))
+    const brokenPath = join(brokenRoot, 'dashboard')
+    await mkdir(brokenPath)
+    await writeFile(join(brokenPath, 'users'), 'not a directory')
+    try {
+      const ledgerApp = createAgentWorkflowApp({
+        defaultWorkspacePath: brokenPath,
+        currentUser: { id: 'ledger-admin', role: 'owner' },
+      })
+      const response = await ledgerApp.request('/api/admin/credits/ledger')
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    } finally {
+      await rm(brokenRoot, { recursive: true, force: true })
+    }
+  })
+
   test('applies project and workspace route permissions by role', async () => {
     const viewerApp = createAgentWorkflowApp({
       currentUser: {
