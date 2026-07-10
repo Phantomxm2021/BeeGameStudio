@@ -156,7 +156,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       if (!file.name.toLowerCase().endsWith('.zip')) throw new Error('请导入资源压缩包（.zip）');
       const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
       const manifestEntry = archive['pack.json'] || archive['manifest.json'];
-      const assetPaths = Object.keys(archive).filter((path) => !path.endsWith('/') && !path.split('/').some((part) => part.startsWith('.')) && !path.endsWith('pack.json') && !path.endsWith('manifest.json'));
+      const assetPaths = Object.keys(archive).filter((path) => !path.endsWith('/') && !path.split('/').some((part) => part.startsWith('.')) && !path.endsWith('pack.json') && !path.endsWith('manifest.json') && !/^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path));
       const inferredCategories = [...new Set(assetPaths.map((path) => path.split('/')[0]).filter(Boolean))];
       const extensions = assetPaths.map((path) => path.split('.').pop()?.toLowerCase());
       const has3d = extensions.some((extension) => ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(extension || ''));
@@ -173,7 +173,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         license: '待补充',
         version: '0.1.0',
         status: 'draft',
-        coverPath: assetPaths.find((path) => /\.(png|jpe?g|webp|svg)$/i.test(path)),
+        coverPath: Object.keys(archive).find((path) => /^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path)),
         elementCount: assetPaths.length,
       };
       const parsed = manifestEntry ? { ...generated, ...(JSON.parse(strFromU8(manifestEntry)) as Partial<ResourcePackSummary>) } : generated;
