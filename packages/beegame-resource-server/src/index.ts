@@ -144,6 +144,13 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     if (!signedURL) throw new Error('Resource URL signing returned no URL')
     return new URL(signedURL, baseUrl).toString()
   }
+  const toClientPack = async (packId: string, row: Record<string, unknown>): Promise<PackSummary> => {
+    const pack = toResourcePack(row)
+    if (typeof row.cover_path !== 'string') return pack
+    const storagePackId = safeStorageComponent(packId, 'Pack id')
+    const coverPath = safeRelativeStoragePath(row.cover_path, 'Resource Pack cover path')
+    return { ...pack, coverPath: await signObject(`${storagePackId}/${coverPath}`) }
+  }
   return {
     updateResourcePack: async (packId: string, body: Record<string, unknown>) => {
       const row = toPackUpdateRow(body)
@@ -152,7 +159,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       if (!response.ok) throw new Error(`Resource Pack update failed (${response.status})`)
       const savedRow = (await response.json() as Array<Record<string, unknown>>)[0]
       if (!savedRow) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
-      return toResourcePack(savedRow)
+      return toClientPack(packId, savedRow)
     },
     deleteResourcePack: async (packId: string) => {
       const prefix = safePrefix(packId)

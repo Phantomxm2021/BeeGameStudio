@@ -105,15 +105,41 @@ describe('Supabase resource lifecycle handlers', () => {
   test('maps lifecycle mutation rows to the public camelCase contract', async () => {
     const handlers = createSupabaseResourceLifecycleHandlers({
       baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
-      fetchImpl: async (_input, init) => {
+      fetchImpl: async (input, init) => {
+        if (String(input).includes('/object/sign/')) return Response.json({ signedURL: '/storage/v1/object/sign/beegame-resource-packs/pack-1/cover/new.png?token=cover' })
         if (init?.method === 'PATCH') return Response.json([{ ...packRow, element_count: 3 }])
         return Response.json([])
       },
     })
 
     await expect(handlers.updateResourcePack('pack-1', { gameTypes: ['puzzle'] })).resolves.toEqual(expect.objectContaining({
-      gameTypes: [], primaryCategory: 'world-scene', coverPath: 'cover/new.png', elementCount: 3,
+      gameTypes: [], primaryCategory: 'world-scene', coverPath: 'https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/cover/new.png?token=cover', elementCount: 3,
     }))
+  })
+
+  test('keeps a signed cover URL after a later Pack metadata edit', async () => {
+    let coverPath: string | null = null
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('select=cover_path')) return Response.json([{ cover_path: coverPath }])
+        if (url.includes('/object/sign/')) return Response.json({ signedURL: `/storage/v1/object/sign/beegame-resource-packs/pack-1/${coverPath || 'cover/new.png'}?token=cover` })
+        if (url.includes('/storage/v1/object/')) return new Response(null, { status: 200 })
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as { cover_path?: string }
+          if (body.cover_path) coverPath = body.cover_path
+          return Response.json([{ ...packRow, cover_path: coverPath }])
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+    const form = new FormData(); form.set('file', new File(['cover'], 'new.png', { type: 'image/png' }))
+
+    await handlers.uploadPackCover('pack-1', new Request('https://resource.test', { method: 'POST', body: form }))
+    const edited = await handlers.updateResourcePack('pack-1', { name: 'Renamed' })
+
+    expect(edited.coverPath).toBe(`https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/${coverPath}?token=cover`)
   })
 
   test('reports an absent Pack mutation instead of mapping an undefined row', async () => {
