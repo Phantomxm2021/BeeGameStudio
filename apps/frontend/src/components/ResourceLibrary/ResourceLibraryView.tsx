@@ -36,14 +36,14 @@ type UploadDestination = { category: string; folderPath: string };
 
 
 const categoryLabels: Record<string, string> = {
-  sprites: '2D 图像',
-  tilemaps: 'Tilemap',
+  sprites: '2D 图像与精灵',
+  tilemaps: '场景与地图',
   scenes: '场景与地图',
-  characters: '角色',
-  environment: '环境',
-  tiles: 'Tile',
-  models: '模型',
-  materials: '材质',
+  characters: '角色与生物',
+  environment: '环境与道具',
+  tiles: '场景与地图',
+  models: '环境与道具',
+  materials: '贴图与材质',
   animation: '动画',
   ui: 'UI',
   vfx: '特效',
@@ -51,6 +51,23 @@ const categoryLabels: Record<string, string> = {
   audio: '音频',
   textures: '贴图',
 };
+
+const useDomainOptions = [
+  ['characters', '角色与生物'], ['environment', '环境与道具'], ['scenes', '场景与地图'],
+  ['ui', 'UI'], ['vfx', '特效'], ['audio', '音频'], ['fonts', '字体'], ['textures', '贴图与材质'], ['animation', '动画'],
+] as const;
+const resourceFormOptions = [
+  ['sprite', '2D 图像 / 精灵'], ['tilemap', 'Tilemap'], ['model', '3D 模型'], ['material', '材质'], ['animation', '动画与骨骼'],
+  ['ui', 'UI'], ['vfx', '特效'], ['audio', '音频'], ['font', '字体'], ['video', '视频'], ['document', '文档'], ['file', '其他文件'],
+] as const;
+
+function legacyCategoryToUseDomain(category: string): string {
+  if (category === 'models') return 'environment';
+  if (category === 'materials') return 'textures';
+  if (category === 'tilemaps' || category === 'tiles') return 'scenes';
+  if (category === 'sprites') return 'characters';
+  return useDomainOptions.some(([value]) => value === category) ? category : 'environment';
+}
 
 const primaryCategoryLabels: Record<'en' | 'zh', Record<ResourcePackPrimaryCategory, string>> = {
   en: {
@@ -572,13 +589,13 @@ function ResourceInspectorOverlay({
   onClose: () => void;
 }) {
   const [kind, setKind] = useState(element.kind);
-  const [category, setCategory] = useState(element.category);
+  const [category, setCategory] = useState(legacyCategoryToUseDomain(element.category));
   const [styleOverride, setStyleOverride] = useState(element.styleOverride || '');
   const [dimensionOverride, setDimensionOverride] = useState(element.dimensionOverride || 'agnostic');
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'config'>('info');
   const [materialBindings, setMaterialBindings] = useState<MaterialTextureBindings>(() => decodeMaterialTextureBindings(element.specs.materialTextureBindings));
-  useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
+  useEffect(() => { setKind(element.kind); setCategory(legacyCategoryToUseDomain(element.category)); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
   const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, category, styleOverride: styleOverride || null, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
   return (
     <aside
@@ -606,8 +623,8 @@ function ResourceInspectorOverlay({
         <button type="button" role="tab" aria-selected={activeTab === 'config'} onClick={() => setActiveTab('config')} className={`type-caption-2 flex-1 rounded-md px-2 py-1.5 transition-colors ${activeTab === 'config' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>元素配置</button>
       </div>
       {activeTab === 'info' ? <InspectorInfoTab element={element} pack={pack} elements={elements} /> : <div className="space-y-3 border-t border-white/10 pt-3">
-        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">分类</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="characters">角色</option><option value="environment">环境</option><option value="models">模型</option><option value="ui">UI</option><option value="vfx">特效</option><option value="audio">音频</option><option value="fonts">字体</option><option value="textures">贴图</option></select></label>
-        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">类型</span><input value={kind} onChange={(event) => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2" /></label>
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">用途分类</span><select aria-label="用途分类" value={category} onChange={(event) => setCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2">{useDomainOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">资源形态</span><select aria-label="资源形态" value={kind} onChange={(event) => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2">{!resourceFormOptions.some(([value]) => value === kind) ? <option value={kind}>{kind}</option> : null}{resourceFormOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><input value={styleOverride} onChange={(event) => setStyleOverride(event.target.value)} placeholder={pack.style} className="glass-control rounded-lg px-2 py-1 type-caption-2" /><span className="type-caption-2 text-zinc-600">当前：<span>{styleOverride || pack.style}</span></span></label>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
         {isModelElement(element) ? <ModelMaterialBindings specs={element.specs} elements={elements} bindings={materialBindings} onBindingChange={setMaterialBindings} /> : null}
