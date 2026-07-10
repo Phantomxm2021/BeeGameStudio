@@ -225,20 +225,20 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       {error ? (
         <div
           role="alert"
-          className="mb-5 rounded-2xl border border-red-300/20 bg-red-400/10 p-4 text-red-200"
+          className="type-callout mb-5 rounded-2xl border border-red-300/20 bg-red-400/10 p-4 text-red-200"
         >
           {error}
         </div>
       ) : null}
       {loading && packs.length === 0 ? (
-        <div className="type-footnote text-zinc-500">正在加载资源包…</div>
+        <div className="type-caption-2 text-zinc-500">正在加载资源包…</div>
       ) : null}
       <div className="mb-5 flex items-center gap-2 border-b border-white/10 pb-4">
         <div className="type-headline flex items-center gap-3">{copy.all} <button type="button" aria-label="创建 Pack" onClick={() => setCreateDialogOpen(true)} className="glass-icon-button h-8 w-8 text-lg">+</button></div>
         <div className="flex-1" />
         <label className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
           <Search className="h-4 w-4" />
-          <input aria-label={copy.search} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={copy.search} className="min-w-0 flex-1 bg-transparent outline-none" />
+          <input aria-label={copy.search} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={copy.search} className="type-input min-w-0 flex-1 bg-transparent outline-none" />
         </label>
         <button
           type="button"
@@ -460,7 +460,7 @@ function PackBrowser({
         <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
           {uploadStatus ? <div role="status" className="mb-4 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           <div className="mb-3 flex items-center justify-between">
-            <div className="type-footnote text-zinc-500">
+            <div className="type-caption-2 text-zinc-500">
               {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
               <span className="text-zinc-200">
                 {activeFolderPath || categoryLabels[activeCategory || ''] || activeCategory}
@@ -476,7 +476,7 @@ function PackBrowser({
             </div>
           </div>
           {error ? (
-            <div role="alert" className="mb-4 rounded-xl bg-red-400/10 p-3 text-red-200">
+            <div role="alert" className="type-callout mb-4 rounded-xl bg-red-400/10 p-3 text-red-200">
               {error}
             </div>
           ) : null}
