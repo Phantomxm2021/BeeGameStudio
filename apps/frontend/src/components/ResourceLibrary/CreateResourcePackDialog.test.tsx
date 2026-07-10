@@ -27,6 +27,13 @@ describe('CreateResourcePackDialog', () => {
     expect(screen.getByRole('button', { name: '创建 Pack' })).toHaveClass('h-11', 'type-button')
   })
 
+  test('keeps the dialog compact and scrolls only its form content', () => {
+    render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
+
+    expect(screen.getByTestId('create-pack-dialog')).toHaveClass('max-w-[640px]', 'max-h-[calc(100dvh-48px)]')
+    expect(screen.getByTestId('create-pack-content')).toHaveClass('overflow-y-auto')
+  })
+
   test('requires Pack metadata before creating', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()
