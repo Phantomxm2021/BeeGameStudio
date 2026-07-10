@@ -29,6 +29,10 @@ type ElementRow = Omit<ResourceElement, 'packId' | 'preview' | 'styleOverride' |
 
 type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
 
+class SupabaseResourceRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message) }
+}
+
 export function createSupabaseResourceRepository(
   options: SupabaseResourceRepositoryOptions,
 ): ResourceRepository {
@@ -46,7 +50,7 @@ export function createSupabaseResourceRepository(
         accept: 'application/json',
       },
     }))
-    if (!response.ok) throw new Error(`Resource repository request failed (${response.status})`)
+    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository request failed (${response.status})`)
     return await response.json() as T[]
   }
   const mutate = async <T>(table: string, init: RequestInit, params: Record<string, string> = {}): Promise<T[]> => {
@@ -64,7 +68,7 @@ export function createSupabaseResourceRepository(
         ...(init.headers || {}),
       },
     })
-    if (!response.ok) throw new Error(`Resource repository mutation failed (${response.status})`)
+    if (!response.ok) throw new SupabaseResourceRequestError(response.status, `Resource repository mutation failed (${response.status})`)
     return await response.json() as T[]
   }
   const signPath = async (path: string): Promise<string> => {
@@ -136,7 +140,12 @@ export function createSupabaseResourceRepository(
       return await toPack(rows[0])
     },
     async listFolders(packId) {
-      return (await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, order: 'path.asc' })).map(toFolder)
+      try {
+        return (await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, order: 'path.asc' })).map(toFolder)
+      } catch (error) {
+        if (error instanceof SupabaseResourceRequestError && error.status === 404) return []
+        throw error
+      }
     },
     async createFolder(packId, input) {
       const parent = input.parentId ? (await request<FolderRow>('beegame_resource_folders', { id: `eq.${input.parentId}`, pack_id: `eq.${packId}` }))[0] : undefined

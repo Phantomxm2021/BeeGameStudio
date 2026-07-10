@@ -31,4 +31,13 @@ describe('Supabase resource repository', () => {
     expect(requests[0]?.url).toContain('pack_id=eq.pack%2F1')
     expect(requests[0]?.url).toContain('category=eq.characters')
   })
+
+  test('treats an unapplied folders migration as an empty folder tree', async () => {
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async () => new Response(JSON.stringify({ code: 'PGRST205', message: 'relation does not exist' }), { status: 404 }),
+    })
+    await expect(repository.listFolders('pack-1')).resolves.toEqual([])
+  })
 })

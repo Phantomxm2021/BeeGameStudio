@@ -69,7 +69,11 @@ export function createBeeGameResourceServerApp(
       }
       const folderMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders$/)
       if (folderMatch && request.method === 'GET') {
-        return corsResponse(Response.json({ folders: await options.repository.listFolders(decodeURIComponent(folderMatch[1])) }), options.corsOrigin)
+        try {
+          return corsResponse(Response.json({ folders: await options.repository.listFolders(decodeURIComponent(folderMatch[1])) }), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(500, 'resource_read_failed', error instanceof Error ? error.message : 'Resource folders could not be loaded'), options.corsOrigin)
+        }
       }
       if (folderMatch && request.method === 'POST') {
         try {
@@ -101,7 +105,11 @@ export function createBeeGameResourceServerApp(
         const body = await request.json() as Record<string, unknown>
         return corsResponse(Response.json({ element: await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body) }), options.corsOrigin)
       }
-      return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
+      try {
+        return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
+      } catch (error) {
+        return corsResponse(jsonError(500, 'resource_read_failed', error instanceof Error ? error.message : 'Resource request failed'), options.corsOrigin)
+      }
     },
   }
 }

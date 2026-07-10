@@ -72,6 +72,18 @@ describe('resource service app', () => {
     expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
   })
 
+  test('keeps CORS headers when a folder repository read fails', async () => {
+    const failingRepository = { ...repository, listFolders: async () => { throw new Error('folders unavailable') } }
+    const app = createBeeGameResourceServerApp({
+      repository: failingRepository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/folders'))
+    expect(response.status).toBe(500)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(await response.json()).toEqual({ error: { code: 'resource_read_failed', message: 'folders unavailable' } })
+  })
+
   test('returns 404 for an unknown Pack', async () => {
     const app = createBeeGameResourceServerApp({
       repository,
