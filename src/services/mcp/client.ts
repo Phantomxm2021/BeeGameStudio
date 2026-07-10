@@ -58,6 +58,8 @@ import {
 import { createMcpAuthTool } from '@bee-game-studio/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@bee-game-studio/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
   createPinnedUndiciDispatcher,
   resolveApprovedOutboundTarget,
   type ApprovedOutboundTarget,
@@ -99,11 +101,7 @@ import {
 import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.js'
 import { memoizeWithLRU } from '../../utils/memoize.js'
 import { getWebSocketTLSOptions } from '../../utils/mtls.js'
-import {
-  getProxyFetchOptions,
-  getWebSocketProxyAgent,
-  getWebSocketProxyUrl,
-} from '../../utils/proxy.js'
+import { getProxyFetchOptions } from '../../utils/proxy.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
 import { subprocessEnv } from '../../utils/subprocessEnv.js'
 import {
@@ -483,6 +481,14 @@ export type RemoteMcpConnectionDependencies = {
   createPinnedUndiciDispatcher: typeof createPinnedUndiciDispatcher
 }
 
+type PinnedWebSocketAgent = { destroy(): void }
+
+export type RemoteMcpWebSocketDependencies = {
+  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
+  createPinnedHttpAgent: typeof createPinnedHttpAgent
+  createPinnedHttpsAgent: typeof createPinnedHttpsAgent
+}
+
 type PinnedRemoteMcpConnection = {
   url: URL
   requestInit: DispatcherRequestInit
@@ -494,6 +500,113 @@ type PinnedRemoteMcpConnection = {
 const remoteMcpConnectionDependencies: RemoteMcpConnectionDependencies = {
   resolveApprovedOutboundTarget,
   createPinnedUndiciDispatcher,
+}
+
+const remoteMcpWebSocketDependencies: RemoteMcpWebSocketDependencies = {
+  resolveApprovedOutboundTarget,
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+}
+
+type PinnedWebSocketConnection = {
+  url: URL
+  agent: PinnedWebSocketAgent
+  close: () => void
+}
+
+function outboundPolicyUrlForWebSocket(url: URL): URL | undefined {
+  const policyUrl = new URL(url)
+  if (url.protocol === 'wss:') {
+    policyUrl.protocol = 'https:'
+    return policyUrl
+  }
+  if (url.protocol === 'ws:') {
+    policyUrl.protocol = 'http:'
+    return policyUrl
+  }
+  return undefined
+}
+
+/**
+ * Resolves a public WebSocket endpoint through the common outbound policy and
+ * supplies ws with an agent whose handshake lookup can only use that result.
+ */
+export async function createPinnedWebSocketConnection(
+  value: string,
+  dependencies: RemoteMcpWebSocketDependencies = remoteMcpWebSocketDependencies,
+): Promise<PinnedWebSocketConnection> {
+  let websocketUrl: URL
+  try {
+    websocketUrl = new URL(value)
+  } catch {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      'Outbound URL is not permitted',
+      'Outbound URL is not permitted',
+    )
+  }
+
+  const policyUrl = outboundPolicyUrlForWebSocket(websocketUrl)
+  if (!policyUrl) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      'Outbound URL is not permitted',
+      'Outbound URL is not permitted',
+    )
+  }
+
+  const target = await dependencies.resolveApprovedOutboundTarget(
+    policyUrl.toString(),
+  )
+  if (!target) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      'Outbound URL is not permitted',
+      'Outbound URL is not permitted',
+    )
+  }
+
+  const finalUrl = new URL(target.url)
+  finalUrl.protocol = websocketUrl.protocol
+  if (finalUrl.origin !== websocketUrl.origin) {
+    throw new Error('Pinned WebSocket connection origin mismatch')
+  }
+
+  const agent = (
+    websocketUrl.protocol === 'wss:'
+      ? dependencies.createPinnedHttpsAgent(target)
+      : dependencies.createPinnedHttpAgent(target)
+  ) as PinnedWebSocketAgent
+  return { url: finalUrl, agent, close: () => agent.destroy() }
+}
+
+/** IDE integrations are local IPC-over-HTTP/WebSocket endpoints, never remote hosts. */
+export function validateLocalIdeMcpUrl(
+  value: string,
+  allowedProtocols: readonly string[],
+): URL {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(
+      'IDE MCP endpoint must use a loopback host and explicit port',
+    )
+  }
+
+  const isLoopback = url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (!allowedProtocols.includes(url.protocol) || !isLoopback || !url.port) {
+    throw new Error(
+      'IDE MCP endpoint must use a loopback host and explicit port',
+    )
+  }
+  return url
+}
+
+function createLocalIdeFetch(endpoint: URL, baseFetch: FetchLike): FetchLike {
+  return async (url, init) => {
+    if (new URL(url.toString()).origin !== endpoint.origin) {
+      throw new Error('IDE MCP connection origin mismatch')
+    }
+    return baseFetch(url, { ...init, redirect: 'error' })
+  }
 }
 
 /**
@@ -523,7 +636,10 @@ function createPinnedRemoteMcpConnectionForTarget(
   const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
   const requestInit: DispatcherRequestInit = { dispatcher, redirect: 'error' }
   let isClosed = false
-  const withDispatcher = (url: string | URL, init?: RequestInit): DispatcherRequestInit => {
+  const withDispatcher = (
+    url: string | URL,
+    init?: RequestInit,
+  ): DispatcherRequestInit => {
     if (new URL(url.toString()).origin !== target.url.origin) {
       throw new Error('Pinned MCP connection origin mismatch')
     }
@@ -765,33 +881,24 @@ export const connectToServer = memoize(
         logMCPDebug(name, `Setting up SSE-IDE transport to ${serverRef.url}`)
         // IDE servers don't need authentication
         // TODO: Use the auth token provided in the lockfile
-        const proxyOptions = getProxyFetchOptions()
-        const transportOptions: SSEClientTransportOptions =
-          proxyOptions.dispatcher
-            ? {
-                eventSourceInit: {
-                  fetch: async (url: string | URL, init?: RequestInit) => {
-                    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-                    return fetch(url, {
-                      ...init,
-                      ...proxyOptions,
-                      headers: {
-                        'User-Agent': getMCPUserAgent(),
-                        ...init?.headers,
-                      },
-                    })
-                  },
-                },
-              }
-            : {}
+        const ideUrl = validateLocalIdeMcpUrl(serverRef.url, [
+          'http:',
+          'https:',
+        ])
+        const transportOptions: SSEClientTransportOptions = {
+          fetch: createLocalIdeFetch(ideUrl, createFetchWithInit()),
+          requestInit: {
+            redirect: 'error',
+            headers: { 'User-Agent': getMCPUserAgent() },
+          },
+          eventSourceInit: {
+            fetch: createLocalIdeFetch(ideUrl, fetch),
+          },
+        }
 
-        transport = new SSEClientTransport(
-          new URL(serverRef.url),
-          Object.keys(transportOptions).length > 0
-            ? transportOptions
-            : undefined,
-        )
+        transport = new SSEClientTransport(ideUrl, transportOptions)
       } else if (serverRef.type === 'ws-ide') {
+        const ideUrl = validateLocalIdeMcpUrl(serverRef.url, ['ws:', 'wss:'])
         const tlsOptions = getWebSocketTLSOptions()
         const wsHeaders = {
           'User-Agent': getMCPUserAgent(),
@@ -804,16 +911,15 @@ export const connectToServer = memoize(
         if (typeof Bun !== 'undefined') {
           // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
           // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          wsClient = new globalThis.WebSocket(serverRef.url, {
+          wsClient = new globalThis.WebSocket(ideUrl.toString(), {
             protocols: ['mcp'],
             headers: wsHeaders,
-            proxy: getWebSocketProxyUrl(serverRef.url),
             tls: tlsOptions || undefined,
           } as unknown as string[])
         } else {
-          wsClient = await createNodeWsClient(serverRef.url, {
+          wsClient = await createNodeWsClient(ideUrl.toString(), {
             headers: wsHeaders,
-            agent: getWebSocketProxyAgent(serverRef.url),
+            followRedirects: false,
             ...(tlsOptions || {}),
           })
         }
@@ -849,23 +955,19 @@ export const connectToServer = memoize(
           })}`,
         )
 
-        let wsClient: WsClientLike
-        if (typeof Bun !== 'undefined') {
-          // Bun's WebSocket supports headers/proxy/tls options but the DOM typings don't
-          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-          wsClient = new globalThis.WebSocket(serverRef.url, {
-            protocols: ['mcp'],
+        const remoteConnection = await createPinnedWebSocketConnection(
+          serverRef.url,
+        )
+        closePinnedRemoteMcpConnection = async () => remoteConnection.close()
+        const wsClient = await createNodeWsClient(
+          remoteConnection.url.toString(),
+          {
             headers: wsHeaders,
-            proxy: getWebSocketProxyUrl(serverRef.url),
-            tls: tlsOptions || undefined,
-          } as unknown as string[])
-        } else {
-          wsClient = await createNodeWsClient(serverRef.url, {
-            headers: wsHeaders,
-            agent: getWebSocketProxyAgent(serverRef.url),
+            agent: remoteConnection.agent,
+            followRedirects: false,
             ...(tlsOptions || {}),
-          })
-        }
+          },
+        )
         transport = new WebSocketTransport(wsClient)
       } else if (serverRef.type === 'http') {
         logMCPDebug(name, `Initializing HTTP transport to ${serverRef.url}`)
