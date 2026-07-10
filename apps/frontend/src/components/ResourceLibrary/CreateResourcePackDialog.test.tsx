@@ -5,6 +5,15 @@ import { describe, expect, test, vi } from 'vitest'
 import { CreateResourcePackDialog } from './CreateResourcePackDialog'
 
 describe('CreateResourcePackDialog', () => {
+  test('groups Pack metadata controls together', () => {
+    render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
+
+    const metadata = screen.getByTestId('create-pack-metadata')
+    expect(metadata).toContainElement(screen.getByPlaceholderText('例如：Painterly Forest'))
+    expect(metadata).toContainElement(screen.getByLabelText('维度'))
+    expect(metadata).toContainElement(screen.getByLabelText('主分类'))
+  })
+
   test('requires Pack metadata before creating', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()
