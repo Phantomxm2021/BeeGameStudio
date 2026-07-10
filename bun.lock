@@ -323,6 +323,17 @@
         "@bee-game-studio/beegame-billing-core": "workspace:*",
       },
     },
+    "packages/beegame-resource-core": {
+      "name": "@bee-game-studio/beegame-resource-core",
+      "version": "0.1.0",
+    },
+    "packages/beegame-resource-server": {
+      "name": "@bee-game-studio/beegame-resource-server",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bee-game-studio/beegame-resource-core": "workspace:*",
+      },
+    },
     "packages/beegame-security-core": {
       "name": "@bee-game-studio/security-core",
       "version": "0.1.0",
@@ -731,6 +742,10 @@
     "@bee-game-studio/beegame-billing-core": ["@bee-game-studio/beegame-billing-core@workspace:packages/beegame-billing-core"],
 
     "@bee-game-studio/beegame-billing-server": ["@bee-game-studio/beegame-billing-server@workspace:packages/beegame-billing-server"],
+
+    "@bee-game-studio/beegame-resource-core": ["@bee-game-studio/beegame-resource-core@workspace:packages/beegame-resource-core"],
+
+    "@bee-game-studio/beegame-resource-server": ["@bee-game-studio/beegame-resource-server@workspace:packages/beegame-resource-server"],
 
     "@bee-game-studio/beegame-skills-core": ["@bee-game-studio/beegame-skills-core@workspace:packages/beegame-skills-core"],
 

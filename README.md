@@ -156,6 +156,7 @@ npm run beegame:dev
 - Runtime host: `http://127.0.0.1:62174`
 - Billing backend: `http://127.0.0.1:62175`
 - Skills backend: `http://127.0.0.1:62176`
+- Resource backend: `http://127.0.0.1:62177`
 
 该命令会自动注入本地服务地址：
 
@@ -171,7 +172,8 @@ npm run beegame:dev -- \
   --frontend-port 62173 \
   --runtime-port 62174 \
   --billing-port 62175 \
-  --skills-port 62176
+  --skills-port 62176 \
+  --resources-port 62177
 ```
 
 只调试单个服务时仍可使用：

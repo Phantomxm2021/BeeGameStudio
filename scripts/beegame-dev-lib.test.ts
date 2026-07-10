@@ -10,10 +10,11 @@ describe('BeeGame local dev launcher helpers', () => {
       cwd: '/repo',
       env: {},
       ports: {
-        runtime: 62174,
-        frontend: 62173,
-        billing: 62175,
-        skills: 62176,
+      runtime: 62174,
+      frontend: 62173,
+      billing: 62175,
+      skills: 62176,
+      resources: 62177,
       },
     })
 
@@ -24,10 +25,12 @@ describe('BeeGame local dev launcher helpers', () => {
       runtime: 'http://127.0.0.1:62174',
       billing: 'http://127.0.0.1:62175',
       skills: 'http://127.0.0.1:62176',
+      resources: 'http://127.0.0.1:62177',
     })
     expect(plan.processes.map(process => process.name)).toEqual([
       'billing',
       'skills',
+      'resources',
       'runtime',
       'frontend',
     ])
@@ -47,7 +50,8 @@ describe('BeeGame local dev launcher helpers', () => {
         runtime: 41174,
         frontend: 41173,
         billing: 41175,
-        skills: 41176,
+      skills: 41176,
+      resources: 41177,
       },
     })
 
@@ -55,6 +59,7 @@ describe('BeeGame local dev launcher helpers', () => {
     const frontend = plan.processes.find(process => process.name === 'frontend')
     const billing = plan.processes.find(process => process.name === 'billing')
     const skills = plan.processes.find(process => process.name === 'skills')
+    const resources = plan.processes.find(process => process.name === 'resources')
 
     expect(runtime?.env).toMatchObject({
       BEEGAME_BILLING_MODE: 'remote',
@@ -82,6 +87,10 @@ describe('BeeGame local dev launcher helpers', () => {
       BEEGAME_SKILLS_HOST: '127.0.0.1',
       BEEGAME_SKILLS_PORT: '41176',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
+    })
+    expect(resources?.env).toMatchObject({
+      BEEGAME_RESOURCE_HOST: '127.0.0.1',
+      BEEGAME_RESOURCE_PORT: '41177',
     })
   })
 
