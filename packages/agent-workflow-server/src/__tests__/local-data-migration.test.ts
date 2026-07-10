@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdtemp } from 'node:fs/promises'
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import {
   loadBeeGameLocalDashboardData,
   migrateBeeGameLocalDashboardData,
@@ -13,6 +13,17 @@ import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
 import { saveWebToolsConfig } from '../web-tools-store'
 
 describe('local data migration', () => {
+  const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+
+  beforeAll(() => {
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 23).toString('base64')
+  })
+
+  afterAll(() => {
+    if (originalKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+    else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalKey
+  })
+
   test('loads local dashboard data without stripping migration secrets', async () => {
     const dataDir = await createLocalDashboardData()
 
@@ -42,6 +53,12 @@ describe('local data migration', () => {
         env: [{ key: 'TOKEN', value: 'mcp-local-secret' }],
       }),
     ])
+    const migrated = readFileSync(join(dataDir, 'model-configs.json'), 'utf8')
+    expect(migrated).not.toContain('sk-local-secret')
+    expect(JSON.parse(migrated).configs[0].apiKey).toMatch(/^v1\./u)
+    expect(loadBeeGameLocalDashboardData(dataDir).modelConfigs[0]?.apiKey)
+      .toBe('sk-local-secret')
+    expect(readFileSync(join(dataDir, 'model-configs.json'), 'utf8')).toBe(migrated)
   })
 
   test('dry-runs by default and applies project records when requested', async () => {

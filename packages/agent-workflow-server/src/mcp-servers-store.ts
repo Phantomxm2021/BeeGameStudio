@@ -12,6 +12,11 @@ import {
 } from '@bee-game-studio/security-core'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import {
+  decryptSecret,
+  encryptSecret,
+  isSecretEnvelope,
+} from './security/secret-crypto'
 
 const STORE_FILE = 'mcp-servers.json'
 
@@ -144,9 +149,18 @@ function loadMcpServers(options: McpServersStoreOptions): McpServerConfig[] {
   if (payload.version !== 1 || !Array.isArray(payload.servers)) {
     throw new Error('Unsupported MCP server store format')
   }
-  return payload.servers
-    .map(server => normalizeMcpServerInput(server, server))
-    .filter(server => server.name)
+  let hasLegacySecrets = false
+  const servers = payload.servers.map(server => {
+    const env = (server.env ?? []).map(item => {
+      if (item.value && !isSecretEnvelope(item.value)) hasLegacySecrets = true
+      return item.value === undefined
+        ? item
+        : { ...item, value: decryptSecret(item.value, `mcp-server:env:${item.key}`) }
+    })
+    return normalizeMcpServerInput({ ...server, env }, server)
+  }).filter(server => server.name)
+  if (hasLegacySecrets) saveMcpServers(servers, options)
+  return servers
 }
 
 function saveMcpServers(
@@ -158,7 +172,15 @@ function saveMcpServers(
 
   const payload: StorePayload = {
     version: 1,
-    servers,
+    servers: servers.map(server => ({
+      ...server,
+      env: (server.env ?? []).map(item => ({
+        ...item,
+        ...(item.value !== undefined
+          ? { value: encryptSecret(item.value, `mcp-server:env:${item.key}`) }
+          : {}),
+      })),
+    })),
   }
   const tempPath = `${filePath}.tmp`
   writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')

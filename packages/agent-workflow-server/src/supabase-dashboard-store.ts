@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { decryptSecret, encryptSecret } from './security/secret-crypto'
 import type {
   ModelConfigInput,
   ModelConfigSnapshotRecord,
@@ -48,6 +49,7 @@ import type {
   WebSearchAdapter,
   WebToolsConfig,
 } from './web-tools-store'
+import { toPublicWebToolsConfig } from './web-tools-store'
 
 type Env = Record<string, string | undefined>
 const PLATFORM_RUNTIME_SETTINGS_KEY = 'runtime_settings'
@@ -434,7 +436,7 @@ export class SupabaseDashboardStore {
       name: input.name,
       provider: input.provider,
       base_url: input.baseUrl ?? null,
-      api_key_ciphertext: input.apiKey,
+      api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
       models: input.models,
       is_default: false,
       created_at: now,
@@ -459,7 +461,9 @@ export class SupabaseDashboardStore {
     if (input.name !== undefined) patch.name = input.name
     if (input.provider !== undefined) patch.provider = input.provider
     if (input.baseUrl !== undefined) patch.base_url = input.baseUrl || null
-    if (input.apiKey !== undefined) patch.api_key_ciphertext = input.apiKey
+    if (input.apiKey !== undefined) {
+      patch.api_key_ciphertext = encryptSecret(input.apiKey, 'model-config:api-key')
+    }
     if (input.models !== undefined) patch.models = input.models
     if (input.isDefault === false) patch.is_default = false
 
@@ -488,7 +492,7 @@ export class SupabaseDashboardStore {
       name: record.name,
       provider: record.provider,
       base_url: record.baseUrl ?? null,
-      api_key_ciphertext: record.apiKey,
+      api_key_ciphertext: encryptSecret(record.apiKey, 'model-config:api-key'),
       models: record.models,
       is_default: record.isDefault ? false : record.isDefault,
       created_at: record.createdAt,
@@ -571,7 +575,7 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseWebToolsRow[]>(
       `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
     )
-    return normalizeWebTools(rows[0]?.config ?? {})
+    return normalizeWebTools(decryptWebTools(rows[0]?.config ?? {}))
   }
 
   async saveWebTools(
@@ -587,10 +591,10 @@ export class SupabaseDashboardStore {
     })
     await this.upsert('beegame_web_tools', {
       owner_id: ownerId,
-      config: normalized as JsonObject,
+      config: encryptWebTools(normalized),
       updated_at: new Date().toISOString(),
     }, 'owner_id')
-    return normalized
+    return toPublicWebToolsConfig(normalized)
   }
 
   async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
@@ -625,7 +629,12 @@ export class SupabaseDashboardStore {
         autoStart: normalized.autoStart,
       },
       env_ciphertext: {
-        env: normalized.env ?? [],
+        env: (normalized.env ?? []).map(item => ({
+          ...item,
+          ...(item.value !== undefined
+            ? { value: encryptSecret(item.value, `mcp-server:env:${item.key}`) }
+            : {}),
+        })),
       },
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -1448,7 +1457,9 @@ function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {
 function rowToPublicModelConfig(
   row: SupabaseModelConfigRow,
 ): PublicModelConfig {
-  const apiKey = trimString(row.api_key_ciphertext)
+  const apiKey = row.api_key_ciphertext
+    ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
+    : ''
   return {
     id: row.id,
     ownerId: row.owner_id,
@@ -1516,6 +1527,33 @@ function normalizeWebTools(value: unknown): WebToolsConfig {
   }
 }
 
+function encryptWebTools(config: WebToolsConfig): JsonObject {
+  return {
+    ...config,
+    ...(config.braveApiKey !== undefined
+      ? { braveApiKey: encryptSecret(config.braveApiKey, 'web-tools:brave-api-key') }
+      : {}),
+    ...(config.exaApiKey !== undefined
+      ? { exaApiKey: encryptSecret(config.exaApiKey, 'web-tools:exa-api-key') }
+      : {}),
+    braveApiKeyPreview: undefined,
+    exaApiKeyPreview: undefined,
+  }
+}
+
+function decryptWebTools(value: unknown): JsonObject {
+  if (!isObject(value)) return {}
+  return {
+    ...value,
+    ...(typeof value.braveApiKey === 'string'
+      ? { braveApiKey: decryptSecret(value.braveApiKey, 'web-tools:brave-api-key') }
+      : {}),
+    ...(typeof value.exaApiKey === 'string'
+      ? { exaApiKey: decryptSecret(value.exaApiKey, 'web-tools:exa-api-key') }
+      : {}),
+  }
+}
+
 function resolveSecretInput(
   next: string | undefined,
   previous: string | undefined,
@@ -1541,7 +1579,12 @@ function rowToMcpServer(
     ...(Array.isArray(config.args) ? { args: config.args.map(String) } : {}),
     ...(typeof config.url === 'string' ? { url: config.url } : {}),
     ...(typeof config.cwd === 'string' ? { cwd: config.cwd } : {}),
-    env: normalizeEnvFromUnknown(envPayload.env),
+    env: normalizeEnvFromUnknown(envPayload.env).map(item => ({
+      ...item,
+      ...(item.value !== undefined
+        ? { value: decryptSecret(item.value, `mcp-server:env:${item.key}`) }
+        : {}),
+    })),
     autoStart: config.autoStart !== false,
   })
 }

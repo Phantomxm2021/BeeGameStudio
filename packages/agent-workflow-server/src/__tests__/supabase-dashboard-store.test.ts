@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import {
   createSupabaseDashboardStoreFromEnv,
   SupabaseDashboardStore,
@@ -6,6 +6,16 @@ import {
 
 describe('SupabaseDashboardStore', () => {
   const originalFetch = globalThis.fetch
+  const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+
+  beforeAll(() => {
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString('base64')
+  })
+
+  afterAll(() => {
+    if (originalKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+    else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalKey
+  })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
@@ -684,7 +694,8 @@ describe('SupabaseDashboardStore', () => {
       braveApiKey: undefined,
     })).toEqual({
       webSearchAdapter: 'brave',
-      braveApiKey: 'brave-key',
+      braveApiKeyPreview: 'brav…-key',
+      braveApiKey: undefined,
     })
     expect(await store.upsertMcpServer(ownerId, {
       name: 'Local MCP',
@@ -945,9 +956,12 @@ describe('SupabaseDashboardStore', () => {
       .filter(call => call.method === 'POST')
       .map(call => JSON.stringify(call.body))
       .join('\n')
-    expect(postedBodies).toContain('sk-new-secret')
-    expect(postedBodies).toContain('brave-key')
-    expect(postedBodies).toContain('secret-token')
+    expect(postedBodies).not.toContain('sk-new-secret')
+    expect(postedBodies).not.toContain('brave-key')
+    expect(postedBodies).not.toContain('secret-token')
+    expect(postedBodies).toContain('"api_key_ciphertext":"v1.')
+    expect(postedBodies).toContain('"braveApiKey":"v1.')
+    expect(postedBodies).toContain('"value":"v1.')
   })
 
   test('sets default model configs through the Supabase RPC', async () => {
@@ -1056,7 +1070,7 @@ describe('SupabaseDashboardStore', () => {
     )).toBe(false)
   })
 
-  test('stores RLS-protected secrets without depending on a local encryption key', async () => {
+  test('encrypts RLS-protected secrets while reading legacy plaintext rows', async () => {
     let row = {
       id: 'llm_1',
       owner_id: '00000000-0000-0000-0000-000000000001',
@@ -1103,7 +1117,8 @@ describe('SupabaseDashboardStore', () => {
       updatedAt: row.updated_at,
     })
     const legacyCiphertext = row.api_key_ciphertext
-    expect(legacyCiphertext).toBe('sk-legacy-secret')
+    expect(legacyCiphertext).not.toBe('sk-legacy-secret')
+    expect(legacyCiphertext).toMatch(/^v1\./u)
 
     const storeWithDedicatedKey = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',
@@ -1128,7 +1143,8 @@ describe('SupabaseDashboardStore', () => {
     })
     const dedicatedCiphertext = row.api_key_ciphertext
     expect(dedicatedCiphertext).not.toBe(legacyCiphertext)
-    expect(dedicatedCiphertext).toBe('sk-new-secret')
+    expect(dedicatedCiphertext).not.toBe('sk-new-secret')
+    expect(dedicatedCiphertext).toMatch(/^v1\./u)
 
     const rotatedAnonKeyStore = new SupabaseDashboardStore({
       url: 'https://project.supabase.co',

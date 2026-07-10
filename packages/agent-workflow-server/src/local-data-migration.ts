@@ -1,6 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelConfigSnapshotRecord } from '@bee-game-studio/agent-workflow'
+import {
+  readModelConfigSnapshotFromStore,
+} from './model-config-store'
 import { exportMcpServersSnapshot, type McpServerConfig } from './mcp-servers-store'
 import {
   BeeGameProjectMetadataStore,
@@ -76,11 +79,6 @@ export type BeeGameLocalMigrationStore = {
   ): Promise<unknown>
 }
 
-type ModelConfigStorePayload = {
-  version: 1
-  configs: ModelConfigSnapshotRecord[]
-}
-
 export function loadBeeGameLocalDashboardData(
   dataDir: string,
 ): BeeGameLocalDashboardData {
@@ -140,13 +138,7 @@ function loadLocalProjects(dataDir: string): BeeGameProjectMetadata[] {
 }
 
 function loadLocalModelConfigs(dataDir: string): ModelConfigSnapshotRecord[] {
-  const filePath = join(dataDir, 'model-configs.json')
-  if (!existsSync(filePath)) return []
-  const payload = JSON.parse(readFileSync(filePath, 'utf8')) as ModelConfigStorePayload
-  if (payload.version !== 1 || !Array.isArray(payload.configs)) {
-    throw new Error('Unsupported model config store format')
-  }
-  return payload.configs
+  return readModelConfigSnapshotFromStore({ dataDir })
 }
 
 function loadLocalSessions(
