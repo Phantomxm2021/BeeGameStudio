@@ -24,7 +24,10 @@ import {
   OAuthTokensSchema,
 } from '@modelcontextprotocol/sdk/shared/auth.js'
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js'
-import axios from 'axios'
+import {
+  createPinnedUndiciDispatcher,
+  resolveApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { mkdir } from 'fs/promises'
 import { createServer, type Server } from 'http'
@@ -195,7 +198,107 @@ export async function normalizeOAuthErrorBody(
  * Used by ClaudeAuthProvider for metadata discovery and token refresh.
  * Prevents stale timeout signals from affecting auth operations.
  */
+type DispatcherRequestInit = RequestInit & { dispatcher?: unknown }
+
+export type OAuthOutboundTransportDependencies = {
+  baseFetch: typeof fetch
+  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
+  createPinnedUndiciDispatcher: typeof createPinnedUndiciDispatcher
+}
+
+const oauthOutboundTransportDependencies: OAuthOutboundTransportDependencies = {
+  baseFetch: fetch,
+  resolveApprovedOutboundTarget,
+  createPinnedUndiciDispatcher,
+}
+
+class OAuthResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    operation: string,
+  ) {
+    super(`HTTP ${status} ${operation}`)
+  }
+}
+
+export function createPolicyResolvingOAuthFetch(
+  dependencies: OAuthOutboundTransportDependencies = oauthOutboundTransportDependencies,
+): FetchLike {
+  return async (input: string | URL, init?: RequestInit) => {
+    let url: URL
+    try {
+      url = new URL(input.toString())
+    } catch {
+      return dependencies.baseFetch(input, init)
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return dependencies.baseFetch(input, init)
+    }
+
+    const target = await dependencies.resolveApprovedOutboundTarget(
+      url.toString(),
+    )
+    if (!target) throw new Error('Outbound URL is not permitted')
+
+    const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
+    try {
+      const response = await dependencies.baseFetch(target.url, {
+        ...init,
+        redirect: 'error',
+        dispatcher,
+      } as DispatcherRequestInit)
+      return closePinnedOAuthResponse(response, dispatcher)
+    } catch (error) {
+      await dispatcher.close()
+      throw error
+    }
+  }
+}
+
+function closePinnedOAuthResponse(
+  response: Response,
+  dispatcher: ReturnType<typeof createPinnedUndiciDispatcher>,
+): Response {
+  if (!response.body) {
+    void dispatcher.close()
+    return response
+  }
+
+  const reader = response.body.getReader()
+  let closed = false
+  const close = async () => {
+    if (closed) return
+    closed = true
+    await dispatcher.close()
+  }
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read()
+        if (chunk.done) {
+          controller.close()
+          await close()
+        } else {
+          controller.enqueue(chunk.value)
+        }
+      } catch (error) {
+        controller.error(error)
+        await close()
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason)
+      } finally {
+        await close()
+      }
+    },
+  })
+  return new Response(body, response)
+}
+
 function createAuthFetch(): FetchLike {
+  const pinnedFetch = createPolicyResolvingOAuthFetch()
   return async (url: string | URL, init?: RequestInit) => {
     const timeoutSignal = AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS)
     const isPost = init?.method?.toUpperCase() === 'POST'
@@ -203,7 +306,10 @@ function createAuthFetch(): FetchLike {
     // No existing signal - just use timeout
     if (!init?.signal) {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const response = await fetch(url, { ...init, signal: timeoutSignal })
+      const response = await pinnedFetch(url, {
+        ...init,
+        signal: timeoutSignal,
+      })
       return isPost ? normalizeOAuthErrorBody(response) : response
     }
 
@@ -226,7 +332,10 @@ function createAuthFetch(): FetchLike {
 
     try {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const response = await fetch(url, { ...init, signal: controller.signal })
+      const response = await pinnedFetch(url, {
+        ...init,
+        signal: controller.signal,
+      })
       cleanup()
       return isPost ? normalizeOAuthErrorBody(response) : response
     } catch (error) {
@@ -397,6 +506,7 @@ async function revokeToken({
   accessToken?: string
   authMethod?: 'client_secret_basic' | 'client_secret_post'
 }): Promise<void> {
+  const authFetch = createAuthFetch()
   const params = new URLSearchParams()
   params.set('token', token)
   params.set('token_type_hint', tokenTypeHint)
@@ -428,13 +538,19 @@ async function revokeToken({
   }
 
   try {
-    await axios.post(endpoint, params, { headers })
+    const response = await authFetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: params,
+    })
+    if (!response.ok)
+      throw new OAuthResponseError(response.status, 'revoking token')
     logMCPDebug(serverName, `Successfully revoked ${tokenTypeHint}`)
   } catch (error: unknown) {
     // Fallback for non-RFC-7009-compliant servers that require Bearer auth
     if (
-      axios.isAxiosError(error) &&
-      error.response?.status === 401 &&
+      error instanceof OAuthResponseError &&
+      error.status === 401 &&
       accessToken
     ) {
       logMCPDebug(
@@ -445,9 +561,13 @@ async function revokeToken({
       // switches to Bearer — clear any client creds from the body.
       params.delete('client_id')
       params.delete('client_secret')
-      await axios.post(endpoint, params, {
+      const retry = await authFetch(endpoint, {
+        method: 'POST',
         headers: { ...headers, Authorization: `Bearer ${accessToken}` },
+        body: params,
       })
+      if (!retry.ok)
+        throw new OAuthResponseError(retry.status, 'revoking token')
       logMCPDebug(
         serverName,
         `Successfully revoked ${tokenTypeHint} with Bearer auth`,
@@ -973,6 +1093,7 @@ export async function performMCPOAuthFlow(
       onAuthorizationUrl,
       options?.skipBrowserOpen,
     )
+    const authFetch = createAuthFetch()
 
     // Fetch and store OAuth metadata for scope information
     try {
@@ -1179,6 +1300,7 @@ export async function performMCPOAuthFlow(
             serverUrl: serverConfig.url,
             scope: wwwAuthParams.scope,
             resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
+            fetchFn: authFetch,
           })
           logMCPDebug(serverName, `Initial auth result: ${result}`)
 
@@ -1221,6 +1343,7 @@ export async function performMCPOAuthFlow(
       serverUrl: serverConfig.url,
       authorizationCode,
       resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
+      fetchFn: authFetch,
     })
 
     logMCPDebug(serverName, `Auth result: ${result}`)
@@ -1913,6 +2036,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       throw new Error(
         'Invalid authorization URL: must use http:// or https:// scheme',
       )
+    }
+    if (!(await resolveApprovedOutboundTarget(urlString))) {
+      throw new Error('Outbound URL is not permitted')
     }
 
     logMCPDebug(this.serverName, `Redirecting to authorization URL`)

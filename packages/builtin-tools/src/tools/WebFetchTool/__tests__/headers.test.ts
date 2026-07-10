@@ -93,6 +93,41 @@ afterAll(() => {
 })
 
 describe('WebFetch response headers', () => {
+  test('resolves the final upgraded HTTPS endpoint and port before fetching', async () => {
+    const resolvedUrls: string[] = []
+    const target = {
+      url: new URL('https://example.test:8443/path'),
+      addresses: ['93.184.216.34'],
+      lookup: (
+        _hostname: string,
+        _options: unknown,
+        callback: (
+          error: Error | null,
+          address: string,
+          family: 4 | 6,
+        ) => void,
+      ) => callback(null, '93.184.216.34', 4 as const),
+    }
+    const { clearWebFetchCache, getURLMarkdownContent } = await import(
+      '../utils'
+    )
+    clearWebFetchCache()
+
+    await getURLMarkdownContent(
+      'http://example.test:8443/path',
+      new AbortController(),
+      {
+        resolveOutboundTarget: async url => {
+          resolvedUrls.push(url)
+          return url === 'https://example.test:8443/path' ? target : null
+        },
+      },
+    )
+
+    expect(resolvedUrls).toEqual(['https://example.test:8443/path'])
+    expect(getCalls).toEqual(['https://example.test:8443/path'])
+  })
+
   test('reads redirect Location from AxiosHeaders-style get()', async () => {
     getMock = async () => {
       const error = new Error('redirect') as MockAxiosError

@@ -551,8 +551,13 @@ export function createBeeGamePinnedFetch(
   }
 
   const pinnedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = getFetchRequestUrl(input)
+    const protocol = getFetchRequestProtocol(requestUrl)
     const origin = getFetchRequestOrigin(input)
     const dispatcher = origin ? dispatchers.get(origin) : undefined
+    if ((protocol === 'http:' || protocol === 'https:') && !dispatcher) {
+      throw new Error('Outbound URL is not permitted')
+    }
     return dispatcher
       ? baseFetch(input, { ...init, dispatcher } as RequestInit)
       : baseFetch(input, init)
@@ -620,6 +625,14 @@ function getFetchRequestUrl(input: RequestInfo | URL): string {
 function getFetchRequestOrigin(input: RequestInfo | URL): string | undefined {
   try {
     return new URL(getFetchRequestUrl(input)).origin
+  } catch {
+    return undefined
+  }
+}
+
+function getFetchRequestProtocol(value: string): string | undefined {
+  try {
+    return new URL(value).protocol
   } catch {
     return undefined
   }

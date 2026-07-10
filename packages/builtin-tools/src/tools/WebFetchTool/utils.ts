@@ -380,7 +380,6 @@ export async function getURLMarkdownContent(
   if (!validateURL(url)) {
     throw new Error('Invalid URL')
   }
-  const approvedTarget = await resolveOutboundTargetOrThrow(url, requestOptions)
 
   let parsedUrl: URL
   let upgradedUrl = url
@@ -405,6 +404,13 @@ export async function getURLMarkdownContent(
   } catch (e) {
     logError(e)
   }
+
+  // Resolve and pin the endpoint after normalizing its scheme. Resolving the
+  // original HTTP URL would approve a different scheme/port than the request.
+  const approvedTarget = await resolveOutboundTargetOrThrow(
+    upgradedUrl,
+    requestOptions,
+  )
 
   // Validate before serving a cached entry; otherwise a cached response could
   // bypass the current outbound policy.

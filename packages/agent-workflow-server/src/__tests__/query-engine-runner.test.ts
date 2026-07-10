@@ -12,7 +12,7 @@ import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
 
-  test('routes an approved provider origin through its pinned dispatcher without another resolver lookup', async () => {
+  test('routes an approved provider origin through its pinned dispatcher and denies unapproved HTTP(S) origins', async () => {
     let pinnedLookupCalls = 0
     const providerUrl = 'https://provider.runtime.test/v1'
     const target: ApprovedOutboundTarget = {
@@ -37,10 +37,16 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
 
     await wrapped('https://provider.runtime.test/v1/chat/completions')
-    await wrapped('https://non-provider.runtime.test/health')
+    await expect(
+      wrapped('https://non-provider.runtime.test/health'),
+    ).rejects.toThrow('Outbound URL is not permitted')
+    await wrapped('file:///tmp/local-runtime-input')
 
     expect(calls[0]?.dispatcher).toBeDefined()
-    expect(calls[1]?.dispatcher).toBeUndefined()
+    expect(calls[1]).toEqual({
+      url: 'file:///tmp/local-runtime-input',
+      dispatcher: undefined,
+    })
     expect(pinnedLookupCalls).toBe(0)
   })
 
