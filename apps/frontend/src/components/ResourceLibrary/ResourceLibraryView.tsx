@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { strFromU8, unzipSync } from 'fflate';
 import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
@@ -112,7 +113,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   const importPack = async (file: File) => {
     try {
-      const parsed = JSON.parse(await file.text()) as ResourcePackSummary;
+      if (!file.name.toLowerCase().endsWith('.zip')) throw new Error('请导入资源压缩包（.zip）');
+      const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+      const manifestEntry = archive['pack.json'] || archive['manifest.json'];
+      if (!manifestEntry) throw new Error('压缩包根目录需要包含 pack.json');
+      const parsed = JSON.parse(strFromU8(manifestEntry)) as ResourcePackSummary;
       if (!parsed.id || !parsed.name || !parsed.dimension) throw new Error('Pack JSON 缺少 id、name 或 dimension');
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
       setError('');
@@ -123,7 +128,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   const importDroppedPacks = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
-      if (file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')) await importPack(file);
+      if (file.type === 'application/zip' || file.name.toLowerCase().endsWith('.zip')) await importPack(file);
     }
   };
 
@@ -166,8 +171,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   return (
     <section className={`relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100 ${isRootDragActive ? 'ring-2 ring-inset ring-orange-300/70' : ''}`} onDragEnter={(event) => { event.preventDefault(); setIsRootDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setIsRootDragActive(false); }} onDrop={(event) => { event.preventDefault(); setIsRootDragActive(false); void importDroppedPacks(event.dataTransfer.files); }}>
-      {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 JSON Pack 文件</div></div></div> : null}
-      <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
+      {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 ZIP 资源压缩包</div></div></div> : null}
+      <input ref={importInputRef} hidden type="file" accept="application/zip,.zip" onChange={(event) => {
         const file = event.target.files?.[0];
         if (file) void importPack(file);
         event.target.value = '';
