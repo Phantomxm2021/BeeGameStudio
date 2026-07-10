@@ -291,6 +291,7 @@ create table if not exists public.beegame_resource_packs (
   id text primary key,
   name text not null,
   style text not null,
+  primary_category text not null default 'mixed' check (primary_category in ('2d-art', '3d-assets', 'animation-rig', 'ui-kit', 'vfx', 'audio', 'fonts', 'world-scene', 'mixed')),
   game_types jsonb not null default '[]'::jsonb,
   dimension text not null check (dimension in ('2D', '3D', 'agnostic')),
   categories jsonb not null default '[]'::jsonb,
