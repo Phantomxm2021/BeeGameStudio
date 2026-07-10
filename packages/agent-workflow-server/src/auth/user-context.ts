@@ -20,6 +20,8 @@ export type BeeGamePermission =
   | 'skills.manage'
   | 'runtime_settings.manage'
   | 'secrets.manage'
+  | 'credits.admin'
+  | 'lifecycle.admin'
   | 'audit.read'
 
 export type BeeGameUserContext = {
@@ -389,6 +391,8 @@ const OWNER_PERMISSIONS = new Set<BeeGamePermission>([
   'mcp.manage',
   'runtime_settings.manage',
   'secrets.manage',
+  'credits.admin',
+  'lifecycle.admin',
   'audit.read',
 ])
 

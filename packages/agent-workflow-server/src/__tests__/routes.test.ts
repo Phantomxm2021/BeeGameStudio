@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createHmac } from 'node:crypto'
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
@@ -131,6 +131,43 @@ describe('agent workflow server routes', () => {
         'skills.manage',
       ],
     })
+  })
+
+  test('denies privileged routes before repository or audit access', async () => {
+    const cases = [
+      ['/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, ['owner']],
+      ['/api/web-tools', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' }, ['owner']],
+      ['/api/runtime-settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' }, ['owner']],
+      ['/api/mcp-servers', undefined, ['owner']],
+      ['/api/admin/credits/ledger', undefined, ['owner']],
+      ['/api/admin/projects/lifecycle', undefined, ['owner']],
+      ['/api/projects/missing-project', { method: 'DELETE' }, ['owner']],
+      ['/api/beegame-sessions/missing-session/package', undefined, ['viewer', 'developer', 'owner']],
+      ['/api/projects/missing-project/assets/missing-slot/upload', { method: 'POST' }, ['developer', 'owner']],
+    ] as const
+
+    for (const [path, init, allowedRoles] of cases) {
+      for (const role of ['viewer', 'developer', 'owner'] as const) {
+        const root = await mkdtemp(join(tmpdir(), `beegame-permission-${role}-`))
+        try {
+          const routeApp = createAgentWorkflowApp({
+            defaultWorkspacePath: root,
+            currentUser: { id: `${role}-user`, role },
+            skillsConfig: false,
+          })
+          const response = await routeApp.request(path, init)
+          if ((allowedRoles as readonly string[]).includes(role)) {
+            expect(response.status, `${path}/${role}`).not.toBe(403)
+          } else {
+            expect(response.status, `${path}/${role}`).toBe(403)
+            expect(await response.json()).toEqual({ error: 'Forbidden' })
+            expect(await readdir(root)).toEqual([])
+          }
+        } finally {
+          await rm(root, { recursive: true, force: true })
+        }
+      }
+    }
   })
 
   test('does not run account deletion from the local dev or offline runtime host', async () => {
@@ -1539,7 +1576,7 @@ describe('agent workflow server routes', () => {
       currentUser: {
         id: 'viewer-user',
         role: 'viewer',
-        permissions: ['project.read'],
+        permissions: ['project.read', 'skills.manage'],
       },
       skillsConfig: {
         apiBaseUrl: 'http://skills.test',
@@ -1637,8 +1674,8 @@ describe('agent workflow server routes', () => {
       '/api/projects/project_developer_allowed',
       { method: 'DELETE' },
     )
-    expect(developerDeleteRes.status).toBe(200)
-    expect(await developerDeleteRes.json()).toEqual({ deleted: true })
+    expect(developerDeleteRes.status).toBe(403)
+    expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
 
     const viewerDirectoriesRes = await viewerApp.request(
       '/api/filesystem/directories',

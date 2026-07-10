@@ -247,11 +247,30 @@ export type AgentWorkflowAppOptions = {
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
 }
 
+export const ROUTE_PERMISSION = {
+  modelConfig: 'model_config.manage',
+  webTools: 'secrets.manage',
+  runtimeSettings: 'runtime_settings.manage',
+  mcp: 'mcp.manage',
+  userSkills: 'skills.manage',
+  creditsAdmin: 'credits.admin',
+  lifecycleAdmin: 'lifecycle.admin',
+  projectDelete: 'project.delete',
+  projectExport: 'project.export',
+  assetIntegration: 'assets.integrate',
+} as const satisfies Record<string, BeeGamePermission>
+
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
+  app.onError((error, c) => {
+    if (isPrivilegedConfigurationPath(c.req.path)) {
+      return privilegedRouteError(c, c.req.path, error)
+    }
+    return c.json({ error: toErrorMessage(error) }, 500)
+  })
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
     ...options.outboundTargetPolicyOptions,
     allowedHosts: options.outboundTargetPolicyOptions?.allowedHosts ?? readAllowedOutboundHosts(),
@@ -437,14 +456,14 @@ export function createAgentWorkflowApp(
 
   app.get('/api/admin/projects/lifecycle', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'audit.read')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.getProjectLifecycleOverview(c.req.raw, user))
   })
 
   app.get('/api/admin/projects/retention/plan', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'audit.read')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
     return c.json(toProjectRetentionResponse(
       await beeGameDeployments.applyRetention({ dryRun: true }),
@@ -453,7 +472,7 @@ export function createAgentWorkflowApp(
 
   app.post('/api/admin/projects/retention/run', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'audit.read')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
     const result = toProjectRetentionResponse(
       await beeGameDeployments.applyRetention({ dryRun: false }),
@@ -473,7 +492,7 @@ export function createAgentWorkflowApp(
 
   app.get('/api/admin/credits/ledger', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'audit.read')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.creditsAdmin)
     if (forbidden) return c.json(forbidden, 403)
     const kind = c.req.query('kind')?.trim()
     if (kind && !isCreditLedgerKind(kind)) {
@@ -564,6 +583,8 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/model-configs', async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.modelConfig)
+    if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.listModelConfigs(
       c.req.raw,
       getCurrentUser(c.req.raw),
@@ -572,9 +593,8 @@ export function createAgentWorkflowApp(
 
   app.post('/api/model-configs', async c => {
     const user = getCurrentUser(c.req.raw)
-    if (!hasBeeGamePermission(user, 'model_config.manage')) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.modelConfig)
+    if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
@@ -607,9 +627,8 @@ export function createAgentWorkflowApp(
 
   app.patch('/api/model-configs/:id', async c => {
     const user = getCurrentUser(c.req.raw)
-    if (!hasBeeGamePermission(user, 'model_config.manage')) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.modelConfig)
+    if (forbidden) return c.json(forbidden, 403)
     try {
       const body = await readJson(c.req.raw)
       if (!await hasPermittedOutboundUrl(body.baseUrl)) {
@@ -643,15 +662,14 @@ export function createAgentWorkflowApp(
       })
       return c.json(updated)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return privilegedRouteError(c, 'model-config.update', err)
     }
   })
 
   app.delete('/api/model-configs/:id', async c => {
     const user = getCurrentUser(c.req.raw)
-    if (!hasBeeGamePermission(user, 'model_config.manage')) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.modelConfig)
+    if (forbidden) return c.json(forbidden, 403)
     const deleted = await dashboardRepository.deleteModelConfig(
       c.req.raw,
       user,
@@ -670,14 +688,14 @@ export function createAgentWorkflowApp(
 
   app.get('/api/web-tools', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'secrets.manage')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.webTools)
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.loadWebTools(c.req.raw, user))
   })
 
   app.put('/api/web-tools', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'secrets.manage')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.webTools)
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     if (!await hasPermittedOutboundUrl(body.tavilyEndpointUrl) ||
@@ -727,14 +745,14 @@ export function createAgentWorkflowApp(
 
   app.get('/api/runtime-settings', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'runtime_settings.manage')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.runtimeSettings)
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.loadRuntimeSettings(c.req.raw, user))
   })
 
   app.put('/api/runtime-settings', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'runtime_settings.manage')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.runtimeSettings)
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const input = {
@@ -780,7 +798,7 @@ export function createAgentWorkflowApp(
 
   app.get('/api/mcp-servers', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'mcp.manage')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.mcp)
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.listMcpServers(c.req.raw, user))
   })
@@ -897,10 +915,14 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/user-skills', async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
+    if (forbidden) return c.json(forbidden, 403)
     return proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills')
   })
 
   app.post('/api/user-skills/import', async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
+    if (forbidden) return c.json(forbidden, 403)
     try {
       return await proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills/import')
     } catch (err) {
@@ -917,6 +939,8 @@ export function createAgentWorkflowApp(
   })
 
   app.put('/api/user-skills/:id/enabled', async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
+    if (forbidden) return c.json(forbidden, 403)
     return proxyBeeGameSkillsRequest(
       skillsConfig,
       c.req.raw,
@@ -925,6 +949,8 @@ export function createAgentWorkflowApp(
   })
 
   app.delete('/api/user-skills/:id', async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
+    if (forbidden) return c.json(forbidden, 403)
     return proxyBeeGameSkillsRequest(
       skillsConfig,
       c.req.raw,
@@ -1415,7 +1441,7 @@ export function createAgentWorkflowApp(
 
   app.post('/api/projects/:id/assets/:slotId/upload', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
     const form = await c.req.raw.formData()
     const file = form.get('file')
@@ -1460,7 +1486,7 @@ export function createAgentWorkflowApp(
 
   app.delete('/api/projects/:id', async c => {
     const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.read')
+    const forbidden = requirePermission(user, ROUTE_PERMISSION.projectDelete)
     if (forbidden) return c.json(forbidden, 403)
     const project = await getOwnedProjectMetadata(
       c.req.raw,
@@ -2052,6 +2078,29 @@ function requirePermission(
   return hasBeeGamePermission(user, permission)
     ? undefined
     : { error: 'Forbidden' }
+}
+
+function privilegedRouteError(
+  c: Context,
+  route: string,
+  error: unknown,
+): Response {
+  const traceId = randomUUID()
+  console.warn('[BeeGame] privileged route failed', {
+    traceId,
+    route,
+    cause: error instanceof Error ? error.name : 'unknown_error',
+  })
+  return c.json({ error: 'Invalid configuration', traceId }, 400)
+}
+
+function isPrivilegedConfigurationPath(path: string): boolean {
+  return [
+    '/api/model-configs',
+    '/api/web-tools',
+    '/api/runtime-settings',
+    '/api/mcp-servers',
+  ].some(prefix => path === prefix || path.startsWith(`${prefix}/`))
 }
 
 function toProjectRetentionResponse(result: BeeGameDeploymentRetentionResult) {
@@ -3965,7 +4014,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
-    const forbidden = check(c.req.raw, 'assets.upload')
+    const forbidden = check(c.req.raw, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
@@ -4002,7 +4051,7 @@ function registerBeeGameSessionRoutes(
   })
 
   app.get(`${basePath}/:id/package`, async c => {
-    const forbidden = check(c.req.raw, 'project.export')
+    const forbidden = check(c.req.raw, ROUTE_PERMISSION.projectExport)
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)

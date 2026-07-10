@@ -55,6 +55,25 @@ function makeApp() {
 }
 
 describe('BeeGame skill import routes', () => {
+  test('checks skills permission before any repository call', async () => {
+    let repositoryCalls = 0
+    const app = createBeeGameSkillsApp({
+      requireRequestUser: false,
+      resolveRequestUser: async () => ({ id: 'viewer', role: 'viewer' }),
+      getCurrentUser: () => ({ id: 'viewer', role: 'viewer' }),
+      hasPermission: () => false,
+      repository: {
+        listUserSkills: async () => { repositoryCalls += 1; return [] },
+        listEnabledUserSkills: async () => { repositoryCalls += 1; return [] },
+        importUserSkill: async () => { repositoryCalls += 1; throw new Error('must not run') },
+        updateUserSkillEnabled: async () => { repositoryCalls += 1; throw new Error('must not run') },
+        deleteUserSkill: async () => { repositoryCalls += 1; return false },
+      },
+    })
+    const response = await app.request('/api/user-skills')
+    expect(response.status).toBe(403)
+    expect(repositoryCalls).toBe(0)
+  })
   test('rejects traversal before repository import', async () => {
     const app = makeApp()
     const body = new FormData()

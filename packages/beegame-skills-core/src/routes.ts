@@ -13,9 +13,13 @@ import { readRequestBytes, RequestBodyLimitError } from './request-body'
 export type BeeGameSkillsRouteDeps = {
   repository: BeeGameSkillsRepository
   getCurrentUser: (request: Request) => BeeGameSkillsUserContext
-  hasPermission: (user: BeeGameSkillsUserContext, permission: 'skills.manage') => boolean
+  hasPermission: (user: BeeGameSkillsUserContext, permission: typeof SKILLS_ROUTE_PERMISSION.userSkills) => boolean
   serviceToken?: string
 }
+
+export const SKILLS_ROUTE_PERMISSION = {
+  userSkills: 'skills.manage',
+} as const
 
 export function registerBeeGameSkillsRoutes(
   app: Hono,
@@ -112,9 +116,9 @@ function requireSkillsPermission(
   user: BeeGameSkillsUserContext,
   deps: BeeGameSkillsRouteDeps,
 ): { error: string; message: string } | null {
-  return deps.hasPermission(user, 'skills.manage')
+  return deps.hasPermission(user, SKILLS_ROUTE_PERMISSION.userSkills)
     ? null
-    : { error: 'Forbidden', message: 'missing permission: skills.manage' }
+    : { error: 'Forbidden', message: `missing permission: ${SKILLS_ROUTE_PERMISSION.userSkills}` }
 }
 
 function requireServiceToken(
