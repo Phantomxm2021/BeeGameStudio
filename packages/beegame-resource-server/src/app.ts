@@ -17,6 +17,7 @@ export type BeeGameResourceServerAppOptions = {
   currentUserResolver?: ResourceUserResolver
   corsOrigin?: string
   importResourcePack?: (request: Request) => Promise<unknown>
+  updateResourcePack?: (packId: string, body: Record<string, unknown>) => Promise<unknown>
 }
 
 export function createBeeGameResourceServerApp(
@@ -37,6 +38,12 @@ export function createBeeGameResourceServerApp(
           if (error instanceof ResourceImportError) return corsResponse(jsonError(error.status, error.code, error.message), options.corsOrigin)
           return corsResponse(jsonError(500, 'import_failed', error instanceof Error ? error.message : 'Resource import failed'), options.corsOrigin)
         }
+      }
+      const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
+      if (request.method === 'PATCH' && patchMatch) {
+        if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
+        const body = await request.json() as Record<string, unknown>
+        return corsResponse(Response.json({ pack: await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body) }), options.corsOrigin)
       }
       return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
     },

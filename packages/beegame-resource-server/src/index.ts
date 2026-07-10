@@ -14,6 +14,12 @@ if (import.meta.main) {
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
     importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey }) : undefined,
+    updateResourcePack: baseUrl && serviceRoleKey ? async (packId, body) => {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(body) })
+      if (!response.ok) throw new Error(`Resource Pack update failed (${response.status})`)
+      const rows = await response.json() as unknown[]
+      return rows[0]
+    } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)

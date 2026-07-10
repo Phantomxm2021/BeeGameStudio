@@ -9,7 +9,7 @@ import {
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack'
 >;
 
 type ResourceLibraryViewProps = {
@@ -145,8 +145,10 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         onElement={setSelectedElement}
         onEditPack={(name) => {
           const updated = { ...selectedPack, name };
-          setSelectedPack(updated);
-          setPacks((current) => current.map((item) => item.id === updated.id ? { ...item, name } : item));
+          void apiClient.updatePack(selectedPack.id, { name }).then((saved) => {
+            setSelectedPack(saved);
+            setPacks((current) => current.map((item) => item.id === saved.id ? saved : item));
+          }).catch((err) => setError(err instanceof Error ? err.message : 'Pack 更新失败'));
         }}
         onAddFile={() => {
           const name = window.prompt('文件名', 'new-asset.png')?.trim();
