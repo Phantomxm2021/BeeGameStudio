@@ -1,5 +1,5 @@
 import { strFromU8, unzipSync } from 'fflate'
-import type { ResourceElement, ResourcePack } from '@bee-game-studio/beegame-resource-core'
+import { RESOURCE_CATEGORIES, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 
 type ImportOptions = {
   baseUrl: string
@@ -75,7 +75,17 @@ function toPack(id: string, filename: string, elements: ResourceElement[], paths
   const has3d = paths.some((path) => /\.(fbx|glb|gltf|obj|blend)$/i.test(path)); const has2d = paths.some((path) => /\.(png|jpe?g|svg|webp)$/i.test(path))
   return { id, name: manifest?.name || filename.replace(/\.zip$/i, ''), style: manifest?.style || 'unassigned', gameTypes: manifest?.gameTypes || ['unassigned'], dimension: manifest?.dimension || (has3d && !has2d ? '3D' : has2d && !has3d ? '2D' : 'agnostic'), categories: manifest?.categories || [...new Set(elements.map((element) => element.category))] as ResourcePack['categories'], license: manifest?.license || 'unassigned', version: manifest?.version || '0.1.0', status: manifest?.status || 'draft', coverPath: manifest?.coverPath || previewPath, }
 }
-function toElement(packId: string, path: string, index: number): ResourceElement { const category = path.split('/')[0] || 'assets'; const ext = path.split('.').pop()?.toLowerCase() || ''; const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext) ? 'model' : ['mp3', 'wav', 'ogg'].includes(ext) ? 'audio' : 'image'; return { id: `${packId}-${index}`, packId, name: path.split('/').pop() || path, path, category: category as ResourceElement['category'], kind, specs: {}, dependencies: [], status: 'ready' } }
+function toElement(packId: string, path: string, index: number): ResourceElement { const ext = path.split('.').pop()?.toLowerCase() || ''; const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext) ? 'model' : ['mp3', 'wav', 'ogg'].includes(ext) ? 'audio' : 'image'; return { id: `${packId}-${index}`, packId, name: path.split('/').pop() || path, path, category: inferCategory(path, ext), kind, specs: {}, dependencies: [], status: 'ready' } }
+function inferCategory(path: string, ext: string): ResourceElement['category'] {
+  const explicit = path.split('/').find((part) => (RESOURCE_CATEGORIES as readonly string[]).includes(part))
+  if (explicit) return explicit as ResourceElement['category']
+  if (['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext)) return 'models'
+  if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audio'
+  if (['ttf', 'otf', 'woff', 'woff2'].includes(ext)) return 'fonts'
+  if (['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif'].includes(ext)) return 'textures'
+  if (['mp4', 'webm'].includes(ext)) return 'vfx'
+  return 'environment'
+}
 async function postJson(url: string, body: unknown, fetchImpl: typeof fetch, key: string): Promise<void> { const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json', prefer: 'return=minimal' }, body: JSON.stringify(body) }); if (!response.ok) { const detail = await response.text().catch(() => ''); throw new Error(`Metadata persistence failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ''}`) } }
 
 async function uploadWithRetry(upload: () => Promise<Response>, attempts = 6): Promise<Response> {

@@ -89,8 +89,10 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     try {
       const detail = await apiClient.getPack(pack.id);
       const nextFolders = await apiClient.listFolders(pack.id);
-      const category = detail.categories?.[0];
-      const nextElements = await apiClient.listElements(pack.id, category);
+      // The Pack category list may contain legacy folder names from ZIP imports.
+      // Initial workspace loading must not treat those values as a validated category filter.
+      const nextElements = await apiClient.listElements(pack.id);
+      const category = detail.categories?.find((value) => Object.prototype.hasOwnProperty.call(categoryLabels, value)) || nextElements[0]?.category;
       setSelectedPack(detail);
       setFolders(nextFolders);
       setActiveCategory(category);
