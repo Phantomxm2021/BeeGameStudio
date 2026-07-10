@@ -128,6 +128,17 @@ export function bindBeeGameLibraryResource(
   return { manifest: { ...manifest, slots }, slot }
 }
 
+export async function bindBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+  binding: BeeGameResourceBinding,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const result = bindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId, binding)
+  await writeAssetManifest(root, result.manifest)
+  return result
+}
+
 export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid asset manifest')
