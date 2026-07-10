@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } from 'lucide-react';
+import { ChevronLeft, File, Folder, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   type ResourceElement,
@@ -10,13 +10,15 @@ import {
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
+import { ResourcePreview } from './ResourcePreview';
+import type { ModelMetrics } from './ModelPreview';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder'
-  | 'updateElement'
+  | 'updateElement' | 'getElementResourceUrl'
   | 'publishPack'
 >;
 
@@ -128,7 +130,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       setActiveFolderPath(undefined);
       setElements(nextElements);
       setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]);
-      setSelectedElement(nextElements[0] || null);
+      setSelectedElement(null);
     } catch (err) {
       if (session === packSessionRef.current) setError(err instanceof Error ? err.message : '资源包加载失败');
     } finally {
@@ -144,26 +146,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       void openPack(pack);
     }
   }, [initialPackId, loading, packs, selectedPack]);
-
-  const selectCategory = async (category?: string, folderPath?: string) => {
-    if (!selectedPack) return;
-    const session = packSessionRef.current;
-    const request = ++categoryRequestRef.current;
-    setActiveCategory(category);
-    setActiveFolderPath(folderPath);
-    setLoading(true);
-    try {
-      const nextElements = await apiClient.listElements(selectedPack.id, category, folderPath);
-      if (session !== packSessionRef.current || request !== categoryRequestRef.current) return;
-      setElements(nextElements);
-      setLoadedElementCategories((current) => [...new Set([...current, ...nextElements.map((element) => element.category)])]);
-      setSelectedElement(nextElements[0] || null);
-    } catch (err) {
-      if (session === packSessionRef.current && request === categoryRequestRef.current) setError(err instanceof Error ? err.message : '元素加载失败');
-    } finally {
-      if (session === packSessionRef.current && request === categoryRequestRef.current) setLoading(false);
-    }
-  };
 
   const visiblePacks = useMemo(() => packs.filter((pack) => {
     const matchesQuery = !query.trim() || [pack.name, pack.style, ...(pack.gameTypes || [])].join(' ').toLowerCase().includes(query.trim().toLowerCase());
@@ -219,13 +201,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       <>
       {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => apiClient.uploadPackCover(selectedPack.id, file)} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setEditDialogOpen(false); setLoading(false); }} /> : null}
       <PackBrowser
+        apiClient={apiClient}
         pack={selectedPack}
         isZh={isZh}
         elements={elements}
         loadedElementCategories={loadedElementCategories}
         selectedElement={selectedElement}
-        activeCategory={activeCategory}
-        activeFolderPath={activeFolderPath}
         loading={loading}
         error={error}
         onBack={() => {
@@ -238,7 +219,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
           setFolders([]);
           setLoading(false);
         }}
-        onCategory={selectCategory}
         onElement={setSelectedElement}
         onEditPack={() => setEditDialogOpen(true)}
         onAddFiles={(files) => void uploadElements(files)}
@@ -388,17 +368,15 @@ function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boo
 }
 
 function PackBrowser({
+  apiClient,
   pack,
   isZh,
   elements,
   loadedElementCategories,
   selectedElement,
-  activeCategory,
-  activeFolderPath,
   loading,
   error,
   onBack,
-  onCategory,
   onElement,
   onEditPack,
   onAddFiles,
@@ -409,17 +387,15 @@ function PackBrowser({
   onPublish,
   onUpdateElement,
 }: {
+  apiClient: ResourceLibraryApi;
   pack: ResourcePackSummary;
   isZh: boolean;
   elements: ResourceElement[];
   loadedElementCategories: string[];
   selectedElement: ResourceElement | null;
-  activeCategory?: string;
   loading: boolean;
   error: string;
   onBack: () => void;
-  onCategory: (category?: string, folderPath?: string) => void;
-  activeFolderPath?: string;
   onElement: (element: ResourceElement) => void;
   onEditPack: () => void;
   onAddFiles: (files: File[]) => void;
@@ -434,9 +410,39 @@ function PackBrowser({
     () => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
     [elements, loadedElementCategories],
   );
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(['root']));
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [resourceUrl, setResourceUrl] = useState<string>();
+  const toggleExpanded = (path: string) => setExpandedPaths(current => {
+    const next = new Set(current);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    return next;
+  });
+  useEffect(() => { setInspectorOpen(false); }, [selectedElement?.id]);
+  useEffect(() => {
+    let active = true;
+    setResourceUrl(undefined);
+    if (!selectedElement) return () => { active = false; };
+    void apiClient.getElementResourceUrl(pack.id, selectedElement.id).then(url => { if (active) setResourceUrl(url); }).catch(() => { if (active) setResourceUrl(undefined); });
+    return () => { active = false; };
+  }, [apiClient, pack.id, selectedElement]);
+  const saveMetrics = useCallback(async (metrics: ModelMetrics) => {
+    if (!selectedElement) return;
+    const nextMetrics: Record<string, string | number | boolean | null> = {
+      triangles: metrics.triangles,
+      vertices: metrics.vertices,
+      materialCount: metrics.materialCount,
+      boundsWidth: metrics.bounds.width,
+      boundsHeight: metrics.bounds.height,
+      boundsDepth: metrics.bounds.depth,
+    };
+    const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value);
+    if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics } });
+  }, [onUpdateElement, selectedElement]);
+  const filesFor = (folder: string) => elements.filter(element => element.category === folder || element.path.startsWith(`${folder}/`));
   return (
-    <section className="flex min-h-full flex-col bg-zinc-950 px-5 py-4 text-zinc-100">
-      <div className="mb-3 flex min-h-12 items-center justify-between border-b border-white/10 pb-3">
+    <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+      <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-white/10 px-5">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -463,30 +469,28 @@ function PackBrowser({
             <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
           </label>
         </div>
-      </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)]">
-        <aside className="border-r border-white/10 py-3 pr-3">
+      </header>
+      <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
+        <aside className="min-h-0 overflow-y-auto border-r border-white/10 py-3 pr-3">
           <div className="mb-2 flex items-center justify-between px-2"><div className="type-caption-1 text-zinc-500">Pack 文件</div><button type="button" aria-label="新建文件夹" className="type-caption-2 text-zinc-500 hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}>＋</button></div>
           <TreeRow
             icon={<Folder className="h-4 w-4 text-orange-300" />}
             label={pack.name}
             count={pack.elementCount}
-            active
+            expanded={expandedPaths.has('root')}
+            onClick={() => toggleExpanded('root')}
           />
-          <div className="mt-1">
+          {expandedPaths.has('root') ? <div className="mt-1">
             {folders.length > 0 ? folders.map((folder) => (
-              <TreeRow key={folder.id} icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.path} active={folder.path === activeFolderPath} onClick={() => onCategory(undefined, folder.path)} />
-            )) : categories.map((category) => (
-              <div key={category}>
+              <div key={folder.id}>
                 <TreeRow
                   icon={<Folder className="h-4 w-4 text-orange-300" />}
-                  label={categoryLabels[category] || category}
-                  count={category === activeCategory ? elements.length : undefined}
-                  active={category === activeCategory}
-                  onClick={() => onCategory(category)}
+                  label={folder.path}
+                  expanded={expandedPaths.has(folder.path)}
+                  onClick={() => toggleExpanded(folder.path)}
                 />
-                {category === activeCategory
-                  ? elements.map((element) => (
+                {expandedPaths.has(folder.path)
+                  ? filesFor(folder.path).map((element) => (
                       <TreeRow
                         key={element.id}
                         icon={<File className="h-4 w-4 text-zinc-600" />}
@@ -498,42 +502,31 @@ function PackBrowser({
                     ))
                   : null}
               </div>
+            )) : categories.map((category) => (
+              <div key={category}>
+                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={filesFor(category).length} expanded={expandedPaths.has(category)} onClick={() => toggleExpanded(category)} />
+                {expandedPaths.has(category) ? filesFor(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
+              </div>
             ))}
-          </div>
+          </div> : null}
         </aside>
-        <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
-          {uploadStatus ? <div role="status" className="mb-4 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
-          <div className="mb-3 flex items-center justify-between">
-            <div className="type-caption-2 text-zinc-500">
-              {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
-              <span className="text-zinc-200">
-                {activeFolderPath || categoryLabels[activeCategory || ''] || activeCategory}
-              </span>
-            </div>
-            <div className="flex gap-1">
-              <button type="button" className="glass-icon-button h-8 w-8">
-                <Grid2X2 className="h-4 w-4" />
-              </button>
-              <button type="button" className="glass-icon-button h-8 w-8">
-                <List className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+        <main className="relative min-h-0 min-w-0 overflow-hidden p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
+          {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
             <div role="alert" className="type-callout mb-4 rounded-xl bg-red-400/10 p-3 text-red-200">
               {error}
             </div>
           ) : null}
-          <div className="grid min-h-[min(560px,calc(100vh-13rem))] place-items-center rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-black p-4">
+          <div className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-black p-4">
             {selectedElement ? (
-              <Preview element={selectedElement} pack={pack} onSave={onUpdateElement} />
+              resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
               <div className="type-footnote text-zinc-600">
-                {loading ? '正在加载…' : '请选择一个元素'}
+                {loading ? '正在加载…' : '尚未选择文件'}
               </div>
             )}
           </div>
-        </div>
+        </main>
       </div>
     </section>
   );
@@ -544,6 +537,7 @@ function TreeRow({
   label,
   count,
   active,
+  expanded,
   onClick,
   ariaLabel,
 }: {
@@ -551,6 +545,7 @@ function TreeRow({
   label: string;
   count?: number;
   active?: boolean;
+  expanded?: boolean;
   onClick?: () => void;
   ariaLabel?: string;
 }) {
@@ -559,37 +554,59 @@ function TreeRow({
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
+      aria-expanded={expanded}
       className={`type-caption-2 flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left ${active ? 'bg-orange-400/10 text-zinc-100' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
     >
-      {icon}
+      <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
       {count === undefined ? null : <span className="ml-auto text-zinc-600">{count}</span>}
     </button>
   );
 }
 
-function Preview({ element, pack, onSave }: { element: ResourceElement; pack: ResourcePackSummary; onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void> }) {
+function Preview({ element, pack, url, inspectorOpen, onOpenInspector, onCloseInspector, onMetrics, onSave }: {
+  element: ResourceElement;
+  pack: ResourcePackSummary;
+  url: string;
+  inspectorOpen: boolean;
+  onOpenInspector: () => void;
+  onCloseInspector: () => void;
+  onMetrics: (metrics: ModelMetrics) => void;
+  onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
+}) {
   return (
-    <div className="relative h-full w-full rounded-2xl bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
-      <div className="absolute left-4 top-4 rounded-lg border border-white/10 bg-black/40 px-2 py-1 type-caption-2 text-zinc-400">
-        预览 · {element.kind}
-      </div>
-      <div className="grid h-full place-items-center text-8xl">
-        {element.preview?.kind === 'image' ? '🧙' : <File className="h-20 w-20 text-zinc-500" />}
-      </div>
-      <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} />
+    <div className="relative h-full w-full min-h-0 rounded-2xl bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
+      <FileInfoOverlay element={element} />
+      {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="glass-icon-button absolute right-4 top-4 z-10 px-3 py-1.5 type-caption-2">Info</button> : null}
+      <div className="grid h-full min-h-0 place-items-center p-4"><ResourcePreview element={element} url={url} onMetrics={onMetrics} /></div>
+      {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
   );
+}
+
+function FileInfoOverlay({ element }: { element: ResourceElement }) {
+  const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.includes('.') ? element.name.split('.').pop() : '—';
+  const size = typeof element.specs.size === 'number' ? formatFileSize(element.specs.size) : '—';
+  const triangles = typeof element.specs.triangles === 'number' ? String(element.specs.triangles) : '—';
+  return <div className="absolute left-4 top-4 z-10 rounded-lg border border-white/10 bg-black/40 px-3 py-2 type-caption-2 text-zinc-300"><div>{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div><div>三角形：{triangles}</div></div>;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ResourceInspectorOverlay({
   element,
   pack,
   onSave,
+  onClose,
 }: {
   element: ResourceElement;
   pack: ResourcePackSummary;
   onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
+  onClose: () => void;
 }) {
   const [kind, setKind] = useState(element.kind);
   const [category, setCategory] = useState(element.category);
@@ -602,7 +619,7 @@ function ResourceInspectorOverlay({
     <aside
       role="complementary"
       aria-label="元素属性"
-      className="absolute bottom-3 right-3 max-h-[calc(100%-1.5rem)] w-64 overflow-y-auto rounded-xl border border-white/15 bg-zinc-950/90 p-3 shadow-2xl backdrop-blur-2xl"
+      className="absolute bottom-3 right-3 max-h-[calc(100%-1.5rem)] w-64 rounded-xl border border-white/15 bg-zinc-950/90 p-3 shadow-2xl backdrop-blur-2xl"
     >
       <div className="mb-3 flex items-start justify-between">
         <div>
@@ -617,7 +634,7 @@ function ResourceInspectorOverlay({
             {categoryLabels[element.category] || element.category} / {element.kind}
           </div>
         </div>
-        <X className="h-4 w-4 text-zinc-600" />
+        <button type="button" aria-label="关闭元素信息" onClick={onClose} className="glass-icon-button h-7 w-7"><X className="h-4 w-4 text-zinc-600" /></button>
       </div>
       <div className="space-y-2 border-t border-white/10 pt-3">
         <Property label="继承 Pack" value={pack.name} />
@@ -634,7 +651,7 @@ function ResourceInspectorOverlay({
             .join(' · ')}
         />
       </div>
-      <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存属性'}</button>
+      <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存更改'}</button>
     </aside>
   );
 }

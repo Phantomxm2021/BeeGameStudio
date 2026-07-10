@@ -38,6 +38,7 @@ const api = {
   listFolders: async () => [],
   createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
   updateElement: async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes }),
+  getElementResourceUrl: async () => 'https://signed.example/character-idle.png',
   publishPack: async () => ({ ...pack, status: 'published' }),
   listPacks: async () => [pack],
   getPack: async () => pack,
@@ -69,20 +70,54 @@ describe('ResourceLibraryView', () => {
     expect(fileTree).not.toBeNull();
     expect(within(fileTree!).getByText('模型')).toBeInTheDocument();
     expect(within(fileTree!).queryByText('贴图')).not.toBeInTheDocument();
+    await user.click(within(fileTree!).getByText('模型'));
     expect(screen.getByRole('button', { name: '文件 Character Idle' })).toBeInTheDocument();
   });
 
-  test('shows the element properties as an overlay in the preview area', async () => {
+  test('keeps folders as expand controls and selects files for the preview workspace', async () => {
     const user = userEvent.setup();
     render(<ResourceLibraryView apiClient={api} />);
     await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    expect(screen.getByText('尚未选择文件')).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: '元素属性' })).not.toBeInTheDocument();
+
+    const explorer = screen.getByText('Pack 文件').closest('aside');
+    expect(explorer).not.toBeNull();
+    await user.click(within(explorer!).getByText('模型'));
+    expect(screen.getByText('尚未选择文件')).toBeInTheDocument();
+
     await user.click(await screen.findByRole('button', { name: '文件 Character Idle' }));
-    await waitFor(() =>
-      expect(screen.getByRole('complementary', { name: '元素属性' })).toBeInTheDocument()
-    );
+    expect(screen.queryByText('尚未选择文件')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '显示元素信息' })).toBeInTheDocument();
+  });
+
+  test('opens the inspector only from the Info control and restores it after close', async () => {
+    const user = userEvent.setup();
+    render(<ResourceLibraryView apiClient={api} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    await user.click(screen.getByText('模型'));
+    await user.click(await screen.findByRole('button', { name: '文件 Character Idle' }));
+    await user.click(screen.getByRole('button', { name: '显示元素信息' }));
+    await waitFor(() => expect(screen.getByRole('complementary', { name: '元素属性' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '显示元素信息' })).not.toBeInTheDocument();
     const inspector = screen.getByRole('complementary', { name: '元素属性' });
     expect(within(inspector).getByText('Stylized')).toBeInTheDocument();
     expect(within(inspector).getByText('2D', { selector: 'span' })).toBeInTheDocument();
+    expect(within(inspector).getByRole('button', { name: '保存更改' })).toBeInTheDocument();
+    await user.click(within(inspector).getByRole('button', { name: '关闭元素信息' }));
+    expect(screen.getByRole('button', { name: '显示元素信息' })).toBeInTheDocument();
+  });
+
+  test('uses the fixed explorer workspace without preview navigation controls', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ResourceLibraryView apiClient={api} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const workspace = container.querySelector('section.flex.h-\\[calc\\(100vh-3\\.5rem\\)\\].overflow-hidden');
+    expect(workspace).not.toBeNull();
+    const explorer = screen.getByText('Pack 文件').closest('aside');
+    expect(explorer?.className).toContain('overflow-y-auto');
+    expect(screen.queryByRole('button', { name: /grid|list/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Example Pack.*模型/)).not.toBeInTheDocument();
   });
 
   test('derives tree categories from loaded elements when Pack metadata is empty', async () => {
@@ -98,7 +133,7 @@ describe('ResourceLibraryView', () => {
     expect(within(fileTree!).getByText('材质')).toBeInTheDocument();
     await user.click(within(fileTree!).getByText('材质'));
     await waitFor(() => expect(within(fileTree!).getByText('模型')).toBeInTheDocument());
-    expect(listElements).toHaveBeenLastCalledWith('pack-1', 'materials', undefined);
+    expect(listElements).toHaveBeenCalledTimes(1);
   });
 
   test('localizes Pack primary categories in card and detail metadata', async () => {
@@ -118,48 +153,6 @@ describe('ResourceLibraryView', () => {
     await user.click(await screen.findByRole('button', { name: '返回资源包' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '返回资源包' })).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Example Pack' })).toBeInTheDocument();
-  });
-
-  test('ignores a rejected category request after returning to the Pack list', async () => {
-    const user = userEvent.setup();
-    let rejectCategoryRequest!: (reason: Error) => void;
-    const listElements = vi.fn((_packId: string, category?: string) => category
-      ? new Promise<ResourceElement[]>((_, reject) => { rejectCategoryRequest = reject; })
-      : Promise.resolve([element]));
-    const apiClient = { ...api, listElements };
-    render(<ResourceLibraryView apiClient={apiClient} />);
-    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
-    const fileTree = screen.getByText('Pack 文件').closest('aside');
-    expect(fileTree).not.toBeNull();
-    await user.click(within(fileTree!).getByText('模型'));
-    await user.click(screen.getByRole('button', { name: '返回资源包' }));
-    await act(async () => {
-      rejectCategoryRequest(new Error('late category failure'));
-    });
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-  });
-
-  test('keeps the latest category selection when an earlier request resolves late', async () => {
-    const user = userEvent.setup();
-    let resolveModels!: (elements: ResourceElement[]) => void;
-    let resolveMaterials!: (elements: ResourceElement[]) => void;
-    const listElements = vi.fn((_packId: string, category?: string) => {
-      if (!category) return Promise.resolve([element, materialElement]);
-      return new Promise<ResourceElement[]>((resolve) => {
-        if (category === 'models') resolveModels = resolve;
-        else resolveMaterials = resolve;
-      });
-    });
-    const apiClient = { ...api, listElements };
-    render(<ResourceLibraryView apiClient={apiClient} />);
-    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
-    const fileTree = screen.getByText('Pack 文件').closest('aside');
-    await user.click(within(fileTree!).getByText('模型'));
-    await user.click(within(fileTree!).getByText('材质'));
-    await act(async () => { resolveMaterials([materialElement]); });
-    await act(async () => { resolveModels([element]); });
-    await waitFor(() => expect(screen.getByRole('button', { name: '文件 Wood' })).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: '文件 Character Idle' })).not.toBeInTheDocument();
   });
 
   test('removes a deleted Pack from the list and clears its route', async () => {
