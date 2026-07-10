@@ -84,6 +84,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const packSessionRef = useRef(0);
+  const consumedInitialPackIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,16 +126,19 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '资源包加载失败');
+      if (session === packSessionRef.current) setError(err instanceof Error ? err.message : '资源包加载失败');
     } finally {
       if (session === packSessionRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!initialPackId || selectedPack || loading) return;
+    if (!initialPackId || initialPackId === consumedInitialPackIdRef.current || selectedPack || loading) return;
     const pack = packs.find((item) => item.id === initialPackId);
-    if (pack) void openPack(pack);
+    if (pack) {
+      consumedInitialPackIdRef.current = initialPackId;
+      void openPack(pack);
+    }
   }, [initialPackId, loading, packs, selectedPack]);
 
   const selectCategory = async (category?: string, folderPath?: string) => {
@@ -150,7 +154,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       setLoadedElementCategories((current) => [...new Set([...current, ...nextElements.map((element) => element.category)])]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '元素加载失败');
+      if (session === packSessionRef.current) setError(err instanceof Error ? err.message : '元素加载失败');
     } finally {
       if (session === packSessionRef.current) setLoading(false);
     }

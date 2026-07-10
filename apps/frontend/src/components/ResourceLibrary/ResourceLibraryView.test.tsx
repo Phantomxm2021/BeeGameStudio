@@ -109,4 +109,31 @@ describe('ResourceLibraryView', () => {
     await user.click(screen.getByRole('button', { name: 'Example Pack' }));
     expect(screen.getByText('世界与场景包')).toBeInTheDocument();
   });
+
+  test('stays on the Pack list after returning from an initial deep link', async () => {
+    const user = userEvent.setup();
+    render(<ResourceLibraryView apiClient={api} initialPackId="pack-1" />);
+    await user.click(await screen.findByRole('button', { name: '返回资源包' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '返回资源包' })).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Example Pack' })).toBeInTheDocument();
+  });
+
+  test('ignores a rejected category request after returning to the Pack list', async () => {
+    const user = userEvent.setup();
+    let rejectCategoryRequest!: (reason: Error) => void;
+    const listElements = vi.fn((_packId: string, category?: string) => category
+      ? new Promise<ResourceElement[]>((_, reject) => { rejectCategoryRequest = reject; })
+      : Promise.resolve([element]));
+    const apiClient = { ...api, listElements };
+    render(<ResourceLibraryView apiClient={apiClient} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const fileTree = screen.getByText('Pack 文件').closest('aside');
+    expect(fileTree).not.toBeNull();
+    await user.click(within(fileTree!).getByText('模型'));
+    await user.click(screen.getByRole('button', { name: '返回资源包' }));
+    await act(async () => {
+      rejectCategoryRequest(new Error('late category failure'));
+    });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
 });
