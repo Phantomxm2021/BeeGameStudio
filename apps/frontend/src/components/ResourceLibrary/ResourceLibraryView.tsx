@@ -48,6 +48,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [query, setQuery] = useState('');
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
+  const [isRootDragActive, setIsRootDragActive] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -120,6 +121,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     }
   };
 
+  const importDroppedPacks = async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      if (file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')) await importPack(file);
+    }
+  };
+
   if (selectedPack) {
     return (
       <PackBrowser
@@ -147,12 +154,19 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           setElements((current) => [...current, next]);
           setSelectedElement(next);
         }}
+        onDropFile={(file) => {
+          if (!activeCategory) return;
+          const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name: file.name, path: `${activeCategory}/${file.name}`, category: activeCategory, kind: 'file', specs: { size: file.size, type: file.type }, dependencies: [], status: 'ready' };
+          setElements((current) => [...current, next]);
+          setSelectedElement(next);
+        }}
       />
     );
   }
 
   return (
-    <section className="min-h-full bg-zinc-950 px-8 py-8 text-zinc-100">
+    <section className={`relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100 ${isRootDragActive ? 'ring-2 ring-inset ring-orange-300/70' : ''}`} onDragEnter={(event) => { event.preventDefault(); setIsRootDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setIsRootDragActive(false); }} onDrop={(event) => { event.preventDefault(); setIsRootDragActive(false); void importDroppedPacks(event.dataTransfer.files); }}>
+      {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 JSON Pack 文件</div></div></div> : null}
       <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
         const file = event.target.files?.[0];
         if (file) void importPack(file);
@@ -307,6 +321,7 @@ function PackBrowser({
   onElement,
   onEditPack,
   onAddFile,
+  onDropFile,
 }: {
   pack: ResourcePackSummary;
   elements: ResourceElement[];
@@ -319,6 +334,7 @@ function PackBrowser({
   onElement: (element: ResourceElement) => void;
   onEditPack: (name: string) => void;
   onAddFile: () => void;
+  onDropFile: (file: File) => void;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -400,7 +416,7 @@ function PackBrowser({
             ))}
           </div>
         </aside>
-        <div className="relative min-w-0 p-5">
+        <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) onDropFile(file); }}>
           <div className="mb-4 flex items-center justify-between">
             <div className="type-footnote text-zinc-500">
               {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
