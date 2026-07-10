@@ -2,6 +2,7 @@ import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
   BeeGameResourceBindingPayload,
+  BeeGameResourceIntegrationPayload,
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
   ContinueTaskResponse,
@@ -735,6 +736,13 @@ export const beeGameAdapter = {
     return postJson<BeeGameResourceBindingPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
       { requirement },
+    );
+  },
+
+  async integrateProjectResource(projectId: string, slotId: string): Promise<BeeGameResourceIntegrationPayload> {
+    return postJson<BeeGameResourceIntegrationPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-integration`,
+      {},
     );
   },
 

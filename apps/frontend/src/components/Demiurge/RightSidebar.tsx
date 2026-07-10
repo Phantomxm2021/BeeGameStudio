@@ -113,6 +113,7 @@ export function RightSidebar({
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
     const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
+    const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
     const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -249,6 +250,17 @@ export function RightSidebar({
         if (!canSendMessage || !canIntegrateAssets) return;
         const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
         onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage, 'asset_integration');
+    };
+
+    const handleReintegrateLibraryResource = async (slotId: string) => {
+        if (!canUploadAssets) return;
+        setReintegratingAssetSlotId(slotId);
+        try {
+            const result = await api.integrateProjectResource(projectId, slotId);
+            setAssetManifest(result.manifest);
+        } finally {
+            setReintegratingAssetSlotId(null);
+        }
     };
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
@@ -472,7 +484,9 @@ export function RightSidebar({
                                 manifest={assetManifest}
                                 isLoading={isAssetsLoading}
                                 isUploadingSlotId={uploadingAssetSlotId}
+                                isReintegratingSlotId={reintegratingAssetSlotId}
                                 onUpload={canUploadAssets ? handleUploadAsset : undefined}
+                                onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}

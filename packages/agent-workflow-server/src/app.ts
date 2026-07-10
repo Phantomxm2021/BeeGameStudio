@@ -1423,6 +1423,34 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.post('/api/projects/:id/assets/:slotId/resource-integration', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: result.path ? 'resource.reintegrated' : 'resource.integration_requested',
+        targetType: 'project_asset_slot',
+        targetId: `${c.req.param('id')}:${c.req.param('slotId')}`,
+        metadata: {
+          packId: result.slot.resource_binding?.pack_id,
+          packVersion: result.slot.resource_binding?.pack_version,
+          elementId: result.slot.resource_binding?.element_id,
+          ...(result.path ? { path: result.path } : {}),
+        },
+      })
+      return c.json({ manifest: result.manifest, slot: result.slot, ...(result.path ? { path: result.path } : {}) })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource integration failed' }, 400)
+    }
+  })
+
   app.post('/api/projects/:id/assets/:slotId/upload', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'assets.upload')

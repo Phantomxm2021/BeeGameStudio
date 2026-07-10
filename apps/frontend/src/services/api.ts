@@ -280,6 +280,12 @@ export interface BeeGameResourceBindingPayload {
   path?: string;
 }
 
+export interface BeeGameResourceIntegrationPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  path?: string;
+}
+
 export interface ExecutionEvidencePayload {
   execution_id?: string;
   project_id?: string;
@@ -1111,6 +1117,11 @@ export const api = {
   bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement);
     throw new Error('Project resource binding is only available for BeeGame projects');
+  },
+
+  integrateProjectResource: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.integrateProjectResource(projectId, slotId);
+    throw new Error('Project resource integration is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

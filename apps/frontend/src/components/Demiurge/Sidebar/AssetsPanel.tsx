@@ -20,7 +20,9 @@ interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
     isLoading: boolean;
     isUploadingSlotId?: string | null;
+    isReintegratingSlotId?: string | null;
     onUpload?: (slotId: string, file: File) => Promise<void>;
+    onReintegrate?: (slotId: string) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
     lang?: Language;
@@ -32,7 +34,9 @@ export const AssetsPanel = memo(({
     manifest,
     isLoading,
     isUploadingSlotId = null,
+    isReintegratingSlotId = null,
     onUpload,
+    onReintegrate,
     onRequestIntegration,
     onRequestAllIntegration,
     lang = 'en',
@@ -122,7 +126,9 @@ export const AssetsPanel = memo(({
                         slot={slot}
                         text={text}
                         isUploading={isUploadingSlotId === slot.id}
+                        isReintegrating={isReintegratingSlotId === slot.id}
                         onUpload={onUpload}
+                        onReintegrate={onReintegrate}
                         onRequestIntegration={onRequestIntegration}
                     />
                 ))}
@@ -137,13 +143,17 @@ function AssetSlotCard({
     slot,
     text,
     isUploading,
+    isReintegrating,
     onUpload,
+    onReintegrate,
     onRequestIntegration,
 }: {
     slot: BeeGameAssetSlotPayload;
     text: AssetsPanelText;
     isUploading: boolean;
+    isReintegrating: boolean;
     onUpload?: (slotId: string, file: File) => Promise<void>;
+    onReintegrate?: (slotId: string) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -249,6 +259,17 @@ function AssetSlotCard({
                             >
                                 <CheckCircle2 className="h-4 w-4" />
                                 {status === 'integrated' ? text.verifyIntegration : text.requestIntegration}
+                            </button>
+                        ) : null}
+                        {slot.resource_binding && onReintegrate ? (
+                            <button
+                                type="button"
+                                disabled={isReintegrating}
+                                onClick={() => void onReintegrate(slot.id).catch(err => setError(err instanceof Error ? err.message : String(err)))}
+                                className="type-button inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-sky-400/10 px-4 py-2 text-sky-100 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <CheckCircle2 className="h-4 w-4" />
+                                {isReintegrating ? text.uploading : text.verifyIntegration}
                             </button>
                         ) : null}
                     </div>
