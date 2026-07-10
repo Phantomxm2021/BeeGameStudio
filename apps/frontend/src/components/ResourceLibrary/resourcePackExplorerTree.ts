@@ -1,0 +1,102 @@
+import type { ResourceElement, ResourceFolder, ResourcePackSummary } from '../../services/resourceLibraryApi'
+
+export type ExplorerNode = {
+  id: string
+  kind: 'folder' | 'file'
+  name: string
+  element?: ResourceElement
+  children?: ExplorerNode[]
+}
+
+const compareByName = <T extends { id: string; name: string }>(left: T, right: T) =>
+  left.name.localeCompare(right.name, 'en', { numeric: true, sensitivity: 'base' }) || left.id.localeCompare(right.id)
+
+const normalisePath = (path: string) => path.replace(/^\/+|\/+$/g, '')
+
+const parentPath = (path: string) => {
+  const normalised = normalisePath(path)
+  const separator = normalised.lastIndexOf('/')
+  return separator < 0 ? '' : normalised.slice(0, separator)
+}
+
+function hasCircularParent(folder: ResourceFolder, foldersById: ReadonlyMap<string, ResourceFolder>) {
+  const seen = new Set<string>([folder.id])
+  let parentId = folder.parentId
+  while (parentId) {
+    if (seen.has(parentId)) return true
+    seen.add(parentId)
+    parentId = foldersById.get(parentId)?.parentId
+  }
+  return false
+}
+
+/**
+ * Converts the persisted folder graph and Pack elements into the display tree.
+ * A file is attached only when its immediate path parent is a persisted folder;
+ * otherwise it remains at its derived category folder.
+ */
+export function buildExplorerTree(
+  pack: ResourcePackSummary,
+  folders: readonly ResourceFolder[],
+  elements: readonly ResourceElement[],
+): ExplorerNode {
+  const root: ExplorerNode = { id: 'root', kind: 'folder', name: pack.name, children: [] }
+  const packFolders = folders.filter((folder) => folder.packId === pack.id).sort(compareByName)
+  const packElements = elements.filter((element) => element.packId === pack.id).sort(compareByName)
+  const foldersById = new Map(packFolders.map((folder) => [folder.id, folder]))
+  const folderNodes = new Map<string, ExplorerNode>()
+  for (const folder of packFolders) {
+    folderNodes.set(folder.id, {
+      id: `folder:${folder.id}`,
+      kind: 'folder',
+      name: folder.name,
+      children: [],
+    })
+  }
+  const foldersByPath = new Map<string, ResourceFolder>()
+
+  for (const folder of packFolders) {
+    const path = normalisePath(folder.path)
+    if (path && !foldersByPath.has(path)) foldersByPath.set(path, folder)
+  }
+
+  for (const folder of packFolders) {
+    const node = folderNodes.get(folder.id)!
+    const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined
+    const parentNode = parent && !hasCircularParent(folder, foldersById) ? folderNodes.get(parent.id) : undefined
+    ;(parentNode?.children ?? root.children)!.push(node)
+  }
+
+  const categoryNodes = new Map<string, ExplorerNode>()
+  for (const element of packElements) {
+    const file: ExplorerNode = { id: `file:${element.id}`, kind: 'file', name: element.name, element }
+    const directParent = foldersByPath.get(parentPath(element.path))
+    if (directParent) {
+      folderNodes.get(directParent.id)!.children!.push(file)
+      continue
+    }
+
+    const category = element.category.trim() || 'uncategorized'
+    let categoryNode = categoryNodes.get(category)
+    if (!categoryNode) {
+      categoryNode = { id: `category:${category}`, kind: 'folder', name: category, children: [] }
+      categoryNodes.set(category, categoryNode)
+      root.children!.push(categoryNode)
+    }
+    categoryNode.children!.push(file)
+  }
+
+  const sortChildren = (node: ExplorerNode) => {
+    if (!node.children) return
+    const files = node.children.filter((child) => child.kind === 'file').sort(compareByName)
+    const folders = node.children.filter((child) => child.kind === 'folder').sort(compareByName)
+    node.children = [...files, ...folders]
+    node.children.forEach(sortChildren)
+  }
+  root.children = [
+    ...root.children!.filter((node) => node.id.startsWith('folder:')).sort(compareByName),
+    ...root.children!.filter((node) => node.id.startsWith('category:')).sort(compareByName),
+  ]
+  root.children.forEach(sortChildren)
+  return root
+}
