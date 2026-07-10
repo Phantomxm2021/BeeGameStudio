@@ -16,6 +16,7 @@ import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
+import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from '../ResourceLibrary/resourceLibraryRoute';
 import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
@@ -648,11 +649,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     : restoredIdeaDraft?.idea || ''
     ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(false);
+    const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
+    useEffect(() => {
+        const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
+        window.addEventListener('popstate', syncResourceRoute);
+        return () => window.removeEventListener('popstate', syncResourceRoute);
+    }, []);
     const [intakePhase, setIntakePhase] = useState<IntakePhase>(restoredIntakeFlow?.phase || 'idle');
     const [intakeOptions, setIntakeOptions] = useState<BeeGameIntakeOption[]>(restoredIntakeFlow?.options || []);
     const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(restoredIntakeFlow?.selectedOption || null);
@@ -1395,6 +1401,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     }}
                     canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                     onOpenResourceLibrary={() => {
+                        openResourceLibraryRoute();
                         setIsResourceLibraryOpen(true);
                         setIsSettingsOpen(false);
                         setIsHistoryOpen(false);
@@ -1419,7 +1426,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onSetLang={onSetLang}
                 />
 
-                {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => setIsResourceLibraryOpen(false)} /> : null}
+                {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} /> : null}
 
                 <ProjectHistoryModal
                     isOpen={isHistoryOpen}
