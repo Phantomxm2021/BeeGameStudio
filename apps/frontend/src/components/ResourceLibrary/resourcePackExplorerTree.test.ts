@@ -61,4 +61,21 @@ describe('buildExplorerTree', () => {
       expect.objectContaining({ id: 'file:nested-file' }),
     ])
   })
+
+  test('deterministically collapses legacy duplicate paths so every direct file remains reachable', () => {
+    const duplicateFolders: ResourceFolder[] = [
+      { id: 'folder-b', packId: pack.id, name: 'Second', path: 'shared' },
+      { id: 'folder-a', packId: pack.id, name: 'First', path: 'shared' },
+    ]
+    const sharedFile: ResourceElement = { ...elements[0], id: 'shared-file', name: 'file.png', path: 'shared/file.png' }
+
+    const tree = buildExplorerTree(pack, duplicateFolders, [sharedFile])
+
+    expect(tree.children).toEqual([
+      expect.objectContaining({
+        id: 'folder:folder-a',
+        children: [expect.objectContaining({ id: 'file:shared-file' })],
+      }),
+    ])
+  })
 })

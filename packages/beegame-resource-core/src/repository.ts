@@ -54,6 +54,7 @@ export function createInMemoryResourceRepository(input: {
       const parent = input.parentId ? folders.find(folder => folder.id === input.parentId && folder.packId === packId) : undefined
       if (input.parentId && !parent) throw new Error('Parent folder not found')
       const path = parent ? `${parent.path}/${input.name}` : input.name
+      if (folders.some(folder => folder.packId === packId && folder.path === path)) throw new Error('Folder path already exists')
       const folder = { id: input.id, packId, name: input.name, ...(input.parentId ? { parentId: input.parentId } : {}), path }
       folders.push(folder)
       return folder

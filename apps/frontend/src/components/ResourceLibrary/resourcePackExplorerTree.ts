@@ -41,11 +41,20 @@ export function buildExplorerTree(
   elements: readonly ResourceElement[],
 ): ExplorerNode {
   const root: ExplorerNode = { id: 'root', kind: 'folder', name: pack.name, children: [] }
-  const packFolders = folders.filter((folder) => folder.packId === pack.id).sort(compareByName)
+  const packFolders = folders.filter((folder) => folder.packId === pack.id)
   const packElements = elements.filter((element) => element.packId === pack.id).sort(compareByName)
   const foldersById = new Map(packFolders.map((folder) => [folder.id, folder]))
+  const foldersByPath = new Map<string, ResourceFolder>()
+  for (const folder of [...packFolders].sort((left, right) => normalisePath(left.path).localeCompare(normalisePath(right.path)) || left.id.localeCompare(right.id))) {
+    const path = normalisePath(folder.path)
+    if (path && !foldersByPath.has(path)) foldersByPath.set(path, folder)
+  }
+  // The database enforces a unique (pack_id, path) constraint. This keeps old
+  // malformed rows deterministic too: a duplicate never becomes an empty,
+  // visible folder that cannot own its files.
+  const canonicalFolders = [...foldersByPath.values()]
   const folderNodes = new Map<string, ExplorerNode>()
-  for (const folder of packFolders) {
+  for (const folder of canonicalFolders) {
     folderNodes.set(folder.id, {
       id: `folder:${folder.id}`,
       kind: 'folder',
@@ -53,17 +62,11 @@ export function buildExplorerTree(
       children: [],
     })
   }
-  const foldersByPath = new Map<string, ResourceFolder>()
-
-  for (const folder of packFolders) {
-    const path = normalisePath(folder.path)
-    if (path && !foldersByPath.has(path)) foldersByPath.set(path, folder)
-  }
-
-  for (const folder of packFolders) {
+  for (const folder of canonicalFolders) {
     const node = folderNodes.get(folder.id)!
     const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined
-    const parentNode = parent && !hasCircularParent(folder, foldersById) ? folderNodes.get(parent.id) : undefined
+    const canonicalParent = parent ? foldersByPath.get(normalisePath(parent.path)) : undefined
+    const parentNode = canonicalParent && !hasCircularParent(folder, foldersById) ? folderNodes.get(canonicalParent.id) : undefined
     ;(parentNode?.children ?? root.children)!.push(node)
   }
 
