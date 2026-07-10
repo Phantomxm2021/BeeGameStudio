@@ -17,6 +17,7 @@ import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
 import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from '../ResourceLibrary/resourceLibraryRoute';
+import { CONFIGURED_PRODUCTION_SETTING_OPTIONS, type ProductionSettingOptions } from '../../config/productionSettingOptions';
 import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
@@ -56,23 +57,6 @@ type IntakePhase =
 
 type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'ready_to_build' | 'failed';
 
-type ProductionSettingOptions = {
-    platforms: string[];
-    engines: string[];
-    dimensions: string[];
-    genres: string[];
-    styles: string[];
-    inputs: string[];
-};
-
-const CONFIGURED_PRODUCTION_SETTING_OPTIONS: ProductionSettingOptions = {
-    platforms: ['Web', 'Mobile', 'PC', 'Console', 'VR/AR'],
-    engines: ['React', 'Unity', 'Godot', 'Unreal'],
-    dimensions: ['2D', '2.5D', '3D', 'VR', 'AR'],
-    genres: ['Arcade', 'Action', 'Adventure', 'Puzzle', 'Racing', 'RPG', 'Strategy', 'Simulation', 'Shooter', 'Platformer', 'Casual'],
-    styles: ['Pixel', 'Cartoon', 'Stylized', 'Minimal', 'Realistic', 'Low Poly', 'Hand-drawn', 'Sci-fi', 'Fantasy'],
-    inputs: ['Keyboard/mouse', 'Touch', 'Gamepad', 'Motion', 'Voice', 'Hand tracking'],
-};
 
 type IntakeCopy = {
     modal: {
