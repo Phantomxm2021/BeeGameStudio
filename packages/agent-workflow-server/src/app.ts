@@ -1182,7 +1182,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(resolved)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 404)
+      return tracedRouteError(c, 'project.permissions.resolve', err, 404)
     }
   })
 
@@ -1409,7 +1409,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(persisted || rollback)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.deployments.rollback', err)
     }
   })
 
@@ -2190,7 +2190,7 @@ function requireBeeGameSessionOwner(
   getCurrentUser: (request?: Request) => BeeGameUserContext,
 ): { error: string } | undefined {
   const metadata = beeGameSessions.metadata(sessionId)
-  if (!metadata) return undefined
+  if (!metadata) return { error: 'Session not found' }
   return metadata.userId === getCurrentUser(request).id
     ? undefined
     : { error: 'Session not found' }
@@ -4050,12 +4050,16 @@ function registerBeeGameSessionRoutes(
       }
       return c.json(manifest)
     } catch (err) {
-      const manifest = await options.loadAssetManifest(
-        c.req.raw,
-        beeGameSessions.metadata(c.req.param('id')),
-      )
-      if (manifest) return c.json(manifest)
-      return c.json({ error: toErrorMessage(err) }, 400)
+      try {
+        const manifest = await options.loadAssetManifest(
+          c.req.raw,
+          beeGameSessions.metadata(c.req.param('id')),
+        )
+        if (manifest) return c.json(manifest)
+      } catch (fallbackErr) {
+        return tracedRouteError(c, 'beegame-session.assets.list', fallbackErr)
+      }
+      return tracedRouteError(c, 'beegame-session.assets.list', err)
     }
   })
 
@@ -4088,11 +4092,7 @@ function registerBeeGameSessionRoutes(
       await options.persistAssetManifest(c.req.raw, sessionMetadata, result.manifest)
       return c.json(result)
     } catch (err) {
-      const message = toErrorMessage(err)
-      return c.json(
-        { error: message },
-        message.startsWith('Asset slot not found') ? 404 : 400,
-      )
+      return tracedRouteError(c, 'beegame-session.assets.upload', err)
     }
   })
 
@@ -4422,10 +4422,10 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
+    if (!sessionMetadata) return c.json({ error: 'Session not found' }, 404)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
-    const workspacePathQuery = c.req.query('workspacePath')
     try {
-      const sessionMetadata = beeGameSessions.metadata(c.req.param('id'))
       const result = await beeGameSessions.delete(c.req.param('id'), {
         deleteArtifacts,
       })
@@ -4450,12 +4450,10 @@ function registerBeeGameSessionRoutes(
     } catch (err) {
       if (deleteArtifacts && toErrorMessage(err) === 'Session not found') {
         try {
-          const workspacePath = workspacePathQuery
-            ? await resolveSessionWorkspacePath(
-                workspacePathQuery,
-                defaultWorkspacePath,
-              )
-            : await getDefaultWorkspacePath({ defaultWorkspacePath })
+          const workspacePath = await resolveSessionWorkspacePath(
+            sessionMetadata.workspacePath,
+            defaultWorkspacePath,
+          )
           const dashboardDataRoot = getDashboardDataRoot(defaultWorkspacePath)
           const deletedArtifactPaths = await deleteSessionArtifactsFromTranscript(
             c.req.param('id'),
