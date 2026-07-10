@@ -90,6 +90,7 @@ import {
   listBeeGamePermissions,
 } from './auth/user-context'
 import { createBeeGameAuthContext } from './auth/auth-context'
+import { registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes } from './auth/session-routes'
 import {
   DashboardRepository,
   ProjectQuotaExceededError,
@@ -302,8 +303,20 @@ export function createAgentWorkflowApp(
   const supabaseRuntimeEnvClient = supabaseStore
     ? createSupabaseRuntimeEnvClientFromEnv()
     : undefined
-  const requestUserResolver =
-    options.currentUserResolver ?? createConfiguredUserResolver()
+  const configuredUserResolver = createConfiguredUserResolver()
+  const sessionAuth = registerHttpOnlySessionRoutes(app)
+  const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
+  const requestUserResolver = sessionAuth
+    ? async (request: Request) => {
+      const accessToken = sessionAuth.getAccessToken(request)
+      if (!accessToken) return baseUserResolver?.(request)
+      const headers = new Headers(request.headers)
+      if (!headers.has('authorization')) {
+        headers.set('authorization', `Bearer ${accessToken}`)
+      }
+      return baseUserResolver?.(new Request(request, { headers }))
+    }
+    : baseUserResolver
   const authContext = createBeeGameAuthContext({
     currentUser: options.currentUser,
     currentUserResolver: requestUserResolver,

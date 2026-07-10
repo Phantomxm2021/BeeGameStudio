@@ -58,6 +58,7 @@ export const authenticatedFetch = (
   const nextInput = typeof input === 'string' ? buildApiUrl(input) : input;
   const response = await fetch(nextInput, {
     ...init,
+    credentials: init.credentials ?? 'include',
     headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
   if (response.status !== 401 || (!getSupabaseAccessToken() && getEnvAuthToken())) return response;
@@ -65,6 +66,7 @@ export const authenticatedFetch = (
   if (!refreshed) return response;
   return fetch(nextInput, {
     ...init,
+    credentials: init.credentials ?? 'include',
     headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
 })();
@@ -90,6 +92,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 30000,
+  withCredentials: true,
 });
 
 apiClient.interceptors.request.use(

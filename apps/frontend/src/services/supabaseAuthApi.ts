@@ -54,6 +54,7 @@ let pendingRedirectConsumption: {
   key: string;
   promise: Promise<boolean>;
 } | null = null;
+let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
@@ -64,6 +65,7 @@ export function isSupabaseAuthConfigured(): boolean {
 }
 
 export function getSupabaseAccessToken(): string {
+  if (isHttpOnlySessionsEnabled()) return '';
   const session = getStoredSupabaseSession();
   if (!session) return '';
   if (session.expiresAt <= Date.now()) {
@@ -73,6 +75,7 @@ export function getSupabaseAccessToken(): string {
 }
 
 export async function getValidSupabaseAccessToken(): Promise<string> {
+  if (isHttpOnlySessionsEnabled()) return '';
   const token = getSupabaseAccessToken();
   if (token) return token;
   const session = getStoredSupabaseSession();
@@ -82,6 +85,7 @@ export async function getValidSupabaseAccessToken(): Promise<string> {
 }
 
 export function getSupabaseSessionUser(): BeeGameSupabaseUser | null {
+  if (isHttpOnlySessionsEnabled()) return httpOnlySessionUser;
   return getStoredSupabaseSession()?.user ?? null;
 }
 
@@ -108,7 +112,7 @@ export async function signInWithSupabasePassword(
     throw await readSupabaseAuthError(response);
   }
   const session = toSupabaseSession(await response.json());
-  saveSupabaseSession(session);
+  await persistSupabaseSession(session);
   return session;
 }
 
@@ -143,7 +147,7 @@ export async function signUpWithSupabasePassword(
   const value = await response.json();
   if (!isRecord(value) || typeof value.access_token !== 'string') return null;
   const session = toSupabaseSession(value);
-  saveSupabaseSession(session);
+  await persistSupabaseSession(session);
   return session;
 }
 
@@ -329,7 +333,7 @@ async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
   const accessToken = hashParams.get('access_token')?.trim() || '';
   if (accessToken) {
     const expiresIn = Number.parseInt(hashParams.get('expires_in') || '3600', 10);
-    saveSupabaseSession({
+    await persistSupabaseSession({
       accessToken,
       refreshToken: hashParams.get('refresh_token') || undefined,
       expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 3600) - 30) * 1000,
@@ -372,6 +376,15 @@ async function redeemOAuthInvitationNonce(
 
 export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSession | null> {
   const session = getStoredSupabaseSession();
+  if (isHttpOnlySessionsEnabled() && !session) {
+    const response = await fetch(buildSameOriginApiUrl('/api/auth/session'), {
+      credentials: 'include',
+    });
+    if (!response.ok) return null;
+    const cookieSession = toCookieSession(await response.json());
+    httpOnlySessionUser = cookieSession.user;
+    return cookieSession;
+  }
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
   if (!session || !supabaseUrl || !anonKey) return session;
@@ -396,11 +409,25 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
       avatarUrl: readUserAvatarUrl(value) ?? session.user.avatarUrl,
     },
   };
-  saveSupabaseSession(hydrated);
+  await persistSupabaseSession(hydrated);
   return hydrated;
 }
 
 export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
+  if (isHttpOnlySessionsEnabled()) {
+    const response = await fetch(buildSameOriginApiUrl('/api/auth/session/refresh'), {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      httpOnlySessionUser = null;
+      return null;
+    }
+    const value = await response.json() as unknown;
+    const session = toCookieSession(value);
+    httpOnlySessionUser = session.user;
+    return session;
+  }
   const session = getStoredSupabaseSession();
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
@@ -432,10 +459,50 @@ export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession |
 
 export function clearSupabaseSession(): void {
   localStorage.removeItem(SESSION_STORAGE_KEY);
+  httpOnlySessionUser = null;
+  if (isHttpOnlySessionsEnabled()) {
+    void fetch(buildSameOriginApiUrl('/api/auth/session/logout'), {
+      method: 'POST',
+      credentials: 'include',
+    });
+  }
 }
 
 function saveSupabaseSession(session: BeeGameSupabaseSession): void {
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<void> {
+  if (!isHttpOnlySessionsEnabled()) {
+    saveSupabaseSession(session);
+    return;
+  }
+  const response = await fetch(buildSameOriginApiUrl('/api/auth/session'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      access_token: session.accessToken,
+      refresh_token: session.refreshToken,
+      expires_in: Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000)),
+    }),
+  });
+  if (response.ok) {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    httpOnlySessionUser = session.user;
+    return;
+  }
+  saveSupabaseSession(session);
+}
+
+function isHttpOnlySessionsEnabled(): boolean {
+  return String(import.meta.env.VITE_BEEGAME_HTTPONLY_SESSIONS ?? '').trim() === '1';
+}
+
+function buildSameOriginApiUrl(path: string): string {
+  const base = String(import.meta.env.VITE_API_BASE_URL ?? '').trim();
+  if (base) return `${trimTrailingSlash(base)}${path}`;
+  return path;
 }
 
 async function exchangeSupabaseOAuthCode(authCode: string): Promise<BeeGameSupabaseSession> {
@@ -463,7 +530,7 @@ async function exchangeSupabaseOAuthCode(authCode: string): Promise<BeeGameSupab
     throw new Error(toUserFacingOAuthError(await readSupabaseError(response), pkce.provider));
   }
   const session = toSupabaseSession(await response.json());
-  saveSupabaseSession(session);
+  await persistSupabaseSession(session);
   sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
   return session;
 }
@@ -524,6 +591,25 @@ function getStoredSupabaseSession(): BeeGameSupabaseSession | null {
   } catch {
     return null;
   }
+}
+
+function toCookieSession(value: unknown): BeeGameSupabaseSession {
+  if (!isRecord(value) || value.authenticated !== true) {
+    throw new Error('Invalid server session response.');
+  }
+  const user = isRecord(value.user) ? value.user : {};
+  const id = typeof user.id === 'string' ? user.id.trim() : '';
+  if (!id) throw new Error('Invalid server session response.');
+  return {
+    accessToken: typeof value.access_token === 'string' ? value.access_token : '',
+    expiresAt: typeof value.expires_at === 'number' ? value.expires_at : Date.now() + 3600_000,
+    user: {
+      id,
+      email: typeof user.email === 'string' ? user.email : undefined,
+      displayName: typeof user.displayName === 'string' ? user.displayName : undefined,
+      avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : undefined,
+    },
+  };
 }
 
 function toSupabaseSession(value: unknown): BeeGameSupabaseSession {
