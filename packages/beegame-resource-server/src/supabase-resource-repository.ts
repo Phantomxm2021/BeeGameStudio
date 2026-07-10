@@ -10,6 +10,7 @@ type SupabaseResourceRepositoryOptions = {
   baseUrl: string
   serviceRoleKey: string
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+  storageBucket?: string
 }
 
 type PackRow = Omit<ResourcePack, 'gameTypes' | 'coverPath'> & {
@@ -30,6 +31,7 @@ export function createSupabaseResourceRepository(
 ): ResourceRepository {
   const fetchImpl = options.fetchImpl ?? fetch
   const apiBase = `${options.baseUrl.replace(/\/+$/, '')}/rest/v1`
+  const storageBucket = options.storageBucket ?? 'beegame-resource-packs'
   const request = async <T>(table: string, params: Record<string, string> = {}): Promise<T[]> => {
     const url = new URL(`${apiBase}/${table}`)
     url.searchParams.set('select', '*')
@@ -44,7 +46,17 @@ export function createSupabaseResourceRepository(
     if (!response.ok) throw new Error(`Resource repository request failed (${response.status})`)
     return await response.json() as T[]
   }
-  const toPack = (row: PackRow): PackSummary => ({
+  const signPath = async (path: string): Promise<string> => {
+    const response = await fetchImpl(`${options.baseUrl.replace(/\/+$/, '')}/storage/v1/object/sign/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'POST',
+      headers: { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ expiresIn: 3600 }),
+    })
+    if (!response.ok) throw new Error('Failed to sign resource preview URL')
+    const body = await response.json() as { signedURL?: string }
+    return body.signedURL || ''
+  }
+  const toPack = async (row: PackRow): Promise<PackSummary> => ({
     id: row.id,
     name: row.name,
     style: row.style,
@@ -54,7 +66,7 @@ export function createSupabaseResourceRepository(
     license: row.license,
     version: row.version,
     status: row.status,
-    ...(row.cover_path ? { coverPath: row.cover_path } : {}),
+    ...(row.cover_path ? { coverPath: await signPath(`${row.id}/${row.cover_path}`) } : {}),
     elementCount: row.element_count ?? 0,
   })
   const toElement = (row: ElementRow): ResourceElement => ({
@@ -73,7 +85,7 @@ export function createSupabaseResourceRepository(
   })
   return {
     async listPacks() {
-      return (await request<PackRow>('beegame_resource_packs', { order: 'name.asc' })).map(toPack)
+      return await Promise.all((await request<PackRow>('beegame_resource_packs', { order: 'name.asc' })).map(toPack))
     },
     async getPack(packId) {
       const rows = await request<PackRow>('beegame_resource_packs', { id: `eq.${packId}` })

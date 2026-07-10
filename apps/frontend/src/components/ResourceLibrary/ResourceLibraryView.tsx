@@ -267,7 +267,7 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
-function PackCard({ pack, previewUrl, onOpen }: { pack: ResourcePackSummary; previewUrl?: string; onOpen: () => void }) {
+function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -276,7 +276,7 @@ function PackCard({ pack, previewUrl, onOpen }: { pack: ResourcePackSummary; pre
       className="group rounded-[1.4rem] border border-white/10 bg-white/[0.025] p-3 text-left transition hover:border-white/25 hover:bg-white/[0.05]"
     >
       <div className="grid h-44 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-orange-200/30 via-zinc-800 to-zinc-950 text-6xl shadow-inner">
-        {previewUrl ? (/(mp4|webm)$/i.test(pack.coverPath || '') ? <video src={previewUrl} muted autoPlay loop playsInline className="h-full w-full object-cover" /> : <img src={previewUrl} alt="" className="h-full w-full object-cover" />) : <span aria-hidden="true">✦</span>}
+        {pack.coverPath ? (/(mp4|webm)/i.test(pack.coverPath) ? <video src={pack.coverPath} muted autoPlay loop playsInline className="h-full w-full object-cover" /> : <img src={pack.coverPath} alt="" className="h-full w-full object-cover" />) : <span aria-hidden="true">✦</span>}
       </div>
       <h2 className="type-headline mt-4 truncate text-zinc-100">{pack.name}</h2>
       <p className="type-footnote mt-1 text-zinc-500">
