@@ -1,4 +1,4 @@
-import { authenticatedFetch } from './apiClient'
+import { resolveAuthTokenAsync } from './apiClient'
 
 export type ResourcePackPrimaryCategory =
   | '2d-art'
@@ -76,7 +76,20 @@ export class ResourceLibraryApiError extends Error {
 
 type ResourceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticatedFetch) {
+/**
+ * The resource service intentionally runs on its own origin in local
+ * development. It is nevertheless a configured first-party service, so its
+ * requests must carry the logged-in Supabase bearer token. We keep this
+ * scoped to this client instead of allowing auth headers on arbitrary URLs.
+ */
+const authenticatedResourceFetch: ResourceFetch = async (input, init = {}) => {
+  const headers = new Headers(init.headers)
+  const token = await resolveAuthTokenAsync()
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  return fetch(input, { ...init, headers })
+}
+
+export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticatedResourceFetch) {
   const baseUrl = String(import.meta.env.VITE_RESOURCE_API_BASE_URL ?? '').replace(/\/+$/, '')
   const request = async <T>(path: string): Promise<T> => {
     const response = await fetchImpl(`${baseUrl}${path}`)
