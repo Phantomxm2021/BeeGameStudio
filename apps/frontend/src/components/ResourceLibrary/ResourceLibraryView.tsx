@@ -116,9 +116,27 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       if (!file.name.toLowerCase().endsWith('.zip')) throw new Error('请导入资源压缩包（.zip）');
       const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
       const manifestEntry = archive['pack.json'] || archive['manifest.json'];
-      if (!manifestEntry) throw new Error('压缩包根目录需要包含 pack.json');
-      const parsed = JSON.parse(strFromU8(manifestEntry)) as ResourcePackSummary;
-      if (!parsed.id || !parsed.name || !parsed.dimension) throw new Error('Pack JSON 缺少 id、name 或 dimension');
+      const assetPaths = Object.keys(archive).filter((path) => !path.endsWith('/') && !path.split('/').some((part) => part.startsWith('.')) && !path.endsWith('pack.json') && !path.endsWith('manifest.json'));
+      const inferredCategories = [...new Set(assetPaths.map((path) => path.split('/')[0]).filter(Boolean))];
+      const extensions = assetPaths.map((path) => path.split('.').pop()?.toLowerCase());
+      const has3d = extensions.some((extension) => ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(extension || ''));
+      const has2d = extensions.some((extension) => ['png', 'jpg', 'jpeg', 'svg', 'webp'].includes(extension || ''));
+      const inferredDimension = has3d && !has2d ? '3D' : has2d && !has3d ? '2D' : 'agnostic';
+      const fallbackId = file.name.replace(/\.zip$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `pack-${Date.now()}`;
+      const generated: ResourcePackSummary = {
+        id: fallbackId,
+        name: file.name.replace(/\.zip$/i, ''),
+        style: '未标注',
+        gameTypes: [],
+        dimension: inferredDimension,
+        categories: inferredCategories,
+        license: '待补充',
+        version: '0.1.0',
+        status: 'draft',
+        coverPath: assetPaths.find((path) => /\.(png|jpe?g|webp|svg)$/i.test(path)),
+        elementCount: assetPaths.length,
+      };
+      const parsed = manifestEntry ? { ...generated, ...(JSON.parse(strFromU8(manifestEntry)) as Partial<ResourcePackSummary>) } : generated;
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
       setError('');
     } catch (err) {
