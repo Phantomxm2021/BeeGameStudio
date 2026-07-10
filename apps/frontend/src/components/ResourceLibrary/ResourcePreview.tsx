@@ -9,6 +9,10 @@ type PreviewSelection = Pick<ResourceElement, 'name' | 'kind' | 'specs'> & { mim
 const textExtensions = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'xml', 'yaml', 'yml', 'js', 'ts', 'tsx', 'jsx', 'css', 'html', 'htm', 'shader', 'glsl'])
 const modelExtensions = new Set(['glb', 'gltf', 'obj', 'fbx'])
 
+export function isSupportedModelPreview(element: PreviewSelection): boolean {
+  return modelExtensions.has(extensionFor(element))
+}
+
 function extensionFor(element: PreviewSelection): string {
   const specified = element.specs?.extension
   if (typeof specified === 'string' && specified.length > 0) return specified.toLowerCase()
@@ -30,7 +34,9 @@ export function renderPreview(element: PreviewSelection): PreviewRenderer {
   if (kind === 'audio' || mimeType.startsWith('audio/')) return 'audio'
   if (kind === 'video' || mimeType.startsWith('video/')) return 'video'
   if (kind === 'font' || mimeType.startsWith('font/')) return 'font'
-  if (kind === 'model' || modelExtensions.has(extension)) return 'model'
+  // The resource service may classify a file as a model before its concrete
+  // format is known. Never send an unsupported format to a Three.js loader.
+  if (isSupportedModelPreview(element)) return 'model'
   if (extension === 'pdf' || mimeType === 'application/pdf') return 'pdf'
   if (kind === 'text' || textExtensions.has(extension) || mimeType.startsWith('text/')) return 'text'
   return 'document-card'

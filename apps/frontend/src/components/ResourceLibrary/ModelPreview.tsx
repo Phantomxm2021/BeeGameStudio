@@ -12,7 +12,24 @@ export type ModelMetrics = {
   bounds: { width: number; height: number; depth: number }
 }
 
-type ModelPreviewProps = { url: string; extension: string; onMetrics?: (metrics: ModelMetrics) => void }
+type ModelPreviewProps = {
+  url: string
+  extension: string
+  onMetrics?: (metrics: ModelMetrics) => void | Promise<void>
+  onMetricsError?: (error: Error) => void
+}
+
+export async function persistModelMetrics(
+  onMetrics: (metrics: ModelMetrics) => void | Promise<void>,
+  metrics: ModelMetrics,
+): Promise<Error | undefined> {
+  try {
+    await onMetrics(metrics)
+    return undefined
+  } catch (reason) {
+    return reason instanceof Error ? reason : new Error('Unable to save model metrics')
+  }
+}
 
 function disposeMaterial(material: THREE.Material) {
   for (const value of Object.values(material)) {
@@ -54,7 +71,7 @@ async function loadModel(url: string, extension: string): Promise<THREE.Object3D
   throw new Error('Unsupported model format')
 }
 
-export function ModelPreview({ url, extension, onMetrics }: ModelPreviewProps) {
+export function ModelPreview({ url, extension, onMetrics, onMetricsError }: ModelPreviewProps) {
   const host = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string>()
 
@@ -72,6 +89,7 @@ export function ModelPreview({ url, extension, onMetrics }: ModelPreviewProps) {
     container.appendChild(renderer.domElement)
     let model: THREE.Object3D | undefined
     let frame = 0
+    let active = true
 
     const resize = () => {
       const { width, height } = container.getBoundingClientRect()
@@ -95,11 +113,18 @@ export function ModelPreview({ url, extension, onMetrics }: ModelPreviewProps) {
         camera.position.copy(center).add(new THREE.Vector3(radius * 2, radius * 1.5, radius * 2))
         camera.lookAt(center)
         controls.update()
-        onMetrics?.(calculateMetrics(loaded))
+        if (onMetrics) {
+          void persistModelMetrics(onMetrics, calculateMetrics(loaded)).then(metricsError => {
+            if (!metricsError || !active) return
+            setError('模型信息保存失败，请重试。')
+            onMetricsError?.(metricsError)
+          })
+        }
       })
-      .catch(() => setError('Model preview is unavailable.'))
+      .catch(() => { if (active) setError('Model preview is unavailable.') })
 
     return () => {
+      active = false
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
@@ -107,7 +132,7 @@ export function ModelPreview({ url, extension, onMetrics }: ModelPreviewProps) {
       renderer.dispose()
       renderer.domElement.remove()
     }
-  }, [extension, onMetrics, url])
+  }, [extension, onMetrics, onMetricsError, url])
 
   return <div className="relative h-full min-h-64 w-full"><div ref={host} className="h-full min-h-64 w-full" />{error && <p className="absolute inset-0 grid place-items-center text-sm text-zinc-300">{error}</p>}</div>
 }

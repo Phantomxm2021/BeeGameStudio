@@ -10,7 +10,7 @@ import {
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
-import { ResourcePreview } from './ResourcePreview';
+import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
 import type { ModelMetrics } from './ModelPreview';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
@@ -619,9 +619,7 @@ function EmptyPreviewState() {
 }
 
 function isModelElement(element: ResourceElement) {
-  if (element.kind.toLowerCase() === 'model') return true;
-  const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.split('.').pop();
-  return ['glb', 'gltf', 'obj', 'fbx'].includes(extension?.toLowerCase() || '');
+  return isSupportedModelPreview(element);
 }
 
 function formatFileSize(size: number) {

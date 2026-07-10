@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { renderPreview } from './ResourcePreview'
+import { persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -8,6 +9,22 @@ describe('renderPreview', () => {
     expect(renderPreview({ name: 'clip.webm', kind: 'video' })).toBe('video')
     expect(renderPreview({ name: 'typeface.woff2', kind: 'font' })).toBe('font')
     expect(renderPreview({ name: 'world.glb', kind: 'model' })).toBe('model')
+  })
+
+  test('does not attempt a model loader for an unsupported model extension', () => {
+    expect(renderPreview({ name: 'legacy.asset', kind: 'model' })).toBe('document-card')
+  })
+
+  test('reports a model metrics persistence error instead of leaving a rejected promise', async () => {
+    const error = new Error('offline')
+    const result = await persistModelMetrics(async () => { throw error }, {
+      triangles: 12,
+      vertices: 8,
+      materialCount: 2,
+      bounds: { width: 1, height: 2, depth: 3 },
+    })
+
+    expect(result).toBe(error)
   })
 
   test('selects PDF, text, and document-card fallbacks safely from extensions', () => {
