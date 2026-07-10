@@ -17,7 +17,15 @@ export const RESOURCE_CATEGORIES = [
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
 export type ResourcePackStatus = 'draft' | 'published' | 'archived'
-export type ResourceElementStatus = 'ready' | 'hidden' | 'archived'
+export type ResourceElementStatus = 'queued' | 'uploading' | 'ready' | 'failed' | 'hidden' | 'archived'
+
+export type ResourceFolder = {
+  id: string
+  packId: string
+  name: string
+  parentId?: string
+  path: string
+}
 
 export type ResourcePack = {
   id: string

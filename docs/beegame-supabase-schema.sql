@@ -322,6 +322,20 @@ create table if not exists public.beegame_resource_elements (
   unique (pack_id, path)
 );
 
+create table if not exists public.beegame_resource_folders (
+  id text primary key,
+  pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
+  name text not null,
+  parent_id text references public.beegame_resource_folders(id) on delete cascade,
+  path text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (pack_id, path)
+);
+
+create index if not exists beegame_resource_folders_pack_parent_idx
+  on public.beegame_resource_folders (pack_id, parent_id, path);
+
 create table if not exists public.beegame_resource_dependencies (
   element_id text not null references public.beegame_resource_elements(id) on delete cascade,
   dependency_path text not null,

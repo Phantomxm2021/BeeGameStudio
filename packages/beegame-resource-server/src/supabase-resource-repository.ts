@@ -2,6 +2,7 @@ import type {
   PackSummary,
   ResourceCategory,
   ResourceElement,
+  ResourceFolder,
   ResourcePack,
   ResourceRepository,
 } from '@bee-game-studio/beegame-resource-core'
@@ -26,6 +27,8 @@ type ElementRow = Omit<ResourceElement, 'packId' | 'preview' | 'styleOverride' |
   dimension_override?: ResourceElement['dimensionOverride'] | null
 }
 
+type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
+
 export function createSupabaseResourceRepository(
   options: SupabaseResourceRepositoryOptions,
 ): ResourceRepository {
@@ -44,6 +47,24 @@ export function createSupabaseResourceRepository(
       },
     }))
     if (!response.ok) throw new Error(`Resource repository request failed (${response.status})`)
+    return await response.json() as T[]
+  }
+  const mutate = async <T>(table: string, init: RequestInit, params: Record<string, string> = {}): Promise<T[]> => {
+    const url = new URL(`${apiBase}/${table}`)
+    url.searchParams.set('select', '*')
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+    const response = await fetchImpl(url, {
+      ...init,
+      headers: {
+        apikey: options.serviceRoleKey,
+        authorization: `Bearer ${options.serviceRoleKey}`,
+        accept: 'application/json',
+        'content-type': 'application/json',
+        prefer: 'return=representation',
+        ...(init.headers || {}),
+      },
+    })
+    if (!response.ok) throw new Error(`Resource repository mutation failed (${response.status})`)
     return await response.json() as T[]
   }
   const signPath = async (path: string): Promise<string> => {
@@ -83,6 +104,13 @@ export function createSupabaseResourceRepository(
     ...(row.style_override ? { styleOverride: row.style_override } : {}),
     ...(row.dimension_override ? { dimensionOverride: row.dimension_override } : {}),
   })
+  const toFolder = (row: FolderRow): ResourceFolder => ({
+    id: row.id,
+    packId: row.pack_id,
+    name: row.name,
+    ...(row.parent_id ? { parentId: row.parent_id } : {}),
+    path: row.path,
+  })
   return {
     async listPacks() {
       return await Promise.all((await request<PackRow>('beegame_resource_packs', { order: 'name.asc' })).map(toPack))
@@ -102,6 +130,26 @@ export function createSupabaseResourceRepository(
         id: `eq.${elementId}`,
       })
       return rows[0] ? toElement(rows[0]) : undefined
+    },
+    async createPack(pack) {
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0 }) })
+      return await toPack(rows[0])
+    },
+    async listFolders(packId) {
+      return (await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, order: 'path.asc' })).map(toFolder)
+    },
+    async createFolder(packId, input) {
+      const parent = input.parentId ? (await request<FolderRow>('beegame_resource_folders', { id: `eq.${input.parentId}`, pack_id: `eq.${packId}` }))[0] : undefined
+      if (input.parentId && !parent) throw new Error('Parent folder not found')
+      const path = parent ? `${parent.path}/${input.name}` : input.name
+      const rows = await mutate<FolderRow>('beegame_resource_folders', { method: 'POST', body: JSON.stringify({ id: input.id, pack_id: packId, name: input.name, parent_id: input.parentId ?? null, path }) })
+      return toFolder(rows[0])
+    },
+    async publishPack(packId) {
+      const incomplete = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}`, status: 'in.(queued,uploading,failed)' })
+      if (incomplete.length > 0) throw new Error('Pack has incomplete uploads')
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published' }) }, { id: `eq.${packId}` })
+      return await toPack(rows[0])
     },
   }
 }

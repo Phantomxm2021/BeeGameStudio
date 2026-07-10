@@ -46,7 +46,7 @@ export function validateResourceElement(value: unknown): ResourceElement {
   if (!isRecord(value.specs) || !Array.isArray(value.dependencies)) {
     throw new ResourceValidationError('Element specs and dependencies are required')
   }
-  if (!isAllowed(value.status, ['ready', 'hidden', 'archived'] as const)) {
+  if (!isAllowed(value.status, ['queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'] as const)) {
     throw new ResourceValidationError('Element status is unsupported')
   }
   return value as ResourceElement
