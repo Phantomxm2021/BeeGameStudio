@@ -9,8 +9,10 @@ import {
   type ResourceSlotRequirement,
 } from '@bee-game-studio/beegame-resource-core'
 import {
+  createConfiguredResourceUserResolver,
   createLocalResourceUserResolver,
   hasResourceAdminPermission,
+  isLocalResourceFallbackAllowed,
   type ResourceUserContext,
   type ResourceUserResolver,
 } from './auth'
@@ -39,7 +41,9 @@ export type BeeGameResourceServerAppOptions = {
 export function createBeeGameResourceServerApp(
   options: BeeGameResourceServerAppOptions,
 ) {
-  const resolveUser = options.currentUserResolver ?? createLocalResourceUserResolver()
+  const resolveUser = options.currentUserResolver ??
+    createConfiguredResourceUserResolver() ??
+    (isLocalResourceFallbackAllowed() ? createLocalResourceUserResolver() : (() => undefined))
   return {
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
