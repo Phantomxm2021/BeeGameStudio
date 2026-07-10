@@ -76,6 +76,22 @@ describe('resource service app', () => {
     expect(deleted).toEqual(['pack-1'])
   })
 
+  test('returns a CORS JSON error when a lifecycle handler throws', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      updateResourcePack: async () => { throw new Error('database unavailable') },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Changed' }),
+    }))
+
+    expect(response.status).toBe(500)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    await expect(response.json()).resolves.toEqual({ error: { code: 'resource_lifecycle_failed', message: 'database unavailable' } })
+  })
+
   test('uploads a supported cover and rejects an unsupported one', async () => {
     const uploads: string[] = []
     const app = createBeeGameResourceServerApp({

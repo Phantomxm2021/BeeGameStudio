@@ -1,4 +1,4 @@
-import { createInMemoryResourceRepository, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
+import { createInMemoryResourceRepository, type PackSummary, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 import { createBeeGameResourceServerApp } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
@@ -17,24 +17,25 @@ if (import.meta.main) {
     importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey, uploadConcurrency: Number(process.env.BEEGAME_RESOURCE_UPLOAD_CONCURRENCY || 1) }) : undefined,
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
-      const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = trimPath(String(form.get('folderPath') || category))
+      const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
       if (!(file instanceof File)) throw new Error('Element file is required')
-      if (!folderPath || folderPath.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Element folder path is invalid')
-      const relativePath = `${folderPath}/${file.name}`
-      const path = `${packId}/${relativePath}`
+      const storagePackId = safeStorageComponent(packId, 'Pack id')
+      const filename = safeStorageComponent(file.name, 'Element filename')
+      const relativePath = `${folderPath}/${filename}`
+      const path = `${storagePackId}/${relativePath}`
       const storageUrl = `${baseUrl.replace(/\/+$/, '')}/storage/v1/object/beegame-resource-packs/${path.split('/').map(encodeURIComponent).join('/')}`
       const headers = { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'true' }
       const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error('Element storage upload failed')
-      const row = buildElementUploadRow(packId, category, file, `${packId}-${crypto.randomUUID()}`, relativePath)
+      const row = buildElementUploadRow(storagePackId, category, file, `${storagePackId}-${crypto.randomUUID()}`, relativePath, filename)
       const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
-      return (await saved.json() as unknown[])[0]
+      return toResourceElement((await saved.json() as Array<Record<string, unknown>>)[0])
     } : undefined,
     updateResourceElement: baseUrl && serviceRoleKey ? async (packId, elementId, body) => {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(toElementRow(body)) })
       if (!response.ok) throw new Error(`Resource element update failed (${response.status})`)
-      return (await response.json() as unknown[])[0]
+      return toResourceElement((await response.json() as Array<Record<string, unknown>>)[0])
     } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
@@ -76,9 +77,13 @@ function trimPath(value: string): string {
 }
 
 function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
+  const editable: Record<string, string> = {
+    name: 'name', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
+    dependencies: 'dependencies', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
+  }
   const row: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(body)) {
-    row[key === 'packId' ? 'pack_id' : key === 'styleOverride' ? 'style_override' : key === 'dimensionOverride' ? 'dimension_override' : key] = value
+  for (const [key, column] of Object.entries(editable)) {
+    if (Object.hasOwn(body, key)) row[column] = body[key]
   }
   return row
 }
@@ -112,8 +117,8 @@ export function inferElementKind(file: File): string {
   return 'file'
 }
 
-export function buildElementUploadRow(packId: string, category: string, file: File, id = `${packId}-${crypto.randomUUID()}`, path = `${category}/${file.name}`): Record<string, unknown> {
-  return { id, pack_id: packId, name: file.name, path, category, kind: inferElementKind(file), specs: { size: file.size, mimeType: file.type || 'application/octet-stream', extension: extensionFromName(file.name) }, dependencies: [], status: 'ready' }
+export function buildElementUploadRow(packId: string, category: string, file: File, id = `${packId}-${crypto.randomUUID()}`, path = `${category}/${file.name}`, name = file.name): Record<string, unknown> {
+  return { id, pack_id: packId, name, path, category, kind: inferElementKind(file), specs: { size: file.size, mimeType: file.type || 'application/octet-stream', extension: extensionFromName(name) }, dependencies: [], status: 'ready' }
 }
 
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -126,20 +131,23 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
   const objectUrl = (path: string) => `${baseUrl}/storage/v1/object/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`
   const safePrefix = (packId: string) => `${safeStorageComponent(packId, 'Pack id')}/`
-  const deleteObject = async (path: string) => { await fetchImpl(objectUrl(path), { method: 'DELETE', headers }) }
+  const deleteObject = async (path: string) => {
+    const response = await fetchImpl(objectUrl(path), { method: 'DELETE', headers })
+    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status})`)
+  }
   return {
     updateResourcePack: async (packId: string, body: Record<string, unknown>) => {
       const row = toPackUpdateRow(body)
       if (Object.keys(row).length === 0) throw new Error('No editable Pack fields were supplied')
       const response = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!response.ok) throw new Error(`Resource Pack update failed (${response.status})`)
-      return (await response.json() as unknown[])[0]
+      return toResourcePack((await response.json() as Array<Record<string, unknown>>)[0])
     },
     deleteResourcePack: async (packId: string) => {
       const prefix = safePrefix(packId)
       const pageSize = 1000
-      for (let offset = 0; ; offset += pageSize) {
-        const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix, limit: pageSize, offset }) })
+      for (;;) {
+        const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix, limit: pageSize, offset: 0 }) })
         if (!listed.ok) throw new Error(`Resource storage listing failed (${listed.status})`)
         const objects = await listed.json() as Array<{ name?: unknown }>
         for (const object of objects) {
@@ -147,7 +155,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
           const path = object.name.startsWith(prefix) ? object.name : `${prefix}${object.name}`
           if (isSafeStoragePath(path, prefix)) await deleteObject(path)
         }
-        if (objects.length < pageSize) break
+        if (objects.length === 0) break
       }
       const deleted = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'DELETE', headers: { ...headers, prefer: 'return=representation' } })
       if (!deleted.ok) throw new Error(`Resource Pack deletion failed (${deleted.status})`)
@@ -174,7 +182,9 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       if (!lookup.ok) throw new Error(`Resource element lookup failed (${lookup.status})`)
       const element = (await lookup.json() as Array<{ pack_id?: string; path?: string }>)[0]
       if (!element?.pack_id || !element.path || element.pack_id !== packId) throw new Error('Resource element not found in Pack')
-      const signed = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${`${packId}/${element.path}`.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
+      const storagePackId = safeStorageComponent(packId, 'Pack id')
+      const relativePath = safeRelativeStoragePath(element.path, 'Resource element path')
+      const signed = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${`${storagePackId}/${relativePath}`.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
       if (!signed.ok) throw new Error(`Resource URL signing failed (${signed.status})`)
       const signedURL = (await signed.json() as { signedURL?: string }).signedURL
       if (!signedURL) throw new Error('Resource URL signing returned no URL')
@@ -183,8 +193,21 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   }
 }
 
-function toResourcePack(row: Record<string, unknown>): ResourcePack {
-  return { id: String(row.id), name: String(row.name), style: String(row.style), gameTypes: Array.isArray(row.game_types) ? row.game_types.map(String) : [], dimension: row.dimension as ResourcePack['dimension'], primaryCategory: row.primary_category as ResourcePack['primaryCategory'], categories: Array.isArray(row.categories) ? row.categories as ResourcePack['categories'] : [], license: String(row.license), version: String(row.version), status: row.status as ResourcePack['status'], ...(typeof row.cover_path === 'string' ? { coverPath: row.cover_path } : {}) }
+export function toResourcePack(row: Record<string, unknown>): PackSummary {
+  return { id: String(row.id), name: String(row.name), style: String(row.style), gameTypes: Array.isArray(row.game_types) ? row.game_types.map(String) : [], dimension: row.dimension as ResourcePack['dimension'], primaryCategory: row.primary_category as ResourcePack['primaryCategory'], categories: Array.isArray(row.categories) ? row.categories as ResourcePack['categories'] : [], license: String(row.license), version: String(row.version), status: row.status as ResourcePack['status'], ...(typeof row.cover_path === 'string' ? { coverPath: row.cover_path } : {}), elementCount: typeof row.element_count === 'number' ? row.element_count : 0 }
+}
+
+export function toResourceElement(row: Record<string, unknown>): ResourceElement {
+  return {
+    id: String(row.id), packId: String(row.pack_id), name: String(row.name), path: String(row.path),
+    category: String(row.category) as ResourceElement['category'], kind: String(row.kind),
+    ...(row.preview && typeof row.preview === 'object' ? { preview: row.preview as ResourceElement['preview'] } : {}),
+    specs: row.specs && typeof row.specs === 'object' ? row.specs as ResourceElement['specs'] : {},
+    dependencies: Array.isArray(row.dependencies) ? row.dependencies.map(String) : [],
+    status: row.status as ResourceElement['status'],
+    ...(typeof row.style_override === 'string' ? { styleOverride: row.style_override } : {}),
+    ...(typeof row.dimension_override === 'string' ? { dimensionOverride: row.dimension_override as ResourceElement['dimensionOverride'] } : {}),
+  }
 }
 
 function isSafeStoragePath(path: string, prefix: string): boolean {
@@ -197,10 +220,17 @@ export function sanitizeStorageBasename(name: string): string {
 }
 
 function safeStorageComponent(value: string, label: string): string {
-  if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\')) throw new Error(`${label} is invalid`)
+  if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${label} is invalid`)
   return value
 }
 
 function isSafeRelativeStoragePath(value: string): boolean {
-  return !value.startsWith('/') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..' && !part.includes('\\'))
+  try { safeRelativeStoragePath(value, 'Storage path'); return true } catch { return false }
+}
+
+function safeRelativeStoragePath(value: string, label: string): string {
+  if (!value || value.startsWith('/') || value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${label} is invalid`)
+  const parts = value.split('/')
+  if (parts.some(part => !part || part === '.' || part === '..')) throw new Error(`${label} is invalid`)
+  return value
 }

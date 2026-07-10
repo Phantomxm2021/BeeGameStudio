@@ -39,6 +39,7 @@ export function createBeeGameResourceServerApp(
       if (!hasResourceAdminPermission(user)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
+      try {
       const pathname = new URL(request.url).pathname
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
@@ -132,10 +133,13 @@ export function createBeeGameResourceServerApp(
         const body = await request.json() as Record<string, unknown>
         return corsResponse(Response.json({ element: await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body) }), options.corsOrigin)
       }
-      try {
-        return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
+        try {
+          return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(500, 'resource_read_failed', error instanceof Error ? error.message : 'Resource request failed'), options.corsOrigin)
+        }
       } catch (error) {
-        return corsResponse(jsonError(500, 'resource_read_failed', error instanceof Error ? error.message : 'Resource request failed'), options.corsOrigin)
+        return corsResponse(jsonError(500, 'resource_lifecycle_failed', error instanceof Error ? error.message : 'Resource lifecycle operation failed'), options.corsOrigin)
       }
     },
   }

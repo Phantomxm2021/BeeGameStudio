@@ -25,3 +25,36 @@ alter table public.beegame_resource_elements
 alter table public.beegame_resource_elements
   add constraint beegame_resource_elements_status_check
   check (status in ('queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'));
+
+-- Keep the Pack summary authoritative for all insertion, deletion, and future
+-- cross-Pack moves. The trigger makes count maintenance transactional instead
+-- of relying on any individual HTTP handler to race a read-modify-write update.
+create or replace function public.beegame_sync_resource_pack_element_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op <> 'INSERT' then
+    update public.beegame_resource_packs
+    set element_count = (select count(*) from public.beegame_resource_elements where pack_id = old.pack_id),
+        updated_at = now()
+    where id = old.pack_id;
+  end if;
+
+  if tg_op <> 'DELETE' then
+    update public.beegame_resource_packs
+    set element_count = (select count(*) from public.beegame_resource_elements where pack_id = new.pack_id),
+        updated_at = now()
+    where id = new.pack_id;
+  end if;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists beegame_resource_elements_sync_pack_count on public.beegame_resource_elements;
+create trigger beegame_resource_elements_sync_pack_count
+after insert or delete or update of pack_id on public.beegame_resource_elements
+for each row execute function public.beegame_sync_resource_pack_element_count();
