@@ -222,9 +222,12 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
   const objectUrl = (path: string) => `${baseUrl}/storage/v1/object/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`
   const safePrefix = (packId: string) => `${safeStorageComponent(packId, 'Pack id')}/`
-  const deleteObject = async (path: string) => {
+  const deleteObject = async (path: string, allowMissing = false): Promise<boolean> => {
     const response = await fetchImpl(objectUrl(path), { method: 'DELETE', headers })
-    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status}) for ${path}${await safeStorageFailureDetail(response)}`)
+    if (response.ok) return true
+    const failure = await readSafeStorageFailure(response)
+    if (allowMissing && failure.objectMissing) return false
+    throw new Error(`Resource storage deletion failed (${response.status}) for ${path}${failure.detail}`)
   }
   const signObject = async (path: string): Promise<string> => {
     const response = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
@@ -268,7 +271,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
             const path = storageListEntryPath(currentPrefix, entry.name)
             if (!isSafeStoragePath(path, prefix)) throw new Error('Resource storage contains an unsafe resource storage entry')
             if (entry.id != null || entry.metadata != null) {
-              await deleteObject(path)
+              await deleteObject(path, true)
               removedObject = true
             } else {
               folders.push(`${path.replace(/\/+$/, '')}/`)
@@ -371,16 +374,27 @@ function storageListEntryPath(prefix: string, name: string): string {
 }
 
 async function safeStorageFailureDetail(response: Response): Promise<string> {
+  return (await readSafeStorageFailure(response)).detail
+}
+
+async function readSafeStorageFailure(response: Response): Promise<{ detail: string; objectMissing: boolean }> {
   const body = await response.text().catch(() => '')
-  if (!body) return ''
+  if (!body) return { detail: '', objectMissing: response.status === 404 }
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>
     const detail = [parsed.code, parsed.message, parsed.error].find(value => typeof value === 'string')
-    if (typeof detail !== 'string') return ''
-    const normalized = detail.trim().slice(0, 240)
-    return normalized && [...normalized].every(character => character >= ' ' && character !== '\u007f') ? `: ${normalized}` : ''
+    const normalized = typeof detail === 'string' ? detail.trim().slice(0, 240) : ''
+    const safeDetail = normalized && [...normalized].every(character => character >= ' ' && character !== '\u007f') ? `: ${normalized}` : ''
+    const statusCode = String(parsed.statusCode ?? parsed.status ?? parsed.code ?? '').trim()
+    const message = typeof parsed.message === 'string' ? parsed.message.trim().toLowerCase() : ''
+    const error = typeof parsed.error === 'string' ? parsed.error.trim().toLowerCase() : ''
+    const objectMissing = response.status === 404 || (
+      message === 'object not found' &&
+      (statusCode === '404' || statusCode.toLowerCase() === 'not_found' || error === 'not found')
+    )
+    return { detail: safeDetail, objectMissing }
   } catch {
-    return ''
+    return { detail: '', objectMissing: response.status === 404 }
   }
 }
 

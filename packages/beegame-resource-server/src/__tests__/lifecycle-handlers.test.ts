@@ -64,6 +64,47 @@ describe('Supabase resource lifecycle handlers', () => {
     expect(deletedPack).toBe(false)
   })
 
+  test('treats a Supabase object-not-found response as an idempotent Pack cleanup success', async () => {
+    let listedObject = false
+    let deletedPack = false
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/object/list/')) {
+          if (listedObject) return Response.json([])
+          listedObject = true
+          return Response.json([{ name: 'kenney_food-kit/models/apple.fbx', id: 'stale-object' }])
+        }
+        if (url.includes('/storage/v1/object/')) {
+          return Response.json({ statusCode: '404', error: 'Not Found', message: 'Object not found' }, { status: 400 })
+        }
+        if (init?.method === 'DELETE') { deletedPack = true; return Response.json([packRow]) }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.deleteResourcePack('pack-1')).resolves.toBe(true)
+    expect(deletedPack).toBe(true)
+  })
+
+  test('does not hide a non-missing Supabase storage 400 during Pack cleanup', async () => {
+    let deletedPack = false
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/object/list/')) return Response.json([{ name: 'assets/item.glb', id: 'item' }])
+        if (url.includes('/storage/v1/object/')) return Response.json({ statusCode: '400', error: 'Bad Request', message: 'Invalid object key' }, { status: 400 })
+        if (init?.method === 'DELETE') { deletedPack = true; return Response.json([packRow]) }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.deleteResourcePack('pack-1')).rejects.toThrow('storage deletion failed (400)')
+    expect(deletedPack).toBe(false)
+  })
+
   test('recursively clears nested virtual folders without deleting directory nodes', async () => {
     const deleted: string[] = []
     let deletedPack = false
