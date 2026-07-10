@@ -3,6 +3,42 @@ import { createInMemoryResourceRepository } from '../../../beegame-resource-core
 import { createBeeGameResourceServerApp } from '../app'
 
 describe('resource authoring routes', () => {
+  test('creates a new Pack before it contains any resource elements', async () => {
+    const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }), currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'empty-pack', name: 'Empty Pack', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: [] }),
+    }))
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({ pack: expect.objectContaining({ id: 'empty-pack', primaryCategory: 'world-scene', categories: [] }) })
+  })
+
+  test('rejects a Pack whose contained element categories are not an array', async () => {
+    const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }), currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'invalid-categories-pack', name: 'Invalid Categories', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: 'environment' }),
+    }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: { code: 'invalid_pack', message: 'Pack categories must be an array of supported values' } })
+  })
+
+  test('rejects a Pack with an unsupported contained element category', async () => {
+    const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }), currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'unsupported-categories-pack', name: 'Unsupported Categories', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'world-scene', gameTypes: ['adventure'], categories: ['unknown'] }),
+    }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: { code: 'invalid_pack', message: 'Pack categories must be an array of supported values' } })
+  })
+
   test('creates a draft Pack and its folders', async () => {
     const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
     const app = createBeeGameResourceServerApp({ repository, currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })

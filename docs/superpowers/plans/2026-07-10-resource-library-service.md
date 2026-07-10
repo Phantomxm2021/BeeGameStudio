@@ -22,7 +22,7 @@
 
 - [ ] **Step 1: Write failing contract tests**
 
-  Add tests covering: a Pack requires a name, primary dimension (`2D`, `3D`, or `agnostic`), style, supported game types, and categories; elements inherit Pack metadata while retaining their own category and preview metadata; invalid dimensions/categories are rejected; listing Pack cards returns stable counts and sorting; listing elements by category returns only elements in that Pack.
+  Add tests covering: a Pack requires a name, primary dimension (`2D`, `3D`, or `agnostic`), style, supported game types, and an array-valued `categories` field (which may be empty before elements are uploaded); elements inherit Pack metadata while retaining their own category and preview metadata; invalid dimensions/categories are rejected; listing Pack cards returns stable counts and sorting; listing elements by category returns only elements in that Pack.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 

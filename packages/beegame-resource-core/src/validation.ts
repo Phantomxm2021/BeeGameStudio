@@ -23,9 +23,9 @@ export function validateResourcePack(value: unknown): ResourcePack {
   if (!Array.isArray(value.gameTypes) || value.gameTypes.length === 0) {
     throw new ResourceValidationError('Pack gameTypes must not be empty')
   }
-  if (!Array.isArray(value.categories) || value.categories.length === 0 ||
+  if (!Array.isArray(value.categories) ||
       value.categories.some(item => !isAllowed(item, RESOURCE_CATEGORIES))) {
-    throw new ResourceValidationError('Pack categories must contain supported values')
+    throw new ResourceValidationError('Pack categories must be an array of supported values')
   }
   if (!isAllowed(value.primaryCategory, RESOURCE_PACK_PRIMARY_CATEGORIES)) {
     throw new ResourceValidationError('Pack primary category is unsupported')

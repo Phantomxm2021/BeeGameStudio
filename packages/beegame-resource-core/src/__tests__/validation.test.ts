@@ -29,9 +29,22 @@ describe('resource pack validation', () => {
     )
   })
 
-  test('rejects a Pack without an explicit category', () => {
-    expect(() => validateResourcePack({ ...validPack, categories: [] })).toThrow(
-      ResourceValidationError,
+  test('accepts an empty derived list of contained element categories', () => {
+    expect(validateResourcePack({ ...validPack, categories: [] })).toEqual({
+      ...validPack,
+      categories: [],
+    })
+  })
+
+  test('rejects a Pack whose contained element categories are not an array', () => {
+    expect(() => validateResourcePack({ ...validPack, categories: 'ui' })).toThrow(
+      'Pack categories must be an array of supported values',
+    )
+  })
+
+  test('rejects a Pack with an unsupported contained element category', () => {
+    expect(() => validateResourcePack({ ...validPack, categories: ['unknown'] })).toThrow(
+      'Pack categories must be an array of supported values',
     )
   })
 

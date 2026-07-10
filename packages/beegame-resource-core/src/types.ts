@@ -52,6 +52,7 @@ export type ResourcePack = {
   gameTypes: readonly string[]
   dimension: ResourceDimension
   primaryCategory: ResourcePackPrimaryCategory
+  // Derived from contained elements, so a newly created Pack has no values yet.
   categories: readonly ResourceCategory[]
   license: string
   version: string
