@@ -9,9 +9,12 @@ describe('CreateResourcePackDialog', () => {
     render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
 
     const metadata = screen.getByTestId('create-pack-metadata')
-    expect(metadata).toContainElement(screen.getByPlaceholderText('例如：Painterly Forest'))
+    const nameInput = screen.getByPlaceholderText('例如：Painterly Forest')
+    expect(metadata).toHaveClass('sm:grid-cols-2')
+    expect(metadata).toContainElement(nameInput)
     expect(metadata).toContainElement(screen.getByLabelText('维度'))
     expect(metadata).toContainElement(screen.getByLabelText('主分类'))
+    expect(nameInput.closest('label')).toHaveClass('sm:col-span-2')
   })
 
   test('requires Pack metadata before creating', async () => {
