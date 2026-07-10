@@ -17,6 +17,16 @@ describe('CreateResourcePackDialog', () => {
     expect(nameInput.closest('label')).toHaveClass('sm:col-span-2')
   })
 
+  test('uses the shared dialog typography and compact control rhythm', () => {
+    render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { name: '创建 Pack' })).toHaveClass('type-modal-title')
+    expect(screen.getByText('先定义风格与使用场景，再添加资源。')).toHaveClass('type-body')
+    expect(screen.getByText('资源库')).toHaveClass('type-label')
+    expect(screen.getByPlaceholderText('例如：Painterly Forest')).toHaveClass('h-11', 'rounded-xl')
+    expect(screen.getByRole('button', { name: '创建 Pack' })).toHaveClass('h-11', 'type-button')
+  })
+
   test('requires Pack metadata before creating', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()
