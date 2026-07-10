@@ -79,6 +79,23 @@ function makeFailingApp(failure: 'list' | 'enable' | 'delete') {
   })
 }
 
+function makeFailingInternalApp() {
+  return createBeeGameSkillsApp({
+    requireRequestUser: false,
+    resolveRequestUser: async () => ({ id: 'user-1' }),
+    getCurrentUser: () => ({ id: 'user-1' }),
+    hasPermission: () => true,
+    serviceToken: 'service-secret',
+    repository: {
+      listUserSkills: async () => [],
+      listEnabledUserSkills: async () => { throw new Error('private enabled-skills failure') },
+      importUserSkill: async () => { throw new Error('unused') },
+      updateUserSkillEnabled: async () => { throw new Error('unused') },
+      deleteUserSkill: async () => false,
+    },
+  })
+}
+
 describe('BeeGame skill import routes', () => {
   test('checks skills permission before any repository call', async () => {
     let repositoryCalls = 0
@@ -105,6 +122,17 @@ describe('BeeGame skill import routes', () => {
     const response = await app.request('/api/internal/user-skills/enabled?userId=user-1')
     expect(response.status).toBe(401)
     expect(await response.json()).toEqual({ error: 'Unauthorized', message: 'invalid service token' })
+  })
+
+  test('redacts and traces internal enabled-skills repository failures after service-token auth', async () => {
+    const response = await makeFailingInternalApp().request('/api/internal/user-skills/enabled?userId=user-1', {
+      headers: { authorization: 'Bearer service-secret' },
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(500)
+    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(JSON.stringify(body)).not.toContain('private enabled-skills failure')
   })
 
   test.each([

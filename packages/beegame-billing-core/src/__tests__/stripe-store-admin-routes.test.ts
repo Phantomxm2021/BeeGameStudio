@@ -72,6 +72,46 @@ describe('stripe store admin routes', () => {
     ])
   })
 
+  test('redacts and traces billing event repository failures after audit authorization', async () => {
+    const failure = new Error('billing events backend secret')
+    const warnings: unknown[] = []
+    console.warn = (...args: unknown[]) => warnings.push(args)
+    const app = createApp(createRepository({
+      listBillingEvents: async () => { throw failure },
+    }))
+
+    const response = await app.request('/api/admin/billing/events')
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(JSON.stringify(body)).not.toContain('billing events backend secret')
+    expect(warnings[0]).toEqual([
+      '[BeeGame] route failed',
+      expect.objectContaining({
+        traceId: body.traceId,
+        route: 'admin.billing.events.list',
+        cause: 'Error',
+      }),
+    ])
+  })
+
+  test('preserves billing events audit authorization before repository access', async () => {
+    let repositoryCalls = 0
+    const app = createApp(createRepository({
+      listBillingEvents: async () => {
+        repositoryCalls += 1
+        return []
+      },
+    }), () => false)
+
+    const response = await app.request('/api/admin/billing/events')
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'Forbidden' })
+    expect(repositoryCalls).toBe(0)
+  })
+
   test('redacts and traces credit-pack upsert failures', async () => {
     const failure = new Error('upsert backend secret')
     const warnings: unknown[] = []

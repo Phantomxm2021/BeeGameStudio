@@ -105,7 +105,11 @@ export function registerBeeGameSkillsRoutes(
     if (!userId) {
       return c.json({ error: 'Validation failed', message: 'userId is required' }, 400)
     }
-    return c.json((await deps.repository.listEnabledUserSkills(userId)).map(toUserSkillResponse))
+    try {
+      return c.json((await deps.repository.listEnabledUserSkills(userId)).map(toUserSkillResponse))
+    } catch (error) {
+      return tracedRouteError(c, 'internal.user-skills.enabled.list', error)
+    }
   })
 }
 

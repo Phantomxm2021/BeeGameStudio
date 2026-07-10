@@ -166,7 +166,11 @@ export function registerBeeGameStripeStoreRoutes(
         '/api/admin/billing/events',
       )
     }
-    return c.json({ events: await deps.dashboardRepository.listBillingEvents(c.req.raw) })
+    try {
+      return c.json({ events: await deps.dashboardRepository.listBillingEvents(c.req.raw) })
+    } catch (error) {
+      return tracedRouteError(c, 'admin.billing.events.list', error)
+    }
   })
 
   app.get('/api/admin/billing/credit-packs', async c => {
