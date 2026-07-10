@@ -17,6 +17,15 @@ export type BeeGameAssetIntegrationProvider = {
   capabilities?: string[]
 }
 
+export type BeeGameResourceBinding = {
+  pack_id: string
+  pack_version: string
+  element_id: string
+  source_url: string
+  selected_at: string
+  selection_reason: string[]
+}
+
 export type BeeGameAssetSlot = {
   id: string
   name?: string
@@ -34,6 +43,7 @@ export type BeeGameAssetSlot = {
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed'
   uploaded_files?: string[]
   uploaded_urls?: string[]
+  resource_binding?: BeeGameResourceBinding
   updated_at?: string
 }
 
@@ -102,6 +112,22 @@ export async function uploadBeeGameAsset(
   }
 }
 
+export function bindBeeGameLibraryResource(
+  manifest: BeeGameAssetManifest,
+  slotId: string,
+  binding: BeeGameResourceBinding,
+): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const validatedBinding = normalizeResourceBinding(binding)
+  if (!validatedBinding) throw new Error('Invalid resource binding')
+  const slot = { ...manifest.slots[slotIndex], resource_binding: validatedBinding, updated_at: new Date().toISOString() }
+  const slots = [...manifest.slots]
+  slots[slotIndex] = slot
+  return { manifest: { ...manifest, slots }, slot }
+}
+
 export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid asset manifest')
@@ -162,7 +188,27 @@ function normalizeAssetSlot(
     status: normalizeSlotStatus(record.status ?? record.placeholder_status),
     uploaded_files: stringArray(record.uploaded_files),
     uploaded_urls: stringArray(record.uploaded_urls),
+    resource_binding: normalizeResourceBinding(record.resource_binding),
     updated_at: trimString(record.updated_at),
+  }
+}
+
+function normalizeResourceBinding(value: unknown): BeeGameResourceBinding | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const packId = trimString(record.pack_id)
+  const packVersion = trimString(record.pack_version)
+  const elementId = trimString(record.element_id)
+  const sourceUrl = trimString(record.source_url)
+  const selectedAt = trimString(record.selected_at)
+  if (!packId || !packVersion || !elementId || !sourceUrl || !selectedAt) return undefined
+  return {
+    pack_id: packId,
+    pack_version: packVersion,
+    element_id: elementId,
+    source_url: sourceUrl,
+    selected_at: selectedAt,
+    selection_reason: stringArray(record.selection_reason),
   }
 }
 
