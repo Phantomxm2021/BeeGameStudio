@@ -34,6 +34,7 @@ const api = {
   listFolders: async () => [],
   createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
   updateElement: async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes }),
+  publishPack: async () => ({ ...pack, status: 'published' }),
   listPacks: async () => [pack],
   getPack: async () => pack,
   listElements: async () => [element],

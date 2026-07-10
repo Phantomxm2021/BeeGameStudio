@@ -86,6 +86,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Resource update failed (${response.status})`, response.status, result.error?.code || 'resource_update_failed')
       return result.pack
     },
+    async publishPack(packId: string): Promise<ResourcePackSummary> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/publish`, { method: 'POST' })
+      const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack publish failed (${response.status})`, response.status, result.error?.code || 'resource_publish_failed')
+      return result.pack
+    },
     async addElement(packId: string, file: File, category: string, folderPath?: string): Promise<ResourceElement> {
       const form = new FormData(); form.set('file', file); form.set('category', category); if (folderPath) form.set('folderPath', folderPath)
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`, { method: 'POST', body: form })

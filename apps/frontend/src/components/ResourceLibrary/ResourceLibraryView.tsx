@@ -14,6 +14,7 @@ type ResourceLibraryApi = Pick<
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder'
   | 'updateElement'
+  | 'publishPack'
 >;
 
 type ResourceLibraryViewProps = {
@@ -188,6 +189,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
+        onPublish={async () => { const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
       />
     );
   }
@@ -343,6 +345,7 @@ function PackBrowser({
   folders,
   onCreateFolder,
   uploadStatus,
+  onPublish,
   onUpdateElement,
 }: {
   pack: ResourcePackSummary;
@@ -361,6 +364,7 @@ function PackBrowser({
   onCreateFolder: (name: string) => Promise<void>;
   onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
   uploadStatus: { done: number; total: number; failed: string[] } | null;
+  onPublish: () => Promise<void>;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -393,6 +397,7 @@ function PackBrowser({
             ＋ 添加文件
             <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
           </label>
+          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button px-4 py-2" onClick={() => void onPublish()}>发布 Pack</button> : null}
         </div>
       </div>
       <div className="mb-5 flex gap-2">

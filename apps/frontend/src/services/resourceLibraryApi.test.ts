@@ -49,6 +49,13 @@ describe('resource library API', () => {
     expect(requests[0].init?.method).toBe('PATCH')
   })
 
+  test('publishes a validated Pack', async () => {
+    const requests: string[] = []
+    const api = createResourceLibraryApi(async (input) => { requests.push(String(input)); return new Response(JSON.stringify({ pack: { id: 'pack-1', name: 'Forest', status: 'published', elementCount: 1 } }), { status: 200 }) })
+    await expect(api.publishPack('pack-1')).resolves.toMatchObject({ status: 'published' })
+    expect(requests[0]).toBe('/api/resource-packs/pack-1/publish')
+  })
+
   test('turns a forbidden response into a typed error', async () => {
     const api = createResourceLibraryApi(async () => new Response(
       JSON.stringify({ error: { code: 'forbidden', message: 'No access' } }),
