@@ -103,6 +103,29 @@ export function calculateModelMetrics(object: THREE.Object3D, unresolvedTextureR
   }
 }
 
+/**
+ * FBX texture URLs are relative to the original authoring directory. A signed
+ * object URL cannot grant those follow-up requests access, so keep the model
+ * inspectable with a neutral PBR material rather than rendering it black.
+ */
+export function applyMissingTextureFallback(object: THREE.Object3D, unresolvedTextureReferences: readonly string[]): void {
+  if (unresolvedTextureReferences.length === 0) return
+  object.traverse(node => {
+    if (!(node instanceof THREE.Mesh)) return
+    const originalMaterials = Array.isArray(node.material) ? node.material : [node.material]
+    const fallbackMaterials = originalMaterials.map((material) => {
+      material.dispose()
+      return new THREE.MeshStandardMaterial({
+        color: 0xd8dce5,
+        roughness: 0.72,
+        metalness: 0.08,
+        side: THREE.DoubleSide,
+      })
+    })
+    node.material = Array.isArray(node.material) ? fallbackMaterials : fallbackMaterials[0]
+  })
+}
+
 async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<THREE.Object3D> {
   const normalized = extension.toLowerCase()
   if (normalized === 'glb' || normalized === 'gltf') return (await new GLTFLoader().loadAsync(url)).scene
@@ -167,6 +190,7 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
           disposeObject(loaded)
           return
         }
+        applyMissingTextureFallback(loaded, [...unresolvedTextures])
         model = loaded
         scene.add(loaded)
         const bounds = new THREE.Box3().setFromObject(loaded)
