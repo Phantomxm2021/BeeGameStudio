@@ -36,4 +36,19 @@ describe('resource selection route', () => {
 
     expect((await response.json()).selections).toEqual([])
   })
+
+  test('permits the dedicated workflow service token only for resource selection', async () => {
+    const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
+    const app = createBeeGameResourceServerApp({
+      repository, currentUser: { id: 'viewer', role: 'viewer' }, serviceSelectionToken: 'resource-service-token', getElementResourceUrl: async () => 'unexpected',
+    })
+    const selection = await app.fetch(new Request('http://resource.test/api/resource-selections', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-beegame-resource-service-token': 'resource-service-token' }, body: JSON.stringify({ requirements: [{ slotId: 'tree' }] }),
+    }))
+    const management = await app.fetch(new Request('http://resource.test/api/resource-packs', {
+      headers: { 'x-beegame-resource-service-token': 'resource-service-token' },
+    }))
+    expect(selection.status).toBe(200)
+    expect(management.status).toBe(403)
+  })
 })

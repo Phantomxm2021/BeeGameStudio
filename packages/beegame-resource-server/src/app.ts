@@ -33,6 +33,7 @@ export type BeeGameResourceServerAppOptions = {
   updateResourceFolder?: (packId: string, folderId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourceFolder?: (packId: string, folderId: string) => Promise<boolean>
   getElementResourceUrl?: (packId: string, elementId: string) => Promise<string>
+  serviceSelectionToken?: string
 }
 
 export function createBeeGameResourceServerApp(
@@ -42,13 +43,15 @@ export function createBeeGameResourceServerApp(
   return {
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
+      const pathname = new URL(request.url).pathname
+      const serviceSelectionRequest = request.method === 'POST' && pathname === '/api/resource-selections' &&
+        Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
       const user = options.currentUser ?? await resolveUser(request)
-      if (!user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
-      if (!hasResourceAdminPermission(user)) {
+      if (!serviceSelectionRequest && !user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
+      if (!serviceSelectionRequest && !hasResourceAdminPermission(user!)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
       try {
-      const pathname = new URL(request.url).pathname
       if (request.method === 'POST' && pathname === '/api/resource-selections') {
         if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource selection URLs are not configured'), options.corsOrigin)
         let requirements: ResourceSlotRequirement[]
