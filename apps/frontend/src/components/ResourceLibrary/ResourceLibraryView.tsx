@@ -84,6 +84,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const packSessionRef = useRef(0);
+  const categoryRequestRef = useRef(0);
   const consumedInitialPackIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -107,6 +108,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const openPack = async (pack: ResourcePackSummary) => {
     const session = ++packSessionRef.current;
+    categoryRequestRef.current += 1;
     openResourcePackRoute(pack.id);
     setError('');
     setLoading(true);
@@ -144,19 +146,20 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const selectCategory = async (category?: string, folderPath?: string) => {
     if (!selectedPack) return;
     const session = packSessionRef.current;
+    const request = ++categoryRequestRef.current;
     setActiveCategory(category);
     setActiveFolderPath(folderPath);
     setLoading(true);
     try {
       const nextElements = await apiClient.listElements(selectedPack.id, category, folderPath);
-      if (session !== packSessionRef.current) return;
+      if (session !== packSessionRef.current || request !== categoryRequestRef.current) return;
       setElements(nextElements);
       setLoadedElementCategories((current) => [...new Set([...current, ...nextElements.map((element) => element.category)])]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
-      if (session === packSessionRef.current) setError(err instanceof Error ? err.message : '元素加载失败');
+      if (session === packSessionRef.current && request === categoryRequestRef.current) setError(err instanceof Error ? err.message : '元素加载失败');
     } finally {
-      if (session === packSessionRef.current) setLoading(false);
+      if (session === packSessionRef.current && request === categoryRequestRef.current) setLoading(false);
     }
   };
 
@@ -224,6 +227,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onBack={() => {
           closeResourcePackRoute();
           packSessionRef.current += 1;
+          categoryRequestRef.current += 1;
           setSelectedPack(null);
           setSelectedElement(null);
           setLoadedElementCategories([]);

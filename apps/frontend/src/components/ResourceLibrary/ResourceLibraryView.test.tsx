@@ -135,4 +135,27 @@ describe('ResourceLibraryView', () => {
     });
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
+
+  test('keeps the latest category selection when an earlier request resolves late', async () => {
+    const user = userEvent.setup();
+    let resolveModels!: (elements: ResourceElement[]) => void;
+    let resolveMaterials!: (elements: ResourceElement[]) => void;
+    const listElements = vi.fn((_packId: string, category?: string) => {
+      if (!category) return Promise.resolve([element, materialElement]);
+      return new Promise<ResourceElement[]>((resolve) => {
+        if (category === 'models') resolveModels = resolve;
+        else resolveMaterials = resolve;
+      });
+    });
+    const apiClient = { ...api, listElements };
+    render(<ResourceLibraryView apiClient={apiClient} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const fileTree = screen.getByText('Pack 文件').closest('aside');
+    await user.click(within(fileTree!).getByText('模型'));
+    await user.click(within(fileTree!).getByText('材质'));
+    await act(async () => { resolveMaterials([materialElement]); });
+    await act(async () => { resolveModels([element]); });
+    await waitFor(() => expect(screen.getByRole('button', { name: '文件 Wood' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '文件 Character Idle' })).not.toBeInTheDocument();
+  });
 });
