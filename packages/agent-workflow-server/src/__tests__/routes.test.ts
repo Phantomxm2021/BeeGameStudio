@@ -188,6 +188,31 @@ describe('agent workflow server routes', () => {
     }))
   })
 
+  test('does not expose internal session request errors', async () => {
+    const response = await app.request('/api/beegame-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{',
+    })
+
+    expect(response.status).toBe(500)
+    const body = await response.json()
+    expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+    expect(JSON.stringify(body)).not.toContain('Unexpected end of JSON input')
+  })
+
+  test('does not expose internal account deletion errors', async () => {
+    const response = await createAgentWorkflowApp({
+      currentUser: { id: 'account-error-user', role: 'owner' },
+    }).request('/api/current-user', { method: 'DELETE' })
+
+    expect(response.status).toBe(501)
+    const body = await response.json()
+    expect(body.error).toBe('Account deletion unavailable')
+    expect(body.traceId).toEqual(expect.any(String))
+    expect(JSON.stringify(body)).not.toContain('Account deletion requires Supabase RPC')
+  })
+
   test('deletes the current user through authenticated Supabase RPC when configured', async () => {
     const originalUrl = process.env.BEEGAME_SUPABASE_URL
     const originalAnonKey = process.env.BEEGAME_SUPABASE_ANON_KEY

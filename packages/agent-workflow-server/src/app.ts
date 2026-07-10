@@ -269,7 +269,7 @@ export function createAgentWorkflowApp(
     if (isPrivilegedConfigurationPath(c.req.path)) {
       return privilegedRouteError(c, c.req.path, error)
     }
-    return c.json({ error: toErrorMessage(error) }, 500)
+    return tracedRouteError(c, c.req.path, error, 500)
   })
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
     ...options.outboundTargetPolicyOptions,
@@ -440,10 +440,13 @@ export function createAgentWorkflowApp(
       await dashboardRepository.deleteAuthUser(c.req.raw, user)
       return c.json({ ok: true })
     } catch (error) {
-      return c.json({
-        error: 'Account deletion unavailable',
-        message: toErrorMessage(error),
-      }, 501)
+      return tracedRouteError(
+        c,
+        'account.delete',
+        error,
+        501,
+        'Account deletion unavailable',
+      )
     }
   })
 
@@ -2132,7 +2135,19 @@ function tracedRouteError(
   c: Context,
   route: string,
   error: unknown,
-  status: 400 | 404 | 500 = 400,
+  status: 400 | 404 | 500 | 501 = 400,
+  publicError = 'Request failed',
+): Response {
+  return tracedRouteResponse(route, error, status, publicError, response => c.json(response, status))
+}
+
+function tracedRouteResponse(
+  route: string,
+  error: unknown,
+  status: 400 | 404 | 500 | 501,
+  publicError = 'Request failed',
+  createResponse: (body: { error: string; traceId: string }) => Response = body =>
+    Response.json(body, { status }),
 ): Response {
   const traceId = randomUUID()
   console.warn('[BeeGame] route failed', {
@@ -2140,7 +2155,19 @@ function tracedRouteError(
     route,
     cause: error instanceof Error ? error.name : 'unknown_error',
   })
-  return c.json({ error: 'Request failed', traceId }, status)
+  return createResponse({ error: publicError, traceId })
+}
+
+function publicSessionRouteError(
+  c: Context,
+  route: string,
+  error: unknown,
+  status: 400 | 404,
+  publicErrors: readonly string[],
+): Response {
+  const message = toErrorMessage(error)
+  if (publicErrors.includes(message)) return c.json({ error: message }, status)
+  return tracedRouteError(c, route, error, status)
 }
 
 function isPrivilegedConfigurationPath(path: string): boolean {
@@ -3888,7 +3915,13 @@ function registerBeeGameSessionRoutes(
           Number.parseInt(c.req.query('after') || '0', 10),
         )
       }
-      return c.json({ error: toErrorMessage(err) }, 404)
+      return publicSessionRouteError(
+        c,
+        'beegame-session.events',
+        err,
+        404,
+        ['Session not found'],
+      )
     }
   })
 
@@ -3912,7 +3945,13 @@ function registerBeeGameSessionRoutes(
         ),
       )
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 404)
+      return publicSessionRouteError(
+        c,
+        'beegame-session.runtime-snapshot',
+        err,
+        404,
+        ['Session not found'],
+      )
     }
   })
 
@@ -3934,7 +3973,13 @@ function registerBeeGameSessionRoutes(
           getDashboardDataRoot(defaultWorkspacePath),
         )
       }
-      return c.json({ error: toErrorMessage(err) }, 404)
+      return publicSessionRouteError(
+        c,
+        'beegame-session.transcript',
+        err,
+        404,
+        ['Session not found'],
+      )
     }
   })
 
@@ -3993,19 +4038,23 @@ function registerBeeGameSessionRoutes(
           return c.json(await readBeeGameProjectArtifact(workspacePath, path))
         } catch (fallbackErr) {
           const fallbackMessage = toErrorMessage(fallbackErr)
-          return c.json(
-            { error: fallbackMessage },
+          return publicSessionRouteError(
+            c,
+            'beegame-session.artifacts.fallback',
+            fallbackErr,
             fallbackMessage === 'Artifact path must stay inside the session workspace'
               ? 400
               : 404,
+            ['Artifact path must stay inside the session workspace', 'Session not found'],
           )
         }
       }
-      return c.json(
-        { error: message },
-        message === 'Artifact path must stay inside the session workspace'
-          ? 400
-          : 404,
+      return publicSessionRouteError(
+        c,
+        'beegame-session.artifacts',
+        err,
+        message === 'Artifact path must stay inside the session workspace' ? 400 : 404,
+        ['Artifact path must stay inside the session workspace', 'Session not found'],
       )
     }
   })
@@ -4023,7 +4072,13 @@ function registerBeeGameSessionRoutes(
       )
       return c.json(await discoverBeeGameProjectArtifacts(workspacePath))
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return publicSessionRouteError(
+        c,
+        'beegame-session.artifact-index',
+        err,
+        400,
+        ['Session not found', 'Workspace path must stay inside the current user workspace'],
+      )
     }
   })
 
@@ -4523,7 +4578,11 @@ async function readTranscriptFromWorkspace(
         : recoveredEvents,
     )
   } catch (err) {
-    return Response.json({ error: toErrorMessage(err) }, { status: 404 })
+    return tracedRouteResponse(
+      'beegame-session.transcript.fallback',
+      err,
+      404,
+    )
   }
 }
 
