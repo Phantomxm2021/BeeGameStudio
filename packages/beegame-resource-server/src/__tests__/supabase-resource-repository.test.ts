@@ -56,4 +56,31 @@ describe('Supabase resource repository', () => {
     })
     await expect(repository.listFolders('pack-1')).resolves.toEqual([])
   })
+
+  test('deletes a Pack and reports whether Supabase returned a deleted row', async () => {
+    const requests: Request[] = []
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async (request, init) => {
+        requests.push(request instanceof Request ? request : new Request(request, init))
+        return Response.json([{ id: 'pack-1' }])
+      },
+    })
+
+    await expect(repository.deletePack('pack-1')).resolves.toBe(true)
+    expect(requests[0]?.method).toBe('DELETE')
+    expect(requests[0]?.url).toContain('/rest/v1/beegame_resource_packs')
+    expect(requests[0]?.url).toContain('id=eq.pack-1')
+  })
+
+  test('reports false when Supabase deletes no Pack rows', async () => {
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async () => Response.json([]),
+    })
+
+    await expect(repository.deletePack('missing')).resolves.toBe(false)
+  })
 })

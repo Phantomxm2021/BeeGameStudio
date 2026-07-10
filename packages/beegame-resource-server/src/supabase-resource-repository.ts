@@ -162,6 +162,10 @@ export function createSupabaseResourceRepository(
       const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published' }) }, { id: `eq.${packId}` })
       return await toPack(rows[0])
     },
+    async deletePack(packId) {
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'DELETE' }, { id: `eq.${packId}` })
+      return rows.length > 0
+    },
   }
 }
 
