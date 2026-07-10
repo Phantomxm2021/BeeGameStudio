@@ -521,19 +521,22 @@ function createPinnedRemoteMcpConnectionForTarget(
   dependencies: RemoteMcpConnectionDependencies,
 ): PinnedRemoteMcpConnection {
   const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
-  const requestInit: DispatcherRequestInit = { dispatcher }
+  const requestInit: DispatcherRequestInit = { dispatcher, redirect: 'error' }
   let isClosed = false
-  const withDispatcher = (init?: RequestInit): DispatcherRequestInit => ({
-    ...init,
-    dispatcher,
-  })
+  const withDispatcher = (url: string | URL, init?: RequestInit): DispatcherRequestInit => {
+    if (new URL(url.toString()).origin !== target.url.origin) {
+      throw new Error('Pinned MCP connection origin mismatch')
+    }
+    return { ...init, redirect: 'error', dispatcher }
+  }
 
   return {
     url: target.url,
     requestInit,
-    fetch: baseFetch => (url, init) => baseFetch(url, withDispatcher(init)),
-    eventSourceFetch: baseFetch => (url, init) =>
-      baseFetch(url, withDispatcher(init)),
+    fetch: baseFetch => async (url, init) =>
+      baseFetch(url, withDispatcher(url, init)),
+    eventSourceFetch: baseFetch => async (url, init) =>
+      baseFetch(url, withDispatcher(url, init)),
     close: async () => {
       if (isClosed) return
       isClosed = true

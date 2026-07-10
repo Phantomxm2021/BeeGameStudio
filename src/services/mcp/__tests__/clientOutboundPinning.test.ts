@@ -42,10 +42,10 @@ describe('createPinnedRemoteMcpConnection', () => {
     expect(resolveApprovedOutboundTarget).toHaveBeenCalledWith(
       'https://mcp.example.test/rpc',
     )
-    expect(connection.requestInit).toMatchObject({ dispatcher })
+    expect(connection.requestInit).toMatchObject({ dispatcher, redirect: 'error' })
     expect(fetchCalls).toEqual([
-      expect.objectContaining({ dispatcher, method: 'POST' }),
-      expect.objectContaining({ dispatcher, method: 'GET' }),
+      expect.objectContaining({ dispatcher, method: 'POST', redirect: 'error' }),
+      expect.objectContaining({ dispatcher, method: 'GET', redirect: 'error' }),
     ])
 
     await connection.close()
@@ -63,5 +63,17 @@ describe('createPinnedRemoteMcpConnection', () => {
       createPinnedRemoteMcpConnection('https://127.0.0.1/mcp', dependencies),
     ).rejects.toThrow('Outbound URL is not permitted')
     expect(createPinnedUndiciDispatcher).not.toHaveBeenCalled()
+  })
+
+  test('does not apply a pinned dispatcher to a different origin or port', async () => {
+    const dependencies: RemoteMcpConnectionDependencies = {
+      resolveApprovedOutboundTarget: async () => approvedTarget,
+      createPinnedUndiciDispatcher: () => ({ close: async () => {} }) as never,
+    }
+    const connection = await createPinnedRemoteMcpConnection(approvedTarget.url.toString(), dependencies)
+    const fetch = mock(async () => new Response('ok'))
+
+    await expect(connection.fetch(fetch)('https://mcp.example.test:8443/rpc')).rejects.toThrow('Pinned MCP connection origin mismatch')
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

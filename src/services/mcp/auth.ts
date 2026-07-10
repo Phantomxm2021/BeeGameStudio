@@ -24,10 +24,7 @@ import {
   OAuthTokensSchema,
 } from '@modelcontextprotocol/sdk/shared/auth.js'
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js'
-import {
-  createPinnedUndiciDispatcher,
-  resolveApprovedOutboundTarget,
-} from '@bee-game-studio/security-core'
+import { resolveApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { mkdir } from 'fs/promises'
 import { createServer, type Server } from 'http'
@@ -49,6 +46,10 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { buildRedirectUri, findAvailablePort } from './oauthPort.js'
+import {
+  createPolicyResolvingPinnedFetch,
+  type PinnedOutboundFetchDependencies,
+} from './pinnedOutboundFetch.js'
 import type { McpHTTPServerConfig, McpSSEServerConfig } from './types.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
 import { performCrossAppAccess, XaaTokenExchangeError } from './xaa.js'
@@ -198,19 +199,7 @@ export async function normalizeOAuthErrorBody(
  * Used by ClaudeAuthProvider for metadata discovery and token refresh.
  * Prevents stale timeout signals from affecting auth operations.
  */
-type DispatcherRequestInit = RequestInit & { dispatcher?: unknown }
-
-export type OAuthOutboundTransportDependencies = {
-  baseFetch: typeof fetch
-  resolveApprovedOutboundTarget: typeof resolveApprovedOutboundTarget
-  createPinnedUndiciDispatcher: typeof createPinnedUndiciDispatcher
-}
-
-const oauthOutboundTransportDependencies: OAuthOutboundTransportDependencies = {
-  baseFetch: fetch,
-  resolveApprovedOutboundTarget,
-  createPinnedUndiciDispatcher,
-}
+export type OAuthOutboundTransportDependencies = PinnedOutboundFetchDependencies
 
 class OAuthResponseError extends Error {
   constructor(
@@ -222,79 +211,9 @@ class OAuthResponseError extends Error {
 }
 
 export function createPolicyResolvingOAuthFetch(
-  dependencies: OAuthOutboundTransportDependencies = oauthOutboundTransportDependencies,
+  dependencies?: OAuthOutboundTransportDependencies,
 ): FetchLike {
-  return async (input: string | URL, init?: RequestInit) => {
-    let url: URL
-    try {
-      url = new URL(input.toString())
-    } catch {
-      return dependencies.baseFetch(input, init)
-    }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return dependencies.baseFetch(input, init)
-    }
-
-    const target = await dependencies.resolveApprovedOutboundTarget(
-      url.toString(),
-    )
-    if (!target) throw new Error('Outbound URL is not permitted')
-
-    const dispatcher = dependencies.createPinnedUndiciDispatcher(target)
-    try {
-      const response = await dependencies.baseFetch(target.url, {
-        ...init,
-        redirect: 'error',
-        dispatcher,
-      } as DispatcherRequestInit)
-      return closePinnedOAuthResponse(response, dispatcher)
-    } catch (error) {
-      await dispatcher.close()
-      throw error
-    }
-  }
-}
-
-function closePinnedOAuthResponse(
-  response: Response,
-  dispatcher: ReturnType<typeof createPinnedUndiciDispatcher>,
-): Response {
-  if (!response.body) {
-    void dispatcher.close()
-    return response
-  }
-
-  const reader = response.body.getReader()
-  let closed = false
-  const close = async () => {
-    if (closed) return
-    closed = true
-    await dispatcher.close()
-  }
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const chunk = await reader.read()
-        if (chunk.done) {
-          controller.close()
-          await close()
-        } else {
-          controller.enqueue(chunk.value)
-        }
-      } catch (error) {
-        controller.error(error)
-        await close()
-      }
-    },
-    async cancel(reason) {
-      try {
-        await reader.cancel(reason)
-      } finally {
-        await close()
-      }
-    },
-  })
-  return new Response(body, response)
+  return createPolicyResolvingPinnedFetch(dependencies)
 }
 
 function createAuthFetch(): FetchLike {

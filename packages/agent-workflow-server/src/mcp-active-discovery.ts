@@ -63,7 +63,7 @@ export async function discoverActiveMcpServers(
   )
   const tested = await Promise.all(
     candidates.map(endpoint =>
-      testMcpEndpoint(endpoint, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options),
+      testMcpEndpoint(endpoint, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options, true),
     ),
   )
   const discovered = new Map<string, ActiveDiscoveredMcpServer>()
@@ -124,11 +124,14 @@ async function testMcpEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
   options: ActiveMcpDiscoveryOptions = {},
+  localOnly = false,
 ): Promise<McpServerTestResult> {
-  const approved = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
-    rawEndpoint,
-    resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
-  )
+  const approved = localOnly
+    ? resolveLoopbackDiscoveryTarget(rawEndpoint)
+    : await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+      rawEndpoint,
+      resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+    )
   if (!approved) {
     return unavailable('Outbound URL is not permitted')
   }
@@ -159,6 +162,7 @@ async function testMcpEndpoint(
         },
       }),
       signal: controller.signal,
+      redirect: 'error',
       dispatcher,
     } as RequestInit)
     const text = await response.text()
@@ -214,11 +218,14 @@ async function testSseEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
   options: ActiveMcpDiscoveryOptions = {},
+  localOnly = false,
 ): Promise<McpServerTestResult> {
-  const approved = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
-    rawEndpoint,
-    resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
-  )
+  const approved = localOnly
+    ? resolveLoopbackDiscoveryTarget(rawEndpoint)
+    : await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+      rawEndpoint,
+      resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+    )
   if (!approved) {
     return unavailable('Outbound URL is not permitted')
   }
@@ -235,6 +242,7 @@ async function testSseEndpoint(
         accept: 'text/event-stream',
       },
       signal: controller.signal,
+      redirect: 'error',
       dispatcher,
     } as RequestInit)
     const contentType = response.headers.get('content-type') ?? ''
@@ -273,6 +281,40 @@ function normalizeEndpoint(rawEndpoint: string): string | undefined {
     return url.toString()
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Active discovery only probes its own bounded 127.0.0.1 candidates. This is
+ * deliberately separate from the public outbound policy: it pins lookup to
+ * loopback and the exact configured port without enabling arbitrary private
+ * network access.
+ */
+function resolveLoopbackDiscoveryTarget(rawEndpoint: string) {
+  const endpoint = normalizeEndpoint(rawEndpoint)
+  if (!endpoint) return null
+  const url = new URL(endpoint)
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) {
+    return null
+  }
+  return {
+    url,
+    addresses: ['127.0.0.1'],
+    lookup: (
+      hostname: string,
+      _options: unknown,
+      callback: (
+        error: NodeJS.ErrnoException | null,
+        address: string,
+        family: 4 | 6,
+      ) => void,
+    ) => {
+      if (hostname !== '127.0.0.1') {
+        callback(Object.assign(new Error('Loopback discovery host mismatch'), { code: 'ENOTFOUND' }), '', 4)
+        return
+      }
+      callback(null, '127.0.0.1', 4)
+    },
   }
 }
 

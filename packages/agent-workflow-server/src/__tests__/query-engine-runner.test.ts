@@ -50,6 +50,23 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(pinnedLookupCalls).toBe(0)
   })
 
+  test('rejects redirect-capable requests and cannot reuse a dispatcher across ports', async () => {
+    const target: ApprovedOutboundTarget = {
+      url: new URL('https://provider.runtime.test/v1'),
+      addresses: ['93.184.216.34'],
+      lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+    }
+    const calls: Array<{ init?: RequestInit }> = []
+    const wrapped = createBeeGamePinnedFetch((async (_input, init) => {
+      calls.push({ init })
+      return new Response('{}')
+    }) as typeof fetch, { OPENAI_BASE_URL: target })
+
+    await wrapped('https://provider.runtime.test/v1/chat/completions')
+    await expect(wrapped('https://provider.runtime.test:8443/v1/chat/completions')).rejects.toThrow('Outbound URL is not permitted')
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' })
+  })
+
   test('installs MACRO globals before loading root CLI modules', () => {
     const target = globalThis as typeof globalThis & { MACRO?: Record<string, string> }
     const previous = target.MACRO

@@ -28,6 +28,7 @@ import { getSecureStorage } from '../../utils/secureStorage/index.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { jsonParse } from '../../utils/slowOperations.js'
 import { buildRedirectUri, findAvailablePort } from './oauthPort.js'
+import { createPolicyResolvingPinnedFetch } from './pinnedOutboundFetch.js'
 
 export function isXaaEnabled(): boolean {
   return isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_XAA)
@@ -205,7 +206,7 @@ export async function discoverOidc(
   const base = idpIssuer.endsWith('/') ? idpIssuer : idpIssuer + '/'
   const url = new URL('.well-known/openid-configuration', base)
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-  const res = await fetch(url, {
+  const res = await createPolicyResolvingPinnedFetch()(url, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
   })
@@ -457,8 +458,7 @@ export async function acquireIdpIdToken(
     codeVerifier,
     redirectUri,
     fetchFn: (url, init) =>
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      fetch(url, {
+      createPolicyResolvingPinnedFetch()(url, {
         ...init,
         signal: AbortSignal.timeout(IDP_REQUEST_TIMEOUT_MS),
       }),

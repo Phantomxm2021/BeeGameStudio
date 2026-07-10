@@ -4,6 +4,12 @@
  */
 
 import axios from 'axios'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
@@ -14,6 +20,11 @@ const BRAVE_API_KEY_ENV_VARS = [
   'BRAVE_SEARCH_API_KEY',
   'BRAVE_API_KEY',
 ] as const
+
+export type BraveSearchAdapterOptions = {
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
+}
 
 interface BraveGroundingResult {
   title?: string
@@ -30,6 +41,8 @@ interface BraveSearchResponse {
 }
 
 export class BraveSearchAdapter implements WebSearchAdapter {
+  constructor(private readonly outboundOptions: BraveSearchAdapterOptions = {}) {}
+
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
     const { signal, onProgress, allowedDomains, blockedDomains } = options
 
@@ -46,6 +59,14 @@ export class BraveSearchAdapter implements WebSearchAdapter {
       })
     }
 
+    const target = await (this.outboundOptions.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+      BRAVE_LLM_CONTEXT_URL,
+      this.outboundOptions.outboundTargetPolicyOptions,
+    )
+    if (!target) throw new Error('Outbound URL is not permitted')
+    const httpAgent = createPinnedHttpAgent(target)
+    const httpsAgent = createPinnedHttpsAgent(target)
+
     let payload: BraveSearchResponse
     try {
       const response = await axios.get<BraveSearchResponse>(
@@ -53,6 +74,9 @@ export class BraveSearchAdapter implements WebSearchAdapter {
         {
           signal: abortController.signal,
           timeout: FETCH_TIMEOUT_MS,
+          maxRedirects: 0,
+          httpAgent,
+          httpsAgent,
           responseType: 'json',
           headers: {
             Accept: 'application/json',
@@ -67,6 +91,9 @@ export class BraveSearchAdapter implements WebSearchAdapter {
         throw new AbortError()
       }
       throw e
+    } finally {
+      httpAgent.destroy()
+      httpsAgent.destroy()
     }
 
     if (abortController.signal.aborted) {

@@ -5,10 +5,21 @@
 
 import axios from 'axios'
 import he from 'he'
+import {
+  createPinnedHttpAgent,
+  createPinnedHttpsAgent,
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 import { AbortError } from 'src/utils/errors.js'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
 const FETCH_TIMEOUT_MS = 30_000
+
+export type BingSearchAdapterOptions = {
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
+}
 
 /**
  * Browser-like headers to avoid Bing's anti-bot JS-rendered response.
@@ -35,6 +46,8 @@ const BROWSER_HEADERS = {
 } as const
 
 export class BingSearchAdapter implements WebSearchAdapter {
+  constructor(private readonly outboundOptions: BingSearchAdapterOptions = {}) {}
+
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
     const { signal, onProgress, allowedDomains, blockedDomains } = options
 
@@ -53,11 +66,22 @@ export class BingSearchAdapter implements WebSearchAdapter {
       })
     }
 
+    const target = await (this.outboundOptions.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+      url,
+      this.outboundOptions.outboundTargetPolicyOptions,
+    )
+    if (!target) throw new Error('Outbound URL is not permitted')
+    const httpAgent = createPinnedHttpAgent(target)
+    const httpsAgent = createPinnedHttpsAgent(target)
+
     let html: string
     try {
       const response = await axios.get(url, {
         signal: abortController.signal,
         timeout: FETCH_TIMEOUT_MS,
+        maxRedirects: 0,
+        httpAgent,
+        httpsAgent,
         responseType: 'text',
         headers: BROWSER_HEADERS,
       })
@@ -67,6 +91,9 @@ export class BingSearchAdapter implements WebSearchAdapter {
         throw new AbortError()
       }
       throw e
+    } finally {
+      httpAgent.destroy()
+      httpsAgent.destroy()
     }
 
     if (abortController.signal.aborted) {

@@ -559,7 +559,7 @@ export function createBeeGamePinnedFetch(
       throw new Error('Outbound URL is not permitted')
     }
     return dispatcher
-      ? baseFetch(input, { ...init, dispatcher } as RequestInit)
+      ? baseFetch(input, { ...init, redirect: 'error', dispatcher } as RequestInit)
       : baseFetch(input, init)
   }) as PinnedRuntimeFetch
   pinnedFetch.close = async () => {
