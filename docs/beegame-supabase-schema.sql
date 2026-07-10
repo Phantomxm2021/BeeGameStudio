@@ -1932,6 +1932,7 @@ alter table public.beegame_user_skills enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_resource_packs enable row level security;
 alter table public.beegame_resource_elements enable row level security;
+alter table public.beegame_resource_folders enable row level security;
 alter table public.beegame_resource_dependencies enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
@@ -2051,6 +2052,11 @@ create policy "resource Pack platform owner access" on public.beegame_resource_p
 
 drop policy if exists "resource element platform owner access" on public.beegame_resource_elements;
 create policy "resource element platform owner access" on public.beegame_resource_elements
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource folder platform owner access" on public.beegame_resource_folders;
+create policy "resource folder platform owner access" on public.beegame_resource_folders
   for all using (public.beegame_is_platform_owner())
   with check (public.beegame_is_platform_owner());
 

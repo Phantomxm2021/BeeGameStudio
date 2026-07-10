@@ -1,6 +1,8 @@
 import {
   RESOURCE_CATEGORIES,
+  type ResourceDimension,
   type ResourceCategory,
+  type ResourcePack,
   type ResourceRepository,
 } from '@bee-game-studio/beegame-resource-core'
 import {
@@ -33,6 +35,24 @@ export function createBeeGameResourceServerApp(
       if (!hasResourceAdminPermission(user)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
+      const pathname = new URL(request.url).pathname
+      if (request.method === 'POST' && pathname === '/api/resource-packs') {
+        try {
+          const body = await request.json() as Record<string, unknown>
+          const pack = await options.repository.createPack({
+            id: typeof body.id === 'string' && body.id ? body.id : `pack-${crypto.randomUUID()}`,
+            name: String(body.name || ''), style: String(body.style || ''),
+            gameTypes: Array.isArray(body.gameTypes) ? body.gameTypes.map(String) : [],
+            dimension: body.dimension as ResourceDimension,
+            categories: Array.isArray(body.categories) ? body.categories as ResourceCategory[] : [],
+            license: typeof body.license === 'string' ? body.license : 'unassigned',
+            version: typeof body.version === 'string' ? body.version : '0.1.0', status: 'draft',
+          })
+          return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(400, 'invalid_pack', error instanceof Error ? error.message : 'Invalid Pack'), options.corsOrigin)
+        }
+      }
       if (request.method === 'POST' && new URL(request.url).pathname === '/api/resource-packs/import') {
         if (!options.importResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource import is not configured'), options.corsOrigin)
         try { return corsResponse(Response.json({ pack: await options.importResourcePack(request) }, { status: 201 }), options.corsOrigin) } catch (error) {
@@ -45,6 +65,29 @@ export function createBeeGameResourceServerApp(
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
         return corsResponse(Response.json({ pack: await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body) }), options.corsOrigin)
+      }
+      const folderMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders$/)
+      if (folderMatch && request.method === 'GET') {
+        return corsResponse(Response.json({ folders: await options.repository.listFolders(decodeURIComponent(folderMatch[1])) }), options.corsOrigin)
+      }
+      if (folderMatch && request.method === 'POST') {
+        try {
+          const body = await request.json() as { id?: string; name?: string; parentId?: string }
+          if (!body.name) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
+          const folder = await options.repository.createFolder(decodeURIComponent(folderMatch[1]), { id: body.id || `folder-${crypto.randomUUID()}`, name: body.name, parentId: body.parentId })
+          return corsResponse(Response.json({ folder }, { status: 201 }), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(400, 'invalid_folder', error instanceof Error ? error.message : 'Invalid folder'), options.corsOrigin)
+        }
+      }
+      const publishMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish$/)
+      if (publishMatch && request.method === 'POST') {
+        try {
+          const pack = await options.repository.publishPack(decodeURIComponent(publishMatch[1]))
+          return corsResponse(Response.json({ pack }), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(400, 'publish_blocked', error instanceof Error ? error.message : 'Pack cannot be published'), options.corsOrigin)
+        }
       }
       const elementMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements$/)
       if (request.method === 'POST' && elementMatch) {
@@ -96,7 +139,7 @@ function jsonError(status: number, code: string, message: string): Response {
 function corsResponse(response: Response, origin = '*'): Response {
   const headers = new Headers(response.headers)
   headers.set('Access-Control-Allow-Origin', origin)
-  headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
   headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With')
   headers.set('Access-Control-Max-Age', '86400')
   return new Response(response.body, { status: response.status, headers })
