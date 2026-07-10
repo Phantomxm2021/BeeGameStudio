@@ -1,5 +1,5 @@
 import { createInMemoryResourceRepository, type PackSummary, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
-import { createBeeGameResourceServerApp } from './app'
+import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
 import { createSupabaseResourcePackImporter } from './import-resource-pack'
@@ -35,7 +35,9 @@ if (import.meta.main) {
     updateResourceElement: baseUrl && serviceRoleKey ? async (packId, elementId, body) => {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(toElementRow(body)) })
       if (!response.ok) throw new Error(`Resource element update failed (${response.status})`)
-      return toResourceElement((await response.json() as Array<Record<string, unknown>>)[0])
+      const row = (await response.json() as Array<Record<string, unknown>>)[0]
+      if (!row) throw new ResourceLifecycleNotFoundError('Resource element not found')
+      return toResourceElement(row)
     } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
@@ -76,7 +78,7 @@ function trimPath(value: string): string {
   return value.slice(start, end)
 }
 
-function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
+export function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
   const editable: Record<string, string> = {
     name: 'name', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
     dependencies: 'dependencies', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
@@ -135,13 +137,22 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     const response = await fetchImpl(objectUrl(path), { method: 'DELETE', headers })
     if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status})`)
   }
+  const signObject = async (path: string): Promise<string> => {
+    const response = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
+    if (!response.ok) throw new Error(`Resource URL signing failed (${response.status})`)
+    const signedURL = (await response.json() as { signedURL?: string }).signedURL
+    if (!signedURL) throw new Error('Resource URL signing returned no URL')
+    return new URL(signedURL, baseUrl).toString()
+  }
   return {
     updateResourcePack: async (packId: string, body: Record<string, unknown>) => {
       const row = toPackUpdateRow(body)
       if (Object.keys(row).length === 0) throw new Error('No editable Pack fields were supplied')
       const response = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!response.ok) throw new Error(`Resource Pack update failed (${response.status})`)
-      return toResourcePack((await response.json() as Array<Record<string, unknown>>)[0])
+      const savedRow = (await response.json() as Array<Record<string, unknown>>)[0]
+      if (!savedRow) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
+      return toResourcePack(savedRow)
     },
     deleteResourcePack: async (packId: string) => {
       const prefix = safePrefix(packId)
@@ -153,13 +164,14 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
         for (const object of objects) {
           if (typeof object.name !== 'string') continue
           const path = object.name.startsWith(prefix) ? object.name : `${prefix}${object.name}`
-          if (isSafeStoragePath(path, prefix)) await deleteObject(path)
+          if (!isSafeStoragePath(path, prefix)) throw new Error('Resource storage contains an unsafe resource storage entry')
+          await deleteObject(path)
         }
         if (objects.length === 0) break
       }
       const deleted = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'DELETE', headers: { ...headers, prefer: 'return=representation' } })
       if (!deleted.ok) throw new Error(`Resource Pack deletion failed (${deleted.status})`)
-      return true
+      return (await deleted.json() as Array<unknown>).length > 0
     },
     uploadPackCover: async (packId: string, request: Request): Promise<ResourcePack> => {
       const form = await request.formData(); const file = form.get('file')
@@ -167,15 +179,21 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       const storagePackId = safeStorageComponent(packId, 'Pack id')
       const current = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path`, { headers })
       if (!current.ok) throw new Error(`Resource Pack lookup failed (${current.status})`)
-      const previous = (await current.json() as Array<{ cover_path?: string | null }>)[0]?.cover_path
+      const currentRow = (await current.json() as Array<{ cover_path?: string | null }>)[0]
+      if (!currentRow) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
+      const previous = currentRow.cover_path
       const coverPath = `cover/${crypto.randomUUID()}-${sanitizeStorageBasename(file.name)}`
       const storagePath = `${storagePackId}/${coverPath}`
       const uploaded = await fetchImpl(objectUrl(storagePath), { method: 'POST', headers: { ...headers, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'false' }, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error(`Cover storage upload failed (${uploaded.status})`)
+      let signedCoverUrl: string
+      try { signedCoverUrl = await signObject(storagePath) } catch (error) { await deleteObject(storagePath); throw error }
       const saved = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify({ cover_path: coverPath }) })
       if (!saved.ok) { await deleteObject(storagePath); throw new Error(`Resource Pack cover update failed (${saved.status})`) }
       if (typeof previous === 'string' && isSafeRelativeStoragePath(previous)) await deleteObject(`${storagePackId}/${previous}`)
-      return toResourcePack((await saved.json() as Array<Record<string, unknown>>)[0])
+      const row = (await saved.json() as Array<Record<string, unknown>>)[0]
+      if (!row) throw new ResourceLifecycleNotFoundError('Resource Pack not found')
+      return { ...toResourcePack(row), coverPath: signedCoverUrl }
     },
     getElementResourceUrl: async (packId: string, elementId: string) => {
       const lookup = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=pack_id,path`, { headers })
@@ -184,11 +202,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       if (!element?.pack_id || !element.path || element.pack_id !== packId) throw new Error('Resource element not found in Pack')
       const storagePackId = safeStorageComponent(packId, 'Pack id')
       const relativePath = safeRelativeStoragePath(element.path, 'Resource element path')
-      const signed = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${`${storagePackId}/${relativePath}`.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
-      if (!signed.ok) throw new Error(`Resource URL signing failed (${signed.status})`)
-      const signedURL = (await signed.json() as { signedURL?: string }).signedURL
-      if (!signedURL) throw new Error('Resource URL signing returned no URL')
-      return new URL(signedURL, baseUrl).toString()
+      return signObject(`${storagePackId}/${relativePath}`)
     },
   }
 }

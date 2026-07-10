@@ -13,6 +13,8 @@ import {
 } from './auth'
 import { ResourceImportError } from './import-resource-pack'
 
+export class ResourceLifecycleNotFoundError extends Error {}
+
 export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
   currentUser?: ResourceUserContext
@@ -69,13 +71,15 @@ export function createBeeGameResourceServerApp(
       const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
       if (request.method === 'DELETE' && patchMatch) {
         if (!options.deleteResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource deletion is not configured'), options.corsOrigin)
-        await options.deleteResourcePack(decodeURIComponent(patchMatch[1]))
+        if (!await options.deleteResourcePack(decodeURIComponent(patchMatch[1]))) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       }
       if (request.method === 'PATCH' && patchMatch) {
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
-        return corsResponse(Response.json({ pack: await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body) }), options.corsOrigin)
+        const pack = await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body)
+        if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        return corsResponse(Response.json({ pack }), options.corsOrigin)
       }
       const coverMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/cover$/)
       if (request.method === 'POST' && coverMatch) {
@@ -131,7 +135,9 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'PATCH' && elementPatchMatch) {
         if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
-        return corsResponse(Response.json({ element: await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body) }), options.corsOrigin)
+        const element = await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body)
+        if (!element) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        return corsResponse(Response.json({ element }), options.corsOrigin)
       }
         try {
           return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
@@ -139,6 +145,9 @@ export function createBeeGameResourceServerApp(
           return corsResponse(jsonError(500, 'resource_read_failed', error instanceof Error ? error.message : 'Resource request failed'), options.corsOrigin)
         }
       } catch (error) {
+        if (error instanceof ResourceLifecycleNotFoundError) {
+          return corsResponse(jsonError(404, 'not_found', error.message), options.corsOrigin)
+        }
         return corsResponse(jsonError(500, 'resource_lifecycle_failed', error instanceof Error ? error.message : 'Resource lifecycle operation failed'), options.corsOrigin)
       }
     },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildElementUploadRow, createSupabaseResourceLifecycleHandlers, sanitizeStorageBasename, toResourceElement } from '../index'
+import { buildElementUploadRow, createSupabaseResourceLifecycleHandlers, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
 
 const packRow = { id: 'pack-1', name: 'Pack', style: 'Stylized', game_types: [], dimension: 'agnostic', primary_category: 'world-scene', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'cover/new.png' }
 
@@ -18,9 +18,10 @@ describe('Supabase resource lifecycle handlers', () => {
           page += 1
           return Response.json(page === 1
             ? Array.from({ length: 1000 }, (_, index) => ({ name: `assets/${index}.png` }))
-            : page === 2 ? [{ name: 'cover/end.png' }, { name: '../outside.png' }] : [])
+            : page === 2 ? [{ name: 'cover/end.png' }] : [])
         }
         if (url.includes('/storage/v1/object/')) { deleted.push(url); return new Response(null, { status: 200 }) }
+        if (init?.method === 'DELETE') return Response.json([packRow])
         return Response.json([])
       },
     })
@@ -28,7 +29,22 @@ describe('Supabase resource lifecycle handlers', () => {
     await expect(handlers.deleteResourcePack('pack-1')).resolves.toBe(true)
     expect(offsets).toEqual([0, 0, 0])
     expect(deleted).toHaveLength(1001)
-    expect(deleted.some(url => url.includes('outside.png'))).toBe(false)
+  })
+
+  test('halts deletion rather than looping over an unsafe legacy storage object', async () => {
+    let deletedPack = false
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/object/list/')) return Response.json([{ name: '../legacy-object' }])
+        if (init?.method === 'DELETE') deletedPack = true
+        return Response.json([])
+      },
+    })
+
+    await expect(handlers.deleteResourcePack('pack-1')).rejects.toThrow('unsafe resource storage entry')
+    expect(deletedPack).toBe(false)
   })
 
   test('does not delete the Pack record if an object cleanup fails', async () => {
@@ -55,6 +71,7 @@ describe('Supabase resource lifecycle handlers', () => {
       fetchImpl: async (input, init) => {
         const url = String(input)
         if (url.includes('select=cover_path')) return Response.json([{ cover_path: 'cover/old.png' }])
+        if (url.includes('/object/sign/')) return Response.json({ signedURL: '/storage/v1/object/sign/beegame-resource-packs/pack-1/cover/new.png?token=cover' })
         if (url.includes('/storage/v1/object/')) { events.push(init?.method === 'POST' ? 'upload' : 'delete') ; return new Response(null, { status: 200 }) }
         if (init?.method === 'PATCH') { events.push('patch'); return Response.json([packRow]) }
         throw new Error(`Unexpected request: ${url}`)
@@ -62,7 +79,7 @@ describe('Supabase resource lifecycle handlers', () => {
     })
     const form = new FormData(); form.set('file', new File(['cover'], '../new.png', { type: 'image/png' }))
 
-    await expect(handlers.uploadPackCover('pack-1', new Request('https://resource.test', { method: 'POST', body: form }))).resolves.toEqual(expect.objectContaining({ coverPath: 'cover/new.png' }))
+    await expect(handlers.uploadPackCover('pack-1', new Request('https://resource.test', { method: 'POST', body: form }))).resolves.toEqual(expect.objectContaining({ coverPath: 'https://supabase.test/storage/v1/object/sign/beegame-resource-packs/pack-1/cover/new.png?token=cover' }))
     expect(events).toEqual(['upload', 'patch', 'delete'])
   })
 
@@ -73,6 +90,7 @@ describe('Supabase resource lifecycle handlers', () => {
       fetchImpl: async (input, init) => {
         const url = String(input)
         if (url.includes('select=cover_path')) return Response.json([{ cover_path: '../../outside.png' }])
+        if (url.includes('/object/sign/')) return Response.json({ signedURL: '/storage/v1/object/sign/beegame-resource-packs/pack-1/cover/new.png?token=cover' })
         if (url.includes('/storage/v1/object/')) { events.push(init?.method === 'POST' ? 'upload' : 'delete'); return new Response(null, { status: 200 }) }
         if (init?.method === 'PATCH') return new Response(null, { status: 500 })
         throw new Error(`Unexpected request: ${url}`)
@@ -96,6 +114,15 @@ describe('Supabase resource lifecycle handlers', () => {
     await expect(handlers.updateResourcePack('pack-1', { gameTypes: ['puzzle'] })).resolves.toEqual(expect.objectContaining({
       gameTypes: [], primaryCategory: 'world-scene', coverPath: 'cover/new.png', elementCount: 3,
     }))
+  })
+
+  test('reports an absent Pack mutation instead of mapping an undefined row', async () => {
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async () => Response.json([]),
+    })
+
+    await expect(handlers.updateResourcePack('missing', { name: 'Missing' })).rejects.toThrow('Resource Pack not found')
   })
 
   test('sanitizes cover basenames and rejects empty or traversal-only values', () => {
@@ -148,5 +175,9 @@ describe('Supabase resource lifecycle handlers', () => {
       category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready',
       style_override: 'stylized', dimension_override: '3D',
     })).toEqual(expect.objectContaining({ packId: 'pack-1', styleOverride: 'stylized', dimensionOverride: '3D' }))
+  })
+
+  test('preserves null to clear an element style override', () => {
+    expect(toElementRow({ styleOverride: null })).toEqual({ style_override: null })
   })
 })

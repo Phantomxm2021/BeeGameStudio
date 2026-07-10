@@ -67,13 +67,30 @@ describe('resource service app', () => {
     const app = createBeeGameResourceServerApp({
       repository,
       currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
-      deleteResourcePack: async (id) => { deleted.push(id); return false },
+      deleteResourcePack: async (id) => { deleted.push(id); return true },
     })
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1', { method: 'DELETE' }))
 
     expect(response.status).toBe(204)
     expect(deleted).toEqual(['pack-1'])
+  })
+
+  test('returns 404 when a lifecycle update or deletion reports no Pack', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      updateResourcePack: async () => undefined,
+      deleteResourcePack: async () => false,
+    })
+
+    const updated = await app.fetch(new Request('http://resource.test/api/resource-packs/missing', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Missing' }),
+    }))
+    const deleted = await app.fetch(new Request('http://resource.test/api/resource-packs/missing', { method: 'DELETE' }))
+
+    expect(updated.status).toBe(404)
+    expect(deleted.status).toBe(404)
   })
 
   test('returns a CORS JSON error when a lifecycle handler throws', async () => {
