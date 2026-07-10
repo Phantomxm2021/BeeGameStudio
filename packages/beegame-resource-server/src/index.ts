@@ -26,7 +26,7 @@ if (import.meta.main) {
       const headers = { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'true' }
       const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error('Element storage upload failed')
-      const id = `${packId}-${crypto.randomUUID()}`; const row = { id, pack_id: packId, name: file.name, path: relativePath, category, kind: inferElementKind(file), specs: { size: file.size, mimeType: file.type || 'application/octet-stream', extension: extensionFromName(file.name) }, dependencies: [], status: 'ready' }
+      const row = buildElementUploadRow(packId, category, file, `${packId}-${crypto.randomUUID()}`, relativePath)
       const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
       return (await saved.json() as unknown[])[0]
@@ -112,7 +112,12 @@ export function inferElementKind(file: File): string {
   return 'file'
 }
 
-type SupabaseLifecycleOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: typeof fetch; storageBucket?: string }
+export function buildElementUploadRow(packId: string, category: string, file: File, id = `${packId}-${crypto.randomUUID()}`, path = `${category}/${file.name}`): Record<string, unknown> {
+  return { id, pack_id: packId, name: file.name, path, category, kind: inferElementKind(file), specs: { size: file.size, mimeType: file.type || 'application/octet-stream', extension: extensionFromName(file.name) }, dependencies: [], status: 'ready' }
+}
+
+type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+type SupabaseLifecycleOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string }
 
 export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecycleOptions) {
   const fetchImpl = options.fetchImpl ?? fetch
@@ -120,7 +125,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   const storageBucket = options.storageBucket ?? 'beegame-resource-packs'
   const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
   const objectUrl = (path: string) => `${baseUrl}/storage/v1/object/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`
-  const safePrefix = (packId: string) => `${packId.replaceAll('/', '%2F')}/`
+  const safePrefix = (packId: string) => `${safeStorageComponent(packId, 'Pack id')}/`
   const deleteObject = async (path: string) => { await fetchImpl(objectUrl(path), { method: 'DELETE', headers }) }
   return {
     updateResourcePack: async (packId: string, body: Record<string, unknown>) => {
@@ -132,13 +137,17 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     },
     deleteResourcePack: async (packId: string) => {
       const prefix = safePrefix(packId)
-      const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix, limit: 1000, offset: 0 }) })
-      if (!listed.ok) throw new Error(`Resource storage listing failed (${listed.status})`)
-      const objects = await listed.json() as Array<{ name?: unknown }>
-      for (const object of objects) {
-        if (typeof object.name !== 'string') continue
-        const path = object.name.startsWith(prefix) ? object.name : `${prefix}${object.name}`
-        if (isSafeStoragePath(path, prefix)) await deleteObject(path)
+      const pageSize = 1000
+      for (let offset = 0; ; offset += pageSize) {
+        const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix, limit: pageSize, offset }) })
+        if (!listed.ok) throw new Error(`Resource storage listing failed (${listed.status})`)
+        const objects = await listed.json() as Array<{ name?: unknown }>
+        for (const object of objects) {
+          if (typeof object.name !== 'string') continue
+          const path = object.name.startsWith(prefix) ? object.name : `${prefix}${object.name}`
+          if (isSafeStoragePath(path, prefix)) await deleteObject(path)
+        }
+        if (objects.length < pageSize) break
       }
       const deleted = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'DELETE', headers: { ...headers, prefer: 'return=representation' } })
       if (!deleted.ok) throw new Error(`Resource Pack deletion failed (${deleted.status})`)
@@ -147,16 +156,17 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     uploadPackCover: async (packId: string, request: Request): Promise<ResourcePack> => {
       const form = await request.formData(); const file = form.get('file')
       if (!(file instanceof File)) throw new Error('Cover file is required')
+      const storagePackId = safeStorageComponent(packId, 'Pack id')
       const current = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path`, { headers })
       if (!current.ok) throw new Error(`Resource Pack lookup failed (${current.status})`)
       const previous = (await current.json() as Array<{ cover_path?: string | null }>)[0]?.cover_path
-      const coverPath = `cover/${crypto.randomUUID()}-${file.name}`
-      const storagePath = `${packId}/${coverPath}`
+      const coverPath = `cover/${crypto.randomUUID()}-${sanitizeStorageBasename(file.name)}`
+      const storagePath = `${storagePackId}/${coverPath}`
       const uploaded = await fetchImpl(objectUrl(storagePath), { method: 'POST', headers: { ...headers, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'false' }, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error(`Cover storage upload failed (${uploaded.status})`)
       const saved = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify({ cover_path: coverPath }) })
       if (!saved.ok) { await deleteObject(storagePath); throw new Error(`Resource Pack cover update failed (${saved.status})`) }
-      if (previous) await deleteObject(`${packId}/${previous}`)
+      if (typeof previous === 'string' && isSafeRelativeStoragePath(previous)) await deleteObject(`${storagePackId}/${previous}`)
       return toResourcePack((await saved.json() as Array<Record<string, unknown>>)[0])
     },
     getElementResourceUrl: async (packId: string, elementId: string) => {
@@ -179,4 +189,18 @@ function toResourcePack(row: Record<string, unknown>): ResourcePack {
 
 function isSafeStoragePath(path: string, prefix: string): boolean {
   return path.startsWith(prefix) && path.slice(prefix.length).split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+export function sanitizeStorageBasename(name: string): string {
+  const basename = name.split(/[\\/]/).at(-1) ?? ''
+  return safeStorageComponent(basename, 'Cover filename')
+}
+
+function safeStorageComponent(value: string, label: string): string {
+  if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\')) throw new Error(`${label} is invalid`)
+  return value
+}
+
+function isSafeRelativeStoragePath(value: string): boolean {
+  return !value.startsWith('/') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..' && !part.includes('\\'))
 }
