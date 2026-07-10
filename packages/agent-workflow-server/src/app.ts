@@ -458,36 +458,48 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(await dashboardRepository.getProjectLifecycleOverview(c.req.raw, user))
+    try {
+      return c.json(await dashboardRepository.getProjectLifecycleOverview(c.req.raw, user))
+    } catch (error) {
+      return tracedRouteError(c, 'admin.projects.lifecycle', error)
+    }
   })
 
   app.get('/api/admin/projects/retention/plan', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
-    return c.json(toProjectRetentionResponse(
-      await beeGameDeployments.applyRetention({ dryRun: true }),
-    ))
+    try {
+      return c.json(toProjectRetentionResponse(
+        await beeGameDeployments.applyRetention({ dryRun: true }),
+      ))
+    } catch (error) {
+      return tracedRouteError(c, 'admin.projects.retention.plan', error)
+    }
   })
 
   app.post('/api/admin/projects/retention/run', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
     if (forbidden) return c.json(forbidden, 403)
-    const result = toProjectRetentionResponse(
-      await beeGameDeployments.applyRetention({ dryRun: false }),
-    )
-    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-      actorId: user.id,
-      action: 'project.retention_run',
-      targetType: 'project_retention',
-      targetId: 'local-deployments',
-      metadata: {
-        dryRun: result.dryRun,
-        ...result.summary,
-      },
-    })
-    return c.json(result)
+    try {
+      const result = toProjectRetentionResponse(
+        await beeGameDeployments.applyRetention({ dryRun: false }),
+      )
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'project.retention_run',
+        targetType: 'project_retention',
+        targetId: 'local-deployments',
+        metadata: {
+          dryRun: result.dryRun,
+          ...result.summary,
+        },
+      })
+      return c.json(result)
+    } catch (error) {
+      return tracedRouteError(c, 'admin.projects.retention.run', error)
+    }
   })
 
   app.get('/api/admin/credits/ledger', async c => {
@@ -917,7 +929,11 @@ export function createAgentWorkflowApp(
   app.get('/api/user-skills', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
-    return proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills')
+    try {
+      return await proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills')
+    } catch (error) {
+      return tracedRouteError(c, 'user-skills.list', error)
+    }
   })
 
   app.post('/api/user-skills/import', async c => {
@@ -941,21 +957,29 @@ export function createAgentWorkflowApp(
   app.put('/api/user-skills/:id/enabled', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
-    return proxyBeeGameSkillsRequest(
-      skillsConfig,
-      c.req.raw,
-      `/api/user-skills/${encodeURIComponent(c.req.param('id'))}/enabled`,
-    )
+    try {
+      return await proxyBeeGameSkillsRequest(
+        skillsConfig,
+        c.req.raw,
+        `/api/user-skills/${encodeURIComponent(c.req.param('id'))}/enabled`,
+      )
+    } catch (error) {
+      return tracedRouteError(c, 'user-skills.enable', error)
+    }
   })
 
   app.delete('/api/user-skills/:id', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
-    return proxyBeeGameSkillsRequest(
-      skillsConfig,
-      c.req.raw,
-      `/api/user-skills/${encodeURIComponent(c.req.param('id'))}`,
-    )
+    try {
+      return await proxyBeeGameSkillsRequest(
+        skillsConfig,
+        c.req.raw,
+        `/api/user-skills/${encodeURIComponent(c.req.param('id'))}`,
+      )
+    } catch (error) {
+      return tracedRouteError(c, 'user-skills.delete', error)
+    }
   })
 
   app.get('/api/filesystem/directories', async c => {
@@ -1010,7 +1034,7 @@ export function createAgentWorkflowApp(
           projectCount: err.projectCount,
         }, 429)
       }
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.create', err)
     }
   })
 
@@ -1040,7 +1064,7 @@ export function createAgentWorkflowApp(
         nextProject,
       ))
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.update', err)
     }
   })
 
@@ -1081,7 +1105,7 @@ export function createAgentWorkflowApp(
       })
       return c.json(ensured)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.session.ensure', err)
     }
   })
 
@@ -1105,7 +1129,7 @@ export function createAgentWorkflowApp(
       })
       return c.json(state)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.runtime-state', err)
     }
   })
 
@@ -1180,7 +1204,7 @@ export function createAgentWorkflowApp(
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
       return c.json(beeGamePreviews.status(sessionRef.sessionId, sessionRef.workspacePath))
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.preview', err)
     }
   })
 
@@ -1214,7 +1238,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(snapshot)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.preview.start', err)
     }
   })
 
@@ -1248,7 +1272,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(snapshot)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.preview.restart', err)
     }
   })
 
@@ -1277,7 +1301,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(snapshot)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.preview.delete', err)
     }
   })
 
@@ -1308,7 +1332,7 @@ export function createAgentWorkflowApp(
         : await beeGameDeployments.list(sessionRef.sessionId)
       return c.json(records)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.deployments.list', err)
     }
   })
 
@@ -1346,7 +1370,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(persisted || deployment)
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.deployments.create', err)
     }
   })
 
@@ -1432,10 +1456,10 @@ export function createAgentWorkflowApp(
           )
           if (manifest) return c.json(manifest)
         }
-        return c.json({ error: toErrorMessage(err) }, 400)
+        return tracedRouteError(c, 'project.assets.list', err)
       }
     } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
+      return tracedRouteError(c, 'project.assets.list', err)
     }
   })
 
@@ -1477,8 +1501,10 @@ export function createAgentWorkflowApp(
       return c.json(result)
     } catch (err) {
       const message = toErrorMessage(err)
-      return c.json(
-        { error: message },
+      return tracedRouteError(
+        c,
+        'project.assets.upload',
+        err,
         message.startsWith('Asset slot not found') ? 404 : 400,
       )
     }
@@ -1488,46 +1514,50 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.projectDelete)
     if (forbidden) return c.json(forbidden, 403)
-    const project = await getOwnedProjectMetadata(
-      c.req.raw,
-      user,
-      c.req.param('id'),
-      dashboardRepository,
-    )
-    const deleted = await dashboardRepository.deleteProject(
-      c.req.raw,
-      user,
-      c.req.param('id'),
-    )
-    const deletedWorkspacePath = deleted && project?.root_path
-      ? await deleteWorkspaceDirectoryIfSafe(project.root_path, dashboardDataRoot)
-      : undefined
-    const cleanupOutcome = deletedWorkspacePath
-      ? 'workspace_deleted'
-      : project?.root_path
-        ? 'workspace_retained'
-        : 'metadata_deleted'
-    if (deleted) {
-      await appendAuditEventBestEffort('project.deleted', () =>
-        dashboardRepository.appendAuditEvent(c.req.raw, user, {
-          actorId: user.id,
-          action: 'project.deleted',
-          targetType: 'project',
-          targetId: c.req.param('id'),
-          metadata: {
-            cleanupOutcome,
-            storageCleanupOutcome: dashboardRepository.hasSupabaseStorage()
-              ? 'storage_prefix_cleanup_requested'
-              : 'not_configured',
-            ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
-          },
-        }),
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
       )
+      const deleted = await dashboardRepository.deleteProject(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+      )
+      const deletedWorkspacePath = deleted && project?.root_path
+        ? await deleteWorkspaceDirectoryIfSafe(project.root_path, dashboardDataRoot)
+        : undefined
+      const cleanupOutcome = deletedWorkspacePath
+        ? 'workspace_deleted'
+        : project?.root_path
+          ? 'workspace_retained'
+          : 'metadata_deleted'
+      if (deleted) {
+        await appendAuditEventBestEffort('project.deleted', () =>
+          dashboardRepository.appendAuditEvent(c.req.raw, user, {
+            actorId: user.id,
+            action: 'project.deleted',
+            targetType: 'project',
+            targetId: c.req.param('id'),
+            metadata: {
+              cleanupOutcome,
+              storageCleanupOutcome: dashboardRepository.hasSupabaseStorage()
+                ? 'storage_prefix_cleanup_requested'
+                : 'not_configured',
+              ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
+            },
+          }),
+        )
+      }
+      return c.json({
+        deleted,
+        ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
+      })
+    } catch (error) {
+      return tracedRouteError(c, 'project.delete', error)
     }
-    return c.json({
-      deleted,
-      ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
-    })
   })
 
   const runBeeGameAttachmentAnalysis = async (
@@ -2094,12 +2124,28 @@ function privilegedRouteError(
   return c.json({ error: 'Invalid configuration', traceId }, 400)
 }
 
+function tracedRouteError(
+  c: Context,
+  route: string,
+  error: unknown,
+  status: 400 | 404 | 500 = 400,
+): Response {
+  const traceId = randomUUID()
+  console.warn('[BeeGame] route failed', {
+    traceId,
+    route,
+    cause: error instanceof Error ? error.name : 'unknown_error',
+  })
+  return c.json({ error: 'Request failed', traceId }, status)
+}
+
 function isPrivilegedConfigurationPath(path: string): boolean {
   return [
     '/api/model-configs',
     '/api/web-tools',
     '/api/runtime-settings',
     '/api/mcp-servers',
+    '/api/admin/projects',
   ].some(prefix => path === prefix || path.startsWith(`${prefix}/`))
 }
 
@@ -4372,6 +4418,8 @@ function registerBeeGameSessionRoutes(
   })
 
   app.delete(`${basePath}/:id`, async c => {
+    const forbidden = check(c.req.raw, 'project.delete')
+    if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     const deleteArtifacts = c.req.query('deleteArtifacts') === '1'
@@ -4438,10 +4486,10 @@ function registerBeeGameSessionRoutes(
           )
           return c.json(result)
         } catch (fallbackErr) {
-          return c.json({ error: toErrorMessage(fallbackErr) }, 404)
+          return tracedRouteError(c, 'beegame-session.delete', fallbackErr, 404)
         }
       }
-      return c.json({ error: toErrorMessage(err) }, 404)
+      return tracedRouteError(c, 'beegame-session.delete', err, 404)
     }
   })
 }

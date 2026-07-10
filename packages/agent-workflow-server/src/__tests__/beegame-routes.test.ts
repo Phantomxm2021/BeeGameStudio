@@ -994,11 +994,9 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/${session.id}`,
         { method: 'DELETE' },
       )
-      expect(developerDeleteRes.status).toBe(200)
-      expect(await developerDeleteRes.json()).toEqual({
-        deleted: true,
-        deletedArtifactPaths: [],
-      })
+      expect(developerDeleteRes.status).toBe(403)
+      expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
+      expect((await developerApp.request(`/api/beegame-sessions/${session.id}`)).status).toBe(200)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

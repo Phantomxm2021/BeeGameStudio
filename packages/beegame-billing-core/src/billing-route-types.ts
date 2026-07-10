@@ -18,6 +18,6 @@ export type BillingRouteDeps = {
   getCurrentUser: (request?: Request) => BeeGameBillingUserContext
   hasPermission: (
     user: BeeGameBillingUserContext,
-    permission: 'audit.read',
+    permission: 'audit.read' | 'credits.admin',
   ) => boolean
 }

@@ -549,9 +549,20 @@ describe('BeeGame billing app', () => {
           const header = request.headers.get('authorization')
           if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
           if (header === 'Bearer developer-token') return { id: 'developer-user', role: 'developer' }
+          if (header === 'Bearer audit-token') {
+            return { id: 'audit-user', role: 'viewer', permissions: ['audit.read'] }
+          }
+          if (header === 'Bearer credits-admin-token') {
+            return { id: 'credits-admin-user', role: 'viewer', permissions: ['credits.admin'] }
+          }
           return undefined
         },
       })
+
+      const auditReaderRes = await billingApp.request('/api/admin/billing/credit-packs', {
+        headers: { authorization: 'Bearer audit-token' },
+      })
+      expect(auditReaderRes.status).toBe(403)
 
       const forbiddenRes = await billingApp.request('/api/admin/billing/credit-packs', {
         headers: { authorization: 'Bearer developer-token' },
@@ -561,7 +572,7 @@ describe('BeeGame billing app', () => {
       const upsertRes = await billingApp.request('/api/admin/billing/credit-packs', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer owner-token',
+          authorization: 'Bearer credits-admin-token',
           'content-type': 'application/json',
         },
         body: JSON.stringify({

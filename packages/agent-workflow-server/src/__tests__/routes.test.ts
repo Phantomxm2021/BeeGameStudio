@@ -490,9 +490,29 @@ describe('agent workflow server routes', () => {
           const header = request.headers.get('authorization')
           if (header === 'Bearer owner-token') return { id: 'owner-user', role: 'owner' }
           if (header === 'Bearer developer-token') return { id: 'developer-user', role: 'developer' }
+          if (header === 'Bearer audit-token') return {
+            id: 'audit-user',
+            role: 'viewer',
+            permissions: ['audit.read'],
+          }
+          if (header === 'Bearer credits-admin-token') return {
+            id: 'credits-admin-user',
+            role: 'viewer',
+            permissions: ['credits.admin'],
+          }
           return undefined
         },
       })
+
+      const auditReaderRes = await authApp.request('/api/admin/credits/grants', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer audit-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ userId: 'customer-a', credits: 40 }),
+      })
+      expect(auditReaderRes.status).toBe(403)
 
       const forbiddenRes = await authApp.request('/api/admin/credits/grants', {
         method: 'POST',
@@ -510,7 +530,7 @@ describe('agent workflow server routes', () => {
       const grantRes = await authApp.request('/api/admin/credits/grants', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer owner-token',
+          authorization: 'Bearer credits-admin-token',
           'content-type': 'application/json',
         },
         body: JSON.stringify({
@@ -548,7 +568,7 @@ describe('agent workflow server routes', () => {
               source: 'payment_provider',
               provider: 'manual',
               providerReference: 'manual-topup-3',
-              grantedBy: 'owner-user',
+              grantedBy: 'credits-admin-user',
             }),
           }),
         ],
@@ -1625,6 +1645,32 @@ describe('agent workflow server routes', () => {
         'PUT http://skills.test/api/user-skills/skill_1/enabled',
         'DELETE http://skills.test/api/user-skills/skill_1',
       ])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('traces skills proxy failures without exposing upstream details', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('upstream secret: skills-token')
+    }) as unknown as typeof fetch
+    const skillApp = createAgentWorkflowApp({
+      currentUser: { id: 'skills-user', role: 'viewer', permissions: ['skills.manage'] },
+      skillsConfig: { apiBaseUrl: 'http://skills.test' },
+    })
+    try {
+      for (const [path, init] of [
+        ['/api/user-skills', undefined],
+        ['/api/user-skills/skill-1/enabled', { method: 'PUT', body: '{}' }],
+        ['/api/user-skills/skill-1', { method: 'DELETE' }],
+      ] as const) {
+        const response = await skillApp.request(path, init)
+        expect(response.status).toBe(400)
+        const body = await response.json()
+        expect(body).toEqual({ error: 'Request failed', traceId: expect.any(String) })
+        expect(JSON.stringify(body)).not.toContain('skills-token')
+      }
     } finally {
       globalThis.fetch = originalFetch
     }

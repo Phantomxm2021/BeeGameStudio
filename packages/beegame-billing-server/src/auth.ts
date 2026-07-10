@@ -49,7 +49,7 @@ export function createConfiguredBillingUserResolver(
 
 export function hasBeeGameBillingPermission(
   user: BeeGameBillingUserContext,
-  permission: 'audit.read',
+  permission: 'audit.read' | 'credits.admin',
 ): boolean {
   if (user.permissions?.includes(permission)) return true
   return user.role === 'owner'

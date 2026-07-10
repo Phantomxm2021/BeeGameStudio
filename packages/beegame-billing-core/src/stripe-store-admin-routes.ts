@@ -169,7 +169,7 @@ export function registerBeeGameStripeStoreRoutes(
 
   app.get('/api/admin/billing/credit-packs', async c => {
     const user = deps.getCurrentUser(c.req.raw)
-    if (!deps.hasPermission(user, 'audit.read')) {
+    if (!deps.hasPermission(user, 'credits.admin')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
@@ -184,7 +184,7 @@ export function registerBeeGameStripeStoreRoutes(
 
   app.post('/api/admin/billing/credit-packs', async c => {
     const user = deps.getCurrentUser(c.req.raw)
-    if (!deps.hasPermission(user, 'audit.read')) {
+    if (!deps.hasPermission(user, 'credits.admin')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
@@ -208,7 +208,7 @@ export function registerBeeGameStripeStoreRoutes(
 
   app.post('/api/admin/credits/grants', async c => {
     const user = deps.getCurrentUser(c.req.raw)
-    if (!deps.hasPermission(user, 'audit.read')) {
+    if (!deps.hasPermission(user, 'credits.admin')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
     if (deps.billingConfig.mode === 'remote') {
