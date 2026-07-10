@@ -1,5 +1,5 @@
-import type { KeyboardEvent, MouseEvent, ReactElement } from 'react'
-import { ChevronRight, File, Folder, FolderOpen, Pencil, Trash2, Upload } from 'lucide-react'
+import { useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react'
+import { ChevronRight, File, Folder, FolderOpen, FolderPlus, Pencil, Trash2, Upload } from 'lucide-react'
 import { Tree, type NodeRendererProps, type RowRendererProps } from 'react-arborist'
 import type { ExplorerNode } from './resourcePackExplorerTree'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu'
@@ -15,6 +15,8 @@ type ResourcePackExplorerProps = {
   onRenameElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onDeleteElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onMoveElement?: (element: NonNullable<ExplorerNode['element']>, destination: ExplorerNode) => void
+  onCreateFolder?: () => void
+  labels?: { upload: string; rename: string; delete: string; newFolder: string }
 }
 
 const TREE_WIDTH = 236
@@ -32,8 +34,17 @@ export function ResourcePackExplorer({
   onRenameElement,
   onDeleteElement,
   onMoveElement,
+  onCreateFolder,
+  labels = { upload: 'Upload', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' },
 }: ResourcePackExplorerProps) {
   const selectedNodeId = selectedElementId ? `file:${selectedElementId}` : undefined
+  const nodesById = useMemo(() => {
+    const nodes = new Map<string, ExplorerNode>()
+    const visit = (node: ExplorerNode) => { nodes.set(node.id, node); node.children?.forEach(visit) }
+    visit(tree)
+    return nodes
+  }, [tree])
+  const [contextNode, setContextNode] = useState<ExplorerNode | undefined>()
   const activateFile = (node: { data: ExplorerNode }) => {
     if (node.data.kind === 'file' && node.data.element) onElement(node.data.element)
   }
@@ -43,11 +54,14 @@ export function ResourcePackExplorer({
   )
 
   const renderNode = (props: NodeRendererProps<ExplorerNode>): ReactElement => (
-    <ExplorerNodeRow {...props} selectedElementId={selectedElementId} onUploadToFolder={onUploadToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onDeleteElement={onDeleteElement} onMoveElement={onMoveElement} />
+    <ExplorerNodeRow {...props} selectedElementId={selectedElementId} onMoveElement={onMoveElement} />
   )
 
   return (
-    <Tree<ExplorerNode>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+    <div className="h-full w-full" onContextMenu={(event) => setContextNode(nodesById.get((event.target as Element).closest('[data-resource-node]')?.getAttribute('data-resource-node') || 'root'))}>
+      <Tree<ExplorerNode>
       aria-label="Pack files"
       className="overflow-hidden bg-transparent text-[#c6c6cc]"
       data={[tree]}
@@ -67,7 +81,11 @@ export function ResourcePackExplorer({
       width={TREE_WIDTH}
     >
       {renderNode}
-    </Tree>
+      </Tree>
+    </div>
+      </ContextMenuTrigger>
+      <ExplorerContextMenu node={contextNode} tree={tree} labels={labels} onCreateFolder={onCreateFolder} onUploadToFolder={onUploadToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onDeleteElement={onDeleteElement} />
+    </ContextMenu>
   )
 }
 
@@ -98,6 +116,7 @@ function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<Explo
 
   return (
     <div
+      data-resource-node={node.data.id}
       {...rowAttributes}
       ref={innerRef}
       className="focus:outline-none"
@@ -110,25 +129,12 @@ function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<Explo
   )
 }
 
-function ExplorerNodeRow({ node, selectedElementId, style, onUploadToFolder, onRenameFolder, onDeleteFolder, onRenameElement, onDeleteElement, onMoveElement }: NodeRendererProps<ExplorerNode> & Pick<ResourcePackExplorerProps, 'onUploadToFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onRenameElement' | 'onDeleteElement' | 'onMoveElement'> & { selectedElementId?: string }) {
+function ExplorerNodeRow({ node, selectedElementId, style, onMoveElement }: NodeRendererProps<ExplorerNode> & Pick<ResourcePackExplorerProps, 'onMoveElement'> & { selectedElementId?: string }) {
   const isFolder = node.data.kind === 'folder'
   const isSelected = Boolean(selectedElementId && node.data.element?.id === selectedElementId)
   const guideLeft = Math.max(6, node.level * INDENT - 9)
 
-  const menu = isFolder && node.data.id !== 'root' ? (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => onUploadToFolder?.(node.data)}><Upload />上传</ContextMenuItem>
-      {node.data.folder ? <><ContextMenuItem onSelect={() => onRenameFolder?.(node.data)}><Pencil />重命名</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteFolder?.(node.data)}><Trash2 />删除</ContextMenuItem></> : null}
-    </ContextMenuContent>
-  ) : !isFolder && node.data.element ? (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => onRenameElement?.(node.data.element!)}><Pencil />重命名</ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem variant="destructive" onSelect={() => onDeleteElement?.(node.data.element!)}><Trash2 />删除</ContextMenuItem>
-    </ContextMenuContent>
-  ) : null
-  const content = (
-    <div
+  return <div
       className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-[12px] leading-none transition-colors ${
         isSelected
           ? 'bg-[#5b3d17] text-[#f5d19b]'
@@ -162,6 +168,12 @@ function ExplorerNodeRow({ node, selectedElementId, style, onUploadToFolder, onR
       )}
       <span className="min-w-0 truncate">{node.data.name}</span>
     </div>
-  )
-  return menu ? <ContextMenu><ContextMenuTrigger asChild>{content}</ContextMenuTrigger>{menu}</ContextMenu> : content
+}
+
+function ExplorerContextMenu({ node, tree, labels, onCreateFolder, onUploadToFolder, onRenameFolder, onDeleteFolder, onRenameElement, onDeleteElement }: Pick<ResourcePackExplorerProps, 'labels' | 'onCreateFolder' | 'onUploadToFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onRenameElement' | 'onDeleteElement'> & { node?: ExplorerNode; tree: ExplorerNode }) {
+  const current = node ?? tree
+  const menuLabels = labels ?? { upload: 'Upload', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' }
+  if (current.kind === 'file' && current.element) return <ContextMenuContent><ContextMenuItem onSelect={() => onRenameElement?.(current.element!)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteElement?.(current.element!)}><Trash2 />{menuLabels.delete}</ContextMenuItem></ContextMenuContent>
+  if (current.id !== 'root') return <ContextMenuContent><ContextMenuItem onSelect={() => onUploadToFolder?.(current)}><Upload />{menuLabels.upload}</ContextMenuItem>{current.folder ? <><ContextMenuItem onSelect={() => onRenameFolder?.(current)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteFolder?.(current)}><Trash2 />{menuLabels.delete}</ContextMenuItem></> : null}</ContextMenuContent>
+  return <ContextMenuContent><ContextMenuItem onSelect={onCreateFolder}><FolderPlus />{menuLabels.newFolder}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadToFolder?.(tree)}><Upload />{menuLabels.upload}</ContextMenuItem></ContextMenuContent>
 }

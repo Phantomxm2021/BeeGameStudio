@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, File, Plus, Search, X } from 'lucide-react';
+import { ChevronLeft, File, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   type ResourceElement,
@@ -11,6 +11,7 @@ import {
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
 import { DeleteResourcePackDialog } from './DeleteResourcePackDialog';
+import { RenameResourceDialog } from './RenameResourceDialog';
 import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
 import { ResourcePackExplorer } from './ResourcePackExplorer';
 import { buildExplorerTree } from './resourcePackExplorerTree';
@@ -401,6 +402,7 @@ function PackBrowser({
   const [resourceUrl, setResourceUrl] = useState<string>();
   const [resourceError, setResourceError] = useState('');
   const [resourceAttempt, setResourceAttempt] = useState(0);
+  const [renameTarget, setRenameTarget] = useState<{ type: 'folder' | 'file'; mode: 'create' | 'rename'; name: string; folder?: ResourceFolder; element?: ResourceElement } | null>(null);
   useLayoutEffect(() => {
     const host = explorerHostRef.current;
     if (!host) return;
@@ -440,11 +442,12 @@ function PackBrowser({
     setUploadDestination({ category, folderPath: node.folder?.path || category });
     fileInputRef.current?.click();
   };
-  const renameFolder = async (folder: ResourceFolder) => { const name = window.prompt('文件夹名称', folder.name)?.trim(); if (name && name !== folder.name) { await apiClient.updateFolder(pack.id, folder.id, { name }); await onRefreshWorkspace(); } };
+  const renameFolder = (folder: ResourceFolder) => setRenameTarget({ type: 'folder', mode: 'rename', name: folder.name, folder });
   const deleteFolder = async (folder: ResourceFolder) => { if (window.confirm(`删除文件夹“${folder.name}”？文件夹必须为空。`)) { await apiClient.deleteFolder(pack.id, folder.id); await onRefreshWorkspace(); } };
-  const renameElement = async (element: ResourceElement) => { const name = window.prompt('文件名称', element.name)?.trim(); if (!name || name === element.name) return; const separator = element.path.lastIndexOf('/'); await onUpdateElement(element.id, { name, path: `${separator >= 0 ? element.path.slice(0, separator + 1) : ''}${name}` }); };
+  const renameElement = (element: ResourceElement) => setRenameTarget({ type: 'file', mode: 'rename', name: element.name, element });
   const deleteElement = async (element: ResourceElement) => { if (window.confirm(`删除文件“${element.name}”？`)) { await apiClient.deleteElement(pack.id, element.id); await onRefreshWorkspace(); } };
   const moveElement = async (element: ResourceElement, folder: ResourceFolder) => { const destination = `${folder.path}/${element.name}`; if (element.path === destination) return; await onUpdateElement(element.id, { path: destination }); };
+  const contextLabels = isZh ? { upload: '上传文件', rename: '重命名', delete: '删除', newFolder: '新建文件夹' } : { upload: 'Upload files', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' };
   return (
     <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
       <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#2d2e34] bg-[#17181d] px-[18px]">
@@ -473,19 +476,18 @@ function PackBrowser({
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-hidden border-r border-[#2c2d33] bg-[#15161b] py-3">
-          <div className="mb-2 flex items-center justify-between px-[14px]"><div className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#90929b]">Pack 文件</div><button type="button" aria-label="新建文件夹" className="grid h-5 w-5 place-items-center rounded text-[#90929b] transition-colors hover:bg-white/[0.06] hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}><Plus className="h-3.5 w-3.5" /></button></div>
-          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} onElement={onElement} onUploadToFolder={startFolderUpload} onRenameFolder={(node) => node.folder && void renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={(element) => void renameElement(element)} onDeleteElement={(element) => void deleteElement(element)} onMoveElement={(element, node) => node.folder && void moveElement(element, node.folder)} /></div>
+        <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2c2d33] bg-[#15161b]">
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} onElement={onElement} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onDeleteElement={(element) => void deleteElement(element)} onMoveElement={(element, node) => node.folder && void moveElement(element, node.folder)} /></div>
           <input ref={fileInputRef} aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
         </aside>
-        <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c] p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
+        <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c]" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
           {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
             <div role="alert" className="type-callout absolute left-4 right-4 top-4 z-30 rounded-xl bg-red-400/10 p-3 text-red-200 shadow-xl">
               {error}
             </div>
           ) : null}
-          <div className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded-[14px] bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)] p-4">
+          <div className="relative grid h-full min-h-0 place-items-center overflow-hidden bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)]">
             {selectedElement ? (
               resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
@@ -494,6 +496,7 @@ function PackBrowser({
           </div>
         </main>
       </div>
+      {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );
 }

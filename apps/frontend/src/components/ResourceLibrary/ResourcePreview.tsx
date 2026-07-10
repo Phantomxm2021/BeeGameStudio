@@ -8,6 +8,10 @@ type PreviewSelection = Pick<ResourceElement, 'name' | 'kind' | 'specs'> & { mim
 
 const textExtensions = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'xml', 'yaml', 'yml', 'js', 'ts', 'tsx', 'jsx', 'css', 'html', 'htm', 'shader', 'glsl'])
 const modelExtensions = new Set(['glb', 'gltf', 'obj', 'fbx'])
+const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'avif'])
+const audioExtensions = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'])
+const videoExtensions = new Set(['mp4', 'webm', 'mov', 'mkv'])
+const fontExtensions = new Set(['ttf', 'otf', 'woff', 'woff2'])
 
 export function isSupportedModelPreview(element: PreviewSelection): boolean {
   return modelExtensions.has(extensionFor(element))
@@ -30,10 +34,10 @@ export function renderPreview(element: PreviewSelection): PreviewRenderer {
   const extension = extensionFor(element)
   const mimeType = mimeFor(element)
 
-  if (kind === 'image' || mimeType.startsWith('image/')) return 'image'
-  if (kind === 'audio' || mimeType.startsWith('audio/')) return 'audio'
-  if (kind === 'video' || mimeType.startsWith('video/')) return 'video'
-  if (kind === 'font' || mimeType.startsWith('font/')) return 'font'
+  if (kind === 'image' || mimeType.startsWith('image/') || imageExtensions.has(extension)) return 'image'
+  if (kind === 'audio' || mimeType.startsWith('audio/') || audioExtensions.has(extension)) return 'audio'
+  if (kind === 'video' || mimeType.startsWith('video/') || videoExtensions.has(extension)) return 'video'
+  if (kind === 'font' || mimeType.startsWith('font/') || fontExtensions.has(extension)) return 'font'
   // The resource service may classify a file as a model before its concrete
   // format is known. Never send an unsupported format to a Three.js loader.
   if (isSupportedModelPreview(element)) return 'model'
@@ -52,9 +56,9 @@ export function ResourcePreview({ element, url, onMetrics }: ResourcePreviewProp
   const renderer = renderPreview(element)
   const extension = extensionFor(element)
 
-  if (renderer === 'image') return <img src={url} alt={element.name} className="max-h-full max-w-full object-contain" />
-  if (renderer === 'audio') return <audio controls src={url}>Your browser cannot play this audio file.</audio>
-  if (renderer === 'video') return <video controls src={url} className="max-h-full max-w-full">Your browser cannot play this video file.</video>
+  if (renderer === 'image') return <img src={url} alt={element.name} className="h-full w-full object-contain" />
+  if (renderer === 'audio') return <div className="grid h-full w-full place-items-center"><audio controls src={url}>Your browser cannot play this audio file.</audio></div>
+  if (renderer === 'video') return <video controls src={url} className="h-full w-full object-contain">Your browser cannot play this video file.</video>
   if (renderer === 'font') return <FontPreview url={url} element={element} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
   if (renderer === 'text') return <SafeTextPreview url={url} />
@@ -74,7 +78,7 @@ function FontPreview({ url }: { url: string; element: ResourceElement }) {
     return () => { active = false; document.fonts.delete(font) }
   }, [url])
 
-  return <p className="max-w-full break-words text-4xl text-white" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p>
+  return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-white" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p></div>
 }
 
 function SafeTextPreview({ url }: { url: string }) {
@@ -93,5 +97,5 @@ function SafeTextPreview({ url }: { url: string }) {
 }
 
 function DocumentCard({ element, url }: { element: ResourceElement; url: string }) {
-  return <div className="rounded border border-white/10 bg-white/5 p-6 text-center text-zinc-200"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-zinc-400">This file type cannot be previewed in the workspace.</p><a className="mt-4 inline-block text-sm text-amber-300 underline" href={url} download={element.name}>Download file</a></div>
+  return <div className="grid h-full w-full place-items-center p-8"><div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center text-zinc-200"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-zinc-400">This file type cannot be previewed in the workspace.</p><a className="mt-4 inline-block text-sm text-amber-300 underline" href={url} download={element.name}>Download file</a></div></div>
 }

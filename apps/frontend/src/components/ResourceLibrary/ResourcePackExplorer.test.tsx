@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import type { ExplorerNode } from './resourcePackExplorerTree'
@@ -72,5 +72,21 @@ describe('ResourcePackExplorer', () => {
 
     await user.keyboard('{Enter}')
     expect(onElement).toHaveBeenCalledWith(knight)
+  })
+
+  test('offers capability-based context actions for empty space and persisted folders', () => {
+    const onCreateFolder = vi.fn()
+    const onUpload = vi.fn()
+    const onRenameFolder = vi.fn()
+    const onDeleteFolder = vi.fn()
+    const persistedTree: ExplorerNode = { ...tree, children: [{ ...tree.children![0], folder: { id: 'models', packId: 'pack-1', name: 'Models', path: 'Models' } }] }
+    render(<ResourcePackExplorer tree={persistedTree} onElement={vi.fn()} onCreateFolder={onCreateFolder} onUploadToFolder={onUpload} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} labels={{ newFolder: 'New folder', upload: 'Upload files', rename: 'Rename', delete: 'Delete' }} />)
+    fireEvent.contextMenu(screen.getByRole('tree'))
+    expect(screen.getByText('New folder')).toBeInTheDocument()
+    expect(screen.getByText('Upload files')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.contextMenu(screen.getByRole('treeitem', { name: 'Models' }))
+    expect(screen.getByText('Rename')).toBeInTheDocument()
+    expect(screen.getByText('Delete')).toBeInTheDocument()
   })
 })
