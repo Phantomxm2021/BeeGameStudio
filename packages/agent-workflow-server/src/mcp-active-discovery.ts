@@ -1,4 +1,5 @@
 import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
+import { validateOutboundTarget } from './security/outbound-target-policy'
 
 export type McpServerHealthStatus = 'available' | 'unavailable'
 
@@ -117,6 +118,9 @@ async function testMcpEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
 ): Promise<McpServerTestResult> {
+  if (!await validateOutboundTarget(rawEndpoint, outboundTargetPolicyOptions())) {
+    return unavailable('Outbound URL is not permitted.')
+  }
   const endpoint = normalizeEndpoint(rawEndpoint)
   if (!endpoint) return unavailable('Invalid MCP URL.')
 
@@ -196,6 +200,9 @@ async function testSseEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
 ): Promise<McpServerTestResult> {
+  if (!await validateOutboundTarget(rawEndpoint, outboundTargetPolicyOptions())) {
+    return unavailable('Outbound URL is not permitted.')
+  }
   const endpoint = normalizeEndpoint(rawEndpoint)
   if (!endpoint) return unavailable('Invalid MCP URL.')
 
@@ -245,6 +252,17 @@ function normalizeEndpoint(rawEndpoint: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function outboundTargetPolicyOptions() {
+  return {
+    allowedHosts: readAllowedOutboundHosts(),
+  }
+}
+
+function readAllowedOutboundHosts(): string[] {
+  const value = process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS
+  return value ? value.split(',').map(host => host.trim()).filter(Boolean) : []
 }
 
 function unavailable(message: string, endpoint?: string): McpServerTestResult {

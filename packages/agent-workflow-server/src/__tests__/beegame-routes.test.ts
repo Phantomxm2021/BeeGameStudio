@@ -693,6 +693,37 @@ describe('beegame session routes', () => {
     ))
   })
 
+  test('rejects private model and MCP service targets without exposing the URL', async () => {
+    const app = createAgentWorkflowApp()
+    const privateTarget = 'http://127.0.0.1:43111/private?api_key=secret-value'
+
+    const modelResponse = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Unsafe model',
+        provider: 'openai-compatible',
+        baseUrl: privateTarget,
+        apiKey: 'sk-test',
+        models: { balanced: 'test' },
+      }),
+    })
+    const mcpResponse = await app.request('/api/mcp-servers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Unsafe MCP',
+        transport: 'http',
+        url: privateTarget,
+      }),
+    })
+
+    expect(modelResponse.status).toBe(400)
+    expect(await modelResponse.json()).toEqual({ error: 'Outbound URL is not permitted' })
+    expect(mcpResponse.status).toBe(400)
+    expect(await mcpResponse.json()).toEqual({ error: 'Outbound URL is not permitted' })
+  })
+
   test('creates a dashboard session without starting a BeeGame turn', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'build_write_complete')

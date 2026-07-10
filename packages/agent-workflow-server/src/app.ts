@@ -68,6 +68,7 @@ import {
   parsePortList,
   testMcpServerConnection,
 } from './mcp-active-discovery'
+import { validateOutboundTarget } from './security/outbound-target-policy'
 import {
   type AppendAuditEventInput,
 } from './audit-events-store'
@@ -537,6 +538,9 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
+    if (!await hasPermittedOutboundUrl(body.baseUrl)) {
+      return c.json({ error: 'Outbound URL is not permitted' }, 400)
+    }
 
     const created = await dashboardRepository.createModelConfig(c.req.raw, user, {
       name: String(body.name),
@@ -568,6 +572,9 @@ export function createAgentWorkflowApp(
     }
     try {
       const body = await readJson(c.req.raw)
+      if (!await hasPermittedOutboundUrl(body.baseUrl)) {
+        return c.json({ error: 'Outbound URL is not permitted' }, 400)
+      }
       const updated = await dashboardRepository.updateModelConfig(c.req.raw, user, c.req.param('id'), {
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(typeof body.provider === 'string'
@@ -632,6 +639,10 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'secrets.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    if (!await hasPermittedOutboundUrl(body.tavilyEndpointUrl) ||
+      !await hasPermittedOutboundUrl(body.exaEndpointUrl)) {
+      return c.json({ error: 'Outbound URL is not permitted' }, 400)
+    }
     const input = {
       ...(typeof body.webSearchAdapter === 'string'
         ? { webSearchAdapter: body.webSearchAdapter as never }
@@ -754,7 +765,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     return c.json(await testMcpServerConnection(toMcpServerInput(body)))
   })
@@ -763,7 +774,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
@@ -789,7 +800,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
@@ -2179,6 +2190,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const apiKey = env.OPENAI_API_KEY
   const model = env.OPENAI_DEFAULT_SONNET_MODEL ?? env.OPENAI_DEFAULT_OPUS_MODEL ?? env.OPENAI_DEFAULT_HAIKU_MODEL
   if (!baseUrl || !apiKey || !model) throw new Error('Attachment analysis requires an OpenAI-compatible model config')
+  await assertPermittedOutboundUrl(baseUrl)
 
   const sourceType = input.attachments.some(item => item.type === 'image')
     ? input.attachments.some(item => item.type === 'file') ? 'mixed' : 'image'
@@ -2272,6 +2284,7 @@ async function generateBeeGameIntakeOptions(input: {
   if (!baseUrl || !apiKey || !model) {
     throw new Error('BeeGame intake currently requires an OpenAI-compatible model config')
   }
+  await assertPermittedOutboundUrl(baseUrl)
 
   const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
     method: 'POST',
@@ -4464,7 +4477,7 @@ function toModelMap(value: unknown): {
   }
 }
 
-function validateMcpServerBody(body: JsonObject): string | null {
+async function validateMcpServerBody(body: JsonObject): Promise<string | null> {
   if (typeof body.name !== 'string' || !body.name.trim()) {
     return 'Missing field: name'
   }
@@ -4480,11 +4493,31 @@ function validateMcpServerBody(body: JsonObject): string | null {
     }
   } else if (typeof body.url !== 'string' || !body.url.trim()) {
     return 'Missing field: url'
+  } else if (!await hasPermittedOutboundUrl(body.url)) {
+    return 'Outbound URL is not permitted'
   }
   if (body.env !== undefined && !Array.isArray(body.env)) {
     return 'Invalid MCP env'
   }
   return null
+}
+
+async function hasPermittedOutboundUrl(value: unknown): Promise<boolean> {
+  if (value === undefined || value === '') return true
+  return typeof value === 'string' && await validateOutboundTarget(value, {
+    allowedHosts: readAllowedOutboundHosts(),
+  })
+}
+
+async function assertPermittedOutboundUrl(value: string): Promise<void> {
+  if (!await hasPermittedOutboundUrl(value)) {
+    throw new Error('Outbound URL is not permitted')
+  }
+}
+
+function readAllowedOutboundHosts(): string[] {
+  const value = process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS
+  return value ? value.split(',').map(host => host.trim()).filter(Boolean) : []
 }
 
 function toMcpServerInput(body: JsonObject) {
