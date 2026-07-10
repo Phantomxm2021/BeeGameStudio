@@ -9,11 +9,12 @@ import {
   type ResourcePackSummary,
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
+import { EditResourcePackDialog } from './EditResourcePackDialog';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder'
   | 'updateElement'
   | 'publishPack'
@@ -81,6 +82,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [uploadPhase, setUploadPhase] = useState<'uploading' | 'processing'>('uploading');
   const [elementUpload, setElementUpload] = useState<{ done: number; total: number; failed: string[] } | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const packSessionRef = useRef(0);
@@ -214,6 +216,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   if (selectedPack) {
     return (
+      <>
+      {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => apiClient.uploadPackCover(selectedPack.id, file)} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setEditDialogOpen(false); setLoading(false); }} /> : null}
       <PackBrowser
         pack={selectedPack}
         isZh={isZh}
@@ -236,12 +240,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         }}
         onCategory={selectCategory}
         onElement={setSelectedElement}
-        onEditPack={(name) => {
-          void apiClient.updatePack(selectedPack.id, { name }).then((saved) => {
-            setSelectedPack(saved);
-            setPacks((current) => current.map((item) => item.id === saved.id ? saved : item));
-          }).catch((err) => setError(err instanceof Error ? err.message : 'Pack 更新失败'));
-        }}
+        onEditPack={() => setEditDialogOpen(true)}
         onAddFiles={(files) => void uploadElements(files)}
         onDropFiles={(files) => void uploadElements(files)}
         uploadStatus={elementUpload}
@@ -249,7 +248,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
         onPublish={async () => { const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
-      />
+      /></>
     );
   }
 
@@ -422,7 +421,7 @@ function PackBrowser({
   onCategory: (category?: string, folderPath?: string) => void;
   activeFolderPath?: string;
   onElement: (element: ResourceElement) => void;
-  onEditPack: (name: string) => void;
+  onEditPack: () => void;
   onAddFiles: (files: File[]) => void;
   onDropFiles: (files: File[]) => void;
   folders: ResourceFolder[];
@@ -454,18 +453,15 @@ function PackBrowser({
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button type="button" className="secondary-pill type-button px-3 py-1.5" onClick={() => {
-            const name = window.prompt('Pack 名称', pack.name)?.trim();
-            if (name) onEditPack(name);
-          }}>
-            编辑 Pack 信息
-          </button>
+        <div className="flex items-center gap-3">
+          <div className="flex overflow-hidden rounded-full border border-white/10">
+          <button type="button" className="secondary-pill type-button rounded-none border-0 px-3 py-1.5" onClick={onEditPack}>编辑 Pack</button>
+          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button rounded-none border-0 border-l border-white/10 px-3 py-1.5" onClick={() => void onPublish()}>发布</button> : null}
+          </div>
           <label className="primary-pill type-button cursor-pointer px-3 py-1.5">
             ＋ 添加文件
             <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
           </label>
-          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button px-3 py-1.5" onClick={() => void onPublish()}>发布</button> : null}
         </div>
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)]">

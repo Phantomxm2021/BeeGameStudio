@@ -43,6 +43,9 @@ const api = {
   getPack: async () => pack,
   listElements: async () => [element],
   getElement: async () => element,
+  updatePack: async (_packId: string, changes: Partial<ResourcePackSummary>) => ({ ...pack, ...changes }),
+  uploadPackCover: async () => pack,
+  deletePack: async () => undefined,
 };
 
 describe('ResourceLibraryView', () => {
@@ -157,5 +160,19 @@ describe('ResourceLibraryView', () => {
     await act(async () => { resolveModels([element]); });
     await waitFor(() => expect(screen.getByRole('button', { name: '文件 Wood' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '文件 Character Idle' })).not.toBeInTheDocument();
+  });
+
+  test('removes a deleted Pack from the list and clears its route', async () => {
+    const user = userEvent.setup();
+    const deletePack = vi.fn(async () => undefined);
+    render(<ResourceLibraryView apiClient={{ ...api, deletePack }} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    await user.click(screen.getByRole('button', { name: '编辑 Pack' }));
+    await user.type(screen.getByLabelText('输入 Pack 名称以确认'), pack.name);
+    await user.click(screen.getByRole('button', { name: '确认删除 Pack' }));
+    await waitFor(() => expect(deletePack).toHaveBeenCalledWith('pack-1'));
+    expect(screen.queryByRole('button', { name: 'Example Pack' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回资源包' })).not.toBeInTheDocument();
+    expect(window.location.hash).not.toContain('resource-pack=');
   });
 });
