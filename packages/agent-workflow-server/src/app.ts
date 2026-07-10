@@ -127,6 +127,7 @@ import {
   type BeeGameSkillsConfig,
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
+  createPinnedUndiciDispatcher,
   resolveApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
@@ -1527,7 +1528,8 @@ export function createAgentWorkflowApp(
         modelConfigId,
         ownerId: user.id,
         runtimeEnv,
-        assertPermittedOutboundUrl,
+        outboundTargetPolicyOptions,
+        resolveOutboundTarget,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -1606,7 +1608,8 @@ export function createAgentWorkflowApp(
           getBearerToken(request),
           modelConfigId,
         ),
-        assertPermittedOutboundUrl,
+        outboundTargetPolicyOptions,
+        resolveOutboundTarget,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -2228,7 +2231,8 @@ async function generateBeeGameAttachmentAnalysis(input: {
   modelConfigId?: string
   ownerId: string
   runtimeEnv?: Record<string, string>
-  assertPermittedOutboundUrl: (value: string) => Promise<void>
+  outboundTargetPolicyOptions: OutboundTargetPolicyOptions
+  resolveOutboundTarget: typeof resolveApprovedOutboundTarget
 }): Promise<AttachmentBuildAnalysis> {
   const configId = input.modelConfigId ?? listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
   const runtime = configId ? mapModelConfigToRuntime(configId) : undefined
@@ -2237,8 +2241,11 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const apiKey = env.OPENAI_API_KEY
   const model = env.OPENAI_DEFAULT_SONNET_MODEL ?? env.OPENAI_DEFAULT_OPUS_MODEL ?? env.OPENAI_DEFAULT_HAIKU_MODEL
   if (!baseUrl || !apiKey || !model) throw new Error('Attachment analysis requires an OpenAI-compatible model config')
-  await input.assertPermittedOutboundUrl(baseUrl)
+  const approvedTarget = await input.resolveOutboundTarget(baseUrl, input.outboundTargetPolicyOptions)
+  if (!approvedTarget) throw new Error('Outbound URL is not permitted')
+  const dispatcher = createPinnedUndiciDispatcher(approvedTarget)
 
+  try {
   const sourceType = input.attachments.some(item => item.type === 'image')
     ? input.attachments.some(item => item.type === 'file') ? 'mixed' : 'image'
     : 'gdd'
@@ -2283,7 +2290,9 @@ async function generateBeeGameAttachmentAnalysis(input: {
         { role: 'user', content: [{ type: 'text', text }, ...imageParts] },
       ],
     }),
-  })
+    redirect: 'error',
+    dispatcher,
+  } as RequestInit)
   if (!response.ok) throw new Error(`Attachment analysis model request failed: ${response.status}`)
   const payload = (await response.json()) as JsonObject
   const choices = Array.isArray(payload.choices) ? payload.choices : []
@@ -2300,6 +2309,9 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const analysis = parseAttachmentBuildAnalysis({ ...(isObject(parsed) ? parsed : {}), analysisId: `attachment_analysis_${randomUUID().replaceAll('-', '')}` })
   if (analysis.sourceType !== sourceType) throw new Error('Attachment analysis source type did not match uploaded attachments')
   return analysis
+  } finally {
+    if (typeof dispatcher.close === 'function') await dispatcher.close()
+  }
 }
 
 async function generateBeeGameIntakeOptions(input: {
@@ -2309,7 +2321,8 @@ async function generateBeeGameIntakeOptions(input: {
   ownerId: string
   modelConfigId?: string
   runtimeEnv?: Record<string, string>
-  assertPermittedOutboundUrl: (value: string) => Promise<void>
+  outboundTargetPolicyOptions: OutboundTargetPolicyOptions
+  resolveOutboundTarget: typeof resolveApprovedOutboundTarget
 }): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
@@ -2332,8 +2345,11 @@ async function generateBeeGameIntakeOptions(input: {
   if (!baseUrl || !apiKey || !model) {
     throw new Error('BeeGame intake currently requires an OpenAI-compatible model config')
   }
-  await input.assertPermittedOutboundUrl(baseUrl)
+  const approvedTarget = await input.resolveOutboundTarget(baseUrl, input.outboundTargetPolicyOptions)
+  if (!approvedTarget) throw new Error('Outbound URL is not permitted')
+  const dispatcher = createPinnedUndiciDispatcher(approvedTarget)
 
+  try {
   const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
     method: 'POST',
     headers: {
@@ -2404,7 +2420,9 @@ async function generateBeeGameIntakeOptions(input: {
         },
       ],
     }),
-  })
+    redirect: 'error',
+    dispatcher,
+  } as RequestInit)
   if (!response.ok) {
     throw new Error(
       await describeModelIntakeFailure(response, {
@@ -2415,6 +2433,9 @@ async function generateBeeGameIntakeOptions(input: {
     )
   }
   return parseBeeGameIntakeResponse(response)
+  } finally {
+    if (typeof dispatcher.close === 'function') await dispatcher.close()
+  }
 }
 
 async function parseBeeGameIntakeResponse(response: Response): Promise<BeeGameIntakeAnalysis> {
