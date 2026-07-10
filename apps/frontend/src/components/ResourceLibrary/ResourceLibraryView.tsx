@@ -57,6 +57,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [isRootDragActive, setIsRootDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadPhase, setUploadPhase] = useState<'uploading' | 'processing'>('uploading');
+  const [elementUpload, setElementUpload] = useState<{ done: number; total: number; failed: string[] } | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -141,6 +142,24 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     }
   };
 
+  const uploadElements = async (files: File[]) => {
+    if (!selectedPack || !activeCategory || files.length === 0) return;
+    setElementUpload({ done: 0, total: files.length, failed: [] });
+    for (const file of files) {
+      try {
+        const next = await apiClient.addElement(selectedPack.id, file, activeCategory, activeCategory);
+        setElements((current) => [...current, next]);
+        setSelectedElement(next);
+      } catch (err) {
+        setElementUpload((current) => current ? { ...current, failed: [...current.failed, file.name] } : current);
+        setError(err instanceof Error ? err.message : '元素上传失败');
+      } finally {
+        setElementUpload((current) => current ? { ...current, done: current.done + 1 } : current);
+      }
+    }
+    setTimeout(() => setElementUpload(null), 1800);
+  };
+
   if (selectedPack) {
     return (
       <PackBrowser
@@ -163,11 +182,9 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
             setPacks((current) => current.map((item) => item.id === saved.id ? saved : item));
           }).catch((err) => setError(err instanceof Error ? err.message : 'Pack 更新失败'));
         }}
-        onAddFile={(file) => { if (!activeCategory) return; void apiClient.addElement(selectedPack.id, file, activeCategory).then((next) => { setElements((current) => [...current, next]); setSelectedElement(next); }).catch((err) => setError(err instanceof Error ? err.message : '元素上传失败')); }}
-        onDropFile={(file) => {
-          if (!activeCategory) return;
-          void apiClient.addElement(selectedPack.id, file, activeCategory).then((next) => { setElements((current) => [...current, next]); setSelectedElement(next); }).catch((err) => setError(err instanceof Error ? err.message : '元素上传失败'));
-        }}
+        onAddFiles={(files) => void uploadElements(files)}
+        onDropFiles={(files) => void uploadElements(files)}
+        uploadStatus={elementUpload}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
@@ -321,10 +338,11 @@ function PackBrowser({
   onCategory,
   onElement,
   onEditPack,
-  onAddFile,
-  onDropFile,
+  onAddFiles,
+  onDropFiles,
   folders,
   onCreateFolder,
+  uploadStatus,
   onUpdateElement,
 }: {
   pack: ResourcePackSummary;
@@ -337,11 +355,12 @@ function PackBrowser({
   onCategory: (category: string) => void;
   onElement: (element: ResourceElement) => void;
   onEditPack: (name: string) => void;
-  onAddFile: (file: File) => void;
-  onDropFile: (file: File) => void;
+  onAddFiles: (files: File[]) => void;
+  onDropFiles: (files: File[]) => void;
   folders: ResourceFolder[];
   onCreateFolder: (name: string) => Promise<void>;
   onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
+  uploadStatus: { done: number; total: number; failed: string[] } | null;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -372,7 +391,7 @@ function PackBrowser({
           </button>
           <label className="primary-pill type-button cursor-pointer px-4 py-2">
             ＋ 添加文件
-            <input type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) onAddFile(file); event.target.value = ''; }} />
+            <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
           </label>
         </div>
       </div>
@@ -426,7 +445,8 @@ function PackBrowser({
             ))}
           </div>
         </aside>
-        <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) onDropFile(file); }}>
+        <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
+          {uploadStatus ? <div role="status" className="mb-4 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           <div className="mb-4 flex items-center justify-between">
             <div className="type-footnote text-zinc-500">
               {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
