@@ -277,6 +277,44 @@ create table if not exists public.beegame_assets (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.beegame_resource_packs (
+  id text primary key,
+  name text not null,
+  style text not null,
+  game_types jsonb not null default '[]'::jsonb,
+  dimension text not null check (dimension in ('2D', '3D', 'agnostic')),
+  categories jsonb not null default '[]'::jsonb,
+  license text not null,
+  version text not null,
+  status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
+  cover_path text,
+  element_count integer not null default 0 check (element_count >= 0),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_resource_elements (
+  id text primary key,
+  pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
+  name text not null,
+  path text not null,
+  category text not null,
+  kind text not null,
+  preview jsonb,
+  specs jsonb not null default '{}'::jsonb,
+  dependencies jsonb not null default '[]'::jsonb,
+  status text not null default 'ready' check (status in ('ready', 'hidden', 'archived')),
+  style_override text,
+  dimension_override text check (dimension_override is null or dimension_override in ('2D', '3D', 'agnostic')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (pack_id, path)
+);
+
+create index if not exists beegame_resource_elements_pack_category_idx
+  on public.beegame_resource_elements (pack_id, category, path);
+
 create table if not exists public.beegame_previews (
   id text primary key,
   project_id text not null references public.beegame_projects(id) on delete cascade,
@@ -1861,6 +1899,8 @@ alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_user_skills enable row level security;
 alter table public.beegame_assets enable row level security;
+alter table public.beegame_resource_packs enable row level security;
+alter table public.beegame_resource_elements enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
@@ -1971,6 +2011,16 @@ create policy "user skill owner access" on public.beegame_user_skills
 drop policy if exists "asset owner access" on public.beegame_assets;
 create policy "asset owner access" on public.beegame_assets
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists "resource Pack platform owner access" on public.beegame_resource_packs;
+create policy "resource Pack platform owner access" on public.beegame_resource_packs
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource element platform owner access" on public.beegame_resource_elements;
+create policy "resource element platform owner access" on public.beegame_resource_elements
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
 
 drop policy if exists "preview owner access" on public.beegame_previews;
 create policy "preview owner access" on public.beegame_previews
