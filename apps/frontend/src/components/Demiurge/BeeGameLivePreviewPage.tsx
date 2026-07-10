@@ -6,7 +6,7 @@ import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../ui/button';
 import { ButtonGroup } from '../ui/button-group';
 import { SettingsMenu } from './Landing/SettingsMenu';
-import { ResourceLibraryPage } from './ResourceLibrary/ResourceLibraryView';
+import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';

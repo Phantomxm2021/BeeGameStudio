@@ -15,7 +15,7 @@ import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
-import { ResourceLibraryPage } from './ResourceLibrary/ResourceLibraryView';
+import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
 import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
