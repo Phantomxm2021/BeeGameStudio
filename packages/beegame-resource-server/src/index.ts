@@ -231,7 +231,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     if (!response.ok) throw new Error(`Resource URL signing failed (${response.status})`)
     const signedURL = (await response.json() as { signedURL?: string }).signedURL
     if (!signedURL) throw new Error('Resource URL signing returned no URL')
-    return new URL(signedURL, baseUrl).toString()
+    return normalizeSupabaseSignedObjectUrl(baseUrl, signedURL)
   }
   const toClientPack = async (packId: string, row: Record<string, unknown>): Promise<PackSummary> => {
     const pack = toResourcePack(row)
@@ -301,6 +301,25 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
       return signObject(`${storagePackId}/${relativePath}`)
     },
   }
+}
+
+function normalizeSupabaseSignedObjectUrl(baseUrl: string, signedURL: string): string {
+  try {
+    new URL(signedURL)
+    return signedURL
+  } catch {
+    // Supabase Storage may return either an absolute URL or a storage-relative path.
+  }
+
+  if (!signedURL.startsWith('/') || signedURL.startsWith('//')) {
+    throw new Error('Resource URL signing returned an unexpected relative URL')
+  }
+
+  const relative = new URL(signedURL, 'https://relative-url.invalid')
+  const suffix = `${relative.pathname}${relative.search}${relative.hash}`
+  if (relative.pathname.startsWith('/object/')) return `${baseUrl}/storage/v1${suffix}`
+  if (relative.pathname.startsWith('/storage/v1/')) return `${baseUrl}${suffix}`
+  throw new Error('Resource URL signing returned an unexpected relative URL')
 }
 
 export function toResourcePack(row: Record<string, unknown>): PackSummary {

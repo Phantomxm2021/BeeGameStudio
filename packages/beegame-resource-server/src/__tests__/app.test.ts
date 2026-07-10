@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createInMemoryResourceRepository } from '../../../beegame-resource-core/src'
 import { createBeeGameResourceServerApp } from '../app'
+import { createSupabaseResourceLifecycleHandlers } from '../index'
 
 const repository = createInMemoryResourceRepository({
   packs: [{
@@ -146,6 +147,30 @@ describe('resource service app', () => {
     const missing = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/missing/resource-url'))
     expect(missing.status).toBe(404)
     expect(signed).toEqual(['pack-1/element-1'])
+  })
+
+  test('returns a canonical Supabase production signed URL through the resource-url route', async () => {
+    const lifecycle = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://project.supabase.co', serviceRoleKey: 'secret',
+      fetchImpl: async (input) => {
+        const url = String(input)
+        if (url.includes('beegame_resource_elements')) return Response.json([{ pack_id: 'pack-1', path: 'characters/idle.png' }])
+        if (url.includes('/object/sign/')) return Response.json({ signedURL: '/object/sign/beegame-resource-packs/pack-1/characters/idle.png?token=preview' })
+        return Response.json([])
+      },
+    })
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      ...lifecycle,
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/element-1/resource-url'))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      url: 'https://project.supabase.co/storage/v1/object/sign/beegame-resource-packs/pack-1/characters/idle.png?token=preview',
+    })
   })
 
   test('returns elements with an explicit category filter', async () => {

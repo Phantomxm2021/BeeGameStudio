@@ -173,6 +173,50 @@ describe('Supabase resource lifecycle handlers', () => {
     expect(signedRequests).toHaveLength(1)
   })
 
+  test('normalizes Supabase production object-sign responses for element resource URLs', async () => {
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://project.supabase.co', serviceRoleKey: 'secret',
+      fetchImpl: async (input) => {
+        const url = String(input)
+        if (url.includes('element-production')) return Response.json([{ pack_id: 'pack-1', path: 'assets/knight.glb' }])
+        if (url.includes('element-storage-v1')) return Response.json([{ pack_id: 'pack-1', path: 'assets/castle.glb' }])
+        if (url.includes('element-absolute')) return Response.json([{ pack_id: 'pack-1', path: 'assets/absolute.glb' }])
+        if (url.includes('/object/sign/')) {
+          return Response.json({ signedURL: url.includes('absolute.glb')
+            ? 'https://signed.cdn.test/object/sign/beegame-resource-packs/pack-1/assets/absolute.glb?token=absolute'
+            : url.includes('castle.glb')
+              ? '/storage/v1/object/sign/beegame-resource-packs/pack-1/assets/castle.glb?token=existing'
+              : '/object/sign/beegame-resource-packs/pack-1/assets/knight.glb?token=production' })
+        }
+        return Response.json([])
+      },
+    })
+
+    await expect(handlers.getElementResourceUrl('pack-1', 'element-production')).resolves.toBe(
+      'https://project.supabase.co/storage/v1/object/sign/beegame-resource-packs/pack-1/assets/knight.glb?token=production',
+    )
+    await expect(handlers.getElementResourceUrl('pack-1', 'element-storage-v1')).resolves.toBe(
+      'https://project.supabase.co/storage/v1/object/sign/beegame-resource-packs/pack-1/assets/castle.glb?token=existing',
+    )
+    await expect(handlers.getElementResourceUrl('pack-1', 'element-absolute')).resolves.toBe(
+      'https://signed.cdn.test/object/sign/beegame-resource-packs/pack-1/assets/absolute.glb?token=absolute',
+    )
+  })
+
+  test('rejects unrelated relative signed URLs', async () => {
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input) => {
+        const url = String(input)
+        if (url.includes('element-1')) return Response.json([{ pack_id: 'pack-1', path: 'assets/item.glb' }])
+        if (url.includes('/object/sign/')) return Response.json({ signedURL: '/rest/v1/beegame_resource_packs' })
+        return Response.json([])
+      },
+    })
+
+    await expect(handlers.getElementResourceUrl('pack-1', 'element-1')).rejects.toThrow('unexpected relative URL')
+  })
+
   test('rejects unsafe element paths before requesting a signed URL', async () => {
     let requestedSignature = false
     const handlers = createSupabaseResourceLifecycleHandlers({
