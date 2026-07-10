@@ -4,7 +4,7 @@
 
 **Goal:** Separate a Pack's primary category from the concrete element types it contains, then expose the corrected Pack-category select in resource authoring.
 
-**Architecture:** Add a required `primaryCategory` field to the Pack contract and Supabase row, while keeping `categories` as the legacy/derived list of contained element categories. The create dialog writes only `primaryCategory`; element upload/import continues to classify individual files through `ResourceCategory` and `kind`. Existing Pack rows migrate to `mixed` and legacy category values remain readable.
+**Architecture:** Add a required `primaryCategory` field to the Pack contract and Supabase row, while keeping `categories` as a required, derived list of contained element categories that may be empty before upload. The create dialog writes only `primaryCategory`; element upload/import continues to classify individual files through `ResourceCategory` and `kind`. Existing Pack rows migrate to `mixed` and legacy category values remain readable.
 
 **Tech Stack:** TypeScript, Bun tests, React, Vite, Supabase REST/Postgres schema.
 
@@ -326,7 +326,7 @@ export type CreateResourcePackInput = {
   primaryCategory: ResourcePackPrimaryCategory
   dimension: '2D' | '3D' | 'agnostic'
   gameTypes: string[]
-  categories?: string[]
+  categories: string[]
 }
 ```
 
@@ -341,8 +341,8 @@ Expected: FAIL because the input and returned summary omit `primaryCategory`.
 
 - [ ] **Step 3: Update API types and create dialog select values**
 
-Add `primaryCategory` to `ResourcePackSummary`; leave `categories` optional
-because it represents contained element categories.
+Add `primaryCategory` to `ResourcePackSummary`; keep `categories` required as
+the derived list of contained element categories, allowing `[]` before upload.
 
 Replace the dialog's current `categoryOptions` with:
 
