@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import type { Hono } from 'hono'
+import type { Context } from 'hono'
 import {
   loadAvailableStripeCreditPacks,
   safeAppendBillingEvent,
@@ -179,7 +181,11 @@ export function registerBeeGameStripeStoreRoutes(
         '/api/admin/billing/credit-packs',
       )
     }
-    return c.json({ packs: await deps.dashboardRepository.listBillingCreditPacks(c.req.raw) })
+    try {
+      return c.json({ packs: await deps.dashboardRepository.listBillingCreditPacks(c.req.raw) })
+    } catch (error) {
+      return tracedRouteError(c, 'admin.billing.credit-packs.list', error)
+    }
   })
 
   app.post('/api/admin/billing/credit-packs', async c => {
@@ -195,15 +201,19 @@ export function registerBeeGameStripeStoreRoutes(
       )
     }
     const body = await readJson(c.req.raw)
-    const pack = await deps.dashboardRepository.upsertBillingCreditPack(c.req.raw, {
-      priceId: stringValue(body.priceId),
-      credits: numberValue(body.credits),
-      displayName: stringValue(body.displayName) || undefined,
-      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
-      sortOrder: numberValue(body.sortOrder),
-      metadata: isObject(body.metadata) ? body.metadata : undefined,
-    })
-    return c.json({ pack })
+    try {
+      const pack = await deps.dashboardRepository.upsertBillingCreditPack(c.req.raw, {
+        priceId: stringValue(body.priceId),
+        credits: numberValue(body.credits),
+        displayName: stringValue(body.displayName) || undefined,
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        sortOrder: numberValue(body.sortOrder),
+        metadata: isObject(body.metadata) ? body.metadata : undefined,
+      })
+      return c.json({ pack })
+    } catch (error) {
+      return tracedRouteError(c, 'admin.billing.credit-packs.upsert', error)
+    }
   })
 
   app.post('/api/admin/credits/grants', async c => {
@@ -234,16 +244,34 @@ export function registerBeeGameStripeStoreRoutes(
     const metadata = isObject(body) && isObject(body.metadata)
       ? body.metadata
       : {}
-    return c.json(await deps.dashboardRepository.grantCredits(
-      c.req.raw,
-      targetUserId,
-      {
-        credits,
-        metadata: {
-          ...metadata,
-          grantedBy: user.id,
+    try {
+      return c.json(await deps.dashboardRepository.grantCredits(
+        c.req.raw,
+        targetUserId,
+        {
+          credits,
+          metadata: {
+            ...metadata,
+            grantedBy: user.id,
+          },
         },
-      },
-    ))
+      ))
+    } catch (error) {
+      return tracedRouteError(c, 'admin.credits.grants', error)
+    }
   })
+}
+
+function tracedRouteError(
+  c: Context,
+  route: string,
+  error: unknown,
+): Response {
+  const traceId = randomUUID()
+  console.warn('[BeeGame] route failed', {
+    traceId,
+    route,
+    cause: error instanceof Error ? error.name : 'unknown_error',
+  })
+  return c.json({ error: 'Request failed', traceId }, 400)
 }
