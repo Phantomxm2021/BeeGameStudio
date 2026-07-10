@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft, File, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
+  ResourceLibraryApiError,
   type ResourceElement,
   type ResourceFolder,
   type ResourcePackPrimaryCategory,
@@ -34,6 +35,22 @@ type ResourceLibraryViewProps = {
 };
 
 type UploadDestination = { category: string; folderPath: string };
+type FailedElementUpload = { file: File; destination: UploadDestination; message: string };
+type ElementUploadStatus = { done: number; total: number; failed: FailedElementUpload[]; phase: 'uploading' | 'failed' | 'complete' };
+
+const uploadRetryDelaysMs = [500, 1_250] as const;
+
+function isRetryableUploadError(error: unknown): boolean {
+  // A retry must never turn validation, permissions, or incompatible-file errors
+  // into a hidden loop. Only a throttled, unavailable, or interrupted request is
+  // safe to retry automatically.
+  if (!(error instanceof ResourceLibraryApiError)) return true;
+  return error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+function waitForUploadRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
 
 
 const categoryLabels: Record<string, string> = {
@@ -123,7 +140,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [query, setQuery] = useState('');
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
-  const [elementUpload, setElementUpload] = useState<{ done: number; total: number; failed: string[] } | null>(null);
+  const [elementUpload, setElementUpload] = useState<ElementUploadStatus | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -195,15 +212,27 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const pageCount = Math.max(1, Math.ceil(visiblePacks.length / 64));
   const pagedPacks = visiblePacks.slice((page - 1) * 64, page * 64);
 
-  const uploadElements = async (files: File[], destination?: UploadDestination) => {
-    if (!selectedPack || files.length === 0) return;
+  const uploadQueuedElements = async (uploads: Array<{ file: File; destination: UploadDestination }>) => {
+    if (!selectedPack || uploads.length === 0) return;
     const session = packSessionRef.current;
-    const uploadCategory = destination?.category || activeCategory || 'environment';
-    const uploadFolderPath = destination?.folderPath || activeFolderPath || uploadCategory;
-    setElementUpload({ done: 0, total: files.length, failed: [] });
-    for (const file of files) {
+    setError('');
+    setElementUpload({ done: 0, total: uploads.length, failed: [], phase: 'uploading' });
+    const failed: FailedElementUpload[] = [];
+    for (const { file, destination } of uploads) {
       try {
-        const next = await apiClient.addElement(selectedPack.id, file, uploadCategory, uploadFolderPath);
+        let next: ResourceElement | undefined;
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= uploadRetryDelaysMs.length; attempt += 1) {
+          try {
+            next = await apiClient.addElement(selectedPack.id, file, destination.category, destination.folderPath);
+            break;
+          } catch (err) {
+            lastError = err;
+            if (!isRetryableUploadError(err) || attempt === uploadRetryDelaysMs.length) break;
+            await waitForUploadRetry(uploadRetryDelaysMs[attempt]);
+          }
+        }
+        if (!next) throw lastError instanceof Error ? lastError : new Error('元素上传失败');
         if (session !== packSessionRef.current) continue;
         setElements((current) => [...current, next]);
         setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
@@ -212,13 +241,31 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         // Uploading must not steal the current inspector/preview focus. The
         // user can select any uploaded item deliberately from the tree.
       } catch (err) {
-        setElementUpload((current) => current ? { ...current, failed: [...current.failed, file.name] } : current);
-        setError(err instanceof Error ? err.message : '元素上传失败');
+        const message = err instanceof Error ? err.message : '元素上传失败';
+        failed.push({ file, destination, message });
       } finally {
         setElementUpload((current) => current ? { ...current, done: current.done + 1 } : current);
       }
     }
-    setTimeout(() => setElementUpload(null), 1800);
+    if (session !== packSessionRef.current) return;
+    if (failed.length) {
+      setElementUpload({ done: uploads.length, total: uploads.length, failed, phase: 'failed' });
+      setError(`${failed.length} 个文件上传失败；请重试或检查文件与权限。`);
+      return;
+    }
+    setElementUpload({ done: uploads.length, total: uploads.length, failed: [], phase: 'complete' });
+    window.setTimeout(() => setElementUpload((current) => current?.phase === 'complete' ? null : current), 1_200);
+  };
+
+  const uploadElements = async (files: File[], destination?: UploadDestination) => {
+    const uploadCategory = destination?.category || activeCategory || 'environment';
+    const uploadFolderPath = destination?.folderPath || activeFolderPath || uploadCategory;
+    await uploadQueuedElements(files.map((file) => ({ file, destination: { category: uploadCategory, folderPath: uploadFolderPath } })));
+  };
+
+  const retryFailedUploads = async () => {
+    if (!elementUpload?.failed.length) return;
+    await uploadQueuedElements(elementUpload.failed.map(({ file, destination }) => ({ file, destination })));
   };
 
   if (selectedPack) {
@@ -251,6 +298,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
+        onRetryFailedUploads={() => void retryFailedUploads()}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
@@ -384,6 +432,7 @@ function PackBrowser({
   folders,
   onCreateFolder,
   uploadStatus,
+  onRetryFailedUploads,
   onPublish,
   onUpdateElement,
   onRefreshWorkspace,
@@ -406,7 +455,8 @@ function PackBrowser({
   onCreateFolder: (name: string) => Promise<void>;
   onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
   onRefreshWorkspace: () => Promise<void>;
-  uploadStatus: { done: number; total: number; failed: string[] } | null;
+  uploadStatus: ElementUploadStatus | null;
+  onRetryFailedUploads: () => void;
   onPublish: () => Promise<void>;
 }) {
   const categories = useMemo(() => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))], [elements, loadedElementCategories]);
@@ -553,22 +603,22 @@ function PackBrowser({
           </div>
         </main>
       </div>
-      {uploadStatus ? <UploadProgressCover status={uploadStatus} /> : null}
+      {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} /> : null}
       {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );
 }
 
-function UploadProgressCover({ status }: { status: { done: number; total: number; failed: string[] } }) {
+function UploadProgressCover({ status, onRetryFailed }: { status: ElementUploadStatus; onRetryFailed: () => void }) {
   const percent = status.total ? Math.min(100, Math.round(status.done / status.total * 100)) : 0;
   return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-[radial-gradient(circle_at_50%_42%,rgba(47,49,57,0.45),rgba(8,9,13,0.9)_52%)] p-6 backdrop-blur-md">
     <div className="w-full max-w-sm rounded-2xl border border-[#34363e] bg-[#17181d]/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
       <div className="flex items-center justify-between border-b border-[#2d2e34] pb-4">
         <div>
           <p className="type-caption-1 text-[#c6a367]">资源库</p>
-          <h2 className="type-headline mt-1 text-zinc-100">正在上传资源</h2>
+          <h2 className="type-headline mt-1 text-zinc-100">{status.phase === 'failed' ? '部分文件未上传' : status.phase === 'complete' ? '上传完成' : '正在上传资源'}</h2>
         </div>
-        <span className="type-caption-2 inline-flex items-center gap-1.5 text-zinc-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-200" />进行中</span>
+        <span className="type-caption-2 inline-flex items-center gap-1.5 text-zinc-500"><span className={`h-1.5 w-1.5 rounded-full ${status.phase === 'uploading' ? 'animate-pulse bg-orange-200' : status.phase === 'failed' ? 'bg-red-300' : 'bg-emerald-300'}`} />{status.phase === 'uploading' ? '进行中' : status.phase === 'failed' ? '需要处理' : '已完成'}</span>
       </div>
       <div className="flex items-center gap-5 py-5">
         <div className="relative grid h-16 w-16 shrink-0 place-items-center">
@@ -580,10 +630,10 @@ function UploadProgressCover({ status }: { status: { done: number; total: number
         </div>
         <div className="min-w-0">
           <p className="type-footnote text-zinc-200">{status.done} / {status.total} 个文件已完成</p>
-          <p className="type-caption-2 mt-1 text-zinc-500">上传完成前请保持此页面打开。</p>
+          <p className="type-caption-2 mt-1 text-zinc-500">{status.phase === 'uploading' ? '上传完成前请保持此页面打开。' : status.phase === 'failed' ? '失败文件会保留在当前任务中，可直接重试。' : '文件已写入资源库。'}</p>
         </div>
       </div>
-      {status.failed.length ? <p className="type-caption-2 rounded-lg border border-red-300/15 bg-red-400/10 px-3 py-2.5 text-red-200">{status.failed.length} 个文件上传失败，将在任务结束后保留失败记录。</p> : null}
+      {status.failed.length ? <div className="space-y-3 rounded-lg border border-red-300/15 bg-red-400/10 p-3"><p className="type-caption-2 text-red-200">{status.failed.length} 个文件上传失败，将在任务结束后保留失败记录。</p><ul className="max-h-20 space-y-1 overflow-y-auto text-[11px] leading-4 text-red-100/80">{status.failed.map(({ file, message }) => <li key={`${file.name}-${file.lastModified}`}>{file.name} · {message}</li>)}</ul><button type="button" onClick={onRetryFailed} className="secondary-pill type-button w-full px-3 py-2 text-red-100">重试失败文件</button></div> : null}
     </div>
   </div>;
 }

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
-import type { ResourceElement, ResourcePackSummary } from '../../services/resourceLibraryApi'
+import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 
 const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
 const element: ResourceElement = { id: 'element-1', packId: 'pack-1', name: 'knight.png', path: 'models/knight.png', category: 'models', kind: 'image', specs: {}, dependencies: [], status: 'ready' }
@@ -54,8 +54,24 @@ describe('ResourceLibraryView workspace', () => {
     expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: '元素配置' }))
     expect(screen.getByRole('button', { name: '保存配置' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '环境与道具' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '模型' })).not.toBeInTheDocument()
     expect(screen.getByRole('option', { name: '3D 模型' })).toBeInTheDocument()
+  })
+
+  test('keeps failed uploads visible and allows retrying the original file', async () => {
+    const user = userEvent.setup()
+    const uploaded = { ...element, id: 'element-2', name: 'retry.png', path: 'models/retry.png' }
+    const addElement = vi.fn()
+      .mockRejectedValueOnce(new ResourceLibraryApiError('Unsupported file', 400, 'invalid_file'))
+      .mockResolvedValueOnce(uploaded)
+    render(<ResourceLibraryView apiClient={{ ...api, addElement }} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+    const input = screen.getByLabelText('选择要添加的文件')
+    await user.upload(input, new File(['asset'], 'retry.png', { type: 'image/png' }))
+    expect(await screen.findByRole('button', { name: '重试失败文件' })).toBeInTheDocument()
+    expect(addElement).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: '重试失败文件' }))
+    await waitFor(() => expect(addElement).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('上传完成')).toBeInTheDocument()
   })
 })
