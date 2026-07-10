@@ -44,6 +44,7 @@ import {
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
+  integrateBeeGameLibraryResourceInWorkspace,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
@@ -1406,9 +1407,10 @@ export function createAgentWorkflowApp(
       const selection = (await options.resourceSelectionClient.select([requirement]))[0]
       if (!selection) return c.json({ error: 'No compatible resource was found' }, 422)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      const result = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
+      const bound = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
+      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId)
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
-      return c.json({ manifest: result.manifest, slot: result.slot, selection })
+      return c.json({ manifest: result.manifest, slot: result.slot, selection, ...(result.path ? { path: result.path } : {}), boundSlot: bound.slot })
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Resource binding failed' }, 400)
     }
