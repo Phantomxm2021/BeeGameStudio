@@ -34,9 +34,9 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const { i18n } = useTranslation();
   const isZh = i18n.language.startsWith('zh');
   const copy = isZh ? {
-    title: '资源包', subtitle: '按风格、游戏类型与表现维度选择 Pack', all: '所有资源包', search: '搜索资源包', import: '导入资源包', empty: '暂无资源包', emptyHint: '导入一个 Pack 后，它会出现在这里并按风格、类型和维度进行管理。', previous: '上一页', next: '下一页',
+    all: '所有资源包', search: '搜索资源包', import: '导入资源包', empty: '暂无资源包', emptyHint: '导入一个 Pack 后，它会出现在这里并按风格、类型和维度进行管理。', previous: '上一页', next: '下一页',
   } : {
-    title: 'Resource Packs', subtitle: 'Choose Packs by style, game type, and dimension', all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
+    all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
   };
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
@@ -153,20 +153,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   return (
     <section className="min-h-full bg-zinc-950 px-8 py-8 text-zinc-100">
-      <div className="mb-7 flex items-end justify-between">
-        <div>
-          <h1 className="type-title-2">{copy.title}</h1>
-          <p className="type-footnote mt-2 text-zinc-500">{copy.subtitle}</p>
-        </div>
-        <button type="button" aria-label="导入资源包" className="primary-pill inline-flex h-10 w-10 items-center justify-center rounded-full" onClick={() => importInputRef.current?.click()}>
-          <span aria-hidden="true" className="text-xl leading-none">+</span>
-        </button>
-        <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void importPack(file);
-          event.target.value = '';
-        }} />
-      </div>
+      <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void importPack(file);
+        event.target.value = '';
+      }} />
       {error ? (
         <div
           role="alert"
