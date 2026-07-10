@@ -32,10 +32,10 @@ export function createSupabaseResourcePackImporter(options: ImportOptions) {
         const objectPath = `${packId}/${path}`
         let response: Response
         try {
-          response = await uploadWithRetry(() => fetchImpl(`${supabaseUrl}/storage/v1/object/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
+          response = await uploadWithRetry(() => fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
             method: 'POST',
             headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey, 'content-type': contentType(path), 'x-upsert': 'true' },
-            body: archive[path] as unknown as BodyInit,
+            body: archive[path].buffer.slice(archive[path].byteOffset, archive[path].byteOffset + archive[path].byteLength) as ArrayBuffer,
           }))
         } catch (error) {
           throw new Error(`${error instanceof Error ? error.message : 'Storage upload failed'} for ${path}`)
@@ -83,7 +83,10 @@ async function uploadWithRetry(upload: () => Promise<Response>, attempts = 6): P
     const response = await upload()
     if (response.ok) return response
     const retryable = response.status === 429 || response.status >= 500
-    if (!retryable || attempt === attempts - 1) throw new Error(`Storage upload failed (${response.status})`)
+    if (!retryable || attempt === attempts - 1) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`Storage upload failed (${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`)
+    }
     const retryAfter = Number(response.headers.get('retry-after') || 0)
     const delay = retryAfter > 0 ? retryAfter * 1000 : 1000 * (2 ** attempt)
     await new Promise((resolve) => setTimeout(resolve, Math.min(delay + Math.round(Math.random() * 500), 30000)))
