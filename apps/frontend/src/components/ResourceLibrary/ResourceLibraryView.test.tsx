@@ -11,7 +11,8 @@ const pack: ResourcePackSummary = {
   style: 'Stylized',
   gameTypes: ['adventure'],
   dimension: '2D',
-  categories: ['characters', 'ui'],
+  primaryCategory: 'world-scene',
+  categories: ['models', 'materials', 'textures'],
   version: '1.0.0',
   status: 'published',
   elementCount: 1,
@@ -21,7 +22,7 @@ const element: ResourceElement = {
   packId: 'pack-1',
   name: 'Character Idle',
   path: 'characters/idle.png',
-  category: 'characters',
+  category: 'models',
   kind: 'sprite-sheet',
   preview: { kind: 'image', path: 'previews/idle.png' },
   specs: { width: 256, height: 256, frames: 4 },
@@ -49,6 +50,12 @@ describe('ResourceLibraryView', () => {
     expect(screen.getByText('Example Pack')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Example Pack' }));
     expect(await screen.findByText('Pack 文件')).toBeInTheDocument();
+    expect(screen.getByText('World/Scene')).toBeInTheDocument();
+    const fileTree = screen.getByText('Pack 文件').closest('aside');
+    expect(fileTree).not.toBeNull();
+    expect(within(fileTree!).getByText('模型')).toBeInTheDocument();
+    expect(within(fileTree!).getByText('材质')).toBeInTheDocument();
+    expect(within(fileTree!).getByText('贴图')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '文件 Character Idle' })).toBeInTheDocument();
   });
 

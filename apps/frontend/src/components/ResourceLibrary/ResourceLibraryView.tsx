@@ -5,6 +5,7 @@ import {
   resourceLibraryApi,
   type ResourceElement,
   type ResourceFolder,
+  type ResourcePackPrimaryCategory,
   type ResourcePackSummary,
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
@@ -39,6 +40,18 @@ const categoryLabels: Record<string, string> = {
   fonts: '字体',
   audio: '音频',
   textures: '贴图',
+};
+
+const primaryCategoryLabels: Record<ResourcePackPrimaryCategory, string> = {
+  '2d-art': '2D Art',
+  '3d-assets': '3D Assets',
+  'animation-rig': 'Animation/Rigging',
+  'ui-kit': 'UI Kit',
+  vfx: 'VFX',
+  audio: 'Audio',
+  fonts: 'Fonts',
+  'world-scene': 'World/Scene',
+  mixed: 'Mixed Resources',
 };
 
 export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPackId = getResourcePackRoute() }: ResourceLibraryViewProps) {
@@ -320,7 +333,7 @@ function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => v
       </div>
       <h2 className="type-headline mt-4 truncate text-zinc-100">{pack.name}</h2>
       <p className="type-footnote mt-1 text-zinc-500">
-        v{pack.version || '—'} · {pack.license || '未标注授权'}
+        v{pack.version || '—'} · {pack.license || '未标注授权'} · <span>{primaryCategoryLabels[pack.primaryCategory]}</span>
       </p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {pack.style ? (
@@ -405,7 +418,7 @@ function PackBrowser({
           <div>
             <h1 className="type-headline">{pack.name}</h1>
             <p className="type-caption-2 mt-0.5 text-zinc-500">
-              {pack.style} · {pack.dimension} · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
+              {pack.style} · {pack.dimension} · <span>{primaryCategoryLabels[pack.primaryCategory]}</span> · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
             </p>
           </div>
         </div>

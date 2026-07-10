@@ -8,9 +8,10 @@ describe('resource library API', () => {
       requests.push({ url: String(input), init })
       return new Response(JSON.stringify({ pack: { id: 'pack-1', name: 'Forest', status: 'draft', elementCount: 0 } }), { status: 201 })
     })
-    await expect(api.createPack({ name: 'Forest', style: 'Painterly', dimension: 'agnostic', gameTypes: ['adventure'], categories: ['environment'] })).resolves.toMatchObject({ id: 'pack-1' })
+    await expect(api.createPack({ name: 'Forest', style: 'Painterly', dimension: 'agnostic', primaryCategory: 'ui-kit', gameTypes: ['adventure'], categories: [] })).resolves.toMatchObject({ id: 'pack-1' })
     expect(requests[0].url).toBe('/api/resource-packs')
     expect(requests[0].init?.method).toBe('POST')
+    expect(JSON.parse(String(requests[0].init?.body))).toMatchObject({ primaryCategory: 'ui-kit', categories: [] })
   })
 
   test('lists Packs from the standalone resource service', async () => {

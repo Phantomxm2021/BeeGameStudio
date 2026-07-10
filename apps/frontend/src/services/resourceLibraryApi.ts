@@ -1,11 +1,23 @@
 import { authenticatedFetch } from './apiClient'
 
+export type ResourcePackPrimaryCategory =
+  | '2d-art'
+  | '3d-assets'
+  | 'animation-rig'
+  | 'ui-kit'
+  | 'vfx'
+  | 'audio'
+  | 'fonts'
+  | 'world-scene'
+  | 'mixed'
+
 export type ResourcePackSummary = {
   id: string
   name: string
   style: string
   gameTypes?: readonly string[]
   dimension: '2D' | '3D' | 'agnostic'
+  primaryCategory: ResourcePackPrimaryCategory
   categories?: readonly string[]
   license?: string
   version?: string
@@ -18,6 +30,7 @@ export type CreateResourcePackInput = {
   name: string
   style: string
   dimension: '2D' | '3D' | 'agnostic'
+  primaryCategory: ResourcePackPrimaryCategory
   gameTypes: string[]
   categories: string[]
   license?: string

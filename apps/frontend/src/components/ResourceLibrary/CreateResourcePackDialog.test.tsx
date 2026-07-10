@@ -27,4 +27,16 @@ describe('CreateResourcePackDialog', () => {
     expect(screen.getByRole('button', { name: 'Pixel' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'RPG' })).toHaveAttribute('aria-pressed', 'true')
   })
+
+  test('submits the selected Pack primary category separately from contained categories', async () => {
+    const user = userEvent.setup()
+    const onCreate = vi.fn().mockResolvedValue({ id: 'pack-1' })
+    render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={onCreate} />)
+    await user.type(screen.getByPlaceholderText('例如：Painterly Forest'), 'Interface Kit')
+    await user.selectOptions(screen.getByLabelText('主分类'), 'ui-kit')
+    await user.click(screen.getByRole('button', { name: 'Pixel' }))
+    await user.click(screen.getByRole('button', { name: 'RPG' }))
+    await user.click(screen.getByRole('button', { name: '创建 Pack' }))
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ primaryCategory: 'ui-kit', categories: [] }))
+  })
 })
