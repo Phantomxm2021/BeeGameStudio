@@ -1,9 +1,12 @@
 import {
   RESOURCE_CATEGORIES,
+  RESOURCE_DIMENSIONS,
+  selectResourceCandidates,
   type ResourceDimension,
   type ResourceCategory,
   type ResourcePack,
   type ResourceRepository,
+  type ResourceSlotRequirement,
 } from '@bee-game-studio/beegame-resource-core'
 import {
   createLocalResourceUserResolver,
@@ -46,6 +49,23 @@ export function createBeeGameResourceServerApp(
       }
       try {
       const pathname = new URL(request.url).pathname
+      if (request.method === 'POST' && pathname === '/api/resource-selections') {
+        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource selection URLs are not configured'), options.corsOrigin)
+        let requirements: ResourceSlotRequirement[]
+        try {
+          requirements = parseSelectionRequirements(await request.json())
+        } catch (error) {
+          return corsResponse(jsonError(400, 'invalid_selection_request', error instanceof Error ? error.message : 'Invalid resource selection request'), options.corsOrigin)
+        }
+        const packs = await options.repository.listPacks()
+        const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
+        const manifest = selectResourceCandidates(packs, elements, requirements)
+        const selections = await Promise.all(manifest.selections.map(async selection => ({
+          ...selection,
+          sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId),
+        })))
+        return corsResponse(Response.json({ selections, unmatchedSlotIds: manifest.unmatchedSlotIds }), options.corsOrigin)
+      }
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
           const body = await request.json() as Record<string, unknown>
@@ -221,6 +241,42 @@ function parseCategory(value: string | null): ResourceCategory | undefined {
   return (RESOURCE_CATEGORIES as readonly string[]).includes(value)
     ? value as ResourceCategory
     : undefined
+}
+
+function parseSelectionRequirements(value: unknown): ResourceSlotRequirement[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Selection request must be an object')
+  const requirements = (value as Record<string, unknown>).requirements
+  if (!Array.isArray(requirements) || requirements.length === 0) throw new Error('At least one resource requirement is required')
+  return requirements.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`Resource requirement ${index + 1} is invalid`)
+    const record = entry as Record<string, unknown>
+    const slotId = typeof record.slotId === 'string' ? record.slotId.trim() : ''
+    if (!slotId) throw new Error(`Resource requirement ${index + 1} slotId is required`)
+    const category = typeof record.category === 'string' && (RESOURCE_CATEGORIES as readonly string[]).includes(record.category)
+      ? record.category as ResourceCategory
+      : undefined
+    if (record.category !== undefined && !category) throw new Error(`Resource requirement ${index + 1} category is unsupported`)
+    const dimension = typeof record.dimension === 'string' && (RESOURCE_DIMENSIONS as readonly string[]).includes(record.dimension)
+      ? record.dimension as ResourceDimension
+      : undefined
+    if (record.dimension !== undefined && !dimension) throw new Error(`Resource requirement ${index + 1} dimension is unsupported`)
+    return {
+      slotId,
+      ...(category ? { category } : {}),
+      ...(dimension ? { dimension } : {}),
+      ...(stringList(record.acceptedFormats) ? { acceptedFormats: stringList(record.acceptedFormats)! } : {}),
+      ...(stringList(record.styles) ? { styles: stringList(record.styles)! } : {}),
+      ...(stringList(record.gameTypes) ? { gameTypes: stringList(record.gameTypes)! } : {}),
+      ...(typeof record.purpose === 'string' && record.purpose.trim() ? { purpose: record.purpose.trim() } : {}),
+    }
+  })
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const values = value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
+  if (values.length !== value.length) throw new Error('Resource requirement list values must be strings')
+  return values.length ? values : undefined
 }
 
 function jsonError(status: number, code: string, message: string): Response {
