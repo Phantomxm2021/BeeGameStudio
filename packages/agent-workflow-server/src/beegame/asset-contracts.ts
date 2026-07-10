@@ -26,6 +26,20 @@ export type BeeGameResourceBinding = {
   selection_reason: string[]
 }
 
+/**
+ * The machine-readable matching contract for one project asset slot. This is
+ * deliberately independent of the project's target engine: adapters decide
+ * how an approved resource is integrated, while selection stays deterministic.
+ */
+export type BeeGameResourceRequirement = {
+  category?: string
+  dimension?: '2D' | '3D' | 'agnostic'
+  accepted_formats?: string[]
+  styles?: string[]
+  game_types?: string[]
+  purpose?: string
+}
+
 export type BeeGameAssetSlot = {
   id: string
   name?: string
@@ -43,6 +57,7 @@ export type BeeGameAssetSlot = {
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed'
   uploaded_files?: string[]
   uploaded_urls?: string[]
+  resource_requirement?: BeeGameResourceRequirement
   resource_binding?: BeeGameResourceBinding
   updated_at?: string
 }
@@ -228,8 +243,31 @@ function normalizeAssetSlot(
     status: normalizeSlotStatus(record.status ?? record.placeholder_status),
     uploaded_files: stringArray(record.uploaded_files),
     uploaded_urls: stringArray(record.uploaded_urls),
+    resource_requirement: normalizeResourceRequirement(record.resource_requirement),
     resource_binding: normalizeResourceBinding(record.resource_binding),
     updated_at: trimString(record.updated_at),
+  }
+}
+
+function normalizeResourceRequirement(value: unknown): BeeGameResourceRequirement | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const category = trimString(record.category)
+  const dimension = record.dimension === '2D' || record.dimension === '3D' || record.dimension === 'agnostic'
+    ? record.dimension
+    : undefined
+  const acceptedFormats = stringArray(record.accepted_formats ?? record.acceptedFormats)
+  const styles = stringArray(record.styles)
+  const gameTypes = stringArray(record.game_types ?? record.gameTypes)
+  const purpose = trimString(record.purpose)
+  if (!category && !dimension && !acceptedFormats.length && !styles.length && !gameTypes.length && !purpose) return undefined
+  return {
+    category: category || undefined,
+    dimension,
+    accepted_formats: acceptedFormats,
+    styles,
+    game_types: gameTypes,
+    purpose: purpose || undefined,
   }
 }
 

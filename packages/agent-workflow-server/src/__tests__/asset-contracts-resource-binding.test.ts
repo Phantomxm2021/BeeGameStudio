@@ -24,6 +24,29 @@ describe('BeeGame resource bindings', () => {
     expect(result.manifest.slots[0]?.resource_binding?.pack_id).toBe('fantasy-pack')
   })
 
+  test('preserves explicit selection requirements without inferring them from a slot name', () => {
+    const manifest = normalizeBeeGameAssetManifest({
+      version: 1,
+      slots: [{
+        id: 'slot-1',
+        name: 'Display label',
+        resource_requirement: {
+          category: 'models',
+          dimension: '3D',
+          accepted_formats: ['glb', 'fbx'],
+          styles: ['Stylized'],
+          game_types: ['Adventure'],
+          purpose: 'Player traversal obstacle',
+        },
+      }],
+    })
+
+    expect(manifest.slots[0]?.resource_requirement).toEqual({
+      category: 'models', dimension: '3D', accepted_formats: ['glb', 'fbx'],
+      styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle',
+    })
+  })
+
   test('rejects an unknown asset slot', () => {
     expect(() => bindBeeGameLibraryResource({ version: 1, slots: [] }, 'missing', {
       pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://storage.example/signed-oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],

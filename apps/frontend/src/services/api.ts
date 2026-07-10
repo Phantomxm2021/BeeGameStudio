@@ -244,6 +244,14 @@ export interface BeeGameAssetSlotPayload {
   };
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed';
   uploaded_files?: string[];
+  resource_requirement?: {
+    category?: string;
+    dimension?: '2D' | '3D' | 'agnostic';
+    accepted_formats?: string[];
+    styles?: string[];
+    game_types?: string[];
+    purpose?: string;
+  };
   resource_binding?: {
     pack_id: string;
     pack_version: string;

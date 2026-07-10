@@ -47,6 +47,7 @@ import {
   integrateBeeGameLibraryResourceInWorkspace,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
+  type BeeGameAssetSlot,
 } from './beegame/asset-contracts'
 import type { ResourceSelectionRequirement } from './beegame/resource-selection-client'
 import { listDirectories } from './filesystem/directories'
@@ -1401,12 +1402,14 @@ export function createAgentWorkflowApp(
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const body = await c.req.raw.json() as { requirement?: ResourceSelectionRequirement }
-      const requirement = body.requirement
-      if (!requirement || requirement.slotId !== c.req.param('slotId')) return c.json({ error: 'Asset requirement does not match slot' }, 400)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const body = await c.req.raw.json().catch(() => ({})) as { requirement?: ResourceSelectionRequirement }
+      const slotId = c.req.param('slotId')
+      const contractSlot = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === slotId)
+      const requirement = body.requirement ?? (contractSlot ? resourceRequirementForSlot(contractSlot) : undefined)
+      if (!requirement || requirement.slotId !== slotId) return c.json({ error: 'Asset requirement does not match slot' }, 400)
       const selection = (await options.resourceSelectionClient.select([requirement]))[0]
       if (!selection) return c.json({ error: 'No compatible resource was found' }, 422)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
       const bound = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
       const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId)
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
@@ -4754,4 +4757,18 @@ function getHttpErrorMessage(body: JsonObject): string {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Request failed'
+}
+
+function resourceRequirementForSlot(slot: BeeGameAssetSlot): ResourceSelectionRequirement | undefined {
+  const requirement = slot.resource_requirement
+  if (!requirement) return undefined
+  return {
+    slotId: slot.id,
+    category: requirement.category,
+    dimension: requirement.dimension,
+    acceptedFormats: requirement.accepted_formats,
+    styles: requirement.styles,
+    gameTypes: requirement.game_types,
+    purpose: requirement.purpose,
+  }
 }
