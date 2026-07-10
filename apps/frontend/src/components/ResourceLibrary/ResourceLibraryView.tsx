@@ -9,7 +9,7 @@ import {
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
 >;
 
 type ResourceLibraryViewProps = {
@@ -150,18 +150,10 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
             setPacks((current) => current.map((item) => item.id === saved.id ? saved : item));
           }).catch((err) => setError(err instanceof Error ? err.message : 'Pack 更新失败'));
         }}
-        onAddFile={() => {
-          const name = window.prompt('文件名', 'new-asset.png')?.trim();
-          if (!name || !activeCategory) return;
-          const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name, path: `${activeCategory}/${name}`, category: activeCategory, kind: 'file', specs: {}, dependencies: [], status: 'ready' };
-          setElements((current) => [...current, next]);
-          setSelectedElement(next);
-        }}
+        onAddFile={(file) => { if (!activeCategory) return; void apiClient.addElement(selectedPack.id, file, activeCategory).then((next) => { setElements((current) => [...current, next]); setSelectedElement(next); }).catch((err) => setError(err instanceof Error ? err.message : '元素上传失败')); }}
         onDropFile={(file) => {
           if (!activeCategory) return;
-          const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name: file.name, path: `${activeCategory}/${file.name}`, category: activeCategory, kind: 'file', specs: { size: file.size, type: file.type }, dependencies: [], status: 'ready' };
-          setElements((current) => [...current, next]);
-          setSelectedElement(next);
+          void apiClient.addElement(selectedPack.id, file, activeCategory).then((next) => { setElements((current) => [...current, next]); setSelectedElement(next); }).catch((err) => setError(err instanceof Error ? err.message : '元素上传失败'));
         }}
       />
     );
@@ -336,7 +328,7 @@ function PackBrowser({
   onCategory: (category: string) => void;
   onElement: (element: ResourceElement) => void;
   onEditPack: (name: string) => void;
-  onAddFile: () => void;
+  onAddFile: (file: File) => void;
   onDropFile: (file: File) => void;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
@@ -366,9 +358,10 @@ function PackBrowser({
           }}>
             编辑 Pack 信息
           </button>
-          <button type="button" className="primary-pill type-button px-4 py-2" onClick={onAddFile}>
+          <label className="primary-pill type-button cursor-pointer px-4 py-2">
             ＋ 添加文件
-          </button>
+            <input type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) onAddFile(file); event.target.value = ''; }} />
+          </label>
         </div>
       </div>
       <div className="mb-5 flex gap-2">

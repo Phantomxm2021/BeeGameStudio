@@ -20,6 +20,19 @@ if (import.meta.main) {
       const rows = await response.json() as unknown[]
       return rows[0]
     } : undefined,
+    addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
+      const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets')
+      if (!(file instanceof File)) throw new Error('Element file is required')
+      const path = `${packId}/${category}/${file.name}`
+      const storageUrl = `${baseUrl.replace(/\/+$/, '')}/storage/v1/object/beegame-resource-packs/${path.split('/').map(encodeURIComponent).join('/')}`
+      const headers = { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': file.type || 'application/octet-stream', 'x-upsert': 'true' }
+      const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
+      if (!uploaded.ok) throw new Error('Element storage upload failed')
+      const id = `${packId}-${crypto.randomUUID()}`; const row = { id, pack_id: packId, name: file.name, path: `${category}/${file.name}`, category, kind: 'file', specs: { size: file.size, type: file.type }, dependencies: [], status: 'ready' }
+      const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
+      if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
+      return (await saved.json() as unknown[])[0]
+    } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)
