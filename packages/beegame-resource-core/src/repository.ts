@@ -12,6 +12,7 @@ export type ResourceRepository = {
   listFolders(packId: string): Promise<ResourceFolder[]>
   createFolder(packId: string, input: { id: string; name: string; parentId?: string }): Promise<ResourceFolder>
   publishPack(packId: string): Promise<ResourcePack>
+  deletePack(packId: string): Promise<boolean>
 }
 
 export function createInMemoryResourceRepository(input: {
@@ -64,6 +65,18 @@ export function createInMemoryResourceRepository(input: {
       const published = { ...pack, status: 'published' as const }
       packs[packs.indexOf(pack)] = published
       return published
+    },
+    async deletePack(packId) {
+      const index = packs.findIndex(item => item.id === packId)
+      if (index < 0) return false
+      packs.splice(index, 1)
+      for (let cursor = elements.length - 1; cursor >= 0; cursor -= 1) {
+        if (elements[cursor].packId === packId) elements.splice(cursor, 1)
+      }
+      for (let cursor = folders.length - 1; cursor >= 0; cursor -= 1) {
+        if (folders[cursor].packId === packId) folders.splice(cursor, 1)
+      }
+      return true
     },
   }
 }

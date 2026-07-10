@@ -49,4 +49,20 @@ describe('in-memory resource repository', () => {
     const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
     await expect(repository.getPack('missing')).resolves.toBeUndefined()
   })
+
+  test('deletes a Pack with its elements and folders', async () => {
+    const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
+    await repository.createFolder('pack-1', { id: 'folder-1', name: 'models' })
+
+    await expect(repository.deletePack('pack-1')).resolves.toBe(true)
+    await expect(repository.getPack('pack-1')).resolves.toBeUndefined()
+    await expect(repository.listElements('pack-1')).resolves.toEqual([])
+    await expect(repository.listFolders('pack-1')).resolves.toEqual([])
+  })
+
+  test('treats an already deleted Pack as absent', async () => {
+    const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
+
+    await expect(repository.deletePack('missing')).resolves.toBe(false)
+  })
 })
