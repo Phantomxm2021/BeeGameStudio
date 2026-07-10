@@ -50,6 +50,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
   const [isRootDragActive, setIsRootDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadPhase, setUploadPhase] = useState<'uploading' | 'processing'>('uploading');
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -114,11 +116,14 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   const importPack = async (file: File) => {
     try {
-      const parsed = await apiClient.importPack(file);
+      setUploadProgress(4);
+      const parsed = await apiClient.importPack(file, (progress, phase) => { setUploadProgress(progress); setUploadPhase(phase); });
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
       setError('');
+      setUploadProgress(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包导入失败');
+      setUploadProgress(null);
     }
   };
 
@@ -162,6 +167,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   return (
     <section className={`relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100 ${isRootDragActive ? 'ring-2 ring-inset ring-orange-300/70' : ''}`} onDragEnter={(event) => { event.preventDefault(); setIsRootDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setIsRootDragActive(false); }} onDrop={(event) => { event.preventDefault(); setIsRootDragActive(false); void importDroppedPacks(event.dataTransfer.files); }}>
       {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 ZIP 资源压缩包</div></div></div> : null}
+      {uploadProgress !== null ? <div role="status" className="fixed bottom-6 left-1/2 z-30 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-center justify-between"><span className="type-button text-zinc-200">{uploadPhase === 'uploading' ? '正在上传资源包…' : '正在解析并入库…'}</span><span className="type-caption-2 text-orange-200">{uploadProgress}%</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-orange-300 transition-all duration-500" style={{ width: `${uploadProgress}%` }} /></div><p className="type-caption-2 mt-2 text-zinc-500">请保持当前页面打开</p></div> : null}
       <input ref={importInputRef} hidden type="file" accept="application/zip,.zip" onChange={(event) => {
         const file = event.target.files?.[0];
         if (file) void importPack(file);

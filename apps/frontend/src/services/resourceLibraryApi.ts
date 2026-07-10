@@ -71,10 +71,13 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element upload failed (${response.status})`, response.status, result.error?.code || 'element_upload_failed')
       return result.element
     },
-    async importPack(file: File): Promise<ResourcePackSummary> {
+    async importPack(file: File, onProgress?: (progress: number, phase: 'uploading' | 'processing') => void): Promise<ResourcePackSummary> {
+      onProgress?.(8, 'uploading')
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/import`, { method: 'POST', body: (() => { const form = new FormData(); form.set('file', file); return form })() })
+      onProgress?.(72, 'processing')
       const body = await response.json().catch(() => undefined) as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } } | undefined
       if (!response.ok || !body?.pack) throw new ResourceLibraryApiError(body?.error?.message || `Resource import failed (${response.status})`, response.status, body?.error?.code || 'resource_import_failed')
+      onProgress?.(100, 'processing')
       return body.pack
     },
     async listPacks(): Promise<ResourcePackSummary[]> {
