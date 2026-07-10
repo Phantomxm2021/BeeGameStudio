@@ -852,7 +852,6 @@ export function SettingsMenu({
         effectiveCanManageInvitations,
         effectiveCanManageRuntimeSettings,
         effectiveCanReadAudit,
-        effectiveCanManageResources,
         adminCopy.deployment,
         billingCopy.tab,
         capabilityCopy.title,
