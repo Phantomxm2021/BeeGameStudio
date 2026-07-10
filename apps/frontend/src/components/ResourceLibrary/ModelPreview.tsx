@@ -5,6 +5,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
+import type { MaterialTextureBindings } from './materialTextureBindings'
 
 export type ModelMetrics = {
   triangles: number
@@ -19,8 +20,38 @@ export type ModelMetrics = {
 type ModelPreviewProps = {
   url: string
   extension: string
+  materialTextureBindings?: MaterialTextureBindings
+  textureUrls?: Readonly<Record<string, string>>
   onMetrics?: (metrics: ModelMetrics) => void | Promise<void>
   onMetricsError?: (error: Error) => void
+}
+
+export async function applyBoundBaseColorTextures(
+  object: THREE.Object3D,
+  bindings: MaterialTextureBindings,
+  textureUrls: Readonly<Record<string, string>>,
+): Promise<void> {
+  const loader = new THREE.TextureLoader()
+  const textures = new Map<string, THREE.Texture>()
+  await Promise.all(Object.values(bindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : []).map(async elementId => {
+    const url = textureUrls[elementId]
+    if (!url || textures.has(elementId)) return
+    const texture = await loader.loadAsync(url)
+    texture.colorSpace = THREE.SRGBColorSpace
+    textures.set(elementId, texture)
+  }))
+  object.traverse(node => {
+    if (!(node instanceof THREE.Mesh)) return
+    const materials = Array.isArray(node.material) ? node.material : [node.material]
+    materials.forEach(material => {
+      const elementId = bindings[material.name]?.baseColor
+      const texture = elementId ? textures.get(elementId) : undefined
+      if (!texture) return
+      const standard = material as THREE.MeshStandardMaterial
+      standard.map = texture
+      standard.needsUpdate = true
+    })
+  })
 }
 
 export async function persistModelMetrics(
@@ -116,12 +147,14 @@ export function applyMissingTextureFallback(object: THREE.Object3D, unresolvedTe
     const originalMaterials = Array.isArray(node.material) ? node.material : [node.material]
     const fallbackMaterials = originalMaterials.map((material) => {
       material.dispose()
-      return new THREE.MeshStandardMaterial({
+      const fallback = new THREE.MeshStandardMaterial({
         color: 0xd8dce5,
         roughness: 0.72,
         metalness: 0.08,
         side: THREE.DoubleSide,
       })
+      fallback.name = material.name
+      return fallback
     })
     node.material = Array.isArray(node.material) ? fallbackMaterials : fallbackMaterials[0]
   })
@@ -164,7 +197,7 @@ async function loadModel(url: string, extension: string, onUnresolvedTexture?: (
   throw new Error('Unsupported model format')
 }
 
-export function ModelPreview({ url, extension, onMetrics, onMetricsError }: ModelPreviewProps) {
+export function ModelPreview({ url, extension, materialTextureBindings = {}, textureUrls = {}, onMetrics, onMetricsError }: ModelPreviewProps) {
   const host = useRef<HTMLDivElement>(null)
   const onMetricsRef = useRef(onMetrics)
   const onMetricsErrorRef = useRef(onMetricsError)
@@ -212,12 +245,13 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
 
     const unresolvedTextures = new Set<string>()
     loadModel(url, extension, (reference) => unresolvedTextures.add(reference))
-      .then(loaded => {
+      .then(async loaded => {
         if (!active) {
           disposeObject(loaded)
           return
         }
         applyMissingTextureFallback(loaded, [...unresolvedTextures])
+        await applyBoundBaseColorTextures(loaded, materialTextureBindings, textureUrls).catch(() => undefined)
         model = loaded
         scene.add(loaded)
         const bounds = new THREE.Box3().setFromObject(loaded)
@@ -255,7 +289,7 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
       renderer.dispose()
       renderer.domElement.remove()
     }
-  }, [extension, url])
+  }, [extension, materialTextureBindings, textureUrls, url])
 
   return <div className="relative h-full min-h-64 w-full"><div ref={host} className="h-full min-h-64 w-full" />{error && <p className="absolute inset-0 grid place-items-center text-sm text-zinc-300">{error}</p>}</div>
 }

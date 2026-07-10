@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ResourceElement } from '../../services/resourceLibraryApi'
 import { ModelPreview, type ModelMetrics } from './ModelPreview'
+import type { MaterialTextureBindings } from './materialTextureBindings'
 
 export type PreviewRenderer = 'image' | 'audio' | 'video' | 'font' | 'pdf' | 'text' | 'document-card' | 'model'
 
@@ -50,9 +51,11 @@ type ResourcePreviewProps = {
   element: ResourceElement
   url: string
   onMetrics?: (metrics: ModelMetrics) => void
+  materialTextureBindings?: MaterialTextureBindings
+  textureUrls?: Readonly<Record<string, string>>
 }
 
-export function ResourcePreview({ element, url, onMetrics }: ResourcePreviewProps) {
+export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls }: ResourcePreviewProps) {
   const renderer = renderPreview(element)
   const extension = extensionFor(element)
 
@@ -62,7 +65,7 @@ export function ResourcePreview({ element, url, onMetrics }: ResourcePreviewProp
   if (renderer === 'font') return <FontPreview url={url} element={element} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
   if (renderer === 'text') return <SafeTextPreview url={url} />
-  if (renderer === 'model') return <ModelPreview url={url} extension={extension} onMetrics={onMetrics} />
+  if (renderer === 'model') return <ModelPreview url={url} extension={extension} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} />
   return <DocumentCard element={element} url={url} />
 }
 

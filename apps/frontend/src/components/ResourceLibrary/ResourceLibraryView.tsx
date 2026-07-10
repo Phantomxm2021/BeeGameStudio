@@ -16,6 +16,7 @@ import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
 import { ResourcePackExplorer } from './ResourcePackExplorer';
 import { buildExplorerTree } from './resourcePackExplorerTree';
 import type { ModelMetrics } from './ModelPreview';
+import { decodeMaterialTextureBindings, encodeMaterialTextureBindings, suggestMaterialTextureCandidates, type MaterialTextureBindings } from './materialTextureBindings';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
 type ResourceLibraryApi = Pick<
@@ -282,14 +283,9 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 }
 
 export function ResourceLibraryPage({ onBack }: { onBack: () => void }) {
+  void onBack;
   return (
     <div className="fixed inset-0 z-[200] overflow-auto bg-zinc-950">
-      <div className="sticky top-0 z-10 flex h-14 items-center border-b border-white/10 bg-zinc-950/90 px-6 backdrop-blur-xl">
-        <button type="button" onClick={onBack} className="secondary-pill type-button px-4 py-2">
-          ← 返回
-        </button>
-        <span className="type-headline ml-4">资源库</span>
-      </div>
       <ResourceLibraryView initialPackId={getResourcePackRoute()} />
     </div>
   );
@@ -402,6 +398,7 @@ function PackBrowser({
   const [resourceUrl, setResourceUrl] = useState<string>();
   const [resourceError, setResourceError] = useState('');
   const [resourceAttempt, setResourceAttempt] = useState(0);
+  const [boundTextureUrls, setBoundTextureUrls] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<{ type: 'folder' | 'file'; mode: 'create' | 'rename'; name: string; folder?: ResourceFolder; element?: ResourceElement } | null>(null);
   useLayoutEffect(() => {
     const host = explorerHostRef.current;
@@ -424,6 +421,16 @@ function PackBrowser({
     void apiClient.getElementResourceUrl(pack.id, selectedElement.id).then(url => { if (active) setResourceUrl(url); }).catch(() => { if (active) setResourceError('预览资源加载失败'); });
     return () => { active = false; };
   }, [apiClient, pack.id, resourceAttempt, selectedElement]);
+  const materialTextureBindings = useMemo(() => decodeMaterialTextureBindings(selectedElement?.specs.materialTextureBindings), [selectedElement?.specs.materialTextureBindings]);
+  useEffect(() => {
+    let active = true;
+    const ids = [...new Set(Object.values(materialTextureBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : []))];
+    if (!ids.length) { setBoundTextureUrls({}); return () => { active = false; }; }
+    void Promise.all(ids.map(async id => [id, await apiClient.getElementResourceUrl(pack.id, id)] as const)).then(entries => {
+      if (active) setBoundTextureUrls(Object.fromEntries(entries));
+    }).catch(() => { if (active) setBoundTextureUrls({}); });
+    return () => { active = false; };
+  }, [apiClient, materialTextureBindings, pack.id]);
   const saveMetrics = useCallback(async (metrics: ModelMetrics) => {
     if (!selectedElement) return;
     const nextMetrics: Record<string, string | number | boolean | null> = {
@@ -437,9 +444,11 @@ function PackBrowser({
       boundsHeight: metrics.bounds.height,
       boundsDepth: metrics.bounds.depth,
     };
-    const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value);
-    if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics } });
-  }, [onUpdateElement, selectedElement]);
+    const suggestedBindings = suggestMaterialTextureCandidates(selectedElement.name, metrics.materialSlots, elements);
+    const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value)
+      || selectedElement.specs.materialTextureCandidates !== JSON.stringify(suggestedBindings);
+    if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics, materialTextureCandidates: JSON.stringify(suggestedBindings) } });
+  }, [elements, onUpdateElement, selectedElement]);
   const startFolderUpload = (node: { id: string; name: string; folder?: ResourceFolder }) => {
     const category = node.folder ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment') : node.id.replace(/^category:/, '');
     setUploadDestination({ category, folderPath: node.folder?.path || category });
@@ -452,7 +461,7 @@ function PackBrowser({
   const moveElement = async (element: ResourceElement, folder: ResourceFolder) => { const destination = `${folder.path}/${element.name}`; if (element.path === destination) return; await onUpdateElement(element.id, { path: destination }); };
   const contextLabels = isZh ? { upload: '上传文件', rename: '重命名', delete: '删除', newFolder: '新建文件夹' } : { upload: 'Upload files', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' };
   return (
-    <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
+    <section className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
       <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#2d2e34] bg-[#17181d] px-[18px]">
         <div className="flex min-w-0 items-center gap-2.5">
           <button
@@ -492,7 +501,7 @@ function PackBrowser({
           ) : null}
           <div className="relative grid h-full min-h-0 place-items-center overflow-hidden bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)]">
             {selectedElement ? (
-              resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
+              resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} elements={elements} materialTextureBindings={materialTextureBindings} textureUrls={boundTextureUrls} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
               loading ? <div className="type-footnote text-zinc-600">正在加载…</div> : <EmptyPreviewState />
             )}
@@ -504,10 +513,13 @@ function PackBrowser({
   );
 }
 
-function Preview({ element, pack, url, inspectorOpen, onOpenInspector, onCloseInspector, onMetrics, onSave }: {
+function Preview({ element, pack, url, elements, materialTextureBindings, textureUrls, inspectorOpen, onOpenInspector, onCloseInspector, onMetrics, onSave }: {
   element: ResourceElement;
   pack: ResourcePackSummary;
   url: string;
+  elements: ResourceElement[];
+  materialTextureBindings: MaterialTextureBindings;
+  textureUrls: Readonly<Record<string, string>>;
   inspectorOpen: boolean;
   onOpenInspector: () => void;
   onCloseInspector: () => void;
@@ -518,8 +530,8 @@ function Preview({ element, pack, url, inspectorOpen, onOpenInspector, onCloseIn
     <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
       {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
-      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} /></div>
-      {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} onClose={onCloseInspector} /> : null}
+      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} /></div>
+      {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} elements={elements} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
   );
 }
@@ -549,11 +561,13 @@ function formatFileSize(size: number) {
 function ResourceInspectorOverlay({
   element,
   pack,
+  elements,
   onSave,
   onClose,
 }: {
   element: ResourceElement;
   pack: ResourcePackSummary;
+  elements: ResourceElement[];
   onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -562,8 +576,9 @@ function ResourceInspectorOverlay({
   const [styleOverride, setStyleOverride] = useState(element.styleOverride || '');
   const [dimensionOverride, setDimensionOverride] = useState(element.dimensionOverride || 'agnostic');
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); }, [element]);
-  const save = async () => { setSaving(true); try { await onSave(element.id, { kind, category, styleOverride: styleOverride || null, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'] }); } finally { setSaving(false); } };
+  const [materialBindings, setMaterialBindings] = useState<MaterialTextureBindings>(() => decodeMaterialTextureBindings(element.specs.materialTextureBindings));
+  useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
+  const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, category, styleOverride: styleOverride || null, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
   return (
     <aside
       role="complementary"
@@ -593,7 +608,7 @@ function ResourceInspectorOverlay({
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
         <Property label="路径" value={element.path} />
         <Property label="状态" value={element.status} />
-        {isModelElement(element) ? <ModelAssetMetadata specs={element.specs} /> : null}
+        {isModelElement(element) ? <ModelAssetMetadata specs={element.specs} elements={elements} bindings={materialBindings} onBindingChange={setMaterialBindings} /> : null}
         <Property
           label="规格"
           value={Object.entries(element.specs)
@@ -606,7 +621,7 @@ function ResourceInspectorOverlay({
   );
 }
 
-function ModelAssetMetadata({ specs }: { specs: ResourceElement['specs'] }) {
+function ModelAssetMetadata({ specs, elements, bindings, onBindingChange }: { specs: ResourceElement['specs']; elements: ResourceElement[]; bindings: MaterialTextureBindings; onBindingChange: (bindings: MaterialTextureBindings) => void }) {
   const materialSlots = typeof specs.materialSlots === 'string' && specs.materialSlots ? specs.materialSlots.split(' · ') : [];
   const textureReferences = typeof specs.textureReferences === 'string' && specs.textureReferences ? specs.textureReferences.split(' · ') : [];
   const unresolved = typeof specs.unresolvedTextureReferences === 'string' && specs.unresolvedTextureReferences ? specs.unresolvedTextureReferences.split(' · ') : [];
@@ -618,6 +633,7 @@ function ModelAssetMetadata({ specs }: { specs: ResourceElement['specs'] }) {
       <MetadataList label="材质槽" values={materialSlots} empty="未检测到材质" />
       <MetadataList label="已加载贴图" values={textureReferences} empty="未检测到嵌入贴图" />
       {unresolved.length ? <MetadataList label="待关联贴图" values={unresolved} empty="" warning /> : null}
+      {materialSlots.map(slot => <label key={slot} className="grid gap-1"><span className="type-caption-2 text-zinc-500">{slot} · 基础色</span><select value={bindings[slot]?.baseColor || ''} onChange={(event) => onBindingChange({ ...bindings, [slot]: event.target.value ? { baseColor: event.target.value } : {} })} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">未关联</option>{elements.filter(candidate => candidate.kind === 'image' || candidate.category === 'textures').map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>)}
     </div>
   );
 }

@@ -43,13 +43,14 @@ describe('renderPreview', () => {
   })
 
   test('replaces unresolved FBX texture materials with a visible neutral material', () => {
-    const material = new THREE.MeshPhongMaterial({ map: new THREE.Texture(), color: 0x111111 })
+    const material = new THREE.MeshPhongMaterial({ map: new THREE.Texture(), color: 0x111111, name: 'Body' })
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)
 
     applyMissingTextureFallback(mesh, ['albedo.png'])
 
     expect(mesh.material).toBeInstanceOf(THREE.MeshStandardMaterial)
     expect((mesh.material as THREE.MeshStandardMaterial).color.getHex()).toBe(0xd8dce5)
+    expect((mesh.material as THREE.MeshStandardMaterial).name).toBe('Body')
   })
 
   test('configures the physical sky with a finite sun direction for HDRI generation', () => {
