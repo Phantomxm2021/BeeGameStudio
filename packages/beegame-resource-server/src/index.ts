@@ -14,7 +14,7 @@ if (import.meta.main) {
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
-    importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey }) : undefined,
+    importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey, uploadConcurrency: Number(process.env.BEEGAME_RESOURCE_UPLOAD_CONCURRENCY || 1) }) : undefined,
     updateResourcePack: baseUrl && serviceRoleKey ? async (packId, body) => {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(body) })
       if (!response.ok) throw new Error(`Resource Pack update failed (${response.status})`)
