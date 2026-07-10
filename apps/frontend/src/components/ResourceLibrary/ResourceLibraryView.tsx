@@ -16,7 +16,7 @@ import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
 import { ResourcePackExplorer } from './ResourcePackExplorer';
 import { buildExplorerTree } from './resourcePackExplorerTree';
 import type { ModelMetrics } from './ModelPreview';
-import { decodeMaterialTextureBindings, encodeMaterialTextureBindings, suggestMaterialTextureCandidates, type MaterialTextureBindings } from './materialTextureBindings';
+import { automaticallyBindBaseColorTextures, decodeMaterialTextureBindings, encodeMaterialTextureBindings, suggestMaterialTextureCandidates, type MaterialTextureBindings } from './materialTextureBindings';
 import { decodeStyleOverride, encodeStyleOverride, packStyleOptions } from './styleOverride';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
@@ -53,9 +53,17 @@ const categoryLabels: Record<string, string> = {
   textures: '贴图',
 };
 
+// "用途" describes the game responsibility of an asset. It is deliberately
+// independent from the file form (model, texture, audio, etc.) and from the
+// repository category used for storage and permissions.
 const useDomainOptions = [
-  ['characters', '角色与生物'], ['environment', '环境与道具'], ['scenes', '场景与地图'],
-  ['ui', 'UI'], ['vfx', '特效'], ['audio', '音频'], ['fonts', '字体'], ['textures', '贴图与材质'], ['animation', '动画'],
+  ['character', '角色'], ['npc', 'NPC'], ['creature', '生物'],
+  ['weapon-equipment', '武器与装备'], ['prop', '道具'], ['vehicle', '载具'],
+  ['building', '建筑'], ['environment', '环境'], ['terrain', '地形'], ['vegetation', '植被'],
+  ['scene', '场景'], ['level-map', '地图与关卡'], ['tile', '格子与关卡块'],
+  ['ui', '界面'], ['icon', '图标'], ['effect', '视觉特效'],
+  ['combat', '战斗'], ['interaction', '交互'], ['narrative', '叙事'],
+  ['music', '音乐'], ['sound-effect', '音效'], ['ambient-audio', '环境音'], ['voice', '语音'],
 ] as const;
 const resourceFormOptions = [
   ['sprite', '2D 图像 / 精灵'], ['tilemap', 'Tilemap'], ['model', '3D 模型'], ['material', '材质'], ['animation', '动画与骨骼'],
@@ -63,11 +71,22 @@ const resourceFormOptions = [
 ] as const;
 
 function legacyCategoryToUseDomain(category: string): string {
-  if (category === 'models') return 'environment';
-  if (category === 'materials') return 'textures';
-  if (category === 'tilemaps' || category === 'tiles') return 'scenes';
-  if (category === 'sprites') return 'characters';
-  return useDomainOptions.some(([value]) => value === category) ? category : 'environment';
+  const legacyDefaults: Record<string, string> = {
+    characters: 'character', environment: 'environment', scenes: 'scene',
+    tilemaps: 'level-map', tiles: 'tile', sprites: 'character', models: 'environment',
+    materials: 'environment', textures: 'environment', ui: 'ui', vfx: 'effect',
+    audio: 'sound-effect', fonts: 'ui', animation: 'character',
+  };
+  return legacyDefaults[category] || 'environment';
+}
+
+function normaliseUsageTags(value: unknown, category: string): string[] {
+  const aliases: Record<string, string> = {
+    characters: 'character', scenes: 'scene', vfx: 'effect', audio: 'sound-effect',
+    textures: 'environment', fonts: 'ui', animation: 'character',
+  };
+  const stored = decodeUsageTags(value).map(tag => aliases[tag] || tag);
+  return stored.length ? [...new Set(stored)] : [legacyCategoryToUseDomain(category)];
 }
 
 const primaryCategoryLabels: Record<'en' | 'zh', Record<ResourcePackPrimaryCategory, string>> = {
@@ -190,7 +209,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
         setSelectedPack((current) => current ? { ...current, elementCount: current.elementCount + 1 } : current);
         setPacks((current) => current.map((pack) => pack.id === selectedPack.id ? { ...pack, elementCount: pack.elementCount + 1 } : pack));
-        setSelectedElement(next);
+        // Uploading must not steal the current inspector/preview focus. The
+        // user can select any uploaded item deliberately from the tree.
       } catch (err) {
         setElementUpload((current) => current ? { ...current, failed: [...current.failed, file.name] } : current);
         setError(err instanceof Error ? err.message : '元素上传失败');
@@ -328,38 +348,19 @@ function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boo
       type="button"
       aria-label={pack.name}
       onClick={onOpen}
-      className="group rounded-[1.4rem] border border-white/10 bg-white/[0.025] p-3 text-left transition hover:border-white/25 hover:bg-white/[0.05]"
+      className="group relative isolate aspect-video overflow-hidden rounded-[1.4rem] border border-white/10 bg-zinc-950 text-left transition hover:border-white/25 hover:shadow-2xl hover:shadow-black/30"
     >
-      <div className="grid h-44 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-orange-200/30 via-zinc-800 to-zinc-950 text-6xl shadow-inner">
-        {hasCover ? (/(mp4|webm)/i.test(pack.coverPath!) ? <video src={pack.coverPath} muted autoPlay loop playsInline onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover" /> : <img src={pack.coverPath} alt="" onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover" />) : <span aria-hidden="true">✦</span>}
+      <div className="absolute inset-0 bg-gradient-to-br from-orange-200/30 via-zinc-800 to-zinc-950">
+        {hasCover ? (/(mp4|webm)/i.test(pack.coverPath!) ? <video src={pack.coverPath} muted autoPlay loop playsInline onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" /> : <img src={pack.coverPath} alt="" onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />) : <div className="grid h-full place-items-center text-6xl" aria-hidden="true">✦</div>}
       </div>
-      <h2 className="type-headline mt-4 truncate text-zinc-100">{pack.name}</h2>
-      <p className="type-footnote mt-1 text-zinc-500">
-        v{pack.version || '—'} · {pack.license || '未标注授权'} · <span>{primaryCategoryLabel(pack.primaryCategory, isZh)}</span>
-      </p>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {pack.style ? (
-          <span className="type-caption-2 rounded-full bg-zinc-800 px-2 py-1 text-zinc-300">
-            {pack.style}
-          </span>
-        ) : null}
-        {pack.gameTypes?.slice(0, 2).map((type) => (
-          <span
-            key={type}
-            className="type-caption-2 rounded-full bg-zinc-800 px-2 py-1 text-zinc-400"
-          >
-            {type}
-          </span>
-        ))}
-        <span className="type-caption-2 rounded-full bg-zinc-700 px-2 py-1 text-zinc-200">
-          {pack.dimension}
-        </span>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-black/10" />
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        <span className="type-caption-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-zinc-100 backdrop-blur-sm">{pack.elementCount} 个元素</span>
+        <span className="type-caption-2 rounded-full border border-emerald-200/20 bg-emerald-300/15 px-2.5 py-1 text-emerald-100 backdrop-blur-sm">● {pack.status === 'published' ? '已发布' : '草稿'}</span>
       </div>
-      <div className="mt-4 flex justify-between border-t border-white/10 pt-3">
-        <span className="type-caption-2 text-zinc-400">{pack.elementCount} 个元素</span>
-        <span className="type-caption-2 text-emerald-300">
-          ● {pack.status === 'published' ? '已发布' : '草稿'}
-        </span>
+      <div className="relative flex h-full flex-col justify-end p-5">
+        <h2 className="type-headline truncate text-zinc-50">{pack.name}</h2>
+        <p className="type-footnote mt-1 text-zinc-300">v{pack.version || '—'} · {pack.license || '未标注授权'} · {primaryCategoryLabel(pack.primaryCategory, isZh)}</p>
       </div>
     </button>
   );
@@ -420,6 +421,9 @@ function PackBrowser({
   const [resourceAttempt, setResourceAttempt] = useState(0);
   const [boundTextureUrls, setBoundTextureUrls] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<{ type: 'folder' | 'file'; mode: 'create' | 'rename'; name: string; folder?: ResourceFolder; element?: ResourceElement } | null>(null);
+  const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
+  const selectedElements = useMemo(() => elements.filter(element => selectedElementIds.includes(element.id)), [elements, selectedElementIds]);
+  const [moveError, setMoveError] = useState('');
   useLayoutEffect(() => {
     const host = explorerHostRef.current;
     if (!host) return;
@@ -465,9 +469,13 @@ function PackBrowser({
       boundsDepth: metrics.bounds.depth,
     };
     const suggestedBindings = suggestMaterialTextureCandidates(selectedElement.name, metrics.materialSlots, elements);
+    const existingBindings = decodeMaterialTextureBindings(selectedElement.specs.materialTextureBindings);
+    const nextBindings = automaticallyBindBaseColorTextures(selectedElement.name, metrics.materialSlots, elements, existingBindings);
+    const encodedBindings = encodeMaterialTextureBindings(nextBindings);
     const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value)
-      || selectedElement.specs.materialTextureCandidates !== JSON.stringify(suggestedBindings);
-    if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics, materialTextureCandidates: JSON.stringify(suggestedBindings) } });
+      || selectedElement.specs.materialTextureCandidates !== JSON.stringify(suggestedBindings)
+      || selectedElement.specs.materialTextureBindings !== encodedBindings;
+    if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics, materialTextureCandidates: JSON.stringify(suggestedBindings), materialTextureBindings: encodedBindings } });
   }, [elements, onUpdateElement, selectedElement]);
   const startFolderUpload = (node: { id: string; name: string; folder?: ResourceFolder }) => {
     const category = node.folder ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment') : node.id.replace(/^category:/, '');
@@ -478,7 +486,16 @@ function PackBrowser({
   const deleteFolder = async (folder: ResourceFolder) => { if (window.confirm(`删除文件夹“${folder.name}”？文件夹必须为空。`)) { await apiClient.deleteFolder(pack.id, folder.id); await onRefreshWorkspace(); } };
   const renameElement = (element: ResourceElement) => setRenameTarget({ type: 'file', mode: 'rename', name: element.name, element });
   const deleteElement = async (element: ResourceElement) => { if (window.confirm(`删除文件“${element.name}”？`)) { await apiClient.deleteElement(pack.id, element.id); await onRefreshWorkspace(); } };
-  const moveElement = async (element: ResourceElement, folder: ResourceFolder) => { const destination = `${folder.path}/${element.name}`; if (element.path === destination) return; await onUpdateElement(element.id, { path: destination }); };
+  const moveElements = async (items: ResourceElement[], folder: ResourceFolder) => {
+    const unique = [...new Map(items.map(item => [item.id, item])).values()];
+    const moves = unique.filter(item => item.path !== `${folder.path}/${item.name}`);
+    if (!moves.length) return;
+    const results = await Promise.allSettled(moves.map(item => onUpdateElement(item.id, { path: `${folder.path}/${item.name}` })));
+    await onRefreshWorkspace();
+    const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed.length) setMoveError(`有 ${failed.length} 个文件未能移动；目录已刷新。`);
+    else setSelectedElementIds(moves.map(item => item.id));
+  };
   const contextLabels = isZh ? { upload: '上传文件', rename: '重命名', delete: '删除', newFolder: '新建文件夹' } : { upload: 'Upload files', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' };
   return (
     <section className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
@@ -509,17 +526,25 @@ function PackBrowser({
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2c2d33] bg-[#15161b]">
-          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} onElement={onElement} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onDeleteElement={(element) => void deleteElement(element)} onMoveElement={(element, node) => node.folder && void moveElement(element, node.folder)} /></div>
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => setSelectedElementIds(items.map(item => item.id))} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
           <input ref={fileInputRef} aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
         </aside>
         <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c]" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
-          {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
-          {error ? (
+          {error || moveError ? (
             <div role="alert" className="type-callout absolute left-4 right-4 top-4 z-30 rounded-xl bg-red-400/10 p-3 text-red-200 shadow-xl">
-              {error}
+              {error || moveError}
             </div>
           ) : null}
           <div className="relative grid h-full min-h-0 place-items-center overflow-hidden bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)]">
+            {selectedElements.length > 1 ? <BatchElementInspector elements={selectedElements} onApply={async (input) => {
+              const results = await Promise.allSettled(selectedElements.map(element => onUpdateElement(element.id, {
+                ...(input.kind ? { kind: input.kind } : {}),
+                ...((input.addUsageTags?.length || input.removeUsageTags?.length) ? { specs: { ...element.specs, usageTags: JSON.stringify([...new Set(normaliseUsageTags(element.specs.usageTags, element.category).filter(tag => !input.removeUsageTags?.includes(tag)).concat(input.addUsageTags || []))]) } } : {}),
+              })));
+              const failed = results.filter(result => result.status === 'rejected').length;
+              if (failed) setMoveError(`有 ${failed} 个元素未能保存批量设置。`);
+              else await onRefreshWorkspace();
+            }} /> : null}
             {selectedElement ? (
               resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} elements={elements} materialTextureBindings={materialTextureBindings} textureUrls={boundTextureUrls} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
@@ -528,9 +553,90 @@ function PackBrowser({
           </div>
         </main>
       </div>
+      {uploadStatus ? <UploadProgressCover status={uploadStatus} /> : null}
       {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );
+}
+
+function UploadProgressCover({ status }: { status: { done: number; total: number; failed: string[] } }) {
+  const percent = status.total ? Math.min(100, Math.round(status.done / status.total * 100)) : 0;
+  return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-[radial-gradient(circle_at_50%_42%,rgba(47,49,57,0.45),rgba(8,9,13,0.9)_52%)] p-6 backdrop-blur-md">
+    <div className="w-full max-w-sm rounded-2xl border border-[#34363e] bg-[#17181d]/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
+      <div className="flex items-center justify-between border-b border-[#2d2e34] pb-4">
+        <div>
+          <p className="type-caption-1 text-[#c6a367]">资源库</p>
+          <h2 className="type-headline mt-1 text-zinc-100">正在上传资源</h2>
+        </div>
+        <span className="type-caption-2 inline-flex items-center gap-1.5 text-zinc-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-200" />进行中</span>
+      </div>
+      <div className="flex items-center gap-5 py-5">
+        <div className="relative grid h-16 w-16 shrink-0 place-items-center">
+          <svg aria-hidden="true" viewBox="0 0 36 36" className="h-16 w-16 -rotate-90">
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2" />
+            <circle cx="18" cy="18" r="15.5" fill="none" pathLength="100" stroke="rgb(236 197 139)" strokeDasharray={`${percent} ${100 - percent}`} strokeLinecap="round" strokeWidth="2" className="transition-[stroke-dasharray] duration-300" />
+          </svg>
+          <span className="type-caption-1 text-zinc-100">{percent}%</span>
+        </div>
+        <div className="min-w-0">
+          <p className="type-footnote text-zinc-200">{status.done} / {status.total} 个文件已完成</p>
+          <p className="type-caption-2 mt-1 text-zinc-500">上传完成前请保持此页面打开。</p>
+        </div>
+      </div>
+      {status.failed.length ? <p className="type-caption-2 rounded-lg border border-red-300/15 bg-red-400/10 px-3 py-2.5 text-red-200">{status.failed.length} 个文件上传失败，将在任务结束后保留失败记录。</p> : null}
+    </div>
+  </div>;
+}
+
+function BatchElementInspector({ elements, onApply }: { elements: ResourceElement[]; onApply: (input: { kind?: string; addUsageTags?: string[]; removeUsageTags?: string[] }) => Promise<void> }) {
+  const commonKind = elements.every(element => element.kind === elements[0]?.kind) ? elements[0]?.kind || '' : '';
+  const commonUsageTags = useMemo(() => {
+    const first = normaliseUsageTags(elements[0]?.specs.usageTags, elements[0]?.category || '');
+    return first.filter(tag => elements.every(element => normaliseUsageTags(element.specs.usageTags, element.category).includes(tag)));
+  }, [elements]);
+  const [kind, setKind] = useState(commonKind);
+  const [usageTags, setUsageTags] = useState<string[]>(commonUsageTags);
+  const [initialUsageTags, setInitialUsageTags] = useState<string[]>(commonUsageTags);
+  const [usageMenuOpen, setUsageMenuOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setKind(commonKind); setUsageTags(commonUsageTags); setInitialUsageTags(commonUsageTags); setUsageMenuOpen(false); }, [commonKind, commonUsageTags]);
+  const addedUsageTags = usageTags.filter(tag => !initialUsageTags.includes(tag));
+  const removedUsageTags = initialUsageTags.filter(tag => !usageTags.includes(tag));
+  const apply = async () => { if (!kind && !addedUsageTags.length && !removedUsageTags.length) return; setSaving(true); try { await onApply({ ...(kind ? { kind } : {}), ...(addedUsageTags.length ? { addUsageTags: addedUsageTags } : {}), ...(removedUsageTags.length ? { removeUsageTags: removedUsageTags } : {}) }); } finally { setSaving(false); } };
+  return <aside className="absolute right-3 top-3 z-20 w-72 rounded-xl border border-sky-300/20 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur-xl">
+    <div className="type-footnote text-zinc-100">已选择 {elements.length} 个元素</div>
+    <p className="type-caption-2 mt-1 text-zinc-500">显示所有元素的共同值；混合值不会被静默覆盖。</p>
+    <label className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">资源形态</span><select value={kind} onChange={event => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">混合值（不修改）</option>{resourceFormOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <div className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">游戏用途（共同项）</span><UsageTagMultiSelect values={usageTags} open={usageMenuOpen} onOpenChange={setUsageMenuOpen} onChange={setUsageTags} /></div>
+    <button type="button" disabled={saving || (!kind && !addedUsageTags.length && !removedUsageTags.length)} onClick={() => void apply()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '应用中…' : '应用到所选元素'}</button>
+  </aside>
+}
+
+function UsageTagMultiSelect({ values, open, onOpenChange, onChange }: { values: string[]; open: boolean; onOpenChange: (open: boolean) => void; onChange: (values: string[]) => void }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedLabels = values.map(value => useDomainOptions.find(([option]) => option === value)?.[1] || value);
+  const toggle = (value: string) => onChange(values.includes(value) ? values.filter(tag => tag !== value) : [...values, value]);
+  useEffect(() => {
+    if (!open) return;
+    const closeWhenOutside = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) onOpenChange(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onOpenChange(false);
+    };
+    document.addEventListener('pointerdown', closeWhenOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open, onOpenChange]);
+  return <div ref={rootRef} className="relative"><button type="button" aria-label="游戏用途" aria-expanded={open} aria-haspopup="listbox" onClick={() => onOpenChange(!open)} className="glass-control flex min-h-8 w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left type-caption-2"><span className={`truncate ${selectedLabels.length ? 'text-zinc-200' : 'text-zinc-500'}`}>{selectedLabels.length ? selectedLabels.join(' · ') : '请选择用途'}</span><span className="text-zinc-500">⌄</span></button>{open ? <div role="listbox" aria-multiselectable="true" className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/15 bg-zinc-950 p-1.5 shadow-xl">{useDomainOptions.map(([value, label]) => <button key={value} type="button" role="option" aria-selected={values.includes(value)} onClick={() => toggle(value)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left type-caption-2 text-zinc-300 hover:bg-white/10"><span className={`grid h-3.5 w-3.5 place-items-center rounded border ${values.includes(value) ? 'border-sky-200/60 bg-sky-300/20 text-sky-100' : 'border-white/20'}`}>{values.includes(value) ? '✓' : null}</span>{label}</button>)}</div> : null}</div>;
+}
+
+function decodeUsageTags(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : []; } catch { return []; }
 }
 
 function Preview({ element, pack, url, elements, materialTextureBindings, textureUrls, inspectorOpen, onOpenInspector, onCloseInspector, onMetrics, onSave }: {
@@ -592,7 +698,8 @@ function ResourceInspectorOverlay({
   onClose: () => void;
 }) {
   const [kind, setKind] = useState(element.kind);
-  const [category, setCategory] = useState(legacyCategoryToUseDomain(element.category));
+  const [usageTags, setUsageTags] = useState<string[]>(() => normaliseUsageTags(element.specs.usageTags, element.category));
+  const [usageMenuOpen, setUsageMenuOpen] = useState(false);
   const [styleOverride, setStyleOverride] = useState<string[]>(() => decodeStyleOverride(element.styleOverride));
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   const [customStyle, setCustomStyle] = useState('');
@@ -600,8 +707,8 @@ function ResourceInspectorOverlay({
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'config'>('info');
   const [materialBindings, setMaterialBindings] = useState<MaterialTextureBindings>(() => decodeMaterialTextureBindings(element.specs.materialTextureBindings));
-  useEffect(() => { setKind(element.kind); setCategory(legacyCategoryToUseDomain(element.category)); setStyleOverride(decodeStyleOverride(element.styleOverride)); setStyleMenuOpen(false); setCustomStyle(''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
-  const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, category, styleOverride: encodeStyleOverride(styleOverride), dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
+  useEffect(() => { setKind(element.kind); setUsageTags(normaliseUsageTags(element.specs.usageTags, element.category)); setUsageMenuOpen(false); setStyleOverride(decodeStyleOverride(element.styleOverride)); setStyleMenuOpen(false); setCustomStyle(''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
+  const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, styleOverride: encodeStyleOverride(styleOverride), dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, usageTags: JSON.stringify(usageTags), materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
   const styleOptions = packStyleOptions(pack.style, styleOverride);
   return (
     <aside
@@ -629,7 +736,7 @@ function ResourceInspectorOverlay({
         <button type="button" role="tab" aria-selected={activeTab === 'config'} onClick={() => setActiveTab('config')} className={`type-caption-2 flex-1 rounded-md px-2 py-1.5 transition-colors ${activeTab === 'config' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>元素配置</button>
       </div>
       {activeTab === 'info' ? <InspectorInfoTab element={element} pack={pack} elements={elements} /> : <div className="space-y-3 border-t border-white/10 pt-3">
-        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">用途分类</span><select aria-label="用途分类" value={category} onChange={(event) => setCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2">{useDomainOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <div className="grid gap-1"><span className="type-caption-2 text-zinc-500">游戏用途（可多选）</span><UsageTagMultiSelect values={usageTags} open={usageMenuOpen} onOpenChange={setUsageMenuOpen} onChange={setUsageTags} /><span className="type-caption-2 text-zinc-600">例如：同一 3D 模型可以同时用于“建筑”和“场景”。</span></div>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">资源形态</span><select aria-label="资源形态" value={kind} onChange={(event) => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2">{!resourceFormOptions.some(([value]) => value === kind) ? <option value={kind}>{kind}</option> : null}{resourceFormOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <div className="grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><div className="relative"><button type="button" aria-expanded={styleMenuOpen} aria-haspopup="menu" onClick={() => setStyleMenuOpen(open => !open)} className="glass-control flex min-h-8 w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left type-caption-2"><span className="truncate">{styleOverride.length ? styleOverride.join(' · ') : `继承 Pack：${pack.style}`}</span><span className="text-zinc-500">⌄</span></button>{styleMenuOpen ? <div role="menu" className="absolute z-20 mt-1 w-full rounded-lg border border-white/15 bg-zinc-950 p-1.5 shadow-xl">{styleOptions.map(option => <button key={option} type="button" role="menuitemcheckbox" aria-checked={styleOverride.includes(option)} onClick={() => setStyleOverride(current => current.includes(option) ? current.filter(value => value !== option) : [...current, option])} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left type-caption-2 text-zinc-300 hover:bg-white/10"><span className={`grid h-3.5 w-3.5 place-items-center rounded border ${styleOverride.includes(option) ? 'border-orange-200/60 bg-orange-300/20 text-orange-100' : 'border-white/20'}`}>{styleOverride.includes(option) ? '✓' : null}</span>{option}</button>)}</div> : null}</div><div className="flex gap-1.5"><input aria-label="添加自定义覆盖风格" value={customStyle} onChange={(event) => setCustomStyle(event.target.value)} className="glass-control min-w-0 flex-1 rounded-lg px-2 py-1 type-caption-2" placeholder="添加自定义风格" /><button type="button" onClick={() => { const value = customStyle.trim(); if (value) setStyleOverride(current => current.includes(value) ? current : [...current, value]); setCustomStyle(''); }} className="secondary-pill px-2 type-caption-2">添加</button></div><span className="type-caption-2 text-zinc-600">未选择时继承 Pack 风格。</span></div>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
@@ -643,7 +750,8 @@ function ResourceInspectorOverlay({
 function InspectorInfoTab({ element, pack, elements }: { element: ResourceElement; pack: ResourcePackSummary; elements: ResourceElement[] }) {
   const bindings = decodeMaterialTextureBindings(element.specs.materialTextureBindings);
   const bindingValues = Object.entries(bindings).map(([slot, binding]) => `${slot} → ${elements.find(candidate => candidate.id === binding.baseColor)?.name || binding.baseColor}`);
-  return <div role="tabpanel" className="space-y-2 border-t border-white/10 pt-3"><Property label="继承 Pack" value={pack.name} /><Property label="路径" value={element.path} /><Property label="状态" value={element.status} /><Property label="分类" value={categoryLabels[element.category] || element.category} /><Property label="类型" value={element.kind} />{isModelElement(element) ? <ModelAssetMetadata specs={element.specs} bindings={bindingValues} /> : null}<MetadataList label="规格" values={Object.entries(element.specs).filter(([key]) => key !== 'materialTextureBindings' && key !== 'materialTextureCandidates').map(([key, value]) => `${key}: ${value}`)} empty="未记录规格" /></div>
+  const usageLabels = normaliseUsageTags(element.specs.usageTags, element.category).map(tag => useDomainOptions.find(([value]) => value === tag)?.[1] || tag);
+  return <div role="tabpanel" className="space-y-2 border-t border-white/10 pt-3"><Property label="继承 Pack" value={pack.name} /><Property label="路径" value={element.path} /><Property label="状态" value={element.status} /><Property label="资源组" value={categoryLabels[element.category] || element.category} /><MetadataList label="游戏用途" values={usageLabels} empty="未设置用途" />{isModelElement(element) ? <ModelAssetMetadata specs={element.specs} bindings={bindingValues} /> : null}<MetadataList label="规格" values={Object.entries(element.specs).filter(([key]) => key !== 'materialTextureBindings' && key !== 'materialTextureCandidates' && key !== 'usageTags').map(([key, value]) => `${key}: ${value}`)} empty="未记录规格" /></div>
 }
 
 function ModelAssetMetadata({ specs, bindings }: { specs: ResourceElement['specs']; bindings: string[] }) {
