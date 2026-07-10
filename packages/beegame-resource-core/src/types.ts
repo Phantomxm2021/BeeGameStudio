@@ -21,6 +21,19 @@ export const RESOURCE_CATEGORIES = [
 ] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
+export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
+  '2d-art',
+  '3d-assets',
+  'animation-rig',
+  'ui-kit',
+  'vfx',
+  'audio',
+  'fonts',
+  'world-scene',
+  'mixed',
+] as const
+export type ResourcePackPrimaryCategory = (typeof RESOURCE_PACK_PRIMARY_CATEGORIES)[number]
+
 export type ResourcePackStatus = 'draft' | 'published' | 'archived'
 export type ResourceElementStatus = 'queued' | 'uploading' | 'ready' | 'failed' | 'hidden' | 'archived'
 
@@ -38,6 +51,7 @@ export type ResourcePack = {
   style: string
   gameTypes: readonly string[]
   dimension: ResourceDimension
+  primaryCategory: ResourcePackPrimaryCategory
   categories: readonly ResourceCategory[]
   license: string
   version: string

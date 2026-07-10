@@ -1,6 +1,7 @@
 import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
+  RESOURCE_PACK_PRIMARY_CATEGORIES,
   type ResourceElement,
   type ResourcePack,
 } from './types'
@@ -25,6 +26,9 @@ export function validateResourcePack(value: unknown): ResourcePack {
   if (!Array.isArray(value.categories) || value.categories.length === 0 ||
       value.categories.some(item => !isAllowed(item, RESOURCE_CATEGORIES))) {
     throw new ResourceValidationError('Pack categories must contain supported values')
+  }
+  if (!isAllowed(value.primaryCategory, RESOURCE_PACK_PRIMARY_CATEGORIES)) {
+    throw new ResourceValidationError('Pack primary category is unsupported')
   }
   if (!isAllowed(value.dimension, RESOURCE_DIMENSIONS)) {
     throw new ResourceValidationError('Pack dimension is unsupported')

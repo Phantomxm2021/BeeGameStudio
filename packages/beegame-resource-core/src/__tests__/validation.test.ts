@@ -11,6 +11,7 @@ const validPack = {
   style: 'Stylized',
   gameTypes: ['adventure'],
   dimension: '2D' as const,
+  primaryCategory: 'ui-kit' as const,
   categories: ['characters', 'ui'] as const,
   license: 'internal',
   version: '1.0.0',
@@ -31,6 +32,19 @@ describe('resource pack validation', () => {
   test('rejects a Pack without an explicit category', () => {
     expect(() => validateResourcePack({ ...validPack, categories: [] })).toThrow(
       ResourceValidationError,
+    )
+  })
+
+  test('rejects an unsupported Pack primary category', () => {
+    expect(() => validateResourcePack({ ...validPack, primaryCategory: 'characters' })).toThrow(
+      'Pack primary category is unsupported',
+    )
+  })
+
+  test('rejects a Pack without a primary category', () => {
+    const { primaryCategory, ...packWithoutPrimaryCategory } = validPack
+    expect(() => validateResourcePack(packWithoutPrimaryCategory)).toThrow(
+      'Pack primary category is unsupported',
     )
   })
 
