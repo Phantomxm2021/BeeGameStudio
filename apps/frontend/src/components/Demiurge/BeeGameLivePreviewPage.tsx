@@ -144,6 +144,7 @@ export function BeeGameLivePreviewPage({
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'resources'>('general');
     const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
     const [isHistoryOpen, setHistoryOpen] = useState(false);
     const [isProfileOpen, setProfileOpen] = useState(false);
@@ -366,7 +367,14 @@ export function BeeGameLivePreviewPage({
                     setCreditStoreOpen(true);
                 }}
                 onToggleSettings={() => {
+                    setSettingsInitialTab('general');
                     closeAccountSurfaces();
+                    setSettingsOpen(true);
+                }}
+                canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                onOpenResourceLibrary={() => {
+                    closeAccountSurfaces();
+                    setSettingsInitialTab('resources');
                     setSettingsOpen(true);
                 }}
                 onToggleHistory={() => {
@@ -529,6 +537,8 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
+                canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                initialTab={settingsInitialTab}
             />
             <ProjectHistoryModal
                 isOpen={isHistoryOpen}

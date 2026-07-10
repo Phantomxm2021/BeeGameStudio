@@ -647,6 +647,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     : restoredIdeaDraft?.idea || ''
     ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'resources'>('general');
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
@@ -1386,7 +1387,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
+                        setSettingsInitialTab('general');
                         setIsSettingsOpen((value) => !value);
+                        setIsHistoryOpen(false);
+                        setIsCreditStoreOpen(false);
+                    }}
+                    canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                    onOpenResourceLibrary={() => {
+                        setSettingsInitialTab('resources');
+                        setIsSettingsOpen(true);
                         setIsHistoryOpen(false);
                         setIsCreditStoreOpen(false);
                     }}
@@ -1407,6 +1416,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
+                    canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                    initialTab={settingsInitialTab}
                 />
 
                 <ProjectHistoryModal

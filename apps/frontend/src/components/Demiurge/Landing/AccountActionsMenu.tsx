@@ -1,4 +1,4 @@
-import { History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
+import { FolderOpen, History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { UserAccountMenu, type UserAccountMenuItem } from './UserAccountMenu';
@@ -16,7 +16,9 @@ interface AccountActionsMenuProps {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     creditBalance?: number;
+    canManageResources?: boolean;
     onToggleSettings: () => void;
+    onOpenResourceLibrary?: () => void;
     onToggleHistory: () => void;
     onOpenCreditStore: () => void;
     onOpenProfile: () => void;
@@ -38,11 +40,13 @@ export function AccountActionsMenu({
     currentUserAvatarUrl,
     creditBalance,
     onToggleSettings,
+    onOpenResourceLibrary,
     onToggleHistory,
     onOpenCreditStore,
     onOpenProfile,
     onOpenLogin,
     onSignOut,
+    canManageResources = false,
 }: AccountActionsMenuProps) {
     const t = useCommonText(lang);
     const items: UserAccountMenuItem[] = [
@@ -64,6 +68,12 @@ export function AccountActionsMenu({
             icon: <Settings className="h-4 w-4" />,
             onClick: onToggleSettings,
         },
+        ...(canManageResources ? [{
+            key: 'resources',
+            label: '资源库',
+            icon: <FolderOpen className="h-4 w-4" />,
+            onClick: onOpenResourceLibrary || onToggleSettings,
+        }] : []),
         {
             key: 'history',
             label: t.historyProjects,

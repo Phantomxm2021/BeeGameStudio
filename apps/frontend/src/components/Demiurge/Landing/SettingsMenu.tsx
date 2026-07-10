@@ -94,6 +94,7 @@ interface SettingsMenuProps {
     canManageInvitations?: boolean;
     canReadAudit?: boolean;
     canManageResources?: boolean;
+    initialTab?: 'general' | 'resources';
 }
 
 type SettingsSection = 'personal' | 'skills' | 'platform';
@@ -146,6 +147,7 @@ export function SettingsMenu({
     canManageInvitations,
     canReadAudit,
     canManageResources,
+    initialTab = 'general',
 }: SettingsMenuProps) {
     const { i18n } = useTranslation('settings');
     const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
@@ -985,6 +987,13 @@ export function SettingsMenu({
             setIsSavingBillingPack(false);
         }
     };
+    useEffect(() => {
+        if (isOpen && initialTab === 'resources' && effectiveCanManageResources) {
+            setActiveSection('platform');
+            setActiveTab('resources');
+        }
+    }, [effectiveCanManageResources, initialTab, isOpen]);
+
     useEffect(() => {
         if (!hasPlatformSettings && activeSection === 'platform') {
             setActiveSection('personal');
