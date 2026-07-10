@@ -43,9 +43,11 @@ import {
 } from './beegame/deployment-manager'
 import {
   readBeeGameAssetManifest,
+  bindBeeGameLibraryResourceInWorkspace,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
+import type { ResourceSelectionRequirement } from './beegame/resource-selection-client'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
@@ -236,6 +238,7 @@ export type AgentWorkflowAppOptions = {
   skillsConfig?: BeeGameSkillsConfig | false
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
+  resourceSelectionClient?: { select(requirements: ResourceSelectionRequirement[]): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>> }
 }
 
 export function createAgentWorkflowApp(
@@ -1386,6 +1389,28 @@ export function createAgentWorkflowApp(
       }
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/assets/:slotId/resource-binding', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!options.resourceSelectionClient) return c.json({ error: 'Resource selection is not configured' }, 503)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const body = await c.req.raw.json() as { requirement?: ResourceSelectionRequirement }
+      const requirement = body.requirement
+      if (!requirement || requirement.slotId !== c.req.param('slotId')) return c.json({ error: 'Asset requirement does not match slot' }, 400)
+      const selection = (await options.resourceSelectionClient.select([requirement]))[0]
+      if (!selection) return c.json({ error: 'No compatible resource was found' }, 422)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const result = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      return c.json({ manifest: result.manifest, slot: result.slot, selection })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource binding failed' }, 400)
     }
   })
 
