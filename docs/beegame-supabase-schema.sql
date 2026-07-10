@@ -272,7 +272,7 @@ create table if not exists public.beegame_user_skills (
   description text not null,
   enabled boolean not null default true,
   content text not null,
-  references jsonb not null default '[]'::jsonb,
+  "references" jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (owner_id, slug)
