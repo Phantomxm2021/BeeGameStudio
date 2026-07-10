@@ -322,6 +322,10 @@ export function createAgentWorkflowApp(
     Boolean(supabaseRuntimeEnvClient),
     outboundTargetPolicyOptions,
     resolveOutboundTarget,
+    async metadata => {
+      if (!metadata.projectId || !options.resourceSelectionClient) return
+      await autoBindLibraryResourcesInWorkspace(metadata.workspacePath, options.resourceSelectionClient)
+    },
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -4863,5 +4867,39 @@ function resourceRequirementForSlot(slot: BeeGameAssetSlot): ResourceSelectionRe
     styles: requirement.styles,
     gameTypes: requirement.game_types,
     purpose: requirement.purpose,
+  }
+}
+
+/**
+ * Post-turn integration entrypoint. It only consumes explicit asset contracts,
+ * never names or inferred categories, and leaves existing bindings untouched.
+ */
+async function autoBindLibraryResourcesInWorkspace(
+  workspacePath: string,
+  resourceSelectionClient: NonNullable<AgentWorkflowAppOptions['resourceSelectionClient']>,
+): Promise<void> {
+  const manifest = await readBeeGameAssetManifest(workspacePath)
+  const requirements = manifest.slots
+    .filter(slot => !slot.resource_binding && slot.status !== 'integrated')
+    .map(resourceRequirementForSlot)
+    .filter((requirement): requirement is ResourceSelectionRequirement => Boolean(requirement))
+  if (!requirements.length) return
+  const selections = await resourceSelectionClient.select(requirements)
+  for (const selection of selections) {
+    try {
+      await bindBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId, {
+        pack_id: selection.packId,
+        pack_version: selection.packVersion,
+        element_id: selection.elementId,
+        source_url: selection.sourceUrl,
+        selected_at: new Date().toISOString(),
+        selection_reason: selection.reasons,
+      })
+      await integrateBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId)
+    } catch (error) {
+      // A failed signed download or an adapter-only target retains its binding
+      // for retry, while the Agent turn and existing project files stay intact.
+      console.warn(`BeeGame resource integration failed for ${selection.slotId}:`, toErrorMessage(error))
+    }
   }
 }

@@ -343,6 +343,7 @@ export class BeeGameSessionManager {
     private readonly allowExternalRuntimeEnv = false,
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
+    private readonly onTurnCompleted?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -927,6 +928,12 @@ export class BeeGameSessionManager {
       record.currentTurnId = null
       record.abortController = null
       record.session.updatedAt = new Date()
+      const metadata = this.metadata(record.session.id)
+      if (metadata && this.onTurnCompleted) {
+        void Promise.resolve(this.onTurnCompleted(metadata)).catch(error => {
+          console.warn('BeeGame post-turn integration failed:', toErrorMessage(error))
+        })
+      }
     }
   }
 
