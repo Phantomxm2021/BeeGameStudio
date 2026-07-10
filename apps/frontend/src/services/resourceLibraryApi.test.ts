@@ -64,6 +64,48 @@ describe('resource library API', () => {
     expect(requests[0]).toBe('/api/resource-packs/pack-1/publish')
   })
 
+  test('deletes a Pack through the lifecycle endpoint', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const api = createResourceLibraryApi(async (input, init) => {
+      requests.push({ url: String(input), init })
+      return new Response(null, { status: 204 })
+    })
+
+    await expect(api.deletePack('pack/1')).resolves.toBeUndefined()
+
+    expect(requests[0].url).toBe('/api/resource-packs/pack%2F1')
+    expect(requests[0].init?.method).toBe('DELETE')
+  })
+
+  test('uploads a Pack cover as multipart form data', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const api = createResourceLibraryApi(async (input, init) => {
+      requests.push({ url: String(input), init })
+      return new Response(JSON.stringify({ pack: { id: 'pack-1', name: 'Forest', elementCount: 0 } }), { status: 200 })
+    })
+    const file = new File(['cover'], 'cover.png', { type: 'image/png' })
+
+    await expect(api.uploadPackCover('pack-1', file)).resolves.toMatchObject({ id: 'pack-1' })
+
+    expect(requests[0].url).toBe('/api/resource-packs/pack-1/cover')
+    expect(requests[0].init?.method).toBe('POST')
+    expect(requests[0].init?.body).toBeInstanceOf(FormData)
+    expect((requests[0].init?.body as FormData).get('file')).toBe(file)
+    expect(requests[0].init?.headers).toBeUndefined()
+  })
+
+  test('gets the signed URL for an element resource', async () => {
+    const requests: string[] = []
+    const api = createResourceLibraryApi(async input => {
+      requests.push(String(input))
+      return new Response(JSON.stringify({ url: 'https://signed.example/file' }), { status: 200 })
+    })
+
+    await expect(api.getElementResourceUrl('pack/1', 'element/1')).resolves.toBe('https://signed.example/file')
+
+    expect(requests[0]).toBe('/api/resource-packs/pack%2F1/elements/element%2F1/resource-url')
+  })
+
   test('turns a forbidden response into a typed error', async () => {
     const api = createResourceLibraryApi(async () => new Response(
       JSON.stringify({ error: { code: 'forbidden', message: 'No access' } }),

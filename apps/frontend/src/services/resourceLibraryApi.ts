@@ -37,6 +37,11 @@ export type CreateResourcePackInput = {
   version?: string
 }
 
+export type UpdateResourcePackInput = Partial<Pick<
+  CreateResourcePackInput,
+  'name' | 'style' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version'
+>>
+
 export type ResourceElement = {
   id: string
   packId: string
@@ -45,7 +50,7 @@ export type ResourceElement = {
   category: string
   kind: string
   preview?: { kind: string; path: string }
-  specs: Record<string, string | number | boolean>
+  specs: Record<string, string | number | boolean | null>
   dependencies: readonly string[]
   status: string
   styleOverride?: string
@@ -93,10 +98,24 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack creation failed (${response.status})`, response.status, result.error?.code || 'resource_pack_create_failed')
       return result.pack
     },
-    async updatePack(packId: string, body: Partial<ResourcePackSummary>): Promise<ResourcePackSummary> {
+    async updatePack(packId: string, body: UpdateResourcePackInput): Promise<ResourcePackSummary> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Resource update failed (${response.status})`, response.status, result.error?.code || 'resource_update_failed')
+      return result.pack
+    },
+    async deletePack(packId: string): Promise<void> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}`, { method: 'DELETE' })
+      if (response.status === 204) return
+      const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
+      throw new ResourceLibraryApiError(result?.error?.message || `Pack deletion failed (${response.status})`, response.status, result?.error?.code || 'resource_pack_delete_failed')
+    },
+    async uploadPackCover(packId: string, file: File): Promise<ResourcePackSummary> {
+      const form = new FormData()
+      form.set('file', file)
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/cover`, { method: 'POST', body: form })
+      const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack cover upload failed (${response.status})`, response.status, result.error?.code || 'resource_pack_cover_upload_failed')
       return result.pack
     },
     async publishPack(packId: string): Promise<ResourcePackSummary> {
@@ -154,6 +173,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
         `/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`,
       )
       return result.element
+    },
+    async getElementResourceUrl(packId: string, elementId: string): Promise<string> {
+      const result = await request<{ url: string }>(
+        `/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}/resource-url`,
+      )
+      return result.url
     },
     async updateElement(packId: string, elementId: string, body: Partial<ResourceElement>): Promise<ResourceElement> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
