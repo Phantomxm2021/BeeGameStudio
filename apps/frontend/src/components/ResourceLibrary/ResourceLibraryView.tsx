@@ -69,6 +69,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [page, setPage] = useState(1);
   const [isRootDragActive, setIsRootDragActive] = useState(false);
   const [localElementsByPack, setLocalElementsByPack] = useState<Record<string, ResourceElement[]>>(localLibrary.elementsByPack);
+  const [localPreviewUrls, setLocalPreviewUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem(LOCAL_LIBRARY_KEY, JSON.stringify({ packs: localLibrary.packs, elementsByPack: localLibrary.elementsByPack }));
@@ -177,6 +178,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         elementCount: assetPaths.length,
       };
       const parsed = manifestEntry ? { ...generated, ...(JSON.parse(strFromU8(manifestEntry)) as Partial<ResourcePackSummary>) } : generated;
+      const previewPath = Object.keys(archive).find((path) => /^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path));
+      if (previewPath) {
+        const extension = previewPath.split('.').pop()?.toLowerCase() || 'png';
+        const mime = extension === 'mp4' ? 'video/mp4' : extension === 'webm' ? 'video/webm' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : `image/${extension}`;
+        setLocalPreviewUrls((current) => ({ ...current, [parsed.id]: URL.createObjectURL(new Blob([archive[previewPath]], { type: mime })) }));
+      }
       const localElements: ResourceElement[] = assetPaths.map((path, index) => {
         const extension = path.split('.').pop()?.toLowerCase() || '';
         const category = path.split('/')[0] || 'assets';
@@ -290,7 +297,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {pagedPacks.map((pack) => (
-          <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
+          <PackCard key={pack.id} pack={pack} previewUrl={localPreviewUrls[pack.id]} onOpen={() => void openPack(pack)} />
         ))}
       </div>
       {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => importInputRef.current?.click()} title={copy.empty} hint={copy.emptyHint} importLabel={copy.import} /> : null}
@@ -342,7 +349,7 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
-function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => void }) {
+function PackCard({ pack, previewUrl, onOpen }: { pack: ResourcePackSummary; previewUrl?: string; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -350,8 +357,8 @@ function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => v
       onClick={onOpen}
       className="group rounded-[1.4rem] border border-white/10 bg-white/[0.025] p-3 text-left transition hover:border-white/25 hover:bg-white/[0.05]"
     >
-      <div className="grid h-44 place-items-center rounded-2xl bg-gradient-to-br from-orange-200/30 via-zinc-800 to-zinc-950 text-6xl shadow-inner">
-        ✦
+      <div className="grid h-44 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-orange-200/30 via-zinc-800 to-zinc-950 text-6xl shadow-inner">
+        {previewUrl ? (/(mp4|webm)$/i.test(pack.coverPath || '') ? <video src={previewUrl} muted autoPlay loop playsInline className="h-full w-full object-cover" /> : <img src={previewUrl} alt="" className="h-full w-full object-cover" />) : <span aria-hidden="true">✦</span>}
       </div>
       <h2 className="type-headline mt-4 truncate text-zinc-100">{pack.name}</h2>
       <p className="type-footnote mt-1 text-zinc-500">
