@@ -430,6 +430,9 @@ function PackBrowser({
       triangles: metrics.triangles,
       vertices: metrics.vertices,
       materialCount: metrics.materialCount,
+      materialSlots: metrics.materialSlots.join(' · '),
+      textureReferences: metrics.textureReferences.join(' · '),
+      unresolvedTextureReferences: metrics.unresolvedTextureReferences.join(' · '),
       boundsWidth: metrics.bounds.width,
       boundsHeight: metrics.bounds.height,
       boundsDepth: metrics.bounds.depth,
@@ -515,7 +518,7 @@ function Preview({ element, pack, url, inspectorOpen, onOpenInspector, onCloseIn
     <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
       {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
-      <div className="grid h-full min-h-0 place-items-center p-4"><ResourcePreview element={element} url={url} onMetrics={onMetrics} /></div>
+      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} /></div>
       {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
   );
@@ -525,7 +528,8 @@ function FileInfoOverlay({ element }: { element: ResourceElement }) {
   const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.includes('.') ? element.name.split('.').pop() : '—';
   const size = typeof element.specs.size === 'number' ? formatFileSize(element.specs.size) : '—';
   const triangles = typeof element.specs.triangles === 'number' ? String(element.specs.triangles) : '—';
-  return <div className="absolute left-4 top-4 z-10 min-w-44 rounded-xl border border-white/10 bg-black/45 px-3 py-2.5 text-[11px] leading-5 text-zinc-300 shadow-lg backdrop-blur-xl"><div className="truncate font-medium text-zinc-100">{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div>{isModelElement(element) ? <div>三角形：{triangles}</div> : null}</div>;
+  const materials = typeof element.specs.materialCount === 'number' ? String(element.specs.materialCount) : '—';
+  return <div className="absolute left-4 top-4 z-10 min-w-44 rounded-xl border border-white/10 bg-black/45 px-3 py-2.5 text-[11px] leading-5 text-zinc-300 shadow-lg backdrop-blur-xl"><div className="truncate font-medium text-zinc-100">{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div>{isModelElement(element) ? <><div>三角形：{triangles}</div><div>材质：{materials}</div></> : null}</div>;
 }
 
 function EmptyPreviewState() {
@@ -589,6 +593,7 @@ function ResourceInspectorOverlay({
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
         <Property label="路径" value={element.path} />
         <Property label="状态" value={element.status} />
+        {isModelElement(element) ? <ModelAssetMetadata specs={element.specs} /> : null}
         <Property
           label="规格"
           value={Object.entries(element.specs)
@@ -599,6 +604,26 @@ function ResourceInspectorOverlay({
       <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存更改'}</button>
     </aside>
   );
+}
+
+function ModelAssetMetadata({ specs }: { specs: ResourceElement['specs'] }) {
+  const materialSlots = typeof specs.materialSlots === 'string' && specs.materialSlots ? specs.materialSlots.split(' · ') : [];
+  const textureReferences = typeof specs.textureReferences === 'string' && specs.textureReferences ? specs.textureReferences.split(' · ') : [];
+  const unresolved = typeof specs.unresolvedTextureReferences === 'string' && specs.unresolvedTextureReferences ? specs.unresolvedTextureReferences.split(' · ') : [];
+  return (
+    <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.025] p-2.5">
+      <div className="type-caption-2 font-medium text-zinc-300">模型资源</div>
+      <Property label="顶点" value={typeof specs.vertices === 'number' ? String(specs.vertices) : '—'} />
+      <Property label="三角形" value={typeof specs.triangles === 'number' ? String(specs.triangles) : '—'} />
+      <MetadataList label="材质槽" values={materialSlots} empty="未检测到材质" />
+      <MetadataList label="已加载贴图" values={textureReferences} empty="未检测到嵌入贴图" />
+      {unresolved.length ? <MetadataList label="待关联贴图" values={unresolved} empty="" warning /> : null}
+    </div>
+  );
+}
+
+function MetadataList({ label, values, empty, warning = false }: { label: string; values: string[]; empty: string; warning?: boolean }) {
+  return <div className="grid gap-1"><span className="type-caption-2 text-zinc-500">{label}</span>{values.length ? <div className="grid gap-1">{values.map((value) => <span key={value} title={value} className={`type-caption-2 truncate ${warning ? 'text-amber-200' : 'text-zinc-300'}`}>{value}</span>)}</div> : <span className="type-caption-2 text-zinc-600">{empty}</span>}</div>;
 }
 
 function Property({ label, value }: { label: string; value: string }) {

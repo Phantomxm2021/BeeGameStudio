@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
+import * as THREE from 'three'
 import { renderPreview } from './ResourcePreview'
-import { persistModelMetrics } from './ModelPreview'
+import { calculateModelMetrics, persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -25,6 +26,19 @@ describe('renderPreview', () => {
     })
 
     expect(result).toBe(error)
+  })
+
+  test('extracts material and texture metadata from a loaded model', () => {
+    const map = new THREE.Texture()
+    map.name = 'albedo.png'
+    const material = new THREE.MeshStandardMaterial({ map, name: 'Painted metal' })
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)
+
+    expect(calculateModelMetrics(mesh)).toMatchObject({
+      materialCount: 1,
+      materialSlots: ['Painted metal'],
+      textureReferences: ['albedo.png'],
+    })
   })
 
   test('selects PDF, text, and document-card fallbacks safely from extensions', () => {
