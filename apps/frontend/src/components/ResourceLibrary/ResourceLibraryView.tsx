@@ -8,6 +8,7 @@ import {
   type ResourcePackSummary,
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
+import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
@@ -19,6 +20,7 @@ type ResourceLibraryApi = Pick<
 
 type ResourceLibraryViewProps = {
   apiClient?: ResourceLibraryApi;
+  initialPackId?: string;
 };
 
 
@@ -36,7 +38,7 @@ const categoryLabels: Record<string, string> = {
   textures: '贴图',
 };
 
-export function ResourceLibraryView({ apiClient = resourceLibraryApi }: ResourceLibraryViewProps) {
+export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPackId = getResourcePackRoute() }: ResourceLibraryViewProps) {
   const { i18n } = useTranslation();
   const isZh = i18n.language.startsWith('zh');
   const copy = isZh ? {
@@ -84,6 +86,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   }, [apiClient]);
 
   const openPack = async (pack: ResourcePackSummary) => {
+    openResourcePackRoute(pack.id);
     setError('');
     setLoading(true);
     try {
@@ -105,6 +108,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!initialPackId || selectedPack || loading) return;
+    const pack = packs.find((item) => item.id === initialPackId);
+    if (pack) void openPack(pack);
+  }, [initialPackId, loading, packs, selectedPack]);
 
   const selectCategory = async (category?: string, folderPath?: string) => {
     if (!selectedPack) return;
@@ -179,6 +188,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         loading={loading}
         error={error}
         onBack={() => {
+          closeResourcePackRoute();
           setSelectedPack(null);
           setSelectedElement(null);
           setFolders([]);
@@ -278,7 +288,7 @@ export function ResourceLibraryPage({ onBack }: { onBack: () => void }) {
         </button>
         <span className="type-headline ml-4">资源库</span>
       </div>
-      <ResourceLibraryView />
+      <ResourceLibraryView initialPackId={getResourcePackRoute()} />
     </div>
   );
 }

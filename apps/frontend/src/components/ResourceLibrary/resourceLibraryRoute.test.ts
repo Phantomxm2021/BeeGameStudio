@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test } from 'vitest'
-import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from './resourceLibraryRoute'
+import { closeResourceLibraryRoute, closeResourcePackRoute, getResourcePackRoute, isResourceLibraryRoute, openResourceLibraryRoute, openResourcePackRoute } from './resourceLibraryRoute'
 
 describe('resource library URL route', () => {
   afterEach(() => {
@@ -14,5 +14,12 @@ describe('resource library URL route', () => {
     expect(isResourceLibraryRoute()).toBe(true)
     closeResourceLibraryRoute()
     expect(isResourceLibraryRoute()).toBe(false)
+  })
+
+  test('preserves the selected Pack in the URL', () => {
+    openResourcePackRoute('pack-1')
+    expect(getResourcePackRoute()).toBe('pack-1')
+    closeResourcePackRoute()
+    expect(getResourcePackRoute()).toBeUndefined()
   })
 })
