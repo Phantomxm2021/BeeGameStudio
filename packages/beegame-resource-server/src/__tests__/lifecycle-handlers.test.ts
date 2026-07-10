@@ -17,8 +17,8 @@ describe('Supabase resource lifecycle handlers', () => {
           offsets.push(offset)
           page += 1
           return Response.json(page === 1
-            ? Array.from({ length: 1000 }, (_, index) => ({ name: `assets/${index}.png` }))
-            : page === 2 ? [{ name: 'cover/end.png' }] : [])
+            ? Array.from({ length: 1000 }, (_, index) => ({ name: `assets/${index}.png`, id: `object-${index}` }))
+            : page === 2 ? [{ name: 'cover/end.png', id: 'cover-end' }] : [])
         }
         if (url.includes('/storage/v1/object/')) { deleted.push(url); return new Response(null, { status: 200 }) }
         if (init?.method === 'DELETE') return Response.json([packRow])
@@ -53,7 +53,7 @@ describe('Supabase resource lifecycle handlers', () => {
       baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
       fetchImpl: async (input, init) => {
         const url = String(input)
-        if (url.includes('/object/list/')) return Response.json([{ name: 'assets/item.glb' }])
+        if (url.includes('/object/list/')) return Response.json([{ name: 'assets/item.glb', id: 'item' }])
         if (url.includes('/storage/v1/object/')) return new Response(null, { status: 500 })
         if (init?.method === 'DELETE') { deletedPack = true; return Response.json([]) }
         return Response.json([])
@@ -62,6 +62,38 @@ describe('Supabase resource lifecycle handlers', () => {
 
     await expect(handlers.deleteResourcePack('pack-1')).rejects.toThrow('storage deletion failed (500)')
     expect(deletedPack).toBe(false)
+  })
+
+  test('recursively clears nested virtual folders without deleting directory nodes', async () => {
+    const deleted: string[] = []
+    let deletedPack = false
+    const prefixes: string[] = []
+    let modelObjectListed = false
+    let coverObjectListed = false
+    const handlers = createSupabaseResourceLifecycleHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/object/list/')) {
+          const { prefix } = JSON.parse(String(init?.body)) as { prefix: string }
+          prefixes.push(prefix)
+          if (prefix === 'pack-1/') return Response.json([{ name: 'models', id: null }, { name: 'cover', metadata: null }])
+          if (prefix === 'pack-1/models/') return Response.json([{ name: 'characters', id: null }])
+          if (prefix === 'pack-1/models/characters/' && !modelObjectListed) { modelObjectListed = true; return Response.json([{ name: 'knight.fbx', id: 'knight-object' }]) }
+          if (prefix === 'pack-1/cover/' && !coverObjectListed) { coverObjectListed = true; return Response.json([{ name: 'preview.png', metadata: { size: 42 } }]) }
+          return Response.json([])
+        }
+        if (url.includes('/storage/v1/object/')) { deleted.push(url); return new Response(null, { status: 200 }) }
+        if (init?.method === 'DELETE') { deletedPack = true; return Response.json([packRow]) }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.deleteResourcePack('pack-1')).resolves.toBe(true)
+    expect(prefixes).toEqual(expect.arrayContaining(['pack-1/', 'pack-1/models/', 'pack-1/models/characters/', 'pack-1/cover/']))
+    expect(deleted).toHaveLength(2)
+    expect(deleted.some(url => url.endsWith('/pack-1/models'))).toBe(false)
+    expect(deletedPack).toBe(true)
   })
 
   test('commits a cover replacement before deleting a safe old cover', async () => {

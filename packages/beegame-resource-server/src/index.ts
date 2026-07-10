@@ -224,7 +224,7 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
   const safePrefix = (packId: string) => `${safeStorageComponent(packId, 'Pack id')}/`
   const deleteObject = async (path: string) => {
     const response = await fetchImpl(objectUrl(path), { method: 'DELETE', headers })
-    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status})`)
+    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status}) for ${path}${await safeStorageFailureDetail(response)}`)
   }
   const signObject = async (path: string): Promise<string> => {
     const response = await fetchImpl(`${baseUrl}/storage/v1/object/sign/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ expiresIn: 300 }) })
@@ -253,18 +253,40 @@ export function createSupabaseResourceLifecycleHandlers(options: SupabaseLifecyc
     deleteResourcePack: async (packId: string) => {
       const prefix = safePrefix(packId)
       const pageSize = 1000
-      for (;;) {
-        const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix, limit: pageSize, offset: 0 }) })
-        if (!listed.ok) throw new Error(`Resource storage listing failed (${listed.status})`)
-        const objects = await listed.json() as Array<{ name?: unknown }>
-        for (const object of objects) {
-          if (typeof object.name !== 'string') continue
-          const path = object.name.startsWith(prefix) ? object.name : `${prefix}${object.name}`
-          if (!isSafeStoragePath(path, prefix)) throw new Error('Resource storage contains an unsafe resource storage entry')
-          await deleteObject(path)
+      const visitedPrefixes = new Set<string>()
+      const clearPrefix = async (currentPrefix: string): Promise<void> => {
+        if (visitedPrefixes.has(currentPrefix)) return
+        visitedPrefixes.add(currentPrefix)
+        for (;;) {
+          const listed = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix: currentPrefix, limit: pageSize, offset: 0 }) })
+          if (!listed.ok) throw new Error(`Resource storage listing failed (${listed.status}) for ${currentPrefix}${await safeStorageFailureDetail(listed)}`)
+          const entries = await listed.json() as Array<{ name?: unknown; id?: unknown; metadata?: unknown }>
+          const folders: string[] = []
+          let removedObject = false
+          for (const entry of entries) {
+            if (typeof entry.name !== 'string' || !entry.name) continue
+            const path = storageListEntryPath(currentPrefix, entry.name)
+            if (!isSafeStoragePath(path, prefix)) throw new Error('Resource storage contains an unsafe resource storage entry')
+            if (entry.id != null || entry.metadata != null) {
+              await deleteObject(path)
+              removedObject = true
+            } else {
+              folders.push(`${path.replace(/\/+$/, '')}/`)
+            }
+          }
+          let visitedFolder = false
+          for (const folderPrefix of [...new Set(folders)]) {
+            if (!visitedPrefixes.has(folderPrefix)) {
+              visitedFolder = true
+              await clearPrefix(folderPrefix)
+            }
+          }
+          // Object deletion shifts the first page; always restart at offset zero.
+          // Directory-only pages can legitimately contain virtual empty folders.
+          if (!removedObject && !visitedFolder) break
         }
-        if (objects.length === 0) break
       }
+      await clearPrefix(prefix)
       const deleted = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}`, { method: 'DELETE', headers: { ...headers, prefer: 'return=representation' } })
       if (!deleted.ok) throw new Error(`Resource Pack deletion failed (${deleted.status})`)
       return (await deleted.json() as Array<unknown>).length > 0
@@ -341,6 +363,25 @@ export function toResourceElement(row: Record<string, unknown>): ResourceElement
 
 function isSafeStoragePath(path: string, prefix: string): boolean {
   return path.startsWith(prefix) && path.slice(prefix.length).split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+function storageListEntryPath(prefix: string, name: string): string {
+  const trimmedName = name.endsWith('/') ? name.slice(0, -1) : name
+  return trimmedName.startsWith(prefix) ? trimmedName : `${prefix}${trimmedName}`
+}
+
+async function safeStorageFailureDetail(response: Response): Promise<string> {
+  const body = await response.text().catch(() => '')
+  if (!body) return ''
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>
+    const detail = [parsed.code, parsed.message, parsed.error].find(value => typeof value === 'string')
+    if (typeof detail !== 'string') return ''
+    const normalized = detail.trim().slice(0, 240)
+    return normalized && [...normalized].every(character => character >= ' ' && character !== '\u007f') ? `: ${normalized}` : ''
+  } catch {
+    return ''
+  }
 }
 
 export function sanitizeStorageBasename(name: string): string {
