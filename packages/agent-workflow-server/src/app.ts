@@ -1410,6 +1410,13 @@ export function createAgentWorkflowApp(
       const bound = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
       const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId)
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: result.path ? 'resource.integrated' : 'resource.bound',
+        targetType: 'project_asset_slot',
+        targetId: `${c.req.param('id')}:${requirement.slotId}`,
+        metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, reasons: selection.reasons, ...(result.path ? { path: result.path } : {}) },
+      })
       return c.json({ manifest: result.manifest, slot: result.slot, selection, ...(result.path ? { path: result.path } : {}), boundSlot: bound.slot })
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Resource binding failed' }, 400)
