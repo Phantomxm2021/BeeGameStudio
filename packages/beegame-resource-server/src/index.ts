@@ -18,6 +18,7 @@ if (import.meta.main) {
     importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey, uploadConcurrency: Number(process.env.BEEGAME_RESOURCE_UPLOAD_CONCURRENCY || 1) }) : undefined,
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
+    ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
       const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
       if (!(file instanceof File)) throw new Error('Element file is required')
@@ -40,6 +41,19 @@ if (import.meta.main) {
 }
 
 type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string }
+
+export function createSupabaseResourceAuditWriter(options: { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation }) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  return async (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => {
+    const response = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_audit_events`, {
+      method: 'POST',
+      headers: { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=minimal' },
+      body: JSON.stringify({ actor_id: event.actorId, action: event.action, pack_id: event.packId ?? null, element_id: event.elementId ?? null, metadata: event.metadata ?? {} }),
+    })
+    if (!response.ok) throw new Error(`Resource audit persistence failed (${response.status})`)
+  }
+}
 
 /** Keeps storage object keys and database paths in lock-step for explorer edits. */
 export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthoringOptions) {

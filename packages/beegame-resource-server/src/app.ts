@@ -35,6 +35,7 @@ export type BeeGameResourceServerAppOptions = {
   updateResourceFolder?: (packId: string, folderId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourceFolder?: (packId: string, folderId: string) => Promise<boolean>
   getElementResourceUrl?: (packId: string, elementId: string) => Promise<string>
+  recordAuditEvent?: (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => Promise<void>
   serviceSelectionToken?: string
 }
 
@@ -44,6 +45,9 @@ export function createBeeGameResourceServerApp(
   const resolveUser = options.currentUserResolver ??
     createConfiguredResourceUserResolver() ??
     (isLocalResourceFallbackAllowed() ? createLocalResourceUserResolver() : (() => undefined))
+  const audit = async (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => {
+    try { await options.recordAuditEvent?.(event) } catch (error) { console.warn('Resource audit write failed:', error) }
+  }
   return {
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
@@ -86,6 +90,7 @@ export function createBeeGameResourceServerApp(
             license: typeof body.license === 'string' ? body.license : 'unassigned',
             version: typeof body.version === 'string' ? body.version : '0.1.0', status: 'draft',
           }, { createdBy: user!.id })
+          await audit({ actorId: user!.id, action: 'pack.created', packId: pack.id, metadata: { primaryCategory: pack.primaryCategory, dimension: pack.dimension } })
           return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'invalid_pack', error instanceof Error ? error.message : 'Invalid Pack'), options.corsOrigin)
@@ -93,7 +98,12 @@ export function createBeeGameResourceServerApp(
       }
       if (request.method === 'POST' && new URL(request.url).pathname === '/api/resource-packs/import') {
         if (!options.importResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource import is not configured'), options.corsOrigin)
-        try { return corsResponse(Response.json({ pack: await options.importResourcePack(request) }, { status: 201 }), options.corsOrigin) } catch (error) {
+        try {
+          const pack = await options.importResourcePack(request)
+          const packId = pack && typeof pack === 'object' && 'id' in pack && typeof (pack as { id?: unknown }).id === 'string' ? (pack as { id: string }).id : undefined
+          await audit({ actorId: user!.id, action: 'pack.imported', ...(packId ? { packId } : {}) })
+          return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
+        } catch (error) {
           if (error instanceof ResourceImportError) return corsResponse(jsonError(error.status, error.code, error.message), options.corsOrigin)
           return corsResponse(jsonError(500, 'import_failed', error instanceof Error ? error.message : 'Resource import failed'), options.corsOrigin)
         }
@@ -101,7 +111,9 @@ export function createBeeGameResourceServerApp(
       const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
       if (request.method === 'DELETE' && patchMatch) {
         if (!options.deleteResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource deletion is not configured'), options.corsOrigin)
-        if (!await options.deleteResourcePack(decodeURIComponent(patchMatch[1]))) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        const packId = decodeURIComponent(patchMatch[1])
+        if (!await options.deleteResourcePack(packId)) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'pack.deleted', packId })
         return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       }
       if (request.method === 'PATCH' && patchMatch) {
@@ -109,6 +121,7 @@ export function createBeeGameResourceServerApp(
         const body = await request.json() as Record<string, unknown>
         const pack = await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body)
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'pack.updated', packId: decodeURIComponent(patchMatch[1]), metadata: { fields: Object.keys(body).sort() } })
         return corsResponse(Response.json({ pack }), options.corsOrigin)
       }
       const coverMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/cover$/)
@@ -119,7 +132,10 @@ export function createBeeGameResourceServerApp(
         if (!(file instanceof File) || !isSupportedCover(file)) {
           return corsResponse(jsonError(400, 'invalid_cover', 'Cover must be a jpg, jpeg, png, webp, gif, mp4, or webm file'), options.corsOrigin)
         }
-        return corsResponse(Response.json({ pack: await options.uploadPackCover(decodeURIComponent(coverMatch[1]), request) }), options.corsOrigin)
+        const packId = decodeURIComponent(coverMatch[1])
+        const pack = await options.uploadPackCover(packId, request)
+        await audit({ actorId: user!.id, action: 'pack.cover_uploaded', packId, metadata: { filename: file.name } })
+        return corsResponse(Response.json({ pack }), options.corsOrigin)
       }
       const folderMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders$/)
       if (folderMatch && request.method === 'GET') {
@@ -160,6 +176,7 @@ export function createBeeGameResourceServerApp(
       if (publishMatch && request.method === 'POST') {
         try {
           const pack = await options.repository.publishPack(decodeURIComponent(publishMatch[1]))
+          await audit({ actorId: user!.id, action: 'pack.published', packId: decodeURIComponent(publishMatch[1]) })
           return corsResponse(Response.json({ pack }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'publish_blocked', error instanceof Error ? error.message : 'Pack cannot be published'), options.corsOrigin)

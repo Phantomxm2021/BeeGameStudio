@@ -38,6 +38,21 @@ describe('resource service app', () => {
     expect(await response.json()).toEqual({ packs: [expect.objectContaining({ id: 'pack-1', elementCount: 1 })] })
   })
 
+  test('writes a Pack creation audit event without exposing audit storage to the browser', async () => {
+    const events: Array<{ actorId: string; action: string; packId?: string }> = []
+    const app = createBeeGameResourceServerApp({
+      repository: createInMemoryResourceRepository({ packs: [], elements: [] }),
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      recordAuditEvent: async event => { events.push(event) },
+    })
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Pack', style: 'Stylized', gameTypes: ['Adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: [], license: 'internal', version: '1.0.0' }),
+    }))
+    expect(response.status).toBe(201)
+    expect(events).toEqual([expect.objectContaining({ actorId: 'admin-1', action: 'pack.created' })])
+  })
+
   test('accepts an Admin Pack import through the multipart route', async () => {
     const app = createBeeGameResourceServerApp({
       repository,
