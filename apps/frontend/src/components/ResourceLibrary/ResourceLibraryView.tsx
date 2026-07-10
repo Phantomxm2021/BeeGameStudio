@@ -66,6 +66,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
   const [elements, setElements] = useState<ResourceElement[]>([]);
+  const [loadedElementCategories, setLoadedElementCategories] = useState<string[]>([]);
   const [folders, setFolders] = useState<ResourceFolder[]>([]);
   const [selectedElement, setSelectedElement] = useState<ResourceElement | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | undefined>();
@@ -118,6 +119,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       setActiveCategory(category);
       setActiveFolderPath(undefined);
       setElements(nextElements);
+      setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包加载失败');
@@ -140,6 +142,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     try {
       const nextElements = await apiClient.listElements(selectedPack.id, category, folderPath);
       setElements(nextElements);
+      setLoadedElementCategories((current) => [...new Set([...current, ...nextElements.map((element) => element.category)])]);
       setSelectedElement(nextElements[0] || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '元素加载失败');
@@ -183,6 +186,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       try {
         const next = await apiClient.addElement(selectedPack.id, file, uploadCategory, uploadFolderPath);
         setElements((current) => [...current, next]);
+        setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
         setSelectedElement(next);
       } catch (err) {
         setElementUpload((current) => current ? { ...current, failed: [...current.failed, file.name] } : current);
@@ -200,6 +204,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         pack={selectedPack}
         isZh={isZh}
         elements={elements}
+        loadedElementCategories={loadedElementCategories}
         selectedElement={selectedElement}
         activeCategory={activeCategory}
         activeFolderPath={activeFolderPath}
@@ -209,6 +214,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
           closeResourcePackRoute();
           setSelectedPack(null);
           setSelectedElement(null);
+          setLoadedElementCategories([]);
           setFolders([]);
         }}
         onCategory={selectCategory}
@@ -369,6 +375,7 @@ function PackBrowser({
   pack,
   isZh,
   elements,
+  loadedElementCategories,
   selectedElement,
   activeCategory,
   activeFolderPath,
@@ -389,6 +396,7 @@ function PackBrowser({
   pack: ResourcePackSummary;
   isZh: boolean;
   elements: ResourceElement[];
+  loadedElementCategories: string[];
   selectedElement: ResourceElement | null;
   activeCategory?: string;
   loading: boolean;
@@ -407,8 +415,8 @@ function PackBrowser({
   onPublish: () => Promise<void>;
 }) {
   const categories = useMemo(
-    () => [...new Set([...(pack.categories || []), ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
-    [elements, pack.categories],
+    () => [...new Set([...(pack.categories || []), ...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
+    [elements, loadedElementCategories, pack.categories],
   );
   return (
     <section className="flex min-h-full flex-col bg-zinc-950 px-5 py-4 text-zinc-100">

@@ -31,6 +31,7 @@ const element: ResourceElement = {
   dependencies: [],
   status: 'ready',
 };
+const materialElement: ResourceElement = { ...element, id: 'element-2', name: 'Wood', category: 'materials' };
 
 const api = {
   createPack: async () => ({ ...pack, status: 'draft', elementCount: 0 }),
@@ -85,14 +86,16 @@ describe('ResourceLibraryView', () => {
   test('derives tree categories from loaded elements when Pack metadata is empty', async () => {
     const user = userEvent.setup();
     const packWithoutCategories = { ...pack, categories: [] };
-    const listElements = vi.fn().mockResolvedValue([element]);
+    const listElements = vi.fn(async (_packId: string, category?: string) => category === 'materials' ? [materialElement] : category === 'models' ? [element] : [element, materialElement]);
     const apiClient = { ...api, listPacks: async () => [packWithoutCategories], getPack: async () => packWithoutCategories, listElements };
     render(<ResourceLibraryView apiClient={apiClient} />);
     await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
     const fileTree = screen.getByText('Pack 文件').closest('aside');
     expect(fileTree).not.toBeNull();
     await user.click(await within(fileTree!).findByText('模型'));
-    expect(listElements).toHaveBeenLastCalledWith('pack-1', 'models', undefined);
+    expect(within(fileTree!).getByText('材质')).toBeInTheDocument();
+    await user.click(within(fileTree!).getByText('材质'));
+    expect(listElements).toHaveBeenLastCalledWith('pack-1', 'materials', undefined);
   });
 
   test('localizes Pack primary categories in card and detail metadata', async () => {
