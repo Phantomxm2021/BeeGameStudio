@@ -18,7 +18,7 @@ export type ResourcePackSummary = {
   gameTypes?: readonly string[]
   dimension: '2D' | '3D' | 'agnostic'
   primaryCategory: ResourcePackPrimaryCategory
-  categories?: readonly string[]
+  categories: readonly string[]
   license?: string
   version?: string
   status?: string
