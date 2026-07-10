@@ -39,6 +39,7 @@ import type {
   AppendAuditEventInput,
   BeeGameAuditEvent,
 } from './audit-events-store'
+import type { BeeGameSecretMigrationMetadata } from './local-data-migration'
 import {
   normalizeBeeGameAssetManifest,
   type BeeGameAssetManifest,
@@ -665,6 +666,19 @@ export class SupabaseDashboardStore {
       })
     }
     return { modelConfigs, webTools, mcpServers }
+  }
+
+  async recordSecretMigration(
+    ownerId: string,
+    metadata: BeeGameSecretMigrationMetadata,
+  ): Promise<BeeGameAuditEvent> {
+    return this.appendAuditEvent(ownerId, {
+      actorId: ownerId,
+      action: 'secret.migrated',
+      targetType: 'secret',
+      targetId: 'migration',
+      metadata,
+    })
   }
 
   async saveWebTools(

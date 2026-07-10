@@ -1155,4 +1155,46 @@ describe('SupabaseDashboardStore', () => {
       expect.objectContaining({ apiKeyPreview: 'sk-n...cret' }),
     ])
   })
+
+  test('records local migration secret counts without values or ids', async () => {
+    let auditBody: Record<string, unknown> | undefined
+    globalThis.fetch = (async (url, init) => {
+      if (String(url).includes('/beegame_audit_events')) {
+        auditBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return Response.json([{
+          id: 'audit_1',
+          created_at: '2026-07-10T00:00:00.000Z',
+          ...auditBody,
+        }])
+      }
+      return Response.json([])
+    }) as typeof fetch
+
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+    })
+    await store.recordSecretMigration('owner_1', {
+      modelConfigs: 2,
+      webTools: 1,
+      mcpServers: 3,
+      count: 6,
+    })
+
+    expect(auditBody).toEqual(expect.objectContaining({
+      actor_id: 'owner_1',
+      action: 'secret.migrated',
+      metadata: {
+        modelConfigs: 2,
+        webTools: 1,
+        mcpServers: 3,
+        count: 6,
+        targetType: 'secret',
+        targetId: 'migration',
+      },
+    }))
+    expect(JSON.stringify(auditBody)).not.toContain('secret-value')
+    expect(JSON.stringify(auditBody)).not.toContain('secret-id')
+  })
 })

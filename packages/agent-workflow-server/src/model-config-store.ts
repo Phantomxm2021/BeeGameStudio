@@ -48,16 +48,16 @@ export function loadModelConfigsFromStore(
     throw new Error('Unsupported model config store format')
   }
 
-  const { configs, hasLegacySecrets } = decryptModelConfigSnapshot(payload.configs)
+  const { configs, legacySecretCount } = decryptModelConfigSnapshot(payload.configs)
   importModelConfigSnapshot(configs)
-  if (hasLegacySecrets) {
+  if (legacySecretCount > 0) {
     saveModelConfigsToStore(options)
     appendAuditEvent({
       actorId: 'system',
       action: 'secret.migrated',
       targetType: 'model_config',
       targetId: 'local',
-      metadata: { count: configs.length },
+      metadata: { count: legacySecretCount },
     }, { dataDir: options.dataDir })
   }
 }
@@ -71,8 +71,8 @@ export function readModelConfigSnapshotFromStore(
   if (payload.version !== 1 || !Array.isArray(payload.configs)) {
     throw new Error('Unsupported model config store format')
   }
-  const { configs, hasLegacySecrets } = decryptModelConfigSnapshot(payload.configs)
-  if (hasLegacySecrets) {
+  const { configs, legacySecretCount } = decryptModelConfigSnapshot(payload.configs)
+  if (legacySecretCount > 0) {
     mkdirSync(dirname(filePath), { recursive: true })
     const encryptedPayload: StorePayload = {
       version: 1,
@@ -89,7 +89,7 @@ export function readModelConfigSnapshotFromStore(
       action: 'secret.migrated',
       targetType: 'model_config',
       targetId: 'local',
-      metadata: { count: configs.length },
+      metadata: { count: legacySecretCount },
     }, { dataDir: options.dataDir })
   }
   return configs
@@ -115,16 +115,16 @@ export function saveModelConfigsToStore(
 
 function decryptModelConfigSnapshot(
   configs: ModelConfigSnapshotRecord[],
-): { configs: ModelConfigSnapshotRecord[]; hasLegacySecrets: boolean } {
-  let hasLegacySecrets = false
+): { configs: ModelConfigSnapshotRecord[]; legacySecretCount: number } {
+  let legacySecretCount = 0
   const decrypted = configs.map(config => {
-    if (!isSecretEnvelope(config.apiKey)) hasLegacySecrets = true
+    if (!isSecretEnvelope(config.apiKey)) legacySecretCount += 1
     return {
       ...config,
       apiKey: decryptSecret(config.apiKey, 'model-config:api-key'),
     }
   })
-  return { configs: decrypted, hasLegacySecrets }
+  return { configs: decrypted, legacySecretCount }
 }
 
 function getStoreFilePath(options: ModelConfigStoreOptions): string {

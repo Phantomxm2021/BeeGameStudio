@@ -151,24 +151,24 @@ function loadMcpServers(options: McpServersStoreOptions): McpServerConfig[] {
   if (payload.version !== 1 || !Array.isArray(payload.servers)) {
     throw new Error('Unsupported MCP server store format')
   }
-  let hasLegacySecrets = false
+  let legacySecretCount = 0
   const servers = payload.servers.map(server => {
     const env = (server.env ?? []).map(item => {
-      if (item.value && !isSecretEnvelope(item.value)) hasLegacySecrets = true
+      if (item.value && !isSecretEnvelope(item.value)) legacySecretCount += 1
       return item.value === undefined
         ? item
         : { ...item, value: decryptSecret(item.value, `mcp-server:env:${item.key}`) }
     })
     return normalizeMcpServerInput({ ...server, env }, server)
   }).filter(server => server.name)
-  if (hasLegacySecrets) {
+  if (legacySecretCount > 0) {
     saveMcpServers(servers, options)
     appendAuditEvent({
       actorId: 'system',
       action: 'secret.migrated',
       targetType: 'mcp_server',
       targetId: 'local',
-      metadata: { count: servers.length },
+      metadata: { count: legacySecretCount },
     }, { dataDir: options.dataDir })
   }
   return servers

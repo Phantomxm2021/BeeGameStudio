@@ -40,6 +40,13 @@ export type BeeGameLocalMigrationSummary = {
   mcpServers: number
 }
 
+export type BeeGameSecretMigrationMetadata = {
+  modelConfigs: number
+  webTools: number
+  mcpServers: number
+  count: number
+}
+
 export type BeeGameLocalSessionMetadata = {
   id: string
   projectId: string
@@ -76,6 +83,10 @@ export type BeeGameLocalMigrationStore = {
   upsertMcpServer(
     ownerId: string,
     server: McpServerConfig,
+  ): Promise<unknown>
+  recordSecretMigration?(
+    ownerId: string,
+    metadata: BeeGameSecretMigrationMetadata,
   ): Promise<unknown>
 }
 
@@ -128,7 +139,37 @@ export async function migrateBeeGameLocalDashboardData(
   for (const server of data.mcpServers) {
     await options.store.upsertMcpServer(ownerId, server)
   }
+  if (options.store.recordSecretMigration) {
+    const metadata = getSecretMigrationMetadata(data, options.includePlatformSettings === true)
+    if (metadata.count > 0) {
+      await options.store.recordSecretMigration(ownerId, metadata)
+    }
+  }
   return summary
+}
+
+function getSecretMigrationMetadata(
+  data: BeeGameLocalDashboardData,
+  includePlatformSettings: boolean,
+): BeeGameSecretMigrationMetadata {
+  const modelConfigs = includePlatformSettings
+    ? data.modelConfigs.filter(config => typeof config.apiKey === 'string' && config.apiKey.length > 0).length
+    : 0
+  const webTools = includePlatformSettings
+    ? [data.webTools.braveApiKey, data.webTools.exaApiKey]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .length
+    : 0
+  const mcpServers = data.mcpServers
+    .flatMap(server => server.env ?? [])
+    .filter(item => typeof item.value === 'string' && item.value.length > 0)
+    .length
+  return {
+    modelConfigs,
+    webTools,
+    mcpServers,
+    count: modelConfigs + webTools + mcpServers,
+  }
 }
 
 function loadLocalProjects(dataDir: string): BeeGameProjectMetadata[] {

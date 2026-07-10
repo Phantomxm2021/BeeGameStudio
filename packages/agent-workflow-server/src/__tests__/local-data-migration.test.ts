@@ -11,6 +11,8 @@ import { upsertMcpServer } from '../mcp-servers-store'
 import { BeeGameProjectMetadataStore, getBeeGameProjectDatabasePath } from '../project-metadata-store'
 import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
 import { saveWebToolsConfig } from '../web-tools-store'
+import { listAuditEvents } from '../audit-events-store'
+import { encryptSecret } from '../security/secret-crypto'
 
 describe('local data migration', () => {
   const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -59,6 +61,58 @@ describe('local data migration', () => {
     expect(loadBeeGameLocalDashboardData(dataDir).modelConfigs[0]?.apiKey)
       .toBe('sk-local-secret')
     expect(readFileSync(join(dataDir, 'model-configs.json'), 'utf8')).toBe(migrated)
+  })
+
+  test('audits the number of legacy secrets migrated instead of records', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-secret-counts-'))
+    writeFileSync(join(dataDir, 'model-configs.json'), `${JSON.stringify({
+      version: 1,
+      configs: [
+        {
+          id: 'legacy-model',
+          ownerId: 'dashboard-local',
+          name: 'Legacy',
+          provider: 'openai-compatible',
+          apiKey: 'legacy-model-secret',
+          models: {},
+        },
+        {
+          id: 'encrypted-model',
+          ownerId: 'dashboard-local',
+          name: 'Encrypted',
+          provider: 'openai-compatible',
+          apiKey: encryptSecret('encrypted-model-secret', 'model-config:api-key'),
+          models: {},
+        },
+      ],
+    })}\n`, 'utf8')
+    writeFileSync(join(dataDir, 'web-tools.json'), `${JSON.stringify({
+      version: 1,
+      config: {
+        braveApiKey: 'legacy-brave-secret',
+        exaApiKey: encryptSecret('encrypted-exa-secret', 'web-tools:exa-api-key'),
+      },
+    })}\n`, 'utf8')
+    writeFileSync(join(dataDir, 'mcp-servers.json'), `${JSON.stringify({
+      version: 1,
+      servers: [{
+        name: 'mixed-server',
+        env: [
+          { key: 'LEGACY_ONE', value: 'legacy-one-secret' },
+          { key: 'LEGACY_TWO', value: 'legacy-two-secret' },
+          { key: 'ENCRYPTED', value: encryptSecret('encrypted-secret', 'mcp-server:env:ENCRYPTED') },
+        ],
+      }],
+    })}\n`, 'utf8')
+
+    loadBeeGameLocalDashboardData(dataDir)
+
+    const events = listAuditEvents({ dataDir })
+    expect(events.map(event => event.metadata)).toEqual([
+      { count: 1 },
+      { count: 1 },
+      { count: 2 },
+    ])
   })
 
   test('dry-runs by default and applies project records when requested', async () => {
@@ -187,6 +241,59 @@ describe('local data migration', () => {
       ownerId: '00000000-0000-0000-0000-000000000001',
       apiKey: 'sk-local-secret',
     }))
+  })
+
+  test('records destination secret migration counts without secret values or ids', async () => {
+    const dataDir = await createLocalDashboardData()
+    const auditCalls: unknown[] = []
+    const store = {
+      upsertProject: async () => undefined,
+      upsertSession: async () => undefined,
+      upsertModelConfig: async () => undefined,
+      saveRuntimeSettings: async () => undefined,
+      saveWebTools: async () => undefined,
+      upsertMcpServer: async () => undefined,
+      recordSecretMigration: async (_ownerId: string, metadata: unknown) => {
+        auditCalls.push(metadata)
+      },
+    }
+
+    await migrateBeeGameLocalDashboardData({
+      ownerId: '00000000-0000-0000-0000-000000000001',
+      dataDir,
+      store,
+      dryRun: false,
+      includePlatformSettings: true,
+    })
+
+    expect(auditCalls).toEqual([{
+      modelConfigs: 1,
+      webTools: 1,
+      mcpServers: 1,
+      count: 3,
+    }])
+    expect(JSON.stringify(auditCalls)).not.toContain('sk-local-secret')
+    expect(JSON.stringify(auditCalls)).not.toContain('project_1')
+  })
+
+  test('does not require destination audit support', async () => {
+    const dataDir = await createLocalDashboardData()
+    const store = {
+      upsertProject: async () => undefined,
+      upsertSession: async () => undefined,
+      upsertModelConfig: async () => undefined,
+      saveRuntimeSettings: async () => undefined,
+      saveWebTools: async () => undefined,
+      upsertMcpServer: async () => undefined,
+    }
+
+    await expect(migrateBeeGameLocalDashboardData({
+      ownerId: '00000000-0000-0000-0000-000000000001',
+      dataDir,
+      store,
+      dryRun: false,
+      includePlatformSettings: true,
+    })).resolves.toBeDefined()
   })
 })
 

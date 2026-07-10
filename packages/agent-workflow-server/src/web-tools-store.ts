@@ -64,15 +64,17 @@ export function loadWebToolsConfig(
       ? { exaApiKey: decryptSecret(payload.config.exaApiKey, 'web-tools:exa-api-key') }
       : {}),
   })
-  if ((typeof payload.config.braveApiKey === 'string' && !isSecretEnvelope(payload.config.braveApiKey)) ||
-    (typeof payload.config.exaApiKey === 'string' && !isSecretEnvelope(payload.config.exaApiKey))) {
+  const legacySecretCount = [payload.config.braveApiKey, payload.config.exaApiKey]
+    .filter((value): value is string => typeof value === 'string' && !isSecretEnvelope(value))
+    .length
+  if (legacySecretCount > 0) {
     persistWebToolsConfig(config, options)
     appendAuditEvent({
       actorId: 'system',
       action: 'secret.migrated',
       targetType: 'web_tools',
       targetId: 'local',
-      metadata: { count: 1 },
+      metadata: { count: legacySecretCount },
     }, { dataDir: options.dataDir })
   }
   return config
