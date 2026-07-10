@@ -25,6 +25,9 @@ type ResourceLibraryViewProps = {
 
 
 const categoryLabels: Record<string, string> = {
+  sprites: '2D 图像',
+  tilemaps: 'Tilemap',
+  scenes: '场景与地图',
   characters: '角色',
   environment: '环境',
   tiles: 'Tile',

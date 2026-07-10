@@ -2,9 +2,9 @@ export const RESOURCE_DIMENSIONS = ['2D', '3D', 'agnostic'] as const
 export type ResourceDimension = (typeof RESOURCE_DIMENSIONS)[number]
 
 export const RESOURCE_CATEGORIES = [
-  'characters',
-  'environment',
-  'tiles',
+  // Canonical categories describe the resource type, not its subject matter.
+  'sprites',
+  'tilemaps',
   'models',
   'materials',
   'animation',
@@ -13,6 +13,11 @@ export const RESOURCE_CATEGORIES = [
   'fonts',
   'audio',
   'textures',
+  'scenes',
+  // Legacy imports remain readable while new Packs use the canonical set.
+  'characters',
+  'environment',
+  'tiles',
 ] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
