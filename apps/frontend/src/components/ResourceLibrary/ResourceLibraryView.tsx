@@ -42,17 +42,18 @@ const categoryLabels: Record<string, string> = {
   textures: '贴图',
 };
 
-const primaryCategoryLabels: Record<ResourcePackPrimaryCategory, string> = {
-  '2d-art': '2D Art',
-  '3d-assets': '3D Assets',
-  'animation-rig': 'Animation/Rigging',
-  'ui-kit': 'UI Kit',
-  vfx: 'VFX',
-  audio: 'Audio',
-  fonts: 'Fonts',
-  'world-scene': 'World/Scene',
-  mixed: 'Mixed Resources',
+const primaryCategoryLabels: Record<'en' | 'zh', Record<ResourcePackPrimaryCategory, string>> = {
+  en: {
+    '2d-art': '2D Art Pack', '3d-assets': '3D Asset Pack', 'animation-rig': 'Animation/Rig Pack', 'ui-kit': 'UI Kit',
+    vfx: 'VFX Pack', audio: 'Audio Pack', fonts: 'Font Pack', 'world-scene': 'World/Scene Pack', mixed: 'Mixed Resource Pack',
+  },
+  zh: {
+    '2d-art': '2D 美术包', '3d-assets': '3D 资产包', 'animation-rig': '动画与骨骼包', 'ui-kit': 'UI Kit',
+    vfx: 'VFX 包', audio: '音频包', fonts: '字体包', 'world-scene': '世界与场景包', mixed: '综合资源包',
+  },
 };
+
+const primaryCategoryLabel = (primaryCategory: ResourcePackPrimaryCategory, isZh: boolean) => primaryCategoryLabels[isZh ? 'zh' : 'en'][primaryCategory];
 
 export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPackId = getResourcePackRoute() }: ResourceLibraryViewProps) {
   const { i18n } = useTranslation();
@@ -197,6 +198,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     return (
       <PackBrowser
         pack={selectedPack}
+        isZh={isZh}
         elements={elements}
         selectedElement={selectedElement}
         activeCategory={activeCategory}
@@ -280,7 +282,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {pagedPacks.map((pack) => (
-          <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
+          <PackCard key={pack.id} pack={pack} isZh={isZh} onOpen={() => void openPack(pack)} />
         ))}
       </div>
       {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => setCreateDialogOpen(true)} title={copy.empty} hint={copy.emptyHint} importLabel="创建 Pack" /> : null}
@@ -320,7 +322,7 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
-function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => void }) {
+function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boolean; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -333,7 +335,7 @@ function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => v
       </div>
       <h2 className="type-headline mt-4 truncate text-zinc-100">{pack.name}</h2>
       <p className="type-footnote mt-1 text-zinc-500">
-        v{pack.version || '—'} · {pack.license || '未标注授权'} · <span>{primaryCategoryLabels[pack.primaryCategory]}</span>
+        v{pack.version || '—'} · {pack.license || '未标注授权'} · <span>{primaryCategoryLabel(pack.primaryCategory, isZh)}</span>
       </p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {pack.style ? (
@@ -365,6 +367,7 @@ function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => v
 
 function PackBrowser({
   pack,
+  isZh,
   elements,
   selectedElement,
   activeCategory,
@@ -384,6 +387,7 @@ function PackBrowser({
   onUpdateElement,
 }: {
   pack: ResourcePackSummary;
+  isZh: boolean;
   elements: ResourceElement[];
   selectedElement: ResourceElement | null;
   activeCategory?: string;
@@ -402,7 +406,10 @@ function PackBrowser({
   uploadStatus: { done: number; total: number; failed: string[] } | null;
   onPublish: () => Promise<void>;
 }) {
-  const categories = useMemo(() => pack.categories || [], [pack.categories]);
+  const categories = useMemo(
+    () => [...new Set([...(pack.categories || []), ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
+    [elements, pack.categories],
+  );
   return (
     <section className="flex min-h-full flex-col bg-zinc-950 px-5 py-4 text-zinc-100">
       <div className="mb-3 flex min-h-12 items-center justify-between border-b border-white/10 pb-3">
@@ -418,7 +425,7 @@ function PackBrowser({
           <div>
             <h1 className="type-headline">{pack.name}</h1>
             <p className="type-caption-2 mt-0.5 text-zinc-500">
-              {pack.style} · {pack.dimension} · <span>{primaryCategoryLabels[pack.primaryCategory]}</span> · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
+              {pack.style} · {pack.dimension} · <span>{primaryCategoryLabel(pack.primaryCategory, isZh)}</span> · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
             </p>
           </div>
         </div>

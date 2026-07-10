@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ResourceLibraryView } from './ResourceLibraryView';
+import { closeResourcePackRoute } from './resourceLibraryRoute';
 import type { ResourceElement, ResourcePackSummary } from '../../services/resourceLibraryApi';
+import i18n from '../../i18n';
 
 const pack: ResourcePackSummary = {
   id: 'pack-1',
@@ -43,6 +45,14 @@ const api = {
 };
 
 describe('ResourceLibraryView', () => {
+  afterEach(async () => {
+    cleanup();
+    closeResourcePackRoute();
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+  });
+
   test('renders Pack cards and opens the Pack file browser', async () => {
     const user = userEvent.setup();
     render(<ResourceLibraryView apiClient={api} />);
@@ -50,7 +60,7 @@ describe('ResourceLibraryView', () => {
     expect(screen.getByText('Example Pack')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Example Pack' }));
     expect(await screen.findByText('Pack 文件')).toBeInTheDocument();
-    expect(screen.getByText('World/Scene')).toBeInTheDocument();
+    expect(screen.getByText('World/Scene Pack')).toBeInTheDocument();
     const fileTree = screen.getByText('Pack 文件').closest('aside');
     expect(fileTree).not.toBeNull();
     expect(within(fileTree!).getByText('模型')).toBeInTheDocument();
@@ -70,5 +80,29 @@ describe('ResourceLibraryView', () => {
     const inspector = screen.getByRole('complementary', { name: '元素属性' });
     expect(within(inspector).getByText('Stylized')).toBeInTheDocument();
     expect(within(inspector).getByText('2D', { selector: 'span' })).toBeInTheDocument();
+  });
+
+  test('derives tree categories from loaded elements when Pack metadata is empty', async () => {
+    const user = userEvent.setup();
+    const packWithoutCategories = { ...pack, categories: [] };
+    const listElements = vi.fn().mockResolvedValue([element]);
+    const apiClient = { ...api, listPacks: async () => [packWithoutCategories], getPack: async () => packWithoutCategories, listElements };
+    render(<ResourceLibraryView apiClient={apiClient} />);
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }));
+    const fileTree = screen.getByText('Pack 文件').closest('aside');
+    expect(fileTree).not.toBeNull();
+    await user.click(await within(fileTree!).findByText('模型'));
+    expect(listElements).toHaveBeenLastCalledWith('pack-1', 'models', undefined);
+  });
+
+  test('localizes Pack primary categories in card and detail metadata', async () => {
+    await act(async () => {
+      await i18n.changeLanguage('zh');
+    });
+    const user = userEvent.setup();
+    render(<ResourceLibraryView apiClient={api} />);
+    await waitFor(() => expect(screen.getByText('世界与场景包')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Example Pack' }));
+    expect(screen.getByText('世界与场景包')).toBeInTheDocument();
   });
 });
