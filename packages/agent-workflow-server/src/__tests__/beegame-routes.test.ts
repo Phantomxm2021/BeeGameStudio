@@ -75,6 +75,10 @@ function createAgentWorkflowApp(
   }
   return createAgentWorkflowAppBase({
     ...options,
+    outboundTargetPolicyOptions: options.outboundTargetPolicyOptions ?? {
+      resolve4: async () => ['93.184.216.34'],
+      resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+    },
     dashboardDataRoot,
     currentUser: options.currentUser ??
       (options.currentUserResolver
@@ -1257,6 +1261,10 @@ describe('beegame session routes', () => {
         sessionRunner: fake.runner,
         defaultWorkspacePath: projectsRoot,
         dashboardDataRoot: projectsRoot,
+        outboundTargetPolicyOptions: {
+          resolve4: async () => ['93.184.216.34'],
+          resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+        },
       })
       const model = createModelConfig('owner-a', {
         name: 'Primary LLM',

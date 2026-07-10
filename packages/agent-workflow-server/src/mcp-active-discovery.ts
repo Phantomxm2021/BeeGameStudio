@@ -1,5 +1,9 @@
 import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
-import { validateOutboundTarget } from './security/outbound-target-policy'
+import {
+  createPinnedUndiciDispatcher,
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 
 export type McpServerHealthStatus = 'available' | 'unavailable'
 
@@ -25,6 +29,8 @@ export type ActiveDiscoveredMcpServer = McpServerInput & {
 export type ActiveMcpDiscoveryOptions = {
   ports?: number[]
   timeoutMs?: number
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
 }
 
 const DEFAULT_DISCOVERY_PORTS = [
@@ -57,7 +63,7 @@ export async function discoverActiveMcpServers(
   )
   const tested = await Promise.all(
     candidates.map(endpoint =>
-      testMcpEndpoint(endpoint, options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      testMcpEndpoint(endpoint, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options),
     ),
   )
   const discovered = new Map<string, ActiveDiscoveredMcpServer>()
@@ -100,9 +106,9 @@ export async function testMcpServerConnection(
     return unavailable('MCP URL is required.')
   }
   if (input.transport === 'sse') {
-    return testSseEndpoint(input.url, options.timeoutMs ?? 1600)
+    return testSseEndpoint(input.url, options.timeoutMs ?? 1600, options)
   }
-  return testMcpEndpoint(input.url, options.timeoutMs ?? 1600)
+  return testMcpEndpoint(input.url, options.timeoutMs ?? 1600, options)
 }
 
 export function parsePortList(value: string | undefined): number[] | undefined {
@@ -117,15 +123,21 @@ export function parsePortList(value: string | undefined): number[] | undefined {
 async function testMcpEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
+  options: ActiveMcpDiscoveryOptions = {},
 ): Promise<McpServerTestResult> {
-  if (!await validateOutboundTarget(rawEndpoint, outboundTargetPolicyOptions())) {
-    return unavailable('Outbound URL is not permitted.')
+  const approved = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+    rawEndpoint,
+    resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+  )
+  if (!approved) {
+    return unavailable('Outbound URL is not permitted')
   }
   const endpoint = normalizeEndpoint(rawEndpoint)
   if (!endpoint) return unavailable('Invalid MCP URL.')
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const dispatcher = createPinnedUndiciDispatcher(approved)
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -147,7 +159,8 @@ async function testMcpEndpoint(
         },
       }),
       signal: controller.signal,
-    })
+      dispatcher,
+    } as RequestInit)
     const text = await response.text()
     if (!response.ok) {
       return unavailable(`MCP initialize failed with HTTP ${response.status}.`, endpoint)
@@ -192,6 +205,7 @@ async function testMcpEndpoint(
       : 'MCP initialize request failed.'
     return unavailable(message, endpoint)
   } finally {
+    if (typeof dispatcher.close === 'function') await dispatcher.close()
     clearTimeout(timeout)
   }
 }
@@ -199,15 +213,21 @@ async function testMcpEndpoint(
 async function testSseEndpoint(
   rawEndpoint: string,
   timeoutMs: number,
+  options: ActiveMcpDiscoveryOptions = {},
 ): Promise<McpServerTestResult> {
-  if (!await validateOutboundTarget(rawEndpoint, outboundTargetPolicyOptions())) {
-    return unavailable('Outbound URL is not permitted.')
+  const approved = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+    rawEndpoint,
+    resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+  )
+  if (!approved) {
+    return unavailable('Outbound URL is not permitted')
   }
   const endpoint = normalizeEndpoint(rawEndpoint)
   if (!endpoint) return unavailable('Invalid MCP URL.')
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const dispatcher = createPinnedUndiciDispatcher(approved)
   try {
     const response = await fetch(endpoint, {
       method: 'GET',
@@ -215,7 +235,8 @@ async function testSseEndpoint(
         accept: 'text/event-stream',
       },
       signal: controller.signal,
-    })
+      dispatcher,
+    } as RequestInit)
     const contentType = response.headers.get('content-type') ?? ''
     if (!response.ok) {
       return unavailable(`SSE endpoint failed with HTTP ${response.status}.`, endpoint)
@@ -236,6 +257,7 @@ async function testSseEndpoint(
       : 'SSE endpoint request failed.'
     return unavailable(message, endpoint)
   } finally {
+    if (typeof dispatcher.close === 'function') await dispatcher.close()
     clearTimeout(timeout)
     controller.abort()
   }
@@ -254,9 +276,10 @@ function normalizeEndpoint(rawEndpoint: string): string | undefined {
   }
 }
 
-function outboundTargetPolicyOptions() {
+function resolveOutboundTargetPolicyOptions(options: OutboundTargetPolicyOptions | undefined): OutboundTargetPolicyOptions {
   return {
-    allowedHosts: readAllowedOutboundHosts(),
+    ...options,
+    allowedHosts: options?.allowedHosts ?? readAllowedOutboundHosts(),
   }
 }
 

@@ -68,7 +68,6 @@ import {
   parsePortList,
   testMcpServerConnection,
 } from './mcp-active-discovery'
-import { validateOutboundTarget } from './security/outbound-target-policy'
 import {
   type AppendAuditEventInput,
 } from './audit-events-store'
@@ -127,6 +126,10 @@ import {
   resolveBeeGameSkillsConfig,
   type BeeGameSkillsConfig,
 } from '@bee-game-studio/beegame-skills-core/config'
+import {
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 
 type JsonObject = Record<string, unknown>
 
@@ -231,12 +234,37 @@ export type AgentWorkflowAppOptions = {
   currentUser?: BeeGameUserContext
   currentUserResolver?: BeeGameUserResolver
   skillsConfig?: BeeGameSkillsConfig | false
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  outboundTargetResolver?: typeof resolveApprovedOutboundTarget
 }
 
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
 ): Hono {
   const app = new Hono()
+  const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
+    ...options.outboundTargetPolicyOptions,
+    allowedHosts: options.outboundTargetPolicyOptions?.allowedHosts ?? readAllowedOutboundHosts(),
+  }
+  const resolveOutboundTarget = options.outboundTargetResolver ?? resolveApprovedOutboundTarget
+  const hasPermittedOutboundUrl = async (value: unknown): Promise<boolean> =>
+    value === undefined || value === '' ||
+    (typeof value === 'string' && Boolean(await resolveOutboundTarget(value, outboundTargetPolicyOptions)))
+  const assertPermittedOutboundUrl = async (value: string): Promise<void> => {
+    if (!await hasPermittedOutboundUrl(value)) throw new Error('Outbound URL is not permitted')
+  }
+  const assertPermittedModelConfigRuntime = async (modelConfigId: string): Promise<void> => {
+    const runtime = mapModelConfigToRuntime(modelConfigId)
+    for (const key of [
+      'ANTHROPIC_BASE_URL',
+      'OPENAI_BASE_URL',
+      'GEMINI_BASE_URL',
+      'GROK_BASE_URL',
+    ] as const) {
+      const baseUrl = runtime?.env[key]
+      if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
+    }
+  }
   const dashboardDataRoot = getDashboardDataRoot(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
@@ -758,6 +786,8 @@ export function createAgentWorkflowApp(
     const servers = await dashboardRepository.listMcpServers(c.req.raw, user)
     return c.json(await discoverActiveMcpServers(servers, {
       ports: parsePortList(c.req.query('ports')),
+      outboundTargetPolicyOptions,
+      resolveOutboundTarget,
     }))
   })
 
@@ -765,16 +795,19 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = await validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
-    return c.json(await testMcpServerConnection(toMcpServerInput(body)))
+    return c.json(await testMcpServerConnection(toMcpServerInput(body), {
+      outboundTargetPolicyOptions,
+      resolveOutboundTarget,
+    }))
   })
 
   app.post('/api/mcp-servers', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = await validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
@@ -800,7 +833,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = await validateMcpServerBody(body)
+    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
@@ -990,6 +1023,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
+        assertPermittedModelConfigRuntime,
       })
       return c.json(ensured)
     } catch (err) {
@@ -1112,6 +1146,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
+        assertPermittedModelConfigRuntime,
       })
       const snapshot = await beeGamePreviews.start({
         sessionId: ensured.session.id,
@@ -1145,6 +1180,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
+        assertPermittedModelConfigRuntime,
       })
       const snapshot = await beeGamePreviews.restart({
         sessionId: ensured.session.id,
@@ -1238,6 +1274,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
+        assertPermittedModelConfigRuntime,
       })
       const deployment = await beeGameDeployments.deploy({
         sessionId: ensured.session.id,
@@ -1367,6 +1404,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
+        assertPermittedModelConfigRuntime,
       })
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
       const uploadedUrl = await dashboardRepository.uploadAssetFile(
@@ -1485,6 +1523,7 @@ export function createAgentWorkflowApp(
         modelConfigId,
         ownerId: user.id,
         runtimeEnv,
+        assertPermittedOutboundUrl,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -1563,6 +1602,7 @@ export function createAgentWorkflowApp(
           getBearerToken(request),
           modelConfigId,
         ),
+        assertPermittedOutboundUrl,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -1731,6 +1771,7 @@ export function createAgentWorkflowApp(
     beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      assertPermittedModelConfigRuntime,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
@@ -1809,6 +1850,7 @@ export function createAgentWorkflowApp(
     undefined,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      assertPermittedModelConfigRuntime,
       getCurrentUser,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
@@ -2182,6 +2224,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
   modelConfigId?: string
   ownerId: string
   runtimeEnv?: Record<string, string>
+  assertPermittedOutboundUrl: (value: string) => Promise<void>
 }): Promise<AttachmentBuildAnalysis> {
   const configId = input.modelConfigId ?? listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
   const runtime = configId ? mapModelConfigToRuntime(configId) : undefined
@@ -2190,7 +2233,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const apiKey = env.OPENAI_API_KEY
   const model = env.OPENAI_DEFAULT_SONNET_MODEL ?? env.OPENAI_DEFAULT_OPUS_MODEL ?? env.OPENAI_DEFAULT_HAIKU_MODEL
   if (!baseUrl || !apiKey || !model) throw new Error('Attachment analysis requires an OpenAI-compatible model config')
-  await assertPermittedOutboundUrl(baseUrl)
+  await input.assertPermittedOutboundUrl(baseUrl)
 
   const sourceType = input.attachments.some(item => item.type === 'image')
     ? input.attachments.some(item => item.type === 'file') ? 'mixed' : 'image'
@@ -2262,6 +2305,7 @@ async function generateBeeGameIntakeOptions(input: {
   ownerId: string
   modelConfigId?: string
   runtimeEnv?: Record<string, string>
+  assertPermittedOutboundUrl: (value: string) => Promise<void>
 }): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
@@ -2284,7 +2328,7 @@ async function generateBeeGameIntakeOptions(input: {
   if (!baseUrl || !apiKey || !model) {
     throw new Error('BeeGame intake currently requires an OpenAI-compatible model config')
   }
-  await assertPermittedOutboundUrl(baseUrl)
+  await input.assertPermittedOutboundUrl(baseUrl)
 
   const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
     method: 'POST',
@@ -2893,6 +2937,7 @@ async function ensureBeeGameProjectSession(input: {
   beeGameSessions: BeeGameSessionManager
   dashboardRepository: DashboardRepository
   getUserDataRoot: (request?: Request) => string
+  assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
 }): Promise<{
   session: BeeGameSession
   binding: {
@@ -2936,7 +2981,7 @@ async function ensureBeeGameProjectSession(input: {
     }
   }
 
-  if (latest?.modelConfigId) await assertPermittedModelConfigRuntime(latest.modelConfigId)
+  if (latest?.modelConfigId) await input.assertPermittedModelConfigRuntime(latest.modelConfigId)
   const session = input.beeGameSessions.start({
     workspacePath,
     projectId: input.project.id,
@@ -3501,6 +3546,7 @@ function registerBeeGameSessionRoutes(
   beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
+    assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getUserDataRoot: (request?: Request) => string
     appendAuditEvent: (
@@ -3623,7 +3669,7 @@ function registerBeeGameSessionRoutes(
         body.modelConfigId,
         options.modelConfigExists,
       )
-      if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
+      if (modelConfigId) await options.assertPermittedModelConfigRuntime(modelConfigId)
       const session = beeGameSessions.start({
           workspacePath,
           ...(typeof body.projectId === 'string' && body.projectId
@@ -3757,7 +3803,7 @@ function registerBeeGameSessionRoutes(
         body.modelConfigId,
         options.modelConfigExists,
       )
-      await assertPermittedModelConfigRuntime(modelConfigId)
+      await options.assertPermittedModelConfigRuntime(modelConfigId)
       return c.json(
         beeGameSessions.updateModel(
           c.req.param('id'),
@@ -4480,7 +4526,10 @@ function toModelMap(value: unknown): {
   }
 }
 
-async function validateMcpServerBody(body: JsonObject): Promise<string | null> {
+async function validateMcpServerBody(
+  body: JsonObject,
+  hasPermittedOutboundUrl: (value: unknown) => Promise<boolean>,
+): Promise<string | null> {
   if (typeof body.name !== 'string' || !body.name.trim()) {
     return 'Missing field: name'
   }
@@ -4503,32 +4552,6 @@ async function validateMcpServerBody(body: JsonObject): Promise<string | null> {
     return 'Invalid MCP env'
   }
   return null
-}
-
-async function hasPermittedOutboundUrl(value: unknown): Promise<boolean> {
-  if (value === undefined || value === '') return true
-  return typeof value === 'string' && await validateOutboundTarget(value, {
-    allowedHosts: readAllowedOutboundHosts(),
-  })
-}
-
-async function assertPermittedOutboundUrl(value: string): Promise<void> {
-  if (!await hasPermittedOutboundUrl(value)) {
-    throw new Error('Outbound URL is not permitted')
-  }
-}
-
-async function assertPermittedModelConfigRuntime(modelConfigId: string): Promise<void> {
-  const runtime = mapModelConfigToRuntime(modelConfigId)
-  for (const key of [
-    'ANTHROPIC_BASE_URL',
-    'OPENAI_BASE_URL',
-    'GEMINI_BASE_URL',
-    'GROK_BASE_URL',
-  ] as const) {
-    const baseUrl = runtime?.env[key]
-    if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
-  }
 }
 
 function readAllowedOutboundHosts(): string[] {

@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
+import type { AgentWorkflowAppOptions } from '../app'
 import { createAgentWorkflowApp } from '../app'
 import {
   getCreditBalance,
@@ -16,6 +17,12 @@ describe('agent workflow server routes', () => {
   let testRoot = ''
   let app: ReturnType<typeof createAgentWorkflowApp>
 
+  const loopbackOutboundTargetResolver: NonNullable<AgentWorkflowAppOptions['outboundTargetResolver']> = async value => ({
+    url: new URL(value),
+    addresses: ['127.0.0.1'],
+    lookup: (_hostname, _options, callback) => callback(null, '127.0.0.1', 4),
+  })
+
   beforeEach(async () => {
     resetAgentWorkflow()
     testRoot = await mkdtemp(join(tmpdir(), 'beegame-routes-'))
@@ -23,6 +30,10 @@ describe('agent workflow server routes', () => {
       defaultWorkspacePath: testRoot,
       currentUser: testOwner,
       skillsConfig: false,
+      outboundTargetPolicyOptions: {
+        resolve4: async () => ['93.184.216.34'],
+        resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+      },
     })
   })
 
@@ -1305,6 +1316,10 @@ describe('agent workflow server routes', () => {
       const firstApp = createAgentWorkflowApp({
         modelConfigStore: { dataDir },
         currentUser: testOwner,
+        outboundTargetPolicyOptions: {
+          resolve4: async () => ['93.184.216.34'],
+          resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+        },
       })
       const createRes = await firstApp.request(
         '/api/model-configs',
@@ -1328,6 +1343,10 @@ describe('agent workflow server routes', () => {
       const secondApp = createAgentWorkflowApp({
         modelConfigStore: { dataDir },
         currentUser: testOwner,
+        outboundTargetPolicyOptions: {
+          resolve4: async () => ['93.184.216.34'],
+          resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+        },
       })
       const listRes = await secondApp.request(
         '/api/model-configs',
@@ -1780,12 +1799,14 @@ describe('agent workflow server routes', () => {
 
   test('tests and discovers running HTTP MCP servers', async () => {
     const originalFetch = globalThis.fetch
+    let usedPinnedDispatcher = false
     globalThis.fetch = (async (url, init) => {
       const requestUrl = String(url)
       if (
         init?.method === 'POST' &&
         requestUrl === 'http://127.0.0.1:18081/mcp'
       ) {
+        usedPinnedDispatcher = Boolean((init as RequestInit & { dispatcher?: unknown }).dispatcher)
         const body = JSON.parse(String(init.body ?? '{}')) as { id?: number }
         return Response.json({
           jsonrpc: '2.0',
@@ -1810,6 +1831,7 @@ describe('agent workflow server routes', () => {
       const runtimeApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
         currentUser: testOwner,
+        outboundTargetResolver: loopbackOutboundTargetResolver,
       })
       const endpoint = 'http://127.0.0.1:18081/mcp'
       const testRes = await runtimeApp.request('/api/mcp-servers/test', {
@@ -1824,6 +1846,7 @@ describe('agent workflow server routes', () => {
         }),
       })
       expect(testRes.status).toBe(200)
+      expect(usedPinnedDispatcher).toBe(true)
       expect(await testRes.json()).toEqual(expect.objectContaining({
         ok: true,
         status: 'available',
@@ -1901,6 +1924,7 @@ describe('agent workflow server routes', () => {
       const runtimeApp = createAgentWorkflowApp({
         defaultWorkspacePath: dataDir,
         currentUser: testOwner,
+        outboundTargetResolver: loopbackOutboundTargetResolver,
       })
       const endpoint = 'http://127.0.0.1:18082/mcp'
       const testRes = await runtimeApp.request('/api/mcp-servers/test', {
@@ -2829,6 +2853,10 @@ describe('agent workflow server routes', () => {
 
       const supabaseApp = createAgentWorkflowApp({
         defaultWorkspacePath: testRoot,
+        outboundTargetPolicyOptions: {
+          resolve4: async () => ['93.184.216.34'],
+          resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+        },
         currentUserResolver: request => {
           if (request.headers.get('authorization') !== 'Bearer user-token') {
             return undefined
