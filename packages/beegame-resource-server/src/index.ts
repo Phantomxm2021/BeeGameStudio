@@ -36,6 +36,11 @@ if (import.meta.main) {
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
       return (await saved.json() as unknown[])[0]
     } : undefined,
+    updateResourceElement: baseUrl && serviceRoleKey ? async (packId, elementId, body) => {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(toElementRow(body)) })
+      if (!response.ok) throw new Error(`Resource element update failed (${response.status})`)
+      return (await response.json() as unknown[])[0]
+    } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)
@@ -73,4 +78,12 @@ function trimPath(value: string): string {
   while (start < end && value[start] === '/') start += 1
   while (end > start && value[end - 1] === '/') end -= 1
   return value.slice(start, end)
+}
+
+function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(body)) {
+    row[key === 'packId' ? 'pack_id' : key === 'styleOverride' ? 'style_override' : key === 'dimensionOverride' ? 'dimension_override' : key] = value
+  }
+  return row
 }

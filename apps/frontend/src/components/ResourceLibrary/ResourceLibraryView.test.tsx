@@ -33,6 +33,7 @@ const api = {
   createPack: async () => ({ ...pack, status: 'draft', elementCount: 0 }),
   listFolders: async () => [],
   createFolder: async () => ({ id: 'folder-1', packId: 'pack-1', name: 'Environment', path: 'Environment' }),
+  updateElement: async (_packId: string, _elementId: string, changes: Partial<ResourceElement>) => ({ ...element, ...changes }),
   listPacks: async () => [pack],
   getPack: async () => pack,
   listElements: async () => [element],
@@ -60,6 +61,6 @@ describe('ResourceLibraryView', () => {
     );
     const inspector = screen.getByRole('complementary', { name: '元素属性' });
     expect(within(inspector).getByText('Stylized')).toBeInTheDocument();
-    expect(within(inspector).getByText('2D')).toBeInTheDocument();
+    expect(within(inspector).getByText('2D', { selector: 'span' })).toBeInTheDocument();
   });
 });

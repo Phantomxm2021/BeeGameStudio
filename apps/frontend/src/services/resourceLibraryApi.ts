@@ -133,6 +133,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       )
       return result.element
     },
+    async updateElement(packId: string, elementId: string, body: Partial<ResourceElement>): Promise<ResourceElement> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element update failed (${response.status})`, response.status, result.error?.code || 'element_update_failed')
+      return result.element
+    },
   }
 }
 

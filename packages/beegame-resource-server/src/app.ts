@@ -21,6 +21,7 @@ export type BeeGameResourceServerAppOptions = {
   importResourcePack?: (request: Request) => Promise<unknown>
   updateResourcePack?: (packId: string, body: Record<string, unknown>) => Promise<unknown>
   addResourceElement?: (packId: string, request: Request) => Promise<unknown>
+  updateResourceElement?: (packId: string, elementId: string, body: Record<string, unknown>) => Promise<unknown>
 }
 
 export function createBeeGameResourceServerApp(
@@ -93,6 +94,12 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'POST' && elementMatch) {
         if (!options.addResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element upload is not configured'), options.corsOrigin)
         return corsResponse(Response.json({ element: await options.addResourceElement(decodeURIComponent(elementMatch[1]), request) }, { status: 201 }), options.corsOrigin)
+      }
+      const elementPatchMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)$/)
+      if (request.method === 'PATCH' && elementPatchMatch) {
+        if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
+        const body = await request.json() as Record<string, unknown>
+        return corsResponse(Response.json({ element: await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body) }), options.corsOrigin)
       }
       return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
     },

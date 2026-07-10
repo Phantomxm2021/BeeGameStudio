@@ -13,6 +13,7 @@ type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder'
+  | 'updateElement'
 >;
 
 type ResourceLibraryViewProps = {
@@ -169,6 +170,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         }}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
+        onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
       />
     );
   }
@@ -323,6 +325,7 @@ function PackBrowser({
   onDropFile,
   folders,
   onCreateFolder,
+  onUpdateElement,
 }: {
   pack: ResourcePackSummary;
   elements: ResourceElement[];
@@ -338,6 +341,7 @@ function PackBrowser({
   onDropFile: (file: File) => void;
   folders: ResourceFolder[];
   onCreateFolder: (name: string) => Promise<void>;
+  onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
@@ -446,7 +450,7 @@ function PackBrowser({
           ) : null}
           <div className="grid min-h-[520px] place-items-center rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-800 via-zinc-900 to-black p-5">
             {selectedElement ? (
-              <Preview element={selectedElement} pack={pack} />
+              <Preview element={selectedElement} pack={pack} onSave={onUpdateElement} />
             ) : (
               <div className="type-footnote text-zinc-600">
                 {loading ? '正在加载…' : '请选择一个元素'}
@@ -488,7 +492,7 @@ function TreeRow({
   );
 }
 
-function Preview({ element, pack }: { element: ResourceElement; pack: ResourcePackSummary }) {
+function Preview({ element, pack, onSave }: { element: ResourceElement; pack: ResourcePackSummary; onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void> }) {
   return (
     <div className="relative h-full w-full rounded-2xl bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <div className="absolute left-4 top-4 rounded-lg border border-white/10 bg-black/40 px-2 py-1 type-caption-2 text-zinc-400">
@@ -497,7 +501,7 @@ function Preview({ element, pack }: { element: ResourceElement; pack: ResourcePa
       <div className="grid h-full place-items-center text-8xl">
         {element.preview?.kind === 'image' ? '🧙' : <File className="h-20 w-20 text-zinc-500" />}
       </div>
-      <ResourceInspectorOverlay element={element} pack={pack} />
+      <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} />
     </div>
   );
 }
@@ -505,10 +509,19 @@ function Preview({ element, pack }: { element: ResourceElement; pack: ResourcePa
 function ResourceInspectorOverlay({
   element,
   pack,
+  onSave,
 }: {
   element: ResourceElement;
   pack: ResourcePackSummary;
+  onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
 }) {
+  const [kind, setKind] = useState(element.kind);
+  const [category, setCategory] = useState(element.category);
+  const [styleOverride, setStyleOverride] = useState(element.styleOverride || '');
+  const [dimensionOverride, setDimensionOverride] = useState(element.dimensionOverride || 'agnostic');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); }, [element]);
+  const save = async () => { setSaving(true); try { await onSave(element.id, { kind, category, styleOverride: styleOverride || undefined, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'] }); } finally { setSaving(false); } };
   return (
     <aside
       role="complementary"
@@ -532,8 +545,10 @@ function ResourceInspectorOverlay({
       </div>
       <div className="space-y-2 border-t border-white/10 pt-3">
         <Property label="继承 Pack" value={pack.name} />
-        <Property label="风格" value={element.styleOverride || pack.style} />
-        <Property label="表现" value={element.dimensionOverride || pack.dimension} />
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">分类</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="characters">角色</option><option value="environment">环境</option><option value="models">模型</option><option value="ui">UI</option><option value="vfx">特效</option><option value="audio">音频</option><option value="fonts">字体</option><option value="textures">贴图</option></select></label>
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">类型</span><input value={kind} onChange={(event) => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2" /></label>
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><input value={styleOverride} onChange={(event) => setStyleOverride(event.target.value)} placeholder={pack.style} className="glass-control rounded-lg px-2 py-1 type-caption-2" /><span className="type-caption-2 text-zinc-600">当前：<span>{styleOverride || pack.style}</span></span></label>
+        <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
         <Property label="路径" value={element.path} />
         <Property label="状态" value={element.status} />
         <Property
@@ -543,6 +558,7 @@ function ResourceInspectorOverlay({
             .join(' · ')}
         />
       </div>
+      <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存属性'}</button>
       <p className="type-caption-2 mt-3 border-t border-white/10 pt-3 text-zinc-500">
         元素继承 Pack 的风格与表现维度，AI 将基于这些约束进行匹配。
       </p>
