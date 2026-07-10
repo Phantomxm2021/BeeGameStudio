@@ -13,6 +13,7 @@ interface LandingActionsProps {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     creditBalance?: number;
+    canManageResources?: boolean;
     onToggleSettings: () => void;
     onToggleHistory: () => void;
     onOpenCreditStore: () => void;
@@ -39,6 +40,7 @@ export function LandingActions({
     onOpenProfile,
     onOpenLogin,
     onSignOut,
+    canManageResources,
 }: LandingActionsProps) {
     return (
         <AccountActionsMenu
@@ -54,6 +56,7 @@ export function LandingActions({
             currentUserEmail={currentUserEmail}
             currentUserAvatarUrl={currentUserAvatarUrl}
             creditBalance={creditBalance}
+            canManageResources={canManageResources}
             onToggleSettings={onToggleSettings}
             onToggleHistory={onToggleHistory}
             onOpenCreditStore={onOpenCreditStore}
