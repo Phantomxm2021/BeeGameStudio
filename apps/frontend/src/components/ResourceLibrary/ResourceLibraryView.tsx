@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, File, Folder, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, File, Folder, Plus, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   type ResourceElement,
@@ -81,14 +81,10 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [query, setQuery] = useState('');
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
-  const [isRootDragActive, setIsRootDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploadPhase, setUploadPhase] = useState<'uploading' | 'processing'>('uploading');
   const [elementUpload, setElementUpload] = useState<{ done: number; total: number; failed: string[] } | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const packSessionRef = useRef(0);
   const categoryRequestRef = useRef(0);
   const consumedInitialPackIdRef = useRef<string | undefined>(undefined);
@@ -156,25 +152,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const pageCount = Math.max(1, Math.ceil(visiblePacks.length / 64));
   const pagedPacks = visiblePacks.slice((page - 1) * 64, page * 64);
 
-  const importPack = async (file: File) => {
-    try {
-      setUploadProgress(4);
-      const parsed = await apiClient.importPack(file, (progress, phase) => { setUploadProgress(progress); setUploadPhase(phase); });
-      setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
-      setError('');
-      setUploadProgress(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '资源包导入失败');
-      setUploadProgress(null);
-    }
-  };
-
-  const importDroppedPacks = async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
-      if (file.type === 'application/zip' || file.name.toLowerCase().endsWith('.zip')) await importPack(file);
-    }
-  };
-
   const uploadElements = async (files: File[], destination?: UploadDestination) => {
     if (!selectedPack || files.length === 0) return;
     const session = packSessionRef.current;
@@ -237,15 +214,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   }
 
   return (
-    <section className={`relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100 ${isRootDragActive ? 'ring-2 ring-inset ring-orange-300/70' : ''}`} onDragEnter={(event) => { event.preventDefault(); setIsRootDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setIsRootDragActive(false); }} onDrop={(event) => { event.preventDefault(); setIsRootDragActive(false); void importDroppedPacks(event.dataTransfer.files); }}>
+    <section className="relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100">
       <CreateResourcePackDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={async (input) => { const created = await apiClient.createPack(input); setPacks((current) => [created, ...current]); return created; }} />
-      {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 ZIP 资源压缩包</div></div></div> : null}
-      {uploadProgress !== null ? <div role="status" className="fixed bottom-6 left-1/2 z-30 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-center justify-between"><span className="type-button text-zinc-200">{uploadPhase === 'uploading' ? '正在上传资源包…' : '正在解析并入库…'}</span><span className="type-caption-2 text-orange-200">{uploadProgress}%</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-orange-300 transition-all duration-500" style={{ width: `${uploadProgress}%` }} /></div><p className="type-caption-2 mt-2 text-zinc-500">请保持当前页面打开</p></div> : null}
-      <input ref={importInputRef} hidden type="file" accept="application/zip,.zip" onChange={(event) => {
-        const file = event.target.files?.[0];
-        if (file) void importPack(file);
-        event.target.value = '';
-      }} />
       {error ? (
         <div
           role="alert"
@@ -459,51 +429,40 @@ function PackBrowser({
   const folderPaths = new Set(folders.map(folder => folder.path));
   const categoryOnly = categories.filter(category => !folderPaths.has(category));
   return (
-    <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100">
-      <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-white/10 px-5">
-        <div className="flex items-center gap-3">
+    <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
+      <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#2d2e34] bg-[#17181d] px-[18px]">
+        <div className="flex min-w-0 items-center gap-2.5">
           <button
             type="button"
             onClick={onBack}
-            className="glass-icon-button h-9 w-9"
+            className="grid h-[29px] w-[29px] shrink-0 place-items-center rounded-full bg-[#292a30] text-zinc-300 transition-colors hover:bg-[#36373e] hover:text-white"
             aria-label="返回资源包"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-3.5 w-3.5" />
           </button>
-          <div>
-            <h1 className="type-headline">{pack.name}</h1>
-            <p className="type-caption-2 mt-0.5 text-zinc-500">
-              {pack.style} · {pack.dimension} · <span>{primaryCategoryLabel(pack.primaryCategory, isZh)}</span> · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
+          <div className="min-w-0">
+            <h1 className="truncate text-[14px] font-semibold leading-none tracking-[-0.01em] text-zinc-100">{pack.name}</h1>
+            <p className="mt-1 truncate text-[11px] leading-none text-[#8d8f99]">
+              {primaryCategoryLabel(pack.primaryCategory, isZh)} · {pack.style}{pack.gameTypes?.length ? ` · ${pack.gameTypes[0]}` : ''}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex overflow-hidden rounded-full border border-white/10">
-          <button type="button" className="secondary-pill type-button rounded-none border-0 px-3 py-1.5" onClick={onEditPack}>编辑 Pack</button>
-          <button type="button" disabled={pack.status === 'published'} className="secondary-pill type-button rounded-none border-0 border-l border-white/10 px-3 py-1.5 disabled:opacity-50" onClick={() => void onPublish()}>发布</button>
+        <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex overflow-hidden rounded-full border border-[#474850] bg-transparent">
+          <button type="button" className="h-[33px] border-0 px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05]" onClick={onEditPack}>编辑 Pack</button>
+          <button type="button" disabled={pack.status === 'published'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>发布</button>
           </div>
-          <label className="type-caption-2 flex items-center gap-2 text-zinc-400">上传分类
-            <select aria-label="上传分类" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
-              {uploadCategories.map(category => <option key={category} value={category}>{categoryLabels[category] || category}</option>)}
-            </select>
-          </label>
-          <label className="type-caption-2 flex items-center gap-2 text-zinc-400">上传目标
-            <select aria-label="上传目标" value={uploadTarget} onChange={(event) => setUploadTarget(event.target.value)} className="glass-control rounded-lg px-2 py-1 text-zinc-200">
-              {uploadCategories.map(category => <option key={category} value={`category:${category}`}>{categoryLabels[category] || category}</option>)}
-              {folders.map(folder => <option key={folder.id} value={`folder:${folder.id}`}>文件夹：{folder.path}</option>)}
-            </select>
-          </label>
-          <label className="primary-pill type-button cursor-pointer px-3 py-1.5">
+          <label className="flex h-[33px] cursor-pointer items-center rounded-full bg-[#f4f4f5] px-[13px] text-[11px] font-semibold text-[#121217] transition-colors hover:bg-white">
             ＋ 添加文件
             <input aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), selectedDestination); event.target.value = ''; }} />
           </label>
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-y-auto border-r border-white/10 py-3 pr-3">
-          <div className="mb-2 flex items-center justify-between px-2"><div className="type-caption-1 text-zinc-500">Pack 文件</div><button type="button" aria-label="新建文件夹" className="type-caption-2 text-zinc-500 hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}>＋</button></div>
+        <aside className="min-h-0 overflow-y-auto border-r border-[#2c2d33] bg-[#15161b] py-3">
+          <div className="mb-2 flex items-center justify-between px-[14px]"><div className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#90929b]">Pack 文件</div><button type="button" aria-label="新建文件夹" className="grid h-5 w-5 place-items-center rounded text-[#90929b] transition-colors hover:bg-white/[0.06] hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}><Plus className="h-3.5 w-3.5" /></button></div>
           <TreeRow
-            icon={<Folder className="h-4 w-4 text-orange-300" />}
+            icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />}
             label={pack.name}
             count={pack.elementCount}
             expanded={expandedPaths.has('root')}
@@ -513,20 +472,20 @@ function PackBrowser({
             {folders.filter(folder => !folder.parentId).map((folder) => <FolderTreeNode key={folder.id} folder={folder} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={toggleExpanded} onElement={onElement} selectedElementId={selectedElement?.id} />)}
             {categoryOnly.map((category) => (
               <div key={category}>
-                <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={categoryLabels[category] || category} count={categoryFiles(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
-                {expandedPaths.has(`category:${category}`) ? categoryFiles(category).map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
+                <TreeRow icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />} label={categoryLabels[category] || category} count={categoryFiles(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
+                {expandedPaths.has(`category:${category}`) ? categoryFiles(category).map((element) => <TreeRow key={element.id} icon={<File className="h-3.5 w-3.5 text-[#70727b]" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
               </div>
             ))}
           </div> : null}
         </aside>
-        <main className="relative min-h-0 min-w-0 overflow-hidden p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), selectedDestination); }}>
+        <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c] p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), selectedDestination); }}>
           {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
             <div role="alert" className="type-callout absolute left-4 right-4 top-4 z-30 rounded-xl bg-red-400/10 p-3 text-red-200 shadow-xl">
               {error}
             </div>
           ) : null}
-          <div className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-black p-4">
+          <div className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded-[14px] bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)] p-4">
             {selectedElement ? (
               resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
@@ -553,9 +512,9 @@ function FolderTreeNode({ folder, folders, elements, expandedPaths, onToggle, on
   const directFiles = elements.filter(element => parentPath(element.path) === folder.path);
   const children = folders.filter(candidate => candidate.parentId === folder.id);
   return <div>
-    <TreeRow icon={<Folder className="h-4 w-4 text-orange-300" />} label={folder.name} expanded={isExpanded} onClick={() => onToggle(key)} />
+    <TreeRow icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />} label={folder.name} expanded={isExpanded} onClick={() => onToggle(key)} />
     {isExpanded ? <div className="ml-3">
-      {directFiles.map((element) => <TreeRow key={element.id} icon={<File className="h-4 w-4 text-zinc-600" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElementId === element.id} onClick={() => onElement(element)} />)}
+      {directFiles.map((element) => <TreeRow key={element.id} icon={<File className="h-3.5 w-3.5 text-[#70727b]" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElementId === element.id} onClick={() => onElement(element)} />)}
       {children.map(child => <FolderTreeNode key={child.id} folder={child} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={onToggle} onElement={onElement} selectedElementId={selectedElementId} />)}
     </div> : null}
   </div>;
@@ -583,17 +542,19 @@ function TreeRow({
   onClick?: () => void;
   ariaLabel?: string;
 }) {
+  const isFolder = expanded !== undefined;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
       aria-expanded={expanded}
-      className={`type-caption-2 flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left ${active ? 'bg-orange-400/10 text-zinc-100' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+      className={`flex h-[30px] w-full items-center gap-2 rounded-[7px] px-2 text-left text-[11px] transition-colors ${active ? 'bg-[#513917] text-white' : isFolder ? 'text-[#c0c1c8] hover:bg-[#212229]' : 'text-[#9ea0aa] hover:bg-[#202127] hover:text-zinc-100'}`}
     >
+      {isFolder ? expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-[#aeb0b8]" /> : <ChevronRight className="h-3 w-3 shrink-0 text-[#aeb0b8]" /> : <span className="w-3 shrink-0" />}
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
-      {count === undefined ? null : <span className="ml-auto text-zinc-600">{count}</span>}
+      {count === undefined ? null : <span className="ml-auto text-[10px] text-[#70727b]">{count}</span>}
     </button>
   );
 }
@@ -609,9 +570,9 @@ function Preview({ element, pack, url, inspectorOpen, onOpenInspector, onCloseIn
   onSave: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
 }) {
   return (
-    <div className="relative h-full w-full min-h-0 rounded-2xl bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
+    <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
-      {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="glass-icon-button absolute right-4 top-4 z-10 px-3 py-1.5 type-caption-2">Info</button> : null}
+      {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
       <div className="grid h-full min-h-0 place-items-center p-4"><ResourcePreview element={element} url={url} onMetrics={onMetrics} /></div>
       {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
@@ -622,11 +583,11 @@ function FileInfoOverlay({ element }: { element: ResourceElement }) {
   const extension = typeof element.specs.extension === 'string' ? element.specs.extension : element.name.includes('.') ? element.name.split('.').pop() : '—';
   const size = typeof element.specs.size === 'number' ? formatFileSize(element.specs.size) : '—';
   const triangles = typeof element.specs.triangles === 'number' ? String(element.specs.triangles) : '—';
-  return <div className="absolute left-4 top-4 z-10 rounded-lg border border-white/10 bg-black/40 px-3 py-2 type-caption-2 text-zinc-300"><div>{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div>{isModelElement(element) ? <div>三角形：{triangles}</div> : null}</div>;
+  return <div className="absolute left-4 top-4 z-10 min-w-44 rounded-xl border border-white/10 bg-black/45 px-3 py-2.5 text-[11px] leading-5 text-zinc-300 shadow-lg backdrop-blur-xl"><div className="truncate font-medium text-zinc-100">{element.name}</div><div>扩展名：{extension}</div><div>大小：{size}</div>{isModelElement(element) ? <div>三角形：{triangles}</div> : null}</div>;
 }
 
 function EmptyPreviewState() {
-  return <div className="flex max-w-sm flex-col items-center text-center"><div className="mb-4 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-zinc-400"><File className="h-5 w-5" /></div><div className="type-headline text-zinc-200">尚未选择文件</div><p className="type-footnote mt-2 text-zinc-500">从左侧资源浏览器选择一个文件以查看预览和属性。</p></div>;
+  return <div className="flex max-w-sm flex-col items-center text-center"><div className="mb-[13px] grid h-[46px] w-[46px] place-items-center rounded-xl border border-[#4a4b51] bg-[#1a1b20] text-[#999ba5]"><File className="h-5 w-5" /></div><div className="text-[13px] font-semibold text-[#eeeeef]">尚未选择文件</div><p className="mt-[5px] text-[11px] text-[#8b8d97]">从左侧目录选择一个文件以查看预览与属性。</p></div>;
 }
 
 function isModelElement(element: ResourceElement) {
