@@ -576,6 +576,7 @@ function ResourceInspectorOverlay({
   const [styleOverride, setStyleOverride] = useState(element.styleOverride || '');
   const [dimensionOverride, setDimensionOverride] = useState(element.dimensionOverride || 'agnostic');
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<'info' | 'config'>('info');
   const [materialBindings, setMaterialBindings] = useState<MaterialTextureBindings>(() => decodeMaterialTextureBindings(element.specs.materialTextureBindings));
   useEffect(() => { setKind(element.kind); setCategory(element.category); setStyleOverride(element.styleOverride || ''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
   const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, category, styleOverride: styleOverride || null, dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
@@ -600,28 +601,29 @@ function ResourceInspectorOverlay({
         </div>
         <button type="button" aria-label="关闭元素信息" onClick={onClose} className="glass-icon-button h-7 w-7"><X className="h-4 w-4 text-zinc-600" /></button>
       </div>
-      <div className="space-y-2 border-t border-white/10 pt-3">
-        <Property label="继承 Pack" value={pack.name} />
+      <div className="mb-3 flex rounded-lg border border-white/10 bg-black/20 p-0.5" role="tablist" aria-label="元素面板">
+        <button type="button" role="tab" aria-selected={activeTab === 'info'} onClick={() => setActiveTab('info')} className={`type-caption-2 flex-1 rounded-md px-2 py-1.5 transition-colors ${activeTab === 'info' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>元素信息</button>
+        <button type="button" role="tab" aria-selected={activeTab === 'config'} onClick={() => setActiveTab('config')} className={`type-caption-2 flex-1 rounded-md px-2 py-1.5 transition-colors ${activeTab === 'config' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>元素配置</button>
+      </div>
+      {activeTab === 'info' ? <InspectorInfoTab element={element} pack={pack} elements={elements} /> : <div className="space-y-3 border-t border-white/10 pt-3">
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">分类</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="characters">角色</option><option value="environment">环境</option><option value="models">模型</option><option value="ui">UI</option><option value="vfx">特效</option><option value="audio">音频</option><option value="fonts">字体</option><option value="textures">贴图</option></select></label>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">类型</span><input value={kind} onChange={(event) => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2" /></label>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><input value={styleOverride} onChange={(event) => setStyleOverride(event.target.value)} placeholder={pack.style} className="glass-control rounded-lg px-2 py-1 type-caption-2" /><span className="type-caption-2 text-zinc-600">当前：<span>{styleOverride || pack.style}</span></span></label>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
-        <Property label="路径" value={element.path} />
-        <Property label="状态" value={element.status} />
-        {isModelElement(element) ? <ModelAssetMetadata specs={element.specs} elements={elements} bindings={materialBindings} onBindingChange={setMaterialBindings} /> : null}
-        <Property
-          label="规格"
-          value={Object.entries(element.specs)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join(' · ')}
-        />
-      </div>
-      <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存更改'}</button>
+        {isModelElement(element) ? <ModelMaterialBindings specs={element.specs} elements={elements} bindings={materialBindings} onBindingChange={setMaterialBindings} /> : null}
+        <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存配置'}</button>
+      </div>}
     </aside>
   );
 }
 
-function ModelAssetMetadata({ specs, elements, bindings, onBindingChange }: { specs: ResourceElement['specs']; elements: ResourceElement[]; bindings: MaterialTextureBindings; onBindingChange: (bindings: MaterialTextureBindings) => void }) {
+function InspectorInfoTab({ element, pack, elements }: { element: ResourceElement; pack: ResourcePackSummary; elements: ResourceElement[] }) {
+  const bindings = decodeMaterialTextureBindings(element.specs.materialTextureBindings);
+  const bindingValues = Object.entries(bindings).map(([slot, binding]) => `${slot} → ${elements.find(candidate => candidate.id === binding.baseColor)?.name || binding.baseColor}`);
+  return <div role="tabpanel" className="space-y-2 border-t border-white/10 pt-3"><Property label="继承 Pack" value={pack.name} /><Property label="路径" value={element.path} /><Property label="状态" value={element.status} /><Property label="分类" value={categoryLabels[element.category] || element.category} /><Property label="类型" value={element.kind} />{isModelElement(element) ? <ModelAssetMetadata specs={element.specs} bindings={bindingValues} /> : null}<MetadataList label="规格" values={Object.entries(element.specs).filter(([key]) => key !== 'materialTextureBindings' && key !== 'materialTextureCandidates').map(([key, value]) => `${key}: ${value}`)} empty="未记录规格" /></div>
+}
+
+function ModelAssetMetadata({ specs, bindings }: { specs: ResourceElement['specs']; bindings: string[] }) {
   const materialSlots = typeof specs.materialSlots === 'string' && specs.materialSlots ? specs.materialSlots.split(' · ') : [];
   const textureReferences = typeof specs.textureReferences === 'string' && specs.textureReferences ? specs.textureReferences.split(' · ') : [];
   const unresolved = typeof specs.unresolvedTextureReferences === 'string' && specs.unresolvedTextureReferences ? specs.unresolvedTextureReferences.split(' · ') : [];
@@ -633,9 +635,14 @@ function ModelAssetMetadata({ specs, elements, bindings, onBindingChange }: { sp
       <MetadataList label="材质槽" values={materialSlots} empty="未检测到材质" />
       <MetadataList label="已加载贴图" values={textureReferences} empty="未检测到嵌入贴图" />
       {unresolved.length ? <MetadataList label="待关联贴图" values={unresolved} empty="" warning /> : null}
-      {materialSlots.map(slot => <label key={slot} className="grid gap-1"><span className="type-caption-2 text-zinc-500">{slot} · 基础色</span><select value={bindings[slot]?.baseColor || ''} onChange={(event) => onBindingChange({ ...bindings, [slot]: event.target.value ? { baseColor: event.target.value } : {} })} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">未关联</option>{elements.filter(candidate => candidate.kind === 'image' || candidate.category === 'textures').map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>)}
+      <MetadataList label="已绑定贴图" values={bindings} empty="尚未绑定外部贴图" />
     </div>
   );
+}
+
+function ModelMaterialBindings({ specs, elements, bindings, onBindingChange }: { specs: ResourceElement['specs']; elements: ResourceElement[]; bindings: MaterialTextureBindings; onBindingChange: (bindings: MaterialTextureBindings) => void }) {
+  const materialSlots = typeof specs.materialSlots === 'string' && specs.materialSlots ? specs.materialSlots.split(' · ') : [];
+  return <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.025] p-2.5"><div className="type-caption-2 font-medium text-zinc-300">贴图绑定</div><p className="type-caption-2 text-zinc-600">绑定保存在资源元素 ID 中，不依赖导出时的文件路径。</p>{materialSlots.map(slot => <label key={slot} className="grid gap-1"><span className="type-caption-2 text-zinc-500">{slot} · 基础色</span><select value={bindings[slot]?.baseColor || ''} onChange={(event) => onBindingChange({ ...bindings, [slot]: event.target.value ? { baseColor: event.target.value } : {} })} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">未关联</option>{elements.filter(candidate => candidate.kind === 'image' || candidate.category === 'textures').map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>)}</div>
 }
 
 function MetadataList({ label, values, empty, warning = false }: { label: string; values: string[]; empty: string; warning?: boolean }) {

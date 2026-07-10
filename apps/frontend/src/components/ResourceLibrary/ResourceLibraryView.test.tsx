@@ -42,4 +42,17 @@ describe('ResourceLibraryView workspace', () => {
     await waitFor(() => expect(deletePack).toHaveBeenCalledWith(pack.id))
     expect(screen.queryByRole('button', { name: '返回资源包' })).not.toBeInTheDocument()
   })
+
+  test('separates read-only element information from editable configuration', async () => {
+    const user = userEvent.setup()
+    render(<ResourceLibraryView apiClient={api} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+    await user.click(screen.getByRole('treeitem', { name: '模型' }))
+    await user.click(screen.getByRole('treeitem', { name: 'knight.png' }))
+    await user.click(await screen.findByRole('button', { name: '显示元素信息' }))
+    expect(screen.getByRole('tab', { name: '元素信息' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '元素配置' }))
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeInTheDocument()
+  })
 })
