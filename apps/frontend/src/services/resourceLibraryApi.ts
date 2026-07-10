@@ -158,6 +158,18 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
       return result.folder
     },
+    async updateFolder(packId: string, folderId: string, input: { name: string }): Promise<ResourceFolder> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder update failed (${response.status})`, response.status, result.error?.code || 'resource_folder_update_failed')
+      return result.folder
+    },
+    async deleteFolder(packId: string, folderId: string): Promise<void> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
+      if (response.status === 204) return
+      const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
+      throw new ResourceLibraryApiError(result?.error?.message || `Folder deletion failed (${response.status})`, response.status, result?.error?.code || 'resource_folder_delete_failed')
+    },
     async listElements(packId: string, category?: string, folderPath?: string): Promise<ResourceElement[]> {
       const params = new URLSearchParams()
       if (category) params.set('category', category)
@@ -185,6 +197,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element update failed (${response.status})`, response.status, result.error?.code || 'element_update_failed')
       return result.element
+    },
+    async deleteElement(packId: string, elementId: string): Promise<void> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'DELETE' })
+      if (response.status === 204) return
+      const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
+      throw new ResourceLibraryApiError(result?.error?.message || `Element deletion failed (${response.status})`, response.status, result?.error?.code || 'element_delete_failed')
     },
   }
 }

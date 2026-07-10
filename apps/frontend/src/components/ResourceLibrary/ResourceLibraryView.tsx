@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronLeft, ChevronRight, File, Folder, Plus, Search, X } from 'lucide-react';
+import { ChevronLeft, File, Plus, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   type ResourceElement,
@@ -10,16 +10,19 @@ import {
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
+import { DeleteResourcePackDialog } from './DeleteResourcePackDialog';
 import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
+import { ResourcePackExplorer } from './ResourcePackExplorer';
+import { buildExplorerTree } from './resourcePackExplorerTree';
 import type { ModelMetrics } from './ModelPreview';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
-  | 'createPack' | 'listFolders' | 'createFolder'
+  | 'createPack' | 'listFolders' | 'createFolder' | 'updateFolder' | 'deleteFolder'
   | 'updateElement' | 'getElementResourceUrl'
-  | 'publishPack'
+  | 'deleteElement' | 'publishPack'
 >;
 
 type ResourceLibraryViewProps = {
@@ -84,6 +87,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [elementUpload, setElementUpload] = useState<{ done: number; total: number; failed: string[] } | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const packSessionRef = useRef(0);
   const categoryRequestRef = useRef(0);
@@ -180,7 +184,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   if (selectedPack) {
     return (
       <>
-      {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setEditDialogOpen(false); setLoading(false); }} /> : null}
+      {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} /> : null}
+      {deleteDialogOpen ? <DeleteResourcePackDialog open pack={selectedPack} onClose={() => setDeleteDialogOpen(false)} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setDeleteDialogOpen(false); setLoading(false); }} /> : null}
       <PackBrowser
         apiClient={apiClient}
         pack={selectedPack}
@@ -202,6 +207,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         }}
         onElement={setSelectedElement}
         onEditPack={() => setEditDialogOpen(true)}
+        onDeletePack={() => setDeleteDialogOpen(true)}
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
@@ -209,6 +215,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
         onPublish={async () => { const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
+        onRefreshWorkspace={async () => { const [nextFolders, nextElements] = await Promise.all([apiClient.listFolders(selectedPack.id), apiClient.listElements(selectedPack.id)]); setFolders(nextFolders); setElements(nextElements); setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]); setSelectedElement((current) => current ? nextElements.find((element) => element.id === current.id) ?? null : null); }}
       /></>
     );
   }
@@ -353,6 +360,7 @@ function PackBrowser({
   onBack,
   onElement,
   onEditPack,
+  onDeletePack,
   onAddFiles,
   onDropFiles,
   folders,
@@ -360,6 +368,7 @@ function PackBrowser({
   uploadStatus,
   onPublish,
   onUpdateElement,
+  onRefreshWorkspace,
 }: {
   apiClient: ResourceLibraryApi;
   pack: ResourcePackSummary;
@@ -372,28 +381,39 @@ function PackBrowser({
   onBack: () => void;
   onElement: (element: ResourceElement) => void;
   onEditPack: () => void;
+  onDeletePack: () => void;
   onAddFiles: (files: File[], destination: UploadDestination) => void;
   onDropFiles: (files: File[], destination: UploadDestination) => void;
   folders: ResourceFolder[];
   onCreateFolder: (name: string) => Promise<void>;
   onUpdateElement: (elementId: string, body: Partial<ResourceElement>) => Promise<void>;
+  onRefreshWorkspace: () => Promise<void>;
   uploadStatus: { done: number; total: number; failed: string[] } | null;
   onPublish: () => Promise<void>;
 }) {
-  const categories = useMemo(
-    () => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
-    [elements, loadedElementCategories],
-  );
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(['root']));
+  const categories = useMemo(() => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))], [elements, loadedElementCategories]);
+  const explorerTree = useMemo(() => buildExplorerTree(pack, folders, elements, (category) => categoryLabels[category] || category), [elements, folders, pack]);
+  const explorerHostRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [explorerHeight, setExplorerHeight] = useState(0);
+  const [uploadDestination, setUploadDestination] = useState<UploadDestination>({ category: categories[0] || 'environment', folderPath: categories[0] || 'environment' });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [resourceUrl, setResourceUrl] = useState<string>();
   const [resourceError, setResourceError] = useState('');
   const [resourceAttempt, setResourceAttempt] = useState(0);
-  const toggleExpanded = (path: string) => setExpandedPaths(current => {
-    const next = new Set(current);
-    if (next.has(path)) next.delete(path); else next.add(path);
-    return next;
-  });
+  useLayoutEffect(() => {
+    const host = explorerHostRef.current;
+    if (!host) return;
+    const update = () => setExplorerHeight(Math.max(1, Math.floor(host.getBoundingClientRect().height)));
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      // JSDOM has no layout observer; production always measures the host.
+      setExplorerHeight(560);
+      return;
+    }
+    const observer = new ResizeObserver(update); observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => { setInspectorOpen(false); }, [selectedElement?.id]);
   useEffect(() => {
     let active = true;
@@ -415,19 +435,16 @@ function PackBrowser({
     const changed = Object.entries(nextMetrics).some(([key, value]) => selectedElement.specs[key] !== value);
     if (changed) await onUpdateElement(selectedElement.id, { specs: { ...selectedElement.specs, ...nextMetrics } });
   }, [onUpdateElement, selectedElement]);
-  const categoryFiles = (category: string) => elements.filter(element => element.category === category && !folders.some(folder => element.path.startsWith(`${folder.path}/`)));
-  const uploadCategories = categories.length > 0 ? categories : ['environment'];
-  const [uploadCategory, setUploadCategory] = useState('');
-  const [uploadTarget, setUploadTarget] = useState('');
-  useEffect(() => {
-    if (!uploadCategories.includes(uploadCategory)) setUploadCategory(uploadCategories[0]);
-    const validTargets = new Set([...uploadCategories.map(category => `category:${category}`), ...folders.map(folder => `folder:${folder.id}`)]);
-    if (!validTargets.has(uploadTarget)) setUploadTarget(`category:${uploadCategories[0]}`);
-  }, [folders, uploadCategories, uploadCategory, uploadTarget]);
-  const selectedFolder = uploadTarget.startsWith('folder:') ? folders.find(folder => folder.id === uploadTarget.slice('folder:'.length)) : undefined;
-  const selectedDestination: UploadDestination = { category: uploadCategory || uploadCategories[0], folderPath: selectedFolder?.path || (uploadTarget.startsWith('category:') ? uploadTarget.slice('category:'.length) : uploadCategories[0]) };
-  const folderPaths = new Set(folders.map(folder => folder.path));
-  const categoryOnly = categories.filter(category => !folderPaths.has(category));
+  const startFolderUpload = (node: { id: string; name: string; folder?: ResourceFolder }) => {
+    const category = node.folder ? (elements.find((element) => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment') : node.id.replace(/^category:/, '');
+    setUploadDestination({ category, folderPath: node.folder?.path || category });
+    fileInputRef.current?.click();
+  };
+  const renameFolder = async (folder: ResourceFolder) => { const name = window.prompt('文件夹名称', folder.name)?.trim(); if (name && name !== folder.name) { await apiClient.updateFolder(pack.id, folder.id, { name }); await onRefreshWorkspace(); } };
+  const deleteFolder = async (folder: ResourceFolder) => { if (window.confirm(`删除文件夹“${folder.name}”？文件夹必须为空。`)) { await apiClient.deleteFolder(pack.id, folder.id); await onRefreshWorkspace(); } };
+  const renameElement = async (element: ResourceElement) => { const name = window.prompt('文件名称', element.name)?.trim(); if (!name || name === element.name) return; const separator = element.path.lastIndexOf('/'); await onUpdateElement(element.id, { name, path: `${separator >= 0 ? element.path.slice(0, separator + 1) : ''}${name}` }); };
+  const deleteElement = async (element: ResourceElement) => { if (window.confirm(`删除文件“${element.name}”？`)) { await apiClient.deleteElement(pack.id, element.id); await onRefreshWorkspace(); } };
+  const moveElement = async (element: ResourceElement, folder: ResourceFolder) => { const destination = `${folder.path}/${element.name}`; if (element.path === destination) return; await onUpdateElement(element.id, { path: destination }); };
   return (
     <section className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#090a0c] text-zinc-100">
       <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#2d2e34] bg-[#17181d] px-[18px]">
@@ -452,33 +469,16 @@ function PackBrowser({
           <button type="button" className="h-[33px] border-0 px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05]" onClick={onEditPack}>编辑 Pack</button>
           <button type="button" disabled={pack.status === 'published'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>发布</button>
           </div>
-          <label className="flex h-[33px] cursor-pointer items-center rounded-full bg-[#f4f4f5] px-[13px] text-[11px] font-semibold text-[#121217] transition-colors hover:bg-white">
-            ＋ 添加文件
-            <input aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), selectedDestination); event.target.value = ''; }} />
-          </label>
+          <button type="button" onClick={onDeletePack} className="h-[33px] rounded-full border border-red-300/35 px-[13px] text-[11px] font-medium text-red-200 transition-colors hover:bg-red-400/10">删除 Pack</button>
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-y-auto border-r border-[#2c2d33] bg-[#15161b] py-3">
+        <aside className="min-h-0 overflow-hidden border-r border-[#2c2d33] bg-[#15161b] py-3">
           <div className="mb-2 flex items-center justify-between px-[14px]"><div className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#90929b]">Pack 文件</div><button type="button" aria-label="新建文件夹" className="grid h-5 w-5 place-items-center rounded text-[#90929b] transition-colors hover:bg-white/[0.06] hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}><Plus className="h-3.5 w-3.5" /></button></div>
-          <TreeRow
-            icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />}
-            label={pack.name}
-            count={pack.elementCount}
-            expanded={expandedPaths.has('root')}
-            onClick={() => toggleExpanded('root')}
-          />
-          {expandedPaths.has('root') ? <div className="mt-1">
-            {folders.filter(folder => !folder.parentId).map((folder) => <FolderTreeNode key={folder.id} folder={folder} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={toggleExpanded} onElement={onElement} selectedElementId={selectedElement?.id} />)}
-            {categoryOnly.map((category) => (
-              <div key={category}>
-                <TreeRow icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />} label={categoryLabels[category] || category} count={categoryFiles(category).length} expanded={expandedPaths.has(`category:${category}`)} onClick={() => toggleExpanded(`category:${category}`)} />
-                {expandedPaths.has(`category:${category}`) ? categoryFiles(category).map((element) => <TreeRow key={element.id} icon={<File className="h-3.5 w-3.5 text-[#70727b]" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElement?.id === element.id} onClick={() => onElement(element)} />) : null}
-              </div>
-            ))}
-          </div> : null}
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} onElement={onElement} onUploadToFolder={startFolderUpload} onRenameFolder={(node) => node.folder && void renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={(element) => void renameElement(element)} onDeleteElement={(element) => void deleteElement(element)} onMoveElement={(element, node) => node.folder && void moveElement(element, node.folder)} /></div>
+          <input ref={fileInputRef} aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
         </aside>
-        <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c] p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), selectedDestination); }}>
+        <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c] p-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
           {uploadStatus ? <div role="status" className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
           {error ? (
             <div role="alert" className="type-callout absolute left-4 right-4 top-4 z-30 rounded-xl bg-red-400/10 p-3 text-red-200 shadow-xl">
@@ -495,67 +495,6 @@ function PackBrowser({
         </main>
       </div>
     </section>
-  );
-}
-
-function FolderTreeNode({ folder, folders, elements, expandedPaths, onToggle, onElement, selectedElementId }: {
-  folder: ResourceFolder;
-  folders: ResourceFolder[];
-  elements: ResourceElement[];
-  expandedPaths: Set<string>;
-  onToggle: (path: string) => void;
-  onElement: (element: ResourceElement) => void;
-  selectedElementId?: string;
-}) {
-  const key = `folder:${folder.id}`;
-  const isExpanded = expandedPaths.has(key);
-  const directFiles = elements.filter(element => parentPath(element.path) === folder.path);
-  const children = folders.filter(candidate => candidate.parentId === folder.id);
-  return <div>
-    <TreeRow icon={<Folder className="h-3.5 w-3.5 text-[#c0c1c8]" />} label={folder.name} expanded={isExpanded} onClick={() => onToggle(key)} />
-    {isExpanded ? <div className="ml-3">
-      {directFiles.map((element) => <TreeRow key={element.id} icon={<File className="h-3.5 w-3.5 text-[#70727b]" />} label={element.name} ariaLabel={`文件 ${element.name}`} active={selectedElementId === element.id} onClick={() => onElement(element)} />)}
-      {children.map(child => <FolderTreeNode key={child.id} folder={child} folders={folders} elements={elements} expandedPaths={expandedPaths} onToggle={onToggle} onElement={onElement} selectedElementId={selectedElementId} />)}
-    </div> : null}
-  </div>;
-}
-
-function parentPath(path: string) {
-  const separator = path.lastIndexOf('/');
-  return separator >= 0 ? path.slice(0, separator) : '';
-}
-
-function TreeRow({
-  icon,
-  label,
-  count,
-  active,
-  expanded,
-  onClick,
-  ariaLabel,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-  active?: boolean;
-  expanded?: boolean;
-  onClick?: () => void;
-  ariaLabel?: string;
-}) {
-  const isFolder = expanded !== undefined;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      aria-expanded={expanded}
-      className={`flex h-[30px] w-full items-center gap-2 rounded-[7px] px-2 text-left text-[11px] transition-colors ${active ? 'bg-[#513917] text-white' : isFolder ? 'text-[#c0c1c8] hover:bg-[#212229]' : 'text-[#9ea0aa] hover:bg-[#202127] hover:text-zinc-100'}`}
-    >
-      {isFolder ? expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-[#aeb0b8]" /> : <ChevronRight className="h-3 w-3 shrink-0 text-[#aeb0b8]" /> : <span className="w-3 shrink-0" />}
-      <span className="shrink-0">{icon}</span>
-      <span className="truncate">{label}</span>
-      {count === undefined ? null : <span className="ml-auto text-[10px] text-[#70727b]">{count}</span>}
-    </button>
   );
 }
 
@@ -587,7 +526,7 @@ function FileInfoOverlay({ element }: { element: ResourceElement }) {
 }
 
 function EmptyPreviewState() {
-  return <div className="flex max-w-sm flex-col items-center text-center"><div className="mb-[13px] grid h-[46px] w-[46px] place-items-center rounded-xl border border-[#4a4b51] bg-[#1a1b20] text-[#999ba5]"><File className="h-5 w-5" /></div><div className="text-[13px] font-semibold text-[#eeeeef]">尚未选择文件</div><p className="mt-[5px] text-[11px] text-[#8b8d97]">从左侧目录选择一个文件以查看预览与属性。</p></div>;
+  return <div className="flex max-w-sm flex-col items-center text-center"><div className="mb-[13px] grid h-[46px] w-[46px] place-items-center rounded-xl border border-[#4a4b51] bg-[#1a1b20] text-[#999ba5]"><File className="h-5 w-5" /></div><div className="text-[13px] font-semibold text-[#eeeeef]">尚未选择文件</div><p className="mt-[5px] text-[11px] text-[#8b8d97]">从左侧资源浏览器选择一个文件以查看预览和属性。</p></div>;
 }
 
 function isModelElement(element: ResourceElement) {

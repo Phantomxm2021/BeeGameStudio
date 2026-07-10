@@ -26,6 +26,9 @@ export type BeeGameResourceServerAppOptions = {
   uploadPackCover?: (packId: string, request: Request) => Promise<ResourcePack>
   addResourceElement?: (packId: string, request: Request) => Promise<unknown>
   updateResourceElement?: (packId: string, elementId: string, body: Record<string, unknown>) => Promise<unknown>
+  deleteResourceElement?: (packId: string, elementId: string) => Promise<boolean>
+  updateResourceFolder?: (packId: string, folderId: string, body: Record<string, unknown>) => Promise<unknown>
+  deleteResourceFolder?: (packId: string, folderId: string) => Promise<boolean>
   getElementResourceUrl?: (packId: string, elementId: string) => Promise<string>
 }
 
@@ -109,6 +112,23 @@ export function createBeeGameResourceServerApp(
           return corsResponse(jsonError(400, 'invalid_folder', error instanceof Error ? error.message : 'Invalid folder'), options.corsOrigin)
         }
       }
+      const folderPatchMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders\/([^/]+)$/)
+      if (folderPatchMatch && request.method === 'PATCH') {
+        const packId = decodeURIComponent(folderPatchMatch[1])
+        const folderId = decodeURIComponent(folderPatchMatch[2])
+        const body = await request.json() as { name?: unknown }
+        if (typeof body.name !== 'string' || !body.name.trim()) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
+        const folder = options.updateResourceFolder ? await options.updateResourceFolder(packId, folderId, { name: body.name }) : await options.repository.updateFolder(packId, folderId, { name: body.name })
+        if (!folder) return corsResponse(jsonError(404, 'not_found', 'Resource folder not found'), options.corsOrigin)
+        return corsResponse(Response.json({ folder }), options.corsOrigin)
+      }
+      if (folderPatchMatch && request.method === 'DELETE') {
+        const packId = decodeURIComponent(folderPatchMatch[1])
+        const folderId = decodeURIComponent(folderPatchMatch[2])
+        const deleted = options.deleteResourceFolder ? await options.deleteResourceFolder(packId, folderId) : await options.repository.deleteFolder(packId, folderId)
+        if (!deleted) return corsResponse(jsonError(404, 'not_found', 'Resource folder not found'), options.corsOrigin)
+        return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
+      }
       const publishMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish$/)
       if (publishMatch && request.method === 'POST') {
         try {
@@ -138,6 +158,13 @@ export function createBeeGameResourceServerApp(
         const element = await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body)
         if (!element) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
         return corsResponse(Response.json({ element }), options.corsOrigin)
+      }
+      if (request.method === 'DELETE' && elementPatchMatch) {
+        const packId = decodeURIComponent(elementPatchMatch[1])
+        const elementId = decodeURIComponent(elementPatchMatch[2])
+        const deleted = options.deleteResourceElement ? await options.deleteResourceElement(packId, elementId) : await options.repository.deleteElement(packId, elementId)
+        if (!deleted) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       }
         try {
           return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)

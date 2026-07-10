@@ -15,7 +15,7 @@ describe('EditResourcePackDialog', () => {
     const calls: string[] = []
     const onUploadCover = vi.fn(async () => { calls.push('cover'); return { ...pack, coverPath: 'cover/new.png' } })
     const onSave = vi.fn(async () => { calls.push('metadata'); return { ...pack, name: 'Updated Forest' } })
-    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={onUploadCover} onSave={onSave} onDelete={vi.fn()} />)
+    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={onUploadCover} onSave={onSave} />)
 
     const name = screen.getByLabelText('名称')
     await user.clear(name)
@@ -27,27 +27,21 @@ describe('EditResourcePackDialog', () => {
     expect(calls).toEqual(['cover', 'metadata'])
   })
 
-  test('requires the exact Pack name before deletion', async () => {
-    const user = userEvent.setup()
-    const onDelete = vi.fn().mockResolvedValue(undefined)
-    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={vi.fn()} onDelete={onDelete} />)
-
-    expect(screen.getByRole('button', { name: '确认删除 Pack' })).toBeDisabled()
-    await user.type(screen.getByLabelText('输入 Pack 名称以确认'), pack.name)
-    await user.click(screen.getByRole('button', { name: '确认删除 Pack' }))
-
-    await waitFor(() => expect(onDelete).toHaveBeenCalledOnce())
+  test('keeps deletion outside the metadata editor', () => {
+    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={vi.fn()} />)
+    expect(screen.queryByText('危险区域')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('输入 Pack 名称以确认')).not.toBeInTheDocument()
   })
 
   test('preserves custom style and game-type metadata', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(pack)
-    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={onSave} onDelete={vi.fn()} />)
+    render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={onSave} />)
 
     await user.type(screen.getByPlaceholderText('添加自定义风格'), 'Low Poly')
-    await user.click(screen.getByRole('button', { name: '添加自定义风格' }))
+    await user.click(screen.getAllByRole('button', { name: '添加' })[0])
     await user.type(screen.getByPlaceholderText('添加自定义类型'), 'Survival')
-    await user.click(screen.getByRole('button', { name: '添加自定义类型' }))
+    await user.click(screen.getAllByRole('button', { name: '添加' })[1])
     await user.click(screen.getByRole('button', { name: '保存 Pack' }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ style: 'Pixel / Fantasy / Low Poly', gameTypes: ['RPG', 'Survival'] })))

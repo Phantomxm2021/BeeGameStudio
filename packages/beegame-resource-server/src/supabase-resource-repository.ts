@@ -156,6 +156,44 @@ export function createSupabaseResourceRepository(
       const rows = await mutate<FolderRow>('beegame_resource_folders', { method: 'POST', body: JSON.stringify({ id: input.id, pack_id: packId, name: input.name, parent_id: input.parentId ?? null, path }) })
       return toFolder(rows[0])
     },
+    async updateFolder(packId, folderId, input) {
+      const folder = (await request<FolderRow>('beegame_resource_folders', { id: `eq.${folderId}`, pack_id: `eq.${packId}` }))[0]
+      if (!folder) return undefined
+      const name = input.name.trim()
+      if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
+      const parent = folder.parent_id ? (await request<FolderRow>('beegame_resource_folders', { id: `eq.${folder.parent_id}`, pack_id: `eq.${packId}` }))[0] : undefined
+      const oldPath = folder.path
+      const path = parent ? `${parent.path}/${name}` : name
+      const existing = await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, path: `eq.${path}` })
+      if (existing.some(item => item.id !== folderId)) throw new Error('Folder path already exists')
+      const allFolders = await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}` })
+      const allElements = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}` })
+      const replacePath = (value: string) => value === oldPath ? path : value.startsWith(`${oldPath}/`) ? `${path}${value.slice(oldPath.length)}` : value
+      for (const item of allFolders.filter(item => item.path === oldPath || item.path.startsWith(`${oldPath}/`))) {
+        await mutate<FolderRow>('beegame_resource_folders', { method: 'PATCH', body: JSON.stringify({ ...(item.id === folderId ? { name } : {}), path: replacePath(item.path) }) }, { id: `eq.${item.id}`, pack_id: `eq.${packId}` })
+      }
+      for (const item of allElements.filter(item => item.path === oldPath || item.path.startsWith(`${oldPath}/`))) {
+        await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ path: replacePath(item.path) }) }, { id: `eq.${item.id}`, pack_id: `eq.${packId}` })
+      }
+      return { ...toFolder(folder), name, path }
+    },
+    async deleteFolder(packId, folderId) {
+      const folder = (await request<FolderRow>('beegame_resource_folders', { id: `eq.${folderId}`, pack_id: `eq.${packId}` }))[0]
+      if (!folder) return false
+      const children = await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, parent_id: `eq.${folderId}` })
+      const elements = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}` })
+      if (children.length > 0 || elements.some(item => item.path === folder.path || item.path.startsWith(`${folder.path}/`))) throw new Error('Folder is not empty')
+      await mutate<FolderRow>('beegame_resource_folders', { method: 'DELETE' }, { id: `eq.${folderId}`, pack_id: `eq.${packId}` })
+      return true
+    },
+    async updateElement(packId, elementId, input) {
+      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ name: input.name, path: input.path, category: input.category, kind: input.kind, preview: input.preview, specs: input.specs, dependencies: input.dependencies, status: input.status, style_override: input.styleOverride, dimension_override: input.dimensionOverride }) }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
+      return rows[0] ? toElement(rows[0]) : undefined
+    },
+    async deleteElement(packId, elementId) {
+      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'DELETE' }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
+      return rows.length > 0
+    },
     async publishPack(packId) {
       const incomplete = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}`, status: 'in.(queued,uploading,failed)' })
       if (incomplete.length > 0) throw new Error('Pack has incomplete uploads')

@@ -11,6 +11,10 @@ export type ResourceRepository = {
   createPack(pack: ResourcePack): Promise<ResourcePack>
   listFolders(packId: string): Promise<ResourceFolder[]>
   createFolder(packId: string, input: { id: string; name: string; parentId?: string }): Promise<ResourceFolder>
+  updateFolder(packId: string, folderId: string, input: { name: string }): Promise<ResourceFolder | undefined>
+  deleteFolder(packId: string, folderId: string): Promise<boolean>
+  updateElement(packId: string, elementId: string, input: Partial<ResourceElement>): Promise<ResourceElement | undefined>
+  deleteElement(packId: string, elementId: string): Promise<boolean>
   publishPack(packId: string): Promise<ResourcePack>
   deletePack(packId: string): Promise<boolean>
 }
@@ -58,6 +62,41 @@ export function createInMemoryResourceRepository(input: {
       const folder = { id: input.id, packId, name: input.name, ...(input.parentId ? { parentId: input.parentId } : {}), path }
       folders.push(folder)
       return folder
+    },
+    async updateFolder(packId, folderId, input) {
+      const folder = folders.find(item => item.id === folderId && item.packId === packId)
+      if (!folder) return undefined
+      const name = input.name.trim()
+      if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
+      const oldPath = folder.path
+      const parent = folder.parentId ? folders.find(item => item.id === folder.parentId && item.packId === packId) : undefined
+      const path = parent ? `${parent.path}/${name}` : name
+      if (folders.some(item => item.packId === packId && item.id !== folderId && item.path === path)) throw new Error('Folder path already exists')
+      const replacePath = (value: string) => value === oldPath ? path : value.startsWith(`${oldPath}/`) ? `${path}${value.slice(oldPath.length)}` : value
+      for (const item of folders) if (item.packId === packId) item.path = replacePath(item.path)
+      for (const item of elements) if (item.packId === packId) item.path = replacePath(item.path)
+      folder.name = name
+      return folder
+    },
+    async deleteFolder(packId, folderId) {
+      const folder = folders.find(item => item.id === folderId && item.packId === packId)
+      if (!folder) return false
+      if (folders.some(item => item.packId === packId && item.parentId === folderId) || elements.some(item => item.packId === packId && (item.path === folder.path || item.path.startsWith(`${folder.path}/`)))) throw new Error('Folder is not empty')
+      folders.splice(folders.indexOf(folder), 1)
+      return true
+    },
+    async updateElement(packId, elementId, input) {
+      const element = elements.find(item => item.id === elementId && item.packId === packId)
+      if (!element) return undefined
+      const updated = validateResourceElement({ ...element, ...input, packId, id: elementId })
+      elements[elements.indexOf(element)] = updated
+      return updated
+    },
+    async deleteElement(packId, elementId) {
+      const element = elements.find(item => item.id === elementId && item.packId === packId)
+      if (!element) return false
+      elements.splice(elements.indexOf(element), 1)
+      return true
     },
     async publishPack(packId) {
       const pack = packs.find(item => item.id === packId)

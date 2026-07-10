@@ -5,6 +5,7 @@ export type ExplorerNode = {
   kind: 'folder' | 'file'
   name: string
   element?: ResourceElement
+  folder?: ResourceFolder
   children?: ExplorerNode[]
 }
 
@@ -39,6 +40,7 @@ export function buildExplorerTree(
   pack: ResourcePackSummary,
   folders: readonly ResourceFolder[],
   elements: readonly ResourceElement[],
+  categoryLabel: (category: string) => string = (category) => category,
 ): ExplorerNode {
   const root: ExplorerNode = { id: 'root', kind: 'folder', name: pack.name, children: [] }
   const packFolders = folders.filter((folder) => folder.packId === pack.id)
@@ -59,6 +61,7 @@ export function buildExplorerTree(
       id: `folder:${folder.id}`,
       kind: 'folder',
       name: folder.name,
+      folder,
       children: [],
     })
   }
@@ -82,7 +85,7 @@ export function buildExplorerTree(
     const category = element.category.trim() || 'uncategorized'
     let categoryNode = categoryNodes.get(category)
     if (!categoryNode) {
-      categoryNode = { id: `category:${category}`, kind: 'folder', name: category, children: [] }
+      categoryNode = { id: `category:${category}`, kind: 'folder', name: categoryLabel(category), children: [] }
       categoryNodes.set(category, categoryNode)
       root.children!.push(categoryNode)
     }

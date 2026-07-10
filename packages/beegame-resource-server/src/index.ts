@@ -16,6 +16,7 @@ if (import.meta.main) {
     repository: createConfiguredResourceRepository(),
     importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey, uploadConcurrency: Number(process.env.BEEGAME_RESOURCE_UPLOAD_CONCURRENCY || 1) }) : undefined,
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
+    ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
       const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
       if (!(file instanceof File)) throw new Error('Element file is required')
@@ -32,16 +33,104 @@ if (import.meta.main) {
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
       return toResourceElement((await saved.json() as Array<Record<string, unknown>>)[0])
     } : undefined,
-    updateResourceElement: baseUrl && serviceRoleKey ? async (packId, elementId, body) => {
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(toElementRow(body)) })
-      if (!response.ok) throw new Error(`Resource element update failed (${response.status})`)
-      const row = (await response.json() as Array<Record<string, unknown>>)[0]
-      if (!row) throw new ResourceLifecycleNotFoundError('Resource element not found')
-      return toResourceElement(row)
-    } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)
+}
+
+type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string }
+
+/** Keeps storage object keys and database paths in lock-step for explorer edits. */
+export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthoringOptions) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  const storageBucket = options.storageBucket ?? 'beegame-resource-packs'
+  const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
+  const rest = `${baseUrl}/rest/v1`
+  const storagePath = (packId: string, relativePath: string) => `${safeStorageComponent(packId, 'Pack id')}/${safeRelativeStoragePath(relativePath, 'Resource path')}`
+  const getRows = async <T>(table: string, query: string): Promise<T[]> => {
+    const response = await fetchImpl(`${rest}/${table}?${query}`, { headers })
+    if (!response.ok) throw new Error(`Resource metadata lookup failed (${response.status})`)
+    return response.json() as Promise<T[]>
+  }
+  const patchRows = async <T>(table: string, query: string, body: Record<string, unknown>): Promise<T[]> => {
+    const response = await fetchImpl(`${rest}/${table}?${query}`, { method: 'PATCH', headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(body) })
+    if (!response.ok) throw new Error(`Resource metadata update failed (${response.status})`)
+    return response.json() as Promise<T[]>
+  }
+  const deleteRows = async <T>(table: string, query: string): Promise<T[]> => {
+    const response = await fetchImpl(`${rest}/${table}?${query}`, { method: 'DELETE', headers: { ...headers, prefer: 'return=representation' } })
+    if (!response.ok) throw new Error(`Resource metadata deletion failed (${response.status})`)
+    return response.json() as Promise<T[]>
+  }
+  const moveObject = async (source: string, destination: string) => {
+    if (source === destination) return
+    const response = await fetchImpl(`${baseUrl}/storage/v1/object/move`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ bucketId: storageBucket, sourceKey: source, destinationKey: destination }) })
+    if (!response.ok) throw new Error(`Resource storage move failed (${response.status})`)
+  }
+  const deleteObject = async (path: string) => {
+    const response = await fetchImpl(`${baseUrl}/storage/v1/object/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers })
+    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status})`)
+  }
+  type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string }
+  type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
+  const updateElement = async (packId: string, elementId: string, body: Record<string, unknown>) => {
+    const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
+    if (!current) return undefined
+    const row = toElementRow(body)
+    const oldPath = safeRelativeStoragePath(current.path, 'Resource element path')
+    const nextPath = Object.hasOwn(row, 'path') ? safeRelativeStoragePath(String(row.path), 'Resource element path') : oldPath
+    let moved = false
+    if (nextPath !== oldPath) { await moveObject(storagePath(packId, oldPath), storagePath(packId, nextPath)); moved = true }
+    try {
+      const saved = (await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, row))[0]
+      if (!saved) throw new ResourceLifecycleNotFoundError('Resource element not found')
+      return toResourceElement(saved)
+    } catch (error) {
+      if (moved) await moveObject(storagePath(packId, nextPath), storagePath(packId, oldPath)).catch(() => undefined)
+      throw error
+    }
+  }
+  return {
+    updateResourceElement: updateElement,
+    deleteResourceElement: async (packId: string, elementId: string) => {
+      const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
+      if (!current) return false
+      await deleteObject(storagePath(packId, current.path))
+      return (await deleteRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`)).length > 0
+    },
+    updateResourceFolder: async (packId: string, folderId: string, body: Record<string, unknown>) => {
+      const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
+      const folder = folders.find((item) => item.id === folderId)
+      if (!folder) return undefined
+      const name = String(body.name || '').trim()
+      if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
+      const parent = folder.parent_id ? folders.find((item) => item.id === folder.parent_id) : undefined
+      const nextPath = parent ? `${parent.path}/${name}` : name
+      if (folders.some((item) => item.id !== folderId && item.path === nextPath)) throw new Error('Folder path already exists')
+      const oldPath = folder.path
+      const replacePath = (value: string) => value === oldPath ? nextPath : value.startsWith(`${oldPath}/`) ? `${nextPath}${value.slice(oldPath.length)}` : value
+      const elements = (await getRows<ElementRow>('beegame_resource_elements', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)).filter((item) => item.path === oldPath || item.path.startsWith(`${oldPath}/`))
+      const moves = elements.map((item) => ({ from: item.path, to: replacePath(item.path) }))
+      try {
+        for (const move of moves) await moveObject(storagePath(packId, move.from), storagePath(packId, move.to))
+        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name } : {}), path: replacePath(item.path) })
+        for (const item of elements) await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { path: replacePath(item.path) })
+      } catch (error) {
+        for (const move of [...moves].reverse()) await moveObject(storagePath(packId, move.to), storagePath(packId, move.from)).catch(() => undefined)
+        throw error
+      }
+      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath }
+    },
+    deleteResourceFolder: async (packId: string, folderId: string) => {
+      const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
+      const folder = folders.find((item) => item.id === folderId)
+      if (!folder) return false
+      const elements = await getRows<ElementRow>('beegame_resource_elements', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
+      if (folders.some((item) => item.parent_id === folderId) || elements.some((item) => item.path === folder.path || item.path.startsWith(`${folder.path}/`))) throw new Error('Folder is not empty')
+      return (await deleteRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(folderId)}&pack_id=eq.${encodeURIComponent(packId)}`)).length > 0
+    },
+  }
 }
 
 async function loadResourceSupabaseEnv(): Promise<void> {
@@ -80,7 +169,7 @@ function trimPath(value: string): string {
 
 export function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
   const editable: Record<string, string> = {
-    name: 'name', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
+    name: 'name', path: 'path', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
     dependencies: 'dependencies', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
   }
   const row: Record<string, unknown> = {}
