@@ -27,16 +27,20 @@ export function createSupabaseResourcePackImporter(options: ImportOptions) {
     const uploaded: string[] = []
     try {
       const uploadPaths = paths.concat(findPreview(archive) ? [findPreview(archive)!] : [])
-      await Promise.all(uploadPaths.map(async (path) => {
+      await runWithConcurrency(uploadPaths, 4, async (path) => {
         const objectPath = `${packId}/${path}`
-        const response = await fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey, 'content-type': contentType(path), 'x-upsert': 'true' },
-          body: archive[path] as unknown as BodyInit,
-        })
-        if (!response.ok) throw new Error(`Storage upload failed for ${path} (${response.status})`)
+        let response: Response
+        try {
+          response = await uploadWithRetry(() => fetchImpl(`${supabaseUrl}/storage/v1/object/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey, 'content-type': contentType(path), 'x-upsert': 'true' },
+            body: archive[path] as unknown as BodyInit,
+          }))
+        } catch (error) {
+          throw new Error(`${error instanceof Error ? error.message : 'Storage upload failed'} for ${path}`)
+        }
         uploaded.push(objectPath)
-      }))
+      })
       const packRow = { id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, categories: pack.categories, license: pack.license, version: pack.version, status: pack.status, cover_path: pack.coverPath, element_count: elements.length }
       await postJson(`${supabaseUrl}/rest/v1/beegame_resource_packs`, packRow, fetchImpl, options.serviceRoleKey)
       await postJson(`${supabaseUrl}/rest/v1/beegame_resource_elements`, elements.map((element) => ({ id: element.id, pack_id: element.packId, name: element.name, path: element.path, category: element.category, kind: element.kind, preview: element.preview, specs: element.specs, dependencies: element.dependencies, status: element.status, style_override: element.styleOverride, dimension_override: element.dimensionOverride })), fetchImpl, options.serviceRoleKey)
@@ -71,3 +75,22 @@ function toPack(id: string, filename: string, elements: ResourceElement[], paths
 }
 function toElement(packId: string, path: string, index: number): ResourceElement { const category = path.split('/')[0] || 'assets'; const ext = path.split('.').pop()?.toLowerCase() || ''; const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext) ? 'model' : ['mp3', 'wav', 'ogg'].includes(ext) ? 'audio' : 'image'; return { id: `${packId}-${index}`, packId, name: path.split('/').pop() || path, path, category: category as ResourceElement['category'], kind, specs: {}, dependencies: [], status: 'ready' } }
 async function postJson(url: string, body: unknown, fetchImpl: typeof fetch, key: string): Promise<void> { const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json', prefer: 'return=minimal' }, body: JSON.stringify(body) }); if (!response.ok) { const detail = await response.text().catch(() => ''); throw new Error(`Metadata persistence failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ''}`) } }
+
+async function uploadWithRetry(upload: () => Promise<Response>, attempts = 4): Promise<Response> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await upload()
+    if (response.ok) return response
+    const retryable = response.status === 429 || response.status >= 500
+    if (!retryable || attempt === attempts - 1) throw new Error(`Storage upload failed (${response.status})`)
+    const retryAfter = Number(response.headers.get('retry-after') || 0)
+    const delay = retryAfter > 0 ? retryAfter * 1000 : 500 * (2 ** attempt)
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 8000)))
+  }
+  throw new Error('Storage upload failed')
+}
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0
+  const run = async () => { while (cursor < items.length) { const index = cursor; cursor += 1; await worker(items[index]) } }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run))
+}
