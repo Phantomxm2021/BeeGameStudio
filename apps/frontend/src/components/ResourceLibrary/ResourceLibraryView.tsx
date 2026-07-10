@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
@@ -30,6 +31,13 @@ const categoryLabels: Record<string, string> = {
 };
 
 export function ResourceLibraryView({ apiClient = resourceLibraryApi }: ResourceLibraryViewProps) {
+  const { i18n } = useTranslation();
+  const isZh = i18n.language.startsWith('zh');
+  const copy = isZh ? {
+    title: '资源包', subtitle: '按风格、游戏类型与表现维度选择 Pack', all: '所有资源包', search: '搜索资源包', import: '导入资源包', empty: '暂无资源包', emptyHint: '导入一个 Pack 后，它会出现在这里并按风格、类型和维度进行管理。', previous: '上一页', next: '下一页',
+  } : {
+    title: 'Resource Packs', subtitle: 'Choose Packs by style, game type, and dimension', all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
+  };
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
   const [elements, setElements] = useState<ResourceElement[]>([]);
@@ -39,6 +47,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
+  const [page, setPage] = useState(1);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -97,6 +106,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     const matchesQuery = !query.trim() || [pack.name, pack.style, ...pack.gameTypes].join(' ').toLowerCase().includes(query.trim().toLowerCase());
     return matchesQuery && (dimension === 'all' || pack.dimension === dimension);
   }), [dimension, packs, query]);
+  const pageCount = Math.max(1, Math.ceil(visiblePacks.length / 64));
+  const pagedPacks = visiblePacks.slice((page - 1) * 64, page * 64);
 
   const importPack = async (file: File) => {
     try {
@@ -144,26 +155,17 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     <section className="min-h-full bg-zinc-950 px-8 py-8 text-zinc-100">
       <div className="mb-7 flex items-end justify-between">
         <div>
-          <p className="type-caption-1 mb-2 text-orange-300">资源库管理</p>
-          <h1 className="type-title-2">资源包</h1>
-          <p className="type-footnote mt-2 text-zinc-500">按风格、游戏类型与表现维度选择 Pack</p>
+          <h1 className="type-title-2">{copy.title}</h1>
+          <p className="type-footnote mt-2 text-zinc-500">{copy.subtitle}</p>
         </div>
-        <button type="button" className="primary-pill type-button px-4 py-2" onClick={() => importInputRef.current?.click()}>
-          ＋ 导入资源包
+        <button type="button" aria-label="导入资源包" className="primary-pill inline-flex h-10 w-10 items-center justify-center rounded-full" onClick={() => importInputRef.current?.click()}>
+          <span aria-hidden="true" className="text-xl leading-none">+</span>
         </button>
         <input ref={importInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void importPack(file);
           event.target.value = '';
         }} />
-      </div>
-      <div className="mb-7 flex gap-3">
-        <Summary label="已导入" value={String(packs.length)} suffix="个 Pack" />
-        <Summary
-          label="全部元素"
-          value={String(packs.reduce((total, pack) => total + pack.elementCount, 0))}
-          suffix="可用"
-        />
       </div>
       {error ? (
         <div
@@ -177,11 +179,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         <div className="type-footnote text-zinc-500">正在加载资源包…</div>
       ) : null}
       <div className="mb-5 flex items-center gap-2 border-b border-white/10 pb-4">
-        <div className="type-headline">所有资源包</div>
+        <div className="type-headline flex items-center gap-3">{copy.all} <button type="button" aria-label={copy.import} onClick={() => importInputRef.current?.click()} className="glass-icon-button h-8 w-8 text-lg">+</button></div>
         <div className="flex-1" />
         <label className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
           <Search className="h-4 w-4" />
-          <input aria-label="搜索资源包" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资源包" className="min-w-0 flex-1 bg-transparent outline-none" />
+          <input aria-label={copy.search} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={copy.search} className="min-w-0 flex-1 bg-transparent outline-none" />
         </label>
         <button
           type="button"
@@ -206,10 +208,18 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         </button>
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {visiblePacks.map((pack) => (
+        {pagedPacks.map((pack) => (
           <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
         ))}
       </div>
+      {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => importInputRef.current?.click()} title={copy.empty} hint={copy.emptyHint} importLabel={copy.import} /> : null}
+      {pageCount > 1 ? (
+        <div className="mt-7 flex items-center justify-center gap-3">
+          <button type="button" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="secondary-pill type-button px-3 py-2 disabled:opacity-40">{copy.previous}</button>
+          <span className="type-caption-2 text-zinc-500">{page} / {pageCount}</span>
+          <button type="button" disabled={page === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="secondary-pill type-button px-3 py-2 disabled:opacity-40">{copy.next}</button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -236,6 +246,17 @@ function Summary({ label, value, suffix }: { label: string; value: string; suffi
         {value}
         <span className="type-caption-2 ml-2 text-zinc-500">{suffix}</span>
       </div>
+    </div>
+  );
+}
+
+function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => void; title: string; hint: string; importLabel: string }) {
+  return (
+    <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-6 text-center">
+      <div className="mb-4 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-2xl text-zinc-400">＋</div>
+      <h2 className="type-headline text-zinc-200">{title}</h2>
+      <p className="type-footnote mt-2 max-w-sm text-zinc-500">{hint}</p>
+      <button type="button" onClick={onImport} className="primary-pill type-button mt-5 px-4 py-2">{importLabel}</button>
     </div>
   );
 }

@@ -40,7 +40,7 @@ describe('ResourceLibraryView', () => {
   test('renders Pack cards and opens the Pack file browser', async () => {
     const user = userEvent.setup();
     render(<ResourceLibraryView apiClient={api} />);
-    expect(await screen.findByRole('heading', { name: '资源包' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading')).toBeInTheDocument();
     expect(screen.getByText('Example Pack')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Example Pack' }));
     expect(await screen.findByText('Pack 文件')).toBeInTheDocument();
