@@ -26,19 +26,20 @@ export function createSupabaseResourcePackImporter(options: ImportOptions) {
     const pack = toPack(packId, file.name, elements, paths, findPreview(archive), manifest)
     const uploaded: string[] = []
     try {
-      for (const path of paths.concat(findPreview(archive) ? [findPreview(archive)!] : [])) {
+      const uploadPaths = paths.concat(findPreview(archive) ? [findPreview(archive)!] : [])
+      await Promise.all(uploadPaths.map(async (path) => {
         const objectPath = `${packId}/${path}`
         const response = await fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
           method: 'POST',
           headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey, 'content-type': contentType(path), 'x-upsert': 'true' },
           body: archive[path] as unknown as BodyInit,
         })
-        if (!response.ok) throw new Error(`Storage upload failed for ${path}`)
+        if (!response.ok) throw new Error(`Storage upload failed for ${path} (${response.status})`)
         uploaded.push(objectPath)
-      }
-      const packRow = { ...pack, game_types: pack.gameTypes, cover_path: pack.coverPath, element_count: elements.length, created_by: null }
+      }))
+      const packRow = { id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, categories: pack.categories, license: pack.license, version: pack.version, status: pack.status, cover_path: pack.coverPath, element_count: elements.length }
       await postJson(`${supabaseUrl}/rest/v1/beegame_resource_packs`, packRow, fetchImpl, options.serviceRoleKey)
-      await postJson(`${supabaseUrl}/rest/v1/beegame_resource_elements`, elements.map((element) => ({ ...element, pack_id: element.packId, style_override: element.styleOverride, dimension_override: element.dimensionOverride })), fetchImpl, options.serviceRoleKey)
+      await postJson(`${supabaseUrl}/rest/v1/beegame_resource_elements`, elements.map((element) => ({ id: element.id, pack_id: element.packId, name: element.name, path: element.path, category: element.category, kind: element.kind, preview: element.preview, specs: element.specs, dependencies: element.dependencies, status: element.status, style_override: element.styleOverride, dimension_override: element.dimensionOverride })), fetchImpl, options.serviceRoleKey)
       return pack
     } catch (error) {
       await Promise.all(uploaded.map((path) => fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey } })))
@@ -69,4 +70,4 @@ function toPack(id: string, filename: string, elements: ResourceElement[], paths
   return { id, name: manifest?.name || filename.replace(/\.zip$/i, ''), style: manifest?.style || 'unassigned', gameTypes: manifest?.gameTypes || ['unassigned'], dimension: manifest?.dimension || (has3d && !has2d ? '3D' : has2d && !has3d ? '2D' : 'agnostic'), categories: manifest?.categories || [...new Set(elements.map((element) => element.category))] as ResourcePack['categories'], license: manifest?.license || 'unassigned', version: manifest?.version || '0.1.0', status: manifest?.status || 'draft', coverPath: manifest?.coverPath || previewPath, }
 }
 function toElement(packId: string, path: string, index: number): ResourceElement { const category = path.split('/')[0] || 'assets'; const ext = path.split('.').pop()?.toLowerCase() || ''; const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext) ? 'model' : ['mp3', 'wav', 'ogg'].includes(ext) ? 'audio' : 'image'; return { id: `${packId}-${index}`, packId, name: path.split('/').pop() || path, path, category: category as ResourceElement['category'], kind, specs: {}, dependencies: [], status: 'ready' } }
-async function postJson(url: string, body: unknown, fetchImpl: typeof fetch, key: string): Promise<void> { const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json', prefer: 'return=minimal' }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(`Metadata persistence failed (${response.status})`) }
+async function postJson(url: string, body: unknown, fetchImpl: typeof fetch, key: string): Promise<void> { const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json', prefer: 'return=minimal' }, body: JSON.stringify(body) }); if (!response.ok) { const detail = await response.text().catch(() => ''); throw new Error(`Metadata persistence failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ''}`) } }
