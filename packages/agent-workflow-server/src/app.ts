@@ -314,6 +314,8 @@ export function createAgentWorkflowApp(
       ),
     dashboardRepository.createSessionCreditBackend(),
     Boolean(supabaseRuntimeEnvClient),
+    outboundTargetPolicyOptions,
+    resolveOutboundTarget,
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -776,6 +778,8 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await discoverMcpServers({
       dataDir: getCurrentUserDataRoot(c.req.raw),
+      outboundTargetPolicyOptions,
+      outboundTargetResolver: resolveOutboundTarget,
     }))
   })
 

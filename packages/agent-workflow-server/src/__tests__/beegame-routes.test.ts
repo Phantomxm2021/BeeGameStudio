@@ -20,7 +20,10 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from '../beegame/session-manager'
-import { materializeBeeGameFileAttachments } from '../beegame/session-manager'
+import {
+  BeeGameSessionManager,
+  materializeBeeGameFileAttachments,
+} from '../beegame/session-manager'
 import type {
   BeeGameDeploymentPublisher,
   BeeGameDeploymentRunner,
@@ -760,6 +763,64 @@ describe('beegame session routes', () => {
       expect(response.status).toBe(400)
       expect(await response.json()).toEqual({ error: 'Outbound URL is not permitted' })
     } finally { await rm(workspace, { recursive: true, force: true }) }
+  })
+
+  test('validates remote runtime provider endpoints before starting the session runner', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-remote-runtime-endpoints-'))
+    const resolvedUrls: string[] = []
+    let starts = 0
+    const manager = new BeeGameSessionManager(
+      {
+        async start() {
+          starts += 1
+          return new FakeBeeGameRuntime(workspace)
+        },
+      },
+      workspace,
+      () => ({
+        ANTHROPIC_BASE_URL: 'https://anthropic.runtime.test',
+        OPENAI_BASE_URL: 'https://openai.runtime.test',
+        GEMINI_BASE_URL: 'https://gemini.runtime.test',
+        GROK_BASE_URL: 'https://grok.runtime.test',
+      }),
+      undefined,
+      true,
+      {
+        resolve4: async () => ['93.184.216.34'],
+        resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+      },
+      async (value) => {
+        resolvedUrls.push(value)
+        return value === 'https://grok.runtime.test'
+          ? null
+          : {
+            url: new URL(value),
+            addresses: ['93.184.216.34'],
+            lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+          }
+      },
+    )
+
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Start the task')
+
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.failed'))
+
+      expect(resolvedUrls).toEqual([
+        'https://anthropic.runtime.test',
+        'https://openai.runtime.test',
+        'https://gemini.runtime.test',
+        'https://grok.runtime.test',
+      ])
+      expect(starts).toBe(0)
+      expect(manager.events(session.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'turn.failed', text: 'Outbound URL is not permitted' }),
+      ]))
+      expect(JSON.stringify(manager.events(session.id))).not.toContain('grok.runtime.test')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('creates a dashboard session without starting a BeeGame turn', async () => {

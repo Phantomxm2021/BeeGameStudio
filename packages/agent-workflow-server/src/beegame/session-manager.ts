@@ -8,6 +8,10 @@ import {
   type RuntimeModelConfig,
 } from '@bee-game-studio/agent-workflow'
 import {
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
+import {
   refundCreditReservation,
   reserveCredits,
   settleCreditReservation,
@@ -337,6 +341,8 @@ export class BeeGameSessionManager {
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly creditBackend: BeeGameSessionCreditBackend = localCreditBackend,
     private readonly allowExternalRuntimeEnv = false,
+    private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
+    private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -841,19 +847,21 @@ export class BeeGameSessionManager {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
+      const env = buildRuntimeEnv(
+        record.runtime,
+        await this.getAdditionalRuntimeEnv(
+          record.userDataRoot,
+          record.userId,
+          record.authToken,
+          record.session.modelConfigId,
+        ),
+      )
+      await this.assertPermittedRuntimeEndpoints(env)
       const runner = record.runner ?? await this.runner.start({
         sessionId: record.session.id,
         resumeSessionId: record.session.id,
         cwd: record.session.cwd,
-        env: buildRuntimeEnv(
-          record.runtime,
-          await this.getAdditionalRuntimeEnv(
-            record.userDataRoot,
-            record.userId,
-            record.authToken,
-            record.session.modelConfigId,
-          ),
-        ),
+        env,
       })
       record.runner = runner
       try {
@@ -919,6 +927,22 @@ export class BeeGameSessionManager {
       record.currentTurnId = null
       record.abortController = null
       record.session.updatedAt = new Date()
+    }
+  }
+
+  private async assertPermittedRuntimeEndpoints(
+    env: Record<string, string>,
+  ): Promise<void> {
+    for (const key of [
+      'ANTHROPIC_BASE_URL',
+      'OPENAI_BASE_URL',
+      'GEMINI_BASE_URL',
+      'GROK_BASE_URL',
+    ] as const) {
+      const value = env[key]
+      if (value && !await this.resolveOutboundTarget(value, this.outboundTargetPolicyOptions)) {
+        throw new Error('Outbound URL is not permitted')
+      }
     }
   }
 

@@ -1797,6 +1797,56 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('uses the app outbound resolver when discovering remote MCP servers', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'cc-dashboard-mcp-discover-policy-'))
+    const ownerDataDir = join(dataDir, 'users', testOwner.id)
+    const resolvedUrls: string[] = []
+    const policyOptions = {
+      resolve4: async () => ['93.184.216.34'],
+      resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+    }
+
+    try {
+      await mkdir(ownerDataDir, { recursive: true })
+      await writeFile(join(ownerDataDir, '.mcp.json'), JSON.stringify({
+        mcpServers: {
+          'Remote Tools': {
+            transport: 'http',
+            url: 'https://mcp.discovery.test/mcp',
+          },
+        },
+      }), 'utf8')
+      const policyApp = createAgentWorkflowApp({
+        defaultWorkspacePath: dataDir,
+        currentUser: testOwner,
+        skillsConfig: false,
+        outboundTargetPolicyOptions: policyOptions,
+        outboundTargetResolver: async (value, options) => {
+          resolvedUrls.push(value)
+          expect(options).toEqual(expect.objectContaining(policyOptions))
+          return {
+            url: new URL(value),
+            addresses: ['93.184.216.34'],
+            lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+          }
+        },
+      })
+
+      const response = await policyApp.request('/api/mcp-servers/discover')
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual([
+        expect.objectContaining({
+          name: 'Remote Tools',
+          url: 'https://mcp.discovery.test/mcp',
+        }),
+      ])
+      expect(resolvedUrls).toEqual(['https://mcp.discovery.test/mcp'])
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
   test('tests and discovers running HTTP MCP servers', async () => {
     const originalFetch = globalThis.fetch
     let usedPinnedDispatcher = false

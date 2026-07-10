@@ -6,7 +6,10 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { validateOutboundTarget } from './security/outbound-target-policy'
+import {
+  resolveApprovedOutboundTarget,
+  type OutboundTargetPolicyOptions,
+} from '@bee-game-studio/security-core'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -46,6 +49,8 @@ export type DiscoveredMcpServer = McpServerInput & {
 
 export type McpServersStoreOptions = {
   dataDir?: string
+  outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
+  outboundTargetResolver?: typeof resolveApprovedOutboundTarget
 }
 
 type StorePayload = {
@@ -111,7 +116,10 @@ export async function discoverMcpServers(
       const normalized = normalizeMcpServerInput(server, undefined)
       const publicInput = toPublicMcpServerInput(normalized)
       if ((publicInput.transport === 'http' || publicInput.transport === 'sse') &&
-        (!publicInput.url || !await validateOutboundTarget(publicInput.url))) continue
+        (!publicInput.url || !await (options.outboundTargetResolver ?? resolveApprovedOutboundTarget)(
+          publicInput.url,
+          options.outboundTargetPolicyOptions,
+        ))) continue
       const key = getMcpServerFingerprint(publicInput)
       if (discovered.has(key)) continue
       discovered.set(key, {
