@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react'
 import { ChevronRight, File, Folder, FolderOpen, FolderPlus, Pencil, Trash2, Upload } from 'lucide-react'
 import { Tree, type NodeRendererProps, type RowRendererProps } from 'react-arborist'
 import type { ExplorerNode } from './resourcePackExplorerTree'
@@ -7,14 +7,17 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 type ResourcePackExplorerProps = {
   tree: ExplorerNode
   selectedElementId?: string
+  selectedElementIds?: string[]
   onElement: (element: NonNullable<ExplorerNode['element']>) => void
+  onSelectionChange?: (elements: Array<NonNullable<ExplorerNode['element']>>) => void
   height?: number
   onUploadToFolder?: (node: ExplorerNode) => void
+  onDropFilesToFolder?: (files: File[], node: ExplorerNode) => void
   onRenameFolder?: (node: ExplorerNode) => void
   onDeleteFolder?: (node: ExplorerNode) => void
   onRenameElement?: (element: NonNullable<ExplorerNode['element']>) => void
   onDeleteElement?: (element: NonNullable<ExplorerNode['element']>) => void
-  onMoveElement?: (element: NonNullable<ExplorerNode['element']>, destination: ExplorerNode) => void
+  onMoveElements?: (elements: Array<NonNullable<ExplorerNode['element']>>, destination: ExplorerNode) => void
   onCreateFolder?: () => void
   labels?: { upload: string; rename: string; delete: string; newFolder: string }
 }
@@ -26,14 +29,17 @@ const INDENT = 18
 export function ResourcePackExplorer({
   tree,
   selectedElementId,
+  selectedElementIds = [],
   onElement,
+  onSelectionChange,
   height = 560,
   onUploadToFolder,
+  onDropFilesToFolder,
   onRenameFolder,
   onDeleteFolder,
   onRenameElement,
   onDeleteElement,
-  onMoveElement,
+  onMoveElements,
   onCreateFolder,
   labels = { upload: 'Upload', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' },
 }: ResourcePackExplorerProps) {
@@ -45,16 +51,33 @@ export function ResourcePackExplorer({
     return nodes
   }, [tree])
   const [contextNode, setContextNode] = useState<ExplorerNode | undefined>()
+  const selectionAnchorIdRef = useRef<string | undefined>(undefined)
   const activateFile = (node: { data: ExplorerNode }) => {
     if (node.data.kind === 'file' && node.data.element) onElement(node.data.element)
   }
 
+  const selectedIds = new Set(selectedElementIds)
+  const selectedElements = selectedElementIds.flatMap(id => nodesById.get(`file:${id}`)?.element ?? [])
   const renderRow = (props: RowRendererProps<ExplorerNode>): ReactElement => (
-    <ExplorerRow {...props} />
+    <ExplorerRow {...props} onFileClick={(element, event, node) => {
+      const additive = event.metaKey || event.ctrlKey
+      const anchorId = selectionAnchorIdRef.current
+      const range = event.shiftKey && anchorId
+        ? node.tree.nodesBetween(anchorId, node.id).flatMap(rangeNode => rangeNode.data.kind === 'file' && rangeNode.data.element ? [rangeNode.data.element.id] : [])
+        : undefined
+      const next = range
+        ? (additive ? [...new Set([...selectedElementIds, ...range])] : range)
+        : additive
+          ? (selectedIds.has(element.id) ? selectedElementIds.filter(id => id !== element.id) : [...selectedElementIds, element.id])
+          : [element.id]
+      if (!event.shiftKey) selectionAnchorIdRef.current = node.id
+      onSelectionChange?.(next.flatMap(id => nodesById.get(`file:${id}`)?.element ?? []))
+      onElement(element)
+    }} />
   )
 
   const renderNode = (props: NodeRendererProps<ExplorerNode>): ReactElement => (
-    <ExplorerNodeRow {...props} selectedElementId={selectedElementId} onMoveElement={onMoveElement} />
+    <ExplorerNodeRow {...props} selectedElementId={selectedElementId} selectedElementIds={selectedIds} selectedElements={selectedElements} onMoveElements={onMoveElements} onDropFilesToFolder={onDropFilesToFolder} />
   )
 
   return (
@@ -67,7 +90,6 @@ export function ResourcePackExplorer({
       data={[tree]}
       disableDrag
       disableDrop
-      disableMultiSelection
       disableSelect={(node) => node.kind === 'folder'}
       height={height}
       indent={INDENT}
@@ -89,7 +111,7 @@ export function ResourcePackExplorer({
   )
 }
 
-function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<ExplorerNode>) {
+function ExplorerRow({ attrs, children, innerRef, node, onFileClick }: RowRendererProps<ExplorerNode> & { onFileClick: (element: NonNullable<ExplorerNode['element']>, event: MouseEvent<HTMLDivElement>, node: RowRendererProps<ExplorerNode>['node']) => void }) {
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
     event.stopPropagation()
     node.focus()
@@ -97,7 +119,7 @@ function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<Explo
       node.toggle()
       return
     }
-    node.handleClick(event)
+    if (node.data.element) onFileClick(node.data.element, event, node)
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -129,9 +151,9 @@ function ExplorerRow({ attrs, children, innerRef, node }: RowRendererProps<Explo
   )
 }
 
-function ExplorerNodeRow({ node, selectedElementId, style, onMoveElement }: NodeRendererProps<ExplorerNode> & Pick<ResourcePackExplorerProps, 'onMoveElement'> & { selectedElementId?: string }) {
+function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selectedElements, style, onMoveElements, onDropFilesToFolder }: NodeRendererProps<ExplorerNode> & Pick<ResourcePackExplorerProps, 'onMoveElements' | 'onDropFilesToFolder'> & { selectedElementId?: string; selectedElementIds: Set<string>; selectedElements: Array<NonNullable<ExplorerNode['element']>> }) {
   const isFolder = node.data.kind === 'folder'
-  const isSelected = Boolean(selectedElementId && node.data.element?.id === selectedElementId)
+  const isSelected = Boolean(node.data.element && (selectedElementIds.has(node.data.element.id) || selectedElementId === node.data.element.id))
   const guideLeft = Math.max(6, node.level * INDENT - 9)
 
   return <div
@@ -142,9 +164,16 @@ function ExplorerNodeRow({ node, selectedElementId, style, onMoveElement }: Node
       }`}
       style={style}
       draggable={!isFolder}
-      onDragStart={(event) => { if (node.data.element) event.dataTransfer.setData('application/x-resource-element', JSON.stringify(node.data.element)) }}
+      onDragStart={(event) => { if (node.data.element) event.dataTransfer.setData('application/x-resource-elements', JSON.stringify(selectedElementIds.has(node.data.element.id) ? selectedElements : [node.data.element])) }}
       onDragOver={(event) => { if (isFolder && node.data.folder) event.preventDefault() }}
-      onDrop={(event) => { if (!isFolder || !node.data.folder) return; const serialized = event.dataTransfer.getData('application/x-resource-element'); if (!serialized) return; try { const element = JSON.parse(serialized) as NonNullable<ExplorerNode['element']>; event.preventDefault(); onMoveElement?.(element, node.data) } catch { /* Ignore drags not created by this explorer. */ } }}
+      onDrop={(event) => {
+        if (!isFolder || !node.data.folder) return
+        const files = Array.from(event.dataTransfer.files)
+        if (files.length) { event.preventDefault(); onDropFilesToFolder?.(files, node.data); return }
+        const serialized = event.dataTransfer.getData('application/x-resource-elements')
+        if (!serialized) return
+        try { const elements = JSON.parse(serialized) as Array<NonNullable<ExplorerNode['element']>>; event.preventDefault(); onMoveElements?.(elements, node.data) } catch { /* Ignore drags not created by this explorer. */ }
+      }}
     >
       {node.level > 0 ? (
         <span

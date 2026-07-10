@@ -35,6 +35,15 @@ export function suggestMaterialTextureCandidates(modelName: string, materialSlot
   ]))
 }
 
+export function automaticallyBindBaseColorTextures(modelName: string, materialSlots: readonly string[], candidates: readonly TextureCandidate[], current: MaterialTextureBindings = {}): MaterialTextureBindings {
+  const suggestions = suggestMaterialTextureCandidates(modelName, materialSlots, candidates)
+  return Object.fromEntries(materialSlots.flatMap(material => {
+    const existing = current[material]?.baseColor
+    const candidate = suggestions[material]?.[0]
+    return existing ? [[material, { baseColor: existing }]] : candidate ? [[material, { baseColor: candidate }]] : []
+  }))
+}
+
 function tokens(name: string): string[] {
   return name.replace(/\.[^.]+$/, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
 }
