@@ -23,9 +23,9 @@ const STORE_FILE = 'user-skills.json'
 const SKILL_METADATA_FILE = 'skill.json'
 const BUILTIN_SKILLS_DIR = 'builtinskills'
 const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
-const MAX_ZIP_BYTES = 512 * 1024
+const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
-const MAX_FILE_COUNT = 24
+const MAX_FILE_COUNT = 128
 
 type StorePayload = {
   version: 1
@@ -80,13 +80,67 @@ export function parseSkillZipPackage(input: ArrayBuffer | Uint8Array): BeeGameSk
   if (bytes.byteLength > MAX_ZIP_BYTES) {
     throw new BeeGameSkillValidationError('Skill package is too large')
   }
-  const entries = unzipSync(bytes)
-  const decoder = new TextDecoder()
+  rejectZipSymlinks(bytes)
+  let entryCount = 0
+  let uncompressedBytes = 0
+  const entries = unzipSync(bytes, {
+    filter: info => {
+      entryCount += 1
+      uncompressedBytes += info.originalSize
+      if (entryCount > MAX_FILE_COUNT || uncompressedBytes > MAX_ZIP_BYTES) {
+        throw new BeeGameSkillValidationError('Skill package exceeds archive limits')
+      }
+      if (info.name.endsWith('/')) return false
+      normalizePackagePath(info.name)
+      return true
+    },
+  })
+  const decoder = new TextDecoder('utf-8', { fatal: true })
   const files = Object.entries(entries)
     .filter(([path]) => !path.endsWith('/'))
-    .map(([path, content]) => normalizePackageFile(path, decoder.decode(content)))
+    .map(([path, content]) => {
+      try {
+        return normalizePackageFile(path, decoder.decode(content))
+      } catch (error) {
+        if (error instanceof BeeGameSkillValidationError) throw error
+        throw new BeeGameSkillValidationError('Skill package contains non-UTF-8 text')
+      }
+    })
     .sort((left, right) => left.path.localeCompare(right.path))
   return normalizeSkillFiles(files)
+}
+
+function rejectZipSymlinks(bytes: Uint8Array): void {
+  const end = findZipEnd(bytes)
+  if (end < 0) return
+  const totalEntries = readU16(bytes, end + 10)
+  let offset = readU32(bytes, end + 16)
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (readU32(bytes, offset) !== 0x02014b50) throw new BeeGameSkillValidationError('Invalid skill ZIP directory')
+    const versionMadeBy = readU16(bytes, offset + 4)
+    const externalAttributes = readU32(bytes, offset + 38)
+    const unixMode = externalAttributes >>> 16
+    if ((versionMadeBy >>> 8) === 3 && (unixMode & 0xf000) === 0xa000) {
+      throw new BeeGameSkillValidationError('Skill package may not contain symbolic links')
+    }
+    offset += 46 + readU16(bytes, offset + 28) + readU16(bytes, offset + 30) + readU16(bytes, offset + 32)
+  }
+}
+
+function findZipEnd(bytes: Uint8Array): number {
+  const minimum = Math.max(0, bytes.length - 0xffff - 22)
+  for (let offset = bytes.length - 22; offset >= minimum; offset -= 1) {
+    if (readU32(bytes, offset) === 0x06054b50) return offset
+  }
+  return -1
+}
+
+function readU16(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8)
+}
+
+function readU32(bytes: Uint8Array, offset: number): number {
+  return (readU16(bytes, offset) | (readU16(bytes, offset + 2) << 16)) >>> 0
 }
 
 export function listUserSkills(
@@ -204,7 +258,7 @@ function normalizeSkillFiles(files: BeeGameSkillFile[]): BeeGameSkillFile[] {
     throw new BeeGameSkillValidationError('Skill package has too many files')
   }
   const normalized = files.map(file => normalizePackageFile(file.path, file.content))
-  if (!normalized.some(file => file.path === 'SKILL.md')) {
+  if (normalized.filter(file => file.path === 'SKILL.md').length !== 1) {
     throw new BeeGameSkillValidationError('Skill package must include SKILL.md')
   }
   return normalized

@@ -3724,6 +3724,20 @@ describe('agent workflow server routes', () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  test('rejects malformed attachments before model configuration or analysis', async () => {
+    const payload = 'iVBORw0KGgo=malformed'
+    const response = await app.request('/api/beegame-intake/analyze-attachments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ attachments: [{ type: 'image', mediaType: 'image/png', filename: 'concept.png', data: payload }] }),
+    })
+    expect(response.status).toBe(400)
+    const body = await response.json()
+    expect(body.error).toBe('Attachment validation failed')
+    expect(body.traceId).toEqual(expect.any(String))
+    expect(JSON.stringify(body)).not.toContain(payload)
+  })
 })
 
 function signStripePayload(payload: string, secret: string, timestamp = 1720000000): string {

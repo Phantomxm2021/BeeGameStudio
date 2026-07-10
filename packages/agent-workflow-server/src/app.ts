@@ -132,6 +132,10 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
+import {
+  BeeGameUploadPolicyError,
+  validateBeeGameAttachments,
+} from './security/upload-policy'
 
 type JsonObject = Record<string, unknown>
 
@@ -1670,14 +1674,14 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    const attachments = parseBeeGameAttachments(body.attachments)
-    if (attachments.length === 0) return c.json({ error: 'Attachment analysis requires at least one supported attachment' }, 400)
     try {
+      const body = await readJson(c.req.raw)
+      const attachments = validateBeeGameAttachments(body.attachments)
       const analysis = await runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
       return c.json(analysis)
     } catch (err) {
       if (err instanceof HttpError) return c.json(err.body, err.status)
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -1686,14 +1690,14 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    const attachments = parseBeeGameAttachments(body.attachments)
-    if (attachments.length === 0) return c.json({ error: 'Attachment analysis requires at least one supported attachment' }, 400)
-    const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
-    const now = Date.now()
-    attachmentBuildJobs.set(jobId, { ownerId: user.id, status: 'running', createdAt: now, updatedAt: now })
-    setTimeout(() => attachmentBuildJobs.delete(jobId), 30 * 60 * 1000)
-    void runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
+    try {
+      const body = await readJson(c.req.raw)
+      const attachments = validateBeeGameAttachments(body.attachments)
+      const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
+      const now = Date.now()
+      attachmentBuildJobs.set(jobId, { ownerId: user.id, status: 'running', createdAt: now, updatedAt: now })
+      setTimeout(() => attachmentBuildJobs.delete(jobId), 30 * 60 * 1000)
+      void runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
       .then(result => {
         const job = attachmentBuildJobs.get(jobId)
         if (!job) return
@@ -1704,7 +1708,11 @@ export function createAgentWorkflowApp(
         if (!job) return
         attachmentBuildJobs.set(jobId, { ...job, status: 'failed', error: toErrorMessage(err), updatedAt: Date.now() })
       })
-    return c.json({ jobId, status: 'running' }, 202)
+      return c.json({ jobId, status: 'running' }, 202)
+    } catch (err) {
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
   })
 
   app.get('/api/beegame-intake/attachment-jobs/:jobId', async c => {
@@ -4186,13 +4194,15 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const body = await readJson(c.req.raw)
-    const attachments = parseBeeGameAttachments(body.attachments)
-    if (body.text === undefined && attachments.length === 0) {
-      return c.json({ error: 'Missing field: text' }, 400)
-    }
-    const inputText = typeof body.text === 'string' ? body.text : ''
     try {
+      const body = await readJson(c.req.raw)
+      const attachments = body.attachments === undefined
+        ? []
+        : validateBeeGameAttachments(body.attachments)
+      if (body.text === undefined && attachments.length === 0) {
+        return c.json({ error: 'Missing field: text' }, 400)
+      }
+      const inputText = typeof body.text === 'string' ? body.text : ''
       const displayText = typeof body.displayText === 'string'
         ? body.displayText
         : undefined
@@ -4232,6 +4242,7 @@ function registerBeeGameSessionRoutes(
         }),
       )
     } catch (err) {
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse()
       return c.json({ error: toErrorMessage(err) }, 400)
     }
   })
@@ -4638,47 +4649,16 @@ function isBeeGameSessionLanguage(
     value === 'ko'
 }
 
-function parseBeeGameAttachments(value: unknown): BeeGameAttachment[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(parseBeeGameAttachment)
-    .filter((item): item is BeeGameAttachment => item !== undefined)
-}
-
-function parseBeeGameAttachment(
-  value: unknown,
-): BeeGameAttachment | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const record = value as Record<string, unknown>
-  const data = typeof record.data === 'string' ? record.data.trim() : ''
-  if (!data) return undefined
-  if (record.type === 'image' && isBeeGameImageMediaType(record.mediaType)) {
-    return {
-      type: 'image',
-      mediaType: record.mediaType,
-      data,
-      ...(typeof record.filename === 'string' && record.filename.trim()
-        ? { filename: record.filename.trim() }
-        : {}),
-    }
-  }
-  if (record.type === 'file' && typeof record.mediaType === 'string' && typeof record.filename === 'string' && record.filename.trim()) {
-    return {
-      type: 'file',
-      mediaType: record.mediaType,
-      data,
-      filename: record.filename.trim(),
-    } satisfies BeeGameFileAttachment
-  }
-  return undefined
-}
-
-function isBeeGameImageMediaType(
-  value: unknown,
-): value is BeeGameImageAttachment['mediaType'] {
-  return value === 'image/png' ||
-    value === 'image/jpeg' ||
-    value === 'image/webp'
+function uploadPolicyResponse(): Response {
+  const traceId = randomUUID()
+  console.warn(`[BeeGame] upload policy rejected request ${traceId}`)
+  return new Response(JSON.stringify({
+    error: 'Attachment validation failed',
+    traceId,
+  }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 async function refreshSessionAuthTokenFromRequest(
