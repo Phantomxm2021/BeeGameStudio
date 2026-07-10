@@ -2,6 +2,17 @@ import { describe, expect, test } from 'vitest'
 import { createResourceLibraryApi } from './resourceLibraryApi'
 
 describe('resource library API', () => {
+  test('creates a draft Pack from authoring metadata', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const api = createResourceLibraryApi(async (input, init) => {
+      requests.push({ url: String(input), init })
+      return new Response(JSON.stringify({ pack: { id: 'pack-1', name: 'Forest', status: 'draft', elementCount: 0 } }), { status: 201 })
+    })
+    await expect(api.createPack({ name: 'Forest', style: 'Painterly', dimension: 'agnostic', gameTypes: ['adventure'], categories: ['environment'] })).resolves.toMatchObject({ id: 'pack-1' })
+    expect(requests[0].url).toBe('/api/resource-packs')
+    expect(requests[0].init?.method).toBe('POST')
+  })
+
   test('lists Packs from the standalone resource service', async () => {
     const requests: string[] = []
     const api = createResourceLibraryApi(async input => {

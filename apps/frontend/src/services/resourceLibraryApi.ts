@@ -14,6 +14,16 @@ export type ResourcePackSummary = {
   elementCount: number
 }
 
+export type CreateResourcePackInput = {
+  name: string
+  style: string
+  dimension: '2D' | '3D' | 'agnostic'
+  gameTypes: string[]
+  categories: string[]
+  license?: string
+  version?: string
+}
+
 export type ResourceElement = {
   id: string
   packId: string
@@ -30,13 +40,17 @@ export type ResourceElement = {
 }
 
 export class ResourceLibraryApiError extends Error {
+  readonly status: number
+  readonly code: string
   constructor(
     message: string,
-    readonly status: number,
-    readonly code: string,
+    status: number,
+    code: string,
   ) {
     super(message)
     this.name = 'ResourceLibraryApiError'
+    this.status = status
+    this.code = code
   }
 }
 
@@ -58,6 +72,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     return body as T
   }
   return {
+    async createPack(input: CreateResourcePackInput): Promise<ResourcePackSummary> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack creation failed (${response.status})`, response.status, result.error?.code || 'resource_pack_create_failed')
+      return result.pack
+    },
     async updatePack(packId: string, body: Partial<ResourcePackSummary>): Promise<ResourcePackSummary> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }

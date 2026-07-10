@@ -30,6 +30,7 @@ const element: ResourceElement = {
 };
 
 const api = {
+  createPack: async () => ({ ...pack, status: 'draft', elementCount: 0 }),
   listPacks: async () => [pack],
   getPack: async () => pack,
   listElements: async () => [element],

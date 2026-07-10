@@ -6,10 +6,12 @@ import {
   type ResourceElement,
   type ResourcePackSummary,
 } from '../../services/resourceLibraryApi';
+import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'addElement'
+  | 'createPack'
 >;
 
 type ResourceLibraryViewProps = {
@@ -52,6 +54,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [isRootDragActive, setIsRootDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadPhase, setUploadPhase] = useState<'uploading' | 'processing'>('uploading');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -108,7 +111,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   };
 
   const visiblePacks = useMemo(() => packs.filter((pack) => {
-    const matchesQuery = !query.trim() || [pack.name, pack.style, ...pack.gameTypes].join(' ').toLowerCase().includes(query.trim().toLowerCase());
+    const matchesQuery = !query.trim() || [pack.name, pack.style, ...(pack.gameTypes || [])].join(' ').toLowerCase().includes(query.trim().toLowerCase());
     return matchesQuery && (dimension === 'all' || pack.dimension === dimension);
   }), [dimension, packs, query]);
   const pageCount = Math.max(1, Math.ceil(visiblePacks.length / 64));
@@ -149,7 +152,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         onCategory={selectCategory}
         onElement={setSelectedElement}
         onEditPack={(name) => {
-          const updated = { ...selectedPack, name };
           void apiClient.updatePack(selectedPack.id, { name }).then((saved) => {
             setSelectedPack(saved);
             setPacks((current) => current.map((item) => item.id === saved.id ? saved : item));
@@ -166,6 +168,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   return (
     <section className={`relative min-h-full bg-zinc-950 px-8 py-8 text-zinc-100 ${isRootDragActive ? 'ring-2 ring-inset ring-orange-300/70' : ''}`} onDragEnter={(event) => { event.preventDefault(); setIsRootDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setIsRootDragActive(false); }} onDrop={(event) => { event.preventDefault(); setIsRootDragActive(false); void importDroppedPacks(event.dataTransfer.files); }}>
+      <CreateResourcePackDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={async (input) => { const created = await apiClient.createPack(input); setPacks((current) => [created, ...current]); return created; }} />
       {isRootDragActive ? <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-orange-300/70 bg-orange-400/10 text-orange-100"><div className="rounded-2xl bg-zinc-950/80 px-6 py-4 text-center shadow-2xl"><div className="type-headline">松开以导入资源包</div><div className="type-footnote mt-1 text-zinc-400">支持 ZIP 资源压缩包</div></div></div> : null}
       {uploadProgress !== null ? <div role="status" className="fixed bottom-6 left-1/2 z-30 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-center justify-between"><span className="type-button text-zinc-200">{uploadPhase === 'uploading' ? '正在上传资源包…' : '正在解析并入库…'}</span><span className="type-caption-2 text-orange-200">{uploadProgress}%</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-orange-300 transition-all duration-500" style={{ width: `${uploadProgress}%` }} /></div><p className="type-caption-2 mt-2 text-zinc-500">请保持当前页面打开</p></div> : null}
       <input ref={importInputRef} hidden type="file" accept="application/zip,.zip" onChange={(event) => {
@@ -185,7 +188,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
         <div className="type-footnote text-zinc-500">正在加载资源包…</div>
       ) : null}
       <div className="mb-5 flex items-center gap-2 border-b border-white/10 pb-4">
-        <div className="type-headline flex items-center gap-3">{copy.all} <button type="button" aria-label={copy.import} onClick={() => importInputRef.current?.click()} className="glass-icon-button h-8 w-8 text-lg">+</button></div>
+        <div className="type-headline flex items-center gap-3">{copy.all} <button type="button" aria-label="创建 Pack" onClick={() => setCreateDialogOpen(true)} className="glass-icon-button h-8 w-8 text-lg">+</button></div>
         <div className="flex-1" />
         <label className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
           <Search className="h-4 w-4" />
@@ -218,7 +221,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
         ))}
       </div>
-      {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => importInputRef.current?.click()} title={copy.empty} hint={copy.emptyHint} importLabel={copy.import} /> : null}
+      {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => setCreateDialogOpen(true)} title={copy.empty} hint={copy.emptyHint} importLabel="创建 Pack" /> : null}
       {pageCount > 1 ? (
         <div className="mt-7 flex items-center justify-center gap-3">
           <button type="button" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="secondary-pill type-button px-3 py-2 disabled:opacity-40">{copy.previous}</button>
@@ -240,18 +243,6 @@ export function ResourceLibraryPage({ onBack }: { onBack: () => void }) {
         <span className="type-headline ml-4">资源库</span>
       </div>
       <ResourceLibraryView />
-    </div>
-  );
-}
-
-function Summary({ label, value, suffix }: { label: string; value: string; suffix: string }) {
-  return (
-    <div className="glass-panel rounded-2xl p-4">
-      <div className="type-caption-2 text-zinc-500">{label}</div>
-      <div className="type-title-3 mt-2">
-        {value}
-        <span className="type-caption-2 ml-2 text-zinc-500">{suffix}</span>
-      </div>
     </div>
   );
 }
