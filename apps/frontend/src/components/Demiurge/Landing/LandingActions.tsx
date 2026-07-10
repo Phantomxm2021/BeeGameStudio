@@ -8,6 +8,7 @@ interface LandingActionsProps {
     isHistoryOpen: boolean;
     isProfileOpen?: boolean;
     isCreditStoreOpen?: boolean;
+    isResourceLibraryOpen?: boolean;
     currentUserId?: string;
     currentUserDisplayName?: string;
     currentUserEmail?: string;
@@ -30,6 +31,7 @@ export function LandingActions({
     isHistoryOpen,
     isProfileOpen,
     isCreditStoreOpen,
+    isResourceLibraryOpen,
     currentUserId,
     currentUserDisplayName,
     currentUserEmail,
@@ -53,6 +55,7 @@ export function LandingActions({
             isHistoryOpen={isHistoryOpen}
             isProfileOpen={isProfileOpen}
             isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
             currentUserId={currentUserId}
             currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}

@@ -79,7 +79,6 @@ import {
 } from '../../../services/projectLifecycleApi';
 import { useSystemStore } from '../../../store/systemStore';
 import { useToastContext } from '../../../contexts/ToastContext';
-import { ResourceLibraryView } from '../../ResourceLibrary/ResourceLibraryView';
 interface SettingsMenuProps {
     isOpen: boolean;
     lang: Language;
@@ -93,8 +92,6 @@ interface SettingsMenuProps {
     canManageModelConfig?: boolean;
     canManageInvitations?: boolean;
     canReadAudit?: boolean;
-    canManageResources?: boolean;
-    initialTab?: 'general' | 'resources';
 }
 
 type SettingsSection = 'personal' | 'skills' | 'platform';
@@ -146,8 +143,6 @@ export function SettingsMenu({
     canManageModelConfig,
     canManageInvitations,
     canReadAudit,
-    canManageResources,
-    initialTab = 'general',
 }: SettingsMenuProps) {
     const { i18n } = useTranslation('settings');
     const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
@@ -174,15 +169,13 @@ export function SettingsMenu({
     const effectiveCanManageModelConfig = canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
     const effectiveCanManageInvitations = canManageInvitations ?? canOpenPlatformSettings;
     const effectiveCanReadAudit = canReadAudit ?? (canOpenPlatformSettings && hasPermission('audit.read'));
-    const effectiveCanManageResources = canManageResources ?? (canOpenPlatformSettings || hasPermission('resources.manage'));
     const hasPlatformSettings = effectiveCanManageWorkspace ||
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||
         effectiveCanManageMcp ||
         effectiveCanManageModelConfig ||
         effectiveCanManageInvitations ||
-        effectiveCanReadAudit ||
-        effectiveCanManageResources;
+        effectiveCanReadAudit;
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -850,7 +843,6 @@ export function SettingsMenu({
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
             ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
-            ...(effectiveCanManageResources ? [{ id: 'resources' as const, label: '资源库', icon: FolderOpen }] : []),
         ];
     }, [
         effectiveCanManageWorkspace,
@@ -886,8 +878,6 @@ export function SettingsMenu({
                         ? projectLifecycleCopy.title
                     : activeTab === 'credit'
                         ? billingCopy.title
-                    : activeTab === 'resources'
-                        ? '资源库'
                     : text.settingsModel;
     const isSavingCurrentTab = activeSection === 'platform' && activeTab === 'general'
         ? (effectiveCanManageSecrets && isSavingWebTools)
@@ -902,8 +892,6 @@ export function SettingsMenu({
                     : activeTab === 'projects'
                         ? false
                     : activeTab === 'credit'
-                        ? false
-                    : activeTab === 'resources'
                         ? false
                     : isSaving;
     const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
@@ -922,8 +910,6 @@ export function SettingsMenu({
                     : activeTab === 'projects'
                         ? true
                     : activeTab === 'credit'
-                        ? true
-                    : activeTab === 'resources'
                         ? true
                     : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
 
@@ -987,13 +973,6 @@ export function SettingsMenu({
             setIsSavingBillingPack(false);
         }
     };
-    useEffect(() => {
-        if (isOpen && initialTab === 'resources' && effectiveCanManageResources) {
-            setActiveSection('platform');
-            setActiveTab('resources');
-        }
-    }, [effectiveCanManageResources, initialTab, isOpen]);
-
     useEffect(() => {
         if (!hasPlatformSettings && activeSection === 'platform') {
             setActiveSection('personal');
@@ -1304,12 +1283,6 @@ export function SettingsMenu({
                                             </div>
                                         </div>
                                         ) : null}
-                                    </div>
-                                ) : null}
-
-                                {activeSection === 'platform' && activeTab === 'resources' && effectiveCanManageResources ? (
-                                    <div className="min-h-0 flex-1 overflow-auto">
-                                        <ResourceLibraryView />
                                     </div>
                                 ) : null}
 

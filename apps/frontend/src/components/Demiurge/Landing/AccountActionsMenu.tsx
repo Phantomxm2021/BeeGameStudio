@@ -11,6 +11,7 @@ interface AccountActionsMenuProps {
     isHistoryOpen: boolean;
     isProfileOpen?: boolean;
     isCreditStoreOpen?: boolean;
+    isResourceLibraryOpen?: boolean;
     currentUserId?: string;
     currentUserDisplayName?: string;
     currentUserEmail?: string;
@@ -34,6 +35,7 @@ export function AccountActionsMenu({
     isHistoryOpen,
     isProfileOpen = false,
     isCreditStoreOpen = false,
+    isResourceLibraryOpen = false,
     currentUserId,
     currentUserDisplayName,
     currentUserEmail,
@@ -87,7 +89,7 @@ export function AccountActionsMenu({
             ariaLabel={t.userMenu}
             className={className}
             isTransitioning={isTransitioning}
-            isActive={isSettingsOpen || isHistoryOpen || isProfileOpen || isCreditStoreOpen}
+            isActive={isSettingsOpen || isHistoryOpen || isProfileOpen || isCreditStoreOpen || isResourceLibraryOpen}
             currentUserId={currentUserId}
             currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}

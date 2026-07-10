@@ -6,6 +6,7 @@ import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../ui/button';
 import { ButtonGroup } from '../ui/button-group';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { ResourceLibraryPage } from './ResourceLibrary/ResourceLibraryView';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
@@ -144,7 +145,7 @@ export function BeeGameLivePreviewPage({
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
-    const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'resources'>('general');
+    const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(false);
     const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
     const [isHistoryOpen, setHistoryOpen] = useState(false);
     const [isProfileOpen, setProfileOpen] = useState(false);
@@ -352,6 +353,7 @@ export function BeeGameLivePreviewPage({
                 isHistoryOpen={isHistoryOpen}
                 isProfileOpen={isProfileOpen}
                 isCreditStoreOpen={isCreditStoreOpen}
+                isResourceLibraryOpen={isResourceLibraryOpen}
                 currentUserId={currentUser?.id}
                 currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                 currentUserEmail={currentUser?.email}
@@ -367,15 +369,14 @@ export function BeeGameLivePreviewPage({
                     setCreditStoreOpen(true);
                 }}
                 onToggleSettings={() => {
-                    setSettingsInitialTab('general');
                     closeAccountSurfaces();
                     setSettingsOpen(true);
                 }}
                 canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                 onOpenResourceLibrary={() => {
                     closeAccountSurfaces();
-                    setSettingsInitialTab('resources');
-                    setSettingsOpen(true);
+                    setIsResourceLibraryOpen(true);
+                    setSettingsOpen(false);
                 }}
                 onToggleHistory={() => {
                     closeAccountSurfaces();
@@ -537,9 +538,8 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
-                canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
-                initialTab={settingsInitialTab}
             />
+            {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => setIsResourceLibraryOpen(false)} /> : null}
             <ProjectHistoryModal
                 isOpen={isHistoryOpen}
                 lang={lang}

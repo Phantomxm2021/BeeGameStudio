@@ -175,6 +175,20 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   );
 }
 
+export function ResourceLibraryPage({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[200] overflow-auto bg-zinc-950">
+      <div className="sticky top-0 z-10 flex h-14 items-center border-b border-white/10 bg-zinc-950/90 px-6 backdrop-blur-xl">
+        <button type="button" onClick={onBack} className="secondary-pill type-button px-4 py-2">
+          ← 返回
+        </button>
+        <span className="type-headline ml-4">资源库</span>
+      </div>
+      <ResourceLibraryView />
+    </div>
+  );
+}
+
 function Summary({ label, value, suffix }: { label: string; value: string; suffix: string }) {
   return (
     <div className="glass-panel rounded-2xl p-4">

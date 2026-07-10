@@ -15,6 +15,7 @@ import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { ResourceLibraryPage } from './ResourceLibrary/ResourceLibraryView';
 import type { StartProjectResult } from '../../types/project';
 import {
     beeGameAdapter,
@@ -647,7 +648,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     : restoredIdeaDraft?.idea || ''
     ));
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'resources'>('general');
+    const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
@@ -1378,6 +1379,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     isHistoryOpen={isHistoryOpen}
                     isProfileOpen={isProfileOpen}
                     isCreditStoreOpen={isCreditStoreOpen}
+                    isResourceLibraryOpen={isResourceLibraryOpen}
                     currentUserId={currentUser?.id}
                     currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                     currentUserEmail={currentUser?.email}
@@ -1387,15 +1389,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     onOpenProfile={handleOpenProfile}
                     onSignOut={currentUser ? () => void handleSignOut() : undefined}
                     onToggleSettings={() => {
-                        setSettingsInitialTab('general');
                         setIsSettingsOpen((value) => !value);
                         setIsHistoryOpen(false);
                         setIsCreditStoreOpen(false);
                     }}
                     canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                     onOpenResourceLibrary={() => {
-                        setSettingsInitialTab('resources');
-                        setIsSettingsOpen(true);
+                        setIsResourceLibraryOpen(true);
+                        setIsSettingsOpen(false);
                         setIsHistoryOpen(false);
                         setIsCreditStoreOpen(false);
                     }}
@@ -1416,9 +1417,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                    canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
-                    initialTab={settingsInitialTab}
                 />
+
+                {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => setIsResourceLibraryOpen(false)} /> : null}
 
                 <ProjectHistoryModal
                     isOpen={isHistoryOpen}
