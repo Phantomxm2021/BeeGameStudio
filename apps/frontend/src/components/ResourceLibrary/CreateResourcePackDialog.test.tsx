@@ -21,8 +21,8 @@ describe('CreateResourcePackDialog', () => {
     render(<CreateResourcePackDialog open onClose={vi.fn()} onCreate={vi.fn()} />)
 
     expect(screen.getByRole('heading', { name: '创建 Pack' })).toHaveClass('type-modal-title')
-    expect(screen.getByText('先定义风格与使用场景，再添加资源。')).toHaveClass('type-body')
-    expect(screen.getByText('资源库')).toHaveClass('type-label')
+    expect(screen.queryByText('先定义风格与使用场景，再添加资源。')).not.toBeInTheDocument()
+    expect(screen.queryByText('资源库')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('例如：Painterly Forest')).toHaveClass('h-11', 'rounded-xl')
     expect(screen.getByRole('button', { name: '创建 Pack' })).toHaveClass('h-11', 'type-button')
   })
