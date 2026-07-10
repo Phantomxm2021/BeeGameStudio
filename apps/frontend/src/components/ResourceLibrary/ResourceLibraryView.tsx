@@ -388,8 +388,8 @@ function PackBrowser({
 }) {
   const categories = useMemo(() => pack.categories || [], [pack.categories]);
   return (
-    <section className="flex min-h-full flex-col bg-zinc-950 p-6 text-zinc-100">
-      <div className="mb-4 flex items-center justify-between">
+    <section className="flex min-h-full flex-col bg-zinc-950 px-5 py-4 text-zinc-100">
+      <div className="mb-3 flex min-h-12 items-center justify-between border-b border-white/10 pb-3">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -400,42 +400,29 @@ function PackBrowser({
             <ChevronLeft className="h-4 w-4" />
           </button>
           <div>
-            <h1 className="type-title-3">{pack.name}</h1>
-            <p className="type-footnote mt-1 text-zinc-500">
-              {pack.style} · {pack.dimension} · {pack.elementCount} 个元素
+            <h1 className="type-headline">{pack.name}</h1>
+            <p className="type-caption-2 mt-0.5 text-zinc-500">
+              {pack.style} · {pack.dimension} · {pack.elementCount} 个元素{pack.gameTypes?.length ? ` · ${pack.gameTypes.slice(0, 2).join(' / ')}` : ''}
             </p>
           </div>
         </div>
         <div className="flex gap-2">
-          <button type="button" className="secondary-pill type-button px-4 py-2" onClick={() => {
+          <button type="button" className="secondary-pill type-button px-3 py-1.5" onClick={() => {
             const name = window.prompt('Pack 名称', pack.name)?.trim();
             if (name) onEditPack(name);
           }}>
             编辑 Pack 信息
           </button>
-          <label className="primary-pill type-button cursor-pointer px-4 py-2">
+          <label className="primary-pill type-button cursor-pointer px-3 py-1.5">
             ＋ 添加文件
             <input type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
           </label>
-          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button px-4 py-2" onClick={() => void onPublish()}>发布 Pack</button> : null}
+          {pack.status !== 'published' ? <button type="button" className="secondary-pill type-button px-3 py-1.5" onClick={() => void onPublish()}>发布</button> : null}
         </div>
       </div>
-      <div className="mb-5 flex gap-2">
-        {pack.gameTypes?.map((type) => (
-          <span
-            key={type}
-            className="type-caption-2 rounded-full bg-zinc-800 px-2 py-1 text-zinc-400"
-          >
-            {type}
-          </span>
-        ))}
-        <span className="type-caption-2 rounded-full bg-zinc-700 px-2 py-1 text-zinc-200">
-          {pack.dimension}
-        </span>
-      </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)] border-y border-white/10">
-        <aside className="border-r border-white/10 py-4 pr-3">
-          <div className="mb-3 flex items-center justify-between px-3"><div className="type-caption-1 text-zinc-500">Pack 文件</div><button type="button" aria-label="新建文件夹" className="type-caption-2 text-zinc-500 hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}>＋</button></div>
+      <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)]">
+        <aside className="border-r border-white/10 py-3 pr-3">
+          <div className="mb-2 flex items-center justify-between px-2"><div className="type-caption-1 text-zinc-500">Pack 文件</div><button type="button" aria-label="新建文件夹" className="type-caption-2 text-zinc-500 hover:text-zinc-100" onClick={() => { const name = window.prompt('文件夹名称')?.trim(); if (name) void onCreateFolder(name); }}>＋</button></div>
           <TreeRow
             icon={<Folder className="h-4 w-4 text-orange-300" />}
             label={pack.name}
@@ -472,7 +459,7 @@ function PackBrowser({
         </aside>
         <div className="relative min-w-0 p-5" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files)); }}>
           {uploadStatus ? <div role="status" className="mb-4 rounded-xl border border-orange-300/20 bg-orange-400/10 p-3"><div className="flex items-center justify-between type-caption-2 text-orange-100"><span>上传资源</span><span>{uploadStatus.done}/{uploadStatus.total}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-orange-300 transition-all" style={{ width: `${Math.round(uploadStatus.done / uploadStatus.total * 100)}%` }} /></div>{uploadStatus.failed.length ? <p className="mt-2 type-caption-2 text-red-200">失败：{uploadStatus.failed.join('、')}</p> : null}</div> : null}
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between">
             <div className="type-footnote text-zinc-500">
               {pack.name} <ChevronRight className="mx-1 inline h-3 w-3" />{' '}
               <span className="text-zinc-200">
@@ -493,7 +480,7 @@ function PackBrowser({
               {error}
             </div>
           ) : null}
-          <div className="grid min-h-[520px] place-items-center rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-800 via-zinc-900 to-black p-5">
+          <div className="grid min-h-[min(560px,calc(100vh-13rem))] place-items-center rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-black p-4">
             {selectedElement ? (
               <Preview element={selectedElement} pack={pack} onSave={onUpdateElement} />
             ) : (
@@ -528,7 +515,7 @@ function TreeRow({
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
-      className={`type-caption-2 flex h-9 w-full items-center gap-2 rounded-xl px-3 text-left ${active ? 'bg-orange-400/10 text-zinc-100' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+      className={`type-caption-2 flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left ${active ? 'bg-orange-400/10 text-zinc-100' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
     >
       {icon}
       <span className="truncate">{label}</span>
@@ -571,7 +558,7 @@ function ResourceInspectorOverlay({
     <aside
       role="complementary"
       aria-label="元素属性"
-      className="absolute bottom-4 right-4 w-72 rounded-2xl border border-white/15 bg-zinc-950/85 p-4 shadow-2xl backdrop-blur-2xl"
+      className="absolute bottom-3 right-3 max-h-[calc(100%-1.5rem)] w-64 overflow-y-auto rounded-xl border border-white/15 bg-zinc-950/90 p-3 shadow-2xl backdrop-blur-2xl"
     >
       <div className="mb-3 flex items-start justify-between">
         <div>
@@ -604,9 +591,6 @@ function ResourceInspectorOverlay({
         />
       </div>
       <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存属性'}</button>
-      <p className="type-caption-2 mt-3 border-t border-white/10 pt-3 text-zinc-500">
-        元素继承 Pack 的风格与表现维度，AI 将基于这些约束进行匹配。
-      </p>
     </aside>
   );
 }
