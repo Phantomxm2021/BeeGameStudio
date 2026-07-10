@@ -9,12 +9,14 @@ import {
   type ResourceUserContext,
   type ResourceUserResolver,
 } from './auth'
+import { ResourceImportError } from './import-resource-pack'
 
 export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
   corsOrigin?: string
+  importResourcePack?: (request: Request) => Promise<unknown>
 }
 
 export function createBeeGameResourceServerApp(
@@ -28,6 +30,13 @@ export function createBeeGameResourceServerApp(
       if (!user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
       if (!hasResourceAdminPermission(user)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
+      }
+      if (request.method === 'POST' && new URL(request.url).pathname === '/api/resource-packs/import') {
+        if (!options.importResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource import is not configured'), options.corsOrigin)
+        try { return corsResponse(Response.json({ pack: await options.importResourcePack(request) }, { status: 201 }), options.corsOrigin) } catch (error) {
+          if (error instanceof ResourceImportError) return corsResponse(jsonError(error.status, error.code, error.message), options.corsOrigin)
+          return corsResponse(jsonError(500, 'import_failed', error instanceof Error ? error.message : 'Resource import failed'), options.corsOrigin)
+        }
       }
       return corsResponse(await routeRequest(request, options.repository), options.corsOrigin)
     },

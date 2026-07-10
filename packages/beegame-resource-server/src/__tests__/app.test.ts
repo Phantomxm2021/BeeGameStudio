@@ -37,6 +37,22 @@ describe('resource service app', () => {
     expect(await response.json()).toEqual({ packs: [expect.objectContaining({ id: 'pack-1', elementCount: 1 })] })
   })
 
+  test('accepts an Admin Pack import through the multipart route', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      importResourcePack: async (request) => {
+        expect((await request.formData()).get('file')).toBeTruthy()
+        return { id: 'imported-pack', name: 'Imported Pack' }
+      },
+    })
+    const form = new FormData()
+    form.set('file', new File(['zip'], 'pack.zip', { type: 'application/zip' }))
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/import', { method: 'POST', body: form }))
+    expect(response.status).toBe(201)
+    expect(await response.json()).toEqual({ pack: { id: 'imported-pack', name: 'Imported Pack' } })
+  })
+
   test('rejects a non-admin user', async () => {
     const app = createBeeGameResourceServerApp({
       repository,

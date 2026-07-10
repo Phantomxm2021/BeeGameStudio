@@ -1,0 +1,72 @@
+import { strFromU8, unzipSync } from 'fflate'
+import type { ResourceElement, ResourcePack } from '@bee-game-studio/beegame-resource-core'
+
+type ImportOptions = {
+  baseUrl: string
+  serviceRoleKey: string
+  bucket?: string
+  fetchImpl?: typeof fetch
+}
+
+export function createSupabaseResourcePackImporter(options: ImportOptions) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const bucket = options.bucket ?? 'beegame-resource-packs'
+  const supabaseUrl = options.baseUrl.replace(/\/+$/, '')
+  return async (request: Request): Promise<ResourcePack> => {
+    const form = await request.formData()
+    const file = form.get('file')
+    if (!(file instanceof File)) throw new ResourceImportError(400, 'invalid_file', 'A ZIP file is required')
+    if (!file.name.toLowerCase().endsWith('.zip')) throw new ResourceImportError(400, 'invalid_file_type', 'Only ZIP resource packs are supported')
+    const archive = unzipSync(new Uint8Array(await file.arrayBuffer()))
+    const paths = Object.keys(archive).filter((path) => isAssetPath(path))
+    if (paths.length === 0) throw new ResourceImportError(400, 'empty_pack', 'The ZIP does not contain resource files')
+    const manifest = readManifest(archive)
+    const packId = manifest?.id || slugify(file.name.replace(/\.zip$/i, '')) || `pack-${crypto.randomUUID()}`
+    const elements = paths.map((path, index) => toElement(packId, path, index))
+    const pack = toPack(packId, file.name, elements, paths, findPreview(archive), manifest)
+    const uploaded: string[] = []
+    try {
+      for (const path of paths.concat(findPreview(archive) ? [findPreview(archive)!] : [])) {
+        const objectPath = `${packId}/${path}`
+        const response = await fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey, 'content-type': contentType(path), 'x-upsert': 'true' },
+          body: archive[path] as unknown as BodyInit,
+        })
+        if (!response.ok) throw new Error(`Storage upload failed for ${path}`)
+        uploaded.push(objectPath)
+      }
+      const packRow = { ...pack, game_types: pack.gameTypes, cover_path: pack.coverPath, element_count: elements.length, created_by: null }
+      await postJson(`${supabaseUrl}/rest/v1/beegame_resource_packs`, packRow, fetchImpl, options.serviceRoleKey)
+      await postJson(`${supabaseUrl}/rest/v1/beegame_resource_elements`, elements.map((element) => ({ ...element, pack_id: element.packId, style_override: element.styleOverride, dimension_override: element.dimensionOverride })), fetchImpl, options.serviceRoleKey)
+      return pack
+    } catch (error) {
+      await Promise.all(uploaded.map((path) => fetchImpl(`${supabaseUrl}/storage/v1/object/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { authorization: `Bearer ${options.serviceRoleKey}`, apikey: options.serviceRoleKey } })))
+      throw error
+    }
+  }
+}
+
+export class ResourceImportError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message) }
+}
+
+function readManifest(archive: Record<string, Uint8Array>): Partial<ResourcePack> | undefined {
+  const entry = archive['pack.json'] || archive['manifest.json']
+  if (!entry) return undefined
+  try { return JSON.parse(strFromU8(entry)) as Partial<ResourcePack> } catch { throw new ResourceImportError(400, 'invalid_manifest', 'Pack manifest is not valid JSON') }
+}
+
+function isAssetPath(path: string): boolean {
+  return !path.endsWith('/') && !path.split('/').some((part) => part.startsWith('.')) && !path.endsWith('pack.json') && !path.endsWith('manifest.json') && !/^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path)
+}
+
+function findPreview(archive: Record<string, Uint8Array>): string | undefined { return Object.keys(archive).find((path) => /^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path)) }
+function slugify(value: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') }
+function contentType(path: string): string { const ext = path.split('.').pop()?.toLowerCase(); return ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : 'application/octet-stream' }
+function toPack(id: string, filename: string, elements: ResourceElement[], paths: string[], previewPath?: string, manifest?: Partial<ResourcePack>): ResourcePack {
+  const has3d = paths.some((path) => /\.(fbx|glb|gltf|obj|blend)$/i.test(path)); const has2d = paths.some((path) => /\.(png|jpe?g|svg|webp)$/i.test(path))
+  return { id, name: manifest?.name || filename.replace(/\.zip$/i, ''), style: manifest?.style || 'unassigned', gameTypes: manifest?.gameTypes || ['unassigned'], dimension: manifest?.dimension || (has3d && !has2d ? '3D' : has2d && !has3d ? '2D' : 'agnostic'), categories: manifest?.categories || [...new Set(elements.map((element) => element.category))] as ResourcePack['categories'], license: manifest?.license || 'unassigned', version: manifest?.version || '0.1.0', status: manifest?.status || 'draft', coverPath: manifest?.coverPath || previewPath, }
+}
+function toElement(packId: string, path: string, index: number): ResourceElement { const category = path.split('/')[0] || 'assets'; const ext = path.split('.').pop()?.toLowerCase() || ''; const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(ext) ? 'model' : ['mp3', 'wav', 'ogg'].includes(ext) ? 'audio' : 'image'; return { id: `${packId}-${index}`, packId, name: path.split('/').pop() || path, path, category: category as ResourceElement['category'], kind, specs: {}, dependencies: [], status: 'ready' } }
+async function postJson(url: string, body: unknown, fetchImpl: typeof fetch, key: string): Promise<void> { const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, apikey: key, 'content-type': 'application/json', prefer: 'return=minimal' }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(`Metadata persistence failed (${response.status})`) }

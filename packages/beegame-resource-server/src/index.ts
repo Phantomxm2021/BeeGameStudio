@@ -2,14 +2,18 @@ import { createInMemoryResourceRepository } from '@bee-game-studio/beegame-resou
 import { createBeeGameResourceServerApp } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
+import { createSupabaseResourcePackImporter } from './import-resource-pack'
 
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
 
 if (import.meta.main) {
   const { host, port } = resolveBeeGameResourceListenOptions()
+  const baseUrl = process.env.BEEGAME_SUPABASE_URL
+  const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
+    importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey }) : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)

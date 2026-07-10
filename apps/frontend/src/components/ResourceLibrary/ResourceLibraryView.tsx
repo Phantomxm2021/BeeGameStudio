@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { strFromU8, unzipSync } from 'fflate';
 import { ChevronLeft, ChevronRight, File, Folder, Grid2X2, List, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
@@ -10,29 +9,13 @@ import {
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack'
 >;
 
 type ResourceLibraryViewProps = {
   apiClient?: ResourceLibraryApi;
 };
 
-const LOCAL_LIBRARY_KEY = 'beegame.resource-library.local.v1';
-
-type LocalLibrarySnapshot = {
-  packs: ResourcePackSummary[];
-  elementsByPack: Record<string, ResourceElement[]>;
-};
-
-function readLocalLibrary(): LocalLibrarySnapshot {
-  if (typeof window === 'undefined') return { packs: [], elementsByPack: {} };
-  try {
-    const value = JSON.parse(window.localStorage.getItem(LOCAL_LIBRARY_KEY) || '{}') as Partial<LocalLibrarySnapshot>;
-    return { packs: Array.isArray(value.packs) ? value.packs : [], elementsByPack: value.elementsByPack || {} };
-  } catch {
-    return { packs: [], elementsByPack: {} };
-  }
-}
 
 const categoryLabels: Record<string, string> = {
   characters: '角色',
@@ -56,8 +39,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   } : {
     all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
   };
-  const [localLibrary, setLocalLibrary] = useState<LocalLibrarySnapshot>(readLocalLibrary);
-  const [packs, setPacks] = useState<ResourcePackSummary[]>(localLibrary.packs);
+  const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
   const [elements, setElements] = useState<ResourceElement[]>([]);
   const [selectedElement, setSelectedElement] = useState<ResourceElement | null>(null);
@@ -68,12 +50,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
   const [page, setPage] = useState(1);
   const [isRootDragActive, setIsRootDragActive] = useState(false);
-  const [localElementsByPack, setLocalElementsByPack] = useState<Record<string, ResourceElement[]>>(localLibrary.elementsByPack);
-  const [localPreviewUrls, setLocalPreviewUrls] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem(LOCAL_LIBRARY_KEY, JSON.stringify({ packs: localLibrary.packs, elementsByPack: localLibrary.elementsByPack }));
-  }, [localLibrary]);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -82,7 +59,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     apiClient
       .listPacks()
       .then((result) => {
-        if (!cancelled) setPacks([...localLibrary.packs, ...result.filter((pack) => !localLibrary.packs.some((local) => local.id === pack.id))]);
+        if (!cancelled) setPacks(result);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '资源包加载失败');
@@ -93,22 +70,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
     return () => {
       cancelled = true;
     };
-  }, [apiClient, localLibrary.packs]);
+  }, [apiClient]);
 
   const openPack = async (pack: ResourcePackSummary) => {
     setError('');
     setLoading(true);
     try {
-      const localElements = localElementsByPack[pack.id];
-      if (localElements) {
-        const category = pack.categories?.[0];
-        const nextElements = category ? localElements.filter((element) => element.category === category) : localElements;
-        setSelectedPack(pack);
-        setActiveCategory(category);
-        setElements(nextElements);
-        setSelectedElement(nextElements[0] || null);
-        return;
-      }
       const detail = await apiClient.getPack(pack.id);
       const category = detail.categories?.[0];
       const nextElements = await apiClient.listElements(pack.id, category);
@@ -126,13 +93,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
   const selectCategory = async (category: string) => {
     if (!selectedPack) return;
     setActiveCategory(category);
-    const localElements = localElementsByPack[selectedPack.id];
-    if (localElements) {
-      const nextElements = localElements.filter((element) => element.category === category);
-      setElements(nextElements);
-      setSelectedElement(nextElements[0] || null);
-      return;
-    }
     setLoading(true);
     try {
       const nextElements = await apiClient.listElements(selectedPack.id, category);
@@ -154,45 +114,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
 
   const importPack = async (file: File) => {
     try {
-      if (!file.name.toLowerCase().endsWith('.zip')) throw new Error('请导入资源压缩包（.zip）');
-      const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
-      const manifestEntry = archive['pack.json'] || archive['manifest.json'];
-      const assetPaths = Object.keys(archive).filter((path) => !path.endsWith('/') && !path.split('/').some((part) => part.startsWith('.')) && !path.endsWith('pack.json') && !path.endsWith('manifest.json') && !/^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path));
-      const inferredCategories = [...new Set(assetPaths.map((path) => path.split('/')[0]).filter(Boolean))];
-      const extensions = assetPaths.map((path) => path.split('.').pop()?.toLowerCase());
-      const has3d = extensions.some((extension) => ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(extension || ''));
-      const has2d = extensions.some((extension) => ['png', 'jpg', 'jpeg', 'svg', 'webp'].includes(extension || ''));
-      const inferredDimension = has3d && !has2d ? '3D' : has2d && !has3d ? '2D' : 'agnostic';
-      const fallbackId = file.name.replace(/\.zip$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `pack-${Date.now()}`;
-      const generated: ResourcePackSummary = {
-        id: fallbackId,
-        name: file.name.replace(/\.zip$/i, ''),
-        style: '未标注',
-        gameTypes: [],
-        dimension: inferredDimension,
-        categories: inferredCategories,
-        license: '待补充',
-        version: '0.1.0',
-        status: 'draft',
-        coverPath: Object.keys(archive).find((path) => /^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path)),
-        elementCount: assetPaths.length,
-      };
-      const parsed = manifestEntry ? { ...generated, ...(JSON.parse(strFromU8(manifestEntry)) as Partial<ResourcePackSummary>) } : generated;
-      const previewPath = Object.keys(archive).find((path) => /^preview\.(?:jpe?g|png|webp|gif|mp4|webm)$/i.test(path));
-      if (previewPath) {
-        const extension = previewPath.split('.').pop()?.toLowerCase() || 'png';
-        const mime = extension === 'mp4' ? 'video/mp4' : extension === 'webm' ? 'video/webm' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : `image/${extension}`;
-        setLocalPreviewUrls((current) => ({ ...current, [parsed.id]: URL.createObjectURL(new Blob([archive[previewPath]], { type: mime })) }));
-      }
-      const localElements: ResourceElement[] = assetPaths.map((path, index) => {
-        const extension = path.split('.').pop()?.toLowerCase() || '';
-        const category = path.split('/')[0] || 'assets';
-        const kind = ['fbx', 'glb', 'gltf', 'obj', 'blend'].includes(extension) ? 'model' : ['mp3', 'wav', 'ogg'].includes(extension) ? 'audio' : ['ttf', 'otf', 'woff', 'woff2'].includes(extension) ? 'font' : 'image';
-        return { id: `${parsed.id}-${index}`, packId: parsed.id, name: path.split('/').pop() || path, path, category, kind, specs: {}, dependencies: [], status: 'ready' };
-      });
+      const parsed = await apiClient.importPack(file);
       setPacks((current) => [parsed, ...current.filter((pack) => pack.id !== parsed.id)]);
-      setLocalElementsByPack((current) => ({ ...current, [parsed.id]: localElements }));
-      setLocalLibrary((current) => ({ packs: [parsed, ...current.packs.filter((pack) => pack.id !== parsed.id)], elementsByPack: { ...current.elementsByPack, [parsed.id]: localElements } }));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : '资源包导入失败');
@@ -224,7 +147,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           const updated = { ...selectedPack, name };
           setSelectedPack(updated);
           setPacks((current) => current.map((item) => item.id === updated.id ? { ...item, name } : item));
-          setLocalLibrary((current) => ({ ...current, packs: current.packs.map((item) => item.id === updated.id ? { ...item, name } : item) }));
         }}
         onAddFile={() => {
           const name = window.prompt('文件名', 'new-asset.png')?.trim();
@@ -232,16 +154,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
           const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name, path: `${activeCategory}/${name}`, category: activeCategory, kind: 'file', specs: {}, dependencies: [], status: 'ready' };
           setElements((current) => [...current, next]);
           setSelectedElement(next);
-          setLocalElementsByPack((current) => ({ ...current, [selectedPack.id]: [...(current[selectedPack.id] || []), next] }));
-          setLocalLibrary((current) => ({ ...current, elementsByPack: { ...current.elementsByPack, [selectedPack.id]: [...(current.elementsByPack[selectedPack.id] || []), next] } }));
         }}
         onDropFile={(file) => {
           if (!activeCategory) return;
           const next: ResourceElement = { id: `local-${Date.now()}`, packId: selectedPack.id, name: file.name, path: `${activeCategory}/${file.name}`, category: activeCategory, kind: 'file', specs: { size: file.size, type: file.type }, dependencies: [], status: 'ready' };
           setElements((current) => [...current, next]);
           setSelectedElement(next);
-          setLocalElementsByPack((current) => ({ ...current, [selectedPack.id]: [...(current[selectedPack.id] || []), next] }));
-          setLocalLibrary((current) => ({ ...current, elementsByPack: { ...current.elementsByPack, [selectedPack.id]: [...(current.elementsByPack[selectedPack.id] || []), next] } }));
         }}
       />
     );
@@ -297,7 +215,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi }: Resource
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {pagedPacks.map((pack) => (
-          <PackCard key={pack.id} pack={pack} previewUrl={localPreviewUrls[pack.id]} onOpen={() => void openPack(pack)} />
+          <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
         ))}
       </div>
       {!loading && visiblePacks.length === 0 ? <EmptyState onImport={() => importInputRef.current?.click()} title={copy.empty} hint={copy.emptyHint} importLabel={copy.import} /> : null}

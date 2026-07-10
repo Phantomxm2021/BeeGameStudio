@@ -58,6 +58,12 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
     return body as T
   }
   return {
+    async importPack(file: File): Promise<ResourcePackSummary> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/import`, { method: 'POST', body: (() => { const form = new FormData(); form.set('file', file); return form })() })
+      const body = await response.json().catch(() => undefined) as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } } | undefined
+      if (!response.ok || !body?.pack) throw new ResourceLibraryApiError(body?.error?.message || `Resource import failed (${response.status})`, response.status, body?.error?.code || 'resource_import_failed')
+      return body.pack
+    },
     async listPacks(): Promise<ResourcePackSummary[]> {
       const result = await request<{ packs: ResourcePackSummary[] }>('/api/resource-packs')
       return result.packs

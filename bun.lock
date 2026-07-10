@@ -332,6 +332,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@bee-game-studio/beegame-resource-core": "workspace:*",
+        "fflate": "^0.8.2",
       },
     },
     "packages/beegame-security-core": {

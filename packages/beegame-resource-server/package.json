@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@bee-game-studio/beegame-resource-core": "workspace:*"
+    "@bee-game-studio/beegame-resource-core": "workspace:*",
+    "fflate": "^0.8.2"
   }
 }

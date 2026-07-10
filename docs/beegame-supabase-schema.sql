@@ -8,9 +8,19 @@ insert into storage.buckets (id, name, public)
 values
   ('avatars', 'avatars', true),
   ('beegame-assets', 'beegame-assets', false),
+  ('beegame-resource-packs', 'beegame-resource-packs', false),
   ('beegame-deployments', 'beegame-deployments', true)
 on conflict (id) do update
 set public = excluded.public;
+
+drop policy if exists "beegame resource pack platform read" on storage.objects;
+create policy "beegame resource pack platform read" on storage.objects
+  for select using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
+
+drop policy if exists "beegame resource pack platform write" on storage.objects;
+create policy "beegame resource pack platform write" on storage.objects
+  for all using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner())
+  with check (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
 
 drop policy if exists "beegame avatar public read" on storage.objects;
 create policy "beegame avatar public read" on storage.objects
@@ -310,6 +320,13 @@ create table if not exists public.beegame_resource_elements (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (pack_id, path)
+);
+
+create table if not exists public.beegame_resource_dependencies (
+  element_id text not null references public.beegame_resource_elements(id) on delete cascade,
+  dependency_path text not null,
+  dependency_kind text,
+  primary key (element_id, dependency_path)
 );
 
 create index if not exists beegame_resource_elements_pack_category_idx
@@ -1901,6 +1918,7 @@ alter table public.beegame_user_skills enable row level security;
 alter table public.beegame_assets enable row level security;
 alter table public.beegame_resource_packs enable row level security;
 alter table public.beegame_resource_elements enable row level security;
+alter table public.beegame_resource_dependencies enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
@@ -2021,6 +2039,11 @@ drop policy if exists "resource element platform owner access" on public.beegame
 create policy "resource element platform owner access" on public.beegame_resource_elements
   for all using (public.beegame_is_platform_owner())
   with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource dependency platform owner access" on public.beegame_resource_dependencies;
+create policy "resource dependency platform owner access" on public.beegame_resource_dependencies
+  for all using (exists (select 1 from public.beegame_resource_elements e where e.id = element_id and public.beegame_is_platform_owner()))
+  with check (exists (select 1 from public.beegame_resource_elements e where e.id = element_id and public.beegame_is_platform_owner()));
 
 drop policy if exists "preview owner access" on public.beegame_previews;
 create policy "preview owner access" on public.beegame_previews
