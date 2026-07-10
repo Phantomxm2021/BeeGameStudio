@@ -4520,8 +4520,15 @@ async function assertPermittedOutboundUrl(value: string): Promise<void> {
 
 async function assertPermittedModelConfigRuntime(modelConfigId: string): Promise<void> {
   const runtime = mapModelConfigToRuntime(modelConfigId)
-  const baseUrl = runtime?.env.OPENAI_BASE_URL
-  if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
+  for (const key of [
+    'ANTHROPIC_BASE_URL',
+    'OPENAI_BASE_URL',
+    'GEMINI_BASE_URL',
+    'GROK_BASE_URL',
+  ] as const) {
+    const baseUrl = runtime?.env[key]
+    if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
+  }
 }
 
 function readAllowedOutboundHosts(): string[] {

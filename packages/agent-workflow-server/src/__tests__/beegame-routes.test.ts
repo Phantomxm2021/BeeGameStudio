@@ -741,6 +741,23 @@ describe('beegame session routes', () => {
     } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 
+  test('does not start a session from a persisted private Anthropic endpoint', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-private-anthropic-'))
+    const app = createAgentWorkflowApp()
+    const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
+      name: 'Persisted unsafe Anthropic model', provider: 'anthropic-compatible',
+      baseUrl: 'https://127.0.0.1/private', apiKey: 'sk-test', models: { balanced: 'test' },
+    })
+    try {
+      const response = await app.request('/api/beegame-sessions', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace, modelConfigId: model.id }),
+      })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ error: 'Outbound URL is not permitted' })
+    } finally { await rm(workspace, { recursive: true, force: true }) }
+  })
+
   test('creates a dashboard session without starting a BeeGame turn', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner(undefined, 'build_write_complete')
