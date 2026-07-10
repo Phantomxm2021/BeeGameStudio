@@ -14,7 +14,7 @@ const pack: ResourcePackSummary = {
   gameTypes: ['adventure'],
   dimension: '2D',
   primaryCategory: 'world-scene',
-  categories: ['models', 'materials', 'textures'],
+  categories: ['textures'],
   version: '1.0.0',
   status: 'published',
   elementCount: 1,
@@ -65,8 +65,7 @@ describe('ResourceLibraryView', () => {
     const fileTree = screen.getByText('Pack 文件').closest('aside');
     expect(fileTree).not.toBeNull();
     expect(within(fileTree!).getByText('模型')).toBeInTheDocument();
-    expect(within(fileTree!).getByText('材质')).toBeInTheDocument();
-    expect(within(fileTree!).getByText('贴图')).toBeInTheDocument();
+    expect(within(fileTree!).queryByText('贴图')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '文件 Character Idle' })).toBeInTheDocument();
   });
 

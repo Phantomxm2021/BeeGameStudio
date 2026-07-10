@@ -117,7 +117,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       // Initial workspace loading must not treat those values as a validated category filter.
       const nextElements = await apiClient.listElements(pack.id);
       if (session !== packSessionRef.current) return;
-      const category = detail.categories?.find((value) => Object.prototype.hasOwnProperty.call(categoryLabels, value)) || nextElements[0]?.category;
+      const category = nextElements[0]?.category;
       setSelectedPack(detail);
       setFolders(nextFolders);
       setActiveCategory(category);
@@ -189,7 +189,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const uploadElements = async (files: File[]) => {
     if (!selectedPack || files.length === 0) return;
     const session = packSessionRef.current;
-    const uploadCategory = activeCategory || selectedPack.categories?.[0] || 'environment';
+    const uploadCategory = activeCategory || 'environment';
     const uploadFolderPath = activeFolderPath || uploadCategory;
     setElementUpload({ done: 0, total: files.length, failed: [] });
     for (const file of files) {
@@ -428,8 +428,8 @@ function PackBrowser({
   onPublish: () => Promise<void>;
 }) {
   const categories = useMemo(
-    () => [...new Set([...(pack.categories || []), ...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
-    [elements, loadedElementCategories, pack.categories],
+    () => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))],
+    [elements, loadedElementCategories],
   );
   return (
     <section className="flex min-h-full flex-col bg-zinc-950 px-5 py-4 text-zinc-100">
