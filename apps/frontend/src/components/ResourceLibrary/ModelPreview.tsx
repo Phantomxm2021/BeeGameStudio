@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { Sky } from 'three/examples/jsm/objects/Sky.js'
 
 export type ModelMetrics = {
   triangles: number
@@ -126,6 +127,19 @@ export function applyMissingTextureFallback(object: THREE.Object3D, unresolvedTe
   })
 }
 
+/** Configure Three's physical-atmosphere Sky for both the visible sky and PMREM HDR environment. */
+export function configureProceduralSky(sky: Sky): void {
+  const uniforms = sky.material.uniforms
+  uniforms.turbidity.value = 7
+  uniforms.rayleigh.value = 1.6
+  uniforms.mieCoefficient.value = 0.006
+  uniforms.mieDirectionalG.value = 0.78
+
+  const elevation = THREE.MathUtils.degToRad(27)
+  const azimuth = THREE.MathUtils.degToRad(155)
+  uniforms.sunPosition.value.setFromSphericalCoords(1, Math.PI / 2 - elevation, azimuth)
+}
+
 async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<THREE.Object3D> {
   const normalized = extension.toLowerCase()
   if (normalized === 'glb' || normalized === 'gltf') return (await new GLTFLoader().loadAsync(url)).scene
@@ -161,6 +175,15 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.1
+    const pmremGenerator = new THREE.PMREMGenerator(renderer)
+    const sky = new Sky()
+    sky.scale.setScalar(10000)
+    configureProceduralSky(sky)
+    const environmentScene = new THREE.Scene()
+    environmentScene.add(sky)
+    const environmentTarget = pmremGenerator.fromScene(environmentScene, 0.04)
+    scene.environment = environmentTarget.texture
+    scene.add(sky)
     const controls = new OrbitControls(camera, renderer.domElement)
     const hemisphere = new THREE.HemisphereLight(0xf6f1e7, 0x171a21, 1.5)
     const key = new THREE.DirectionalLight(0xfff4dd, 3.1)
@@ -221,6 +244,10 @@ export function ModelPreview({ url, extension, onMetrics, onMetricsError }: Mode
       observer.disconnect()
       controls.dispose()
       if (model) disposeObject(model)
+      environmentTarget.dispose()
+      pmremGenerator.dispose()
+      sky.geometry.dispose()
+      sky.material.dispose()
       renderer.dispose()
       renderer.domElement.remove()
     }

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
+import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, calculateModelMetrics, persistModelMetrics } from './ModelPreview'
+import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -49,6 +50,16 @@ describe('renderPreview', () => {
 
     expect(mesh.material).toBeInstanceOf(THREE.MeshStandardMaterial)
     expect((mesh.material as THREE.MeshStandardMaterial).color.getHex()).toBe(0xd8dce5)
+  })
+
+  test('configures the physical sky with a finite sun direction for HDRI generation', () => {
+    const sky = new Sky()
+
+    configureProceduralSky(sky)
+
+    const sunPosition = sky.material.uniforms.sunPosition.value as THREE.Vector3
+    expect(sunPosition.length()).toBeGreaterThan(0)
+    expect(sky.material.uniforms.turbidity.value).toBeGreaterThan(0)
   })
 
   test('selects PDF, text, and document-card fallbacks safely from extensions', () => {
