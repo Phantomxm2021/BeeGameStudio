@@ -174,7 +174,7 @@ export function SettingsMenu({
     const effectiveCanManageModelConfig = canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
     const effectiveCanManageInvitations = canManageInvitations ?? canOpenPlatformSettings;
     const effectiveCanReadAudit = canReadAudit ?? (canOpenPlatformSettings && hasPermission('audit.read'));
-    const effectiveCanManageResources = canManageResources ?? (canOpenPlatformSettings && hasPermission('resources.manage'));
+    const effectiveCanManageResources = canManageResources ?? (canOpenPlatformSettings || hasPermission('resources.manage'));
     const hasPlatformSettings = effectiveCanManageWorkspace ||
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||

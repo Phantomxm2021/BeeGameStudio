@@ -1392,7 +1392,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         setIsHistoryOpen(false);
                         setIsCreditStoreOpen(false);
                     }}
-                    canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                    canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                     onOpenResourceLibrary={() => {
                         setSettingsInitialTab('resources');
                         setIsSettingsOpen(true);
@@ -1416,7 +1416,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     lang={lang}
                     onClose={() => setIsSettingsOpen(false)}
                     onSetLang={onSetLang}
-                    canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                    canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                     initialTab={settingsInitialTab}
                 />
 

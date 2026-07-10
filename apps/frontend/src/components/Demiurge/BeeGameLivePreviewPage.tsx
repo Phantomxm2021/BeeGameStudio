@@ -371,7 +371,7 @@ export function BeeGameLivePreviewPage({
                     closeAccountSurfaces();
                     setSettingsOpen(true);
                 }}
-                canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                 onOpenResourceLibrary={() => {
                     closeAccountSurfaces();
                     setSettingsInitialTab('resources');
@@ -537,7 +537,7 @@ export function BeeGameLivePreviewPage({
                 lang={lang}
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
-                canManageResources={currentUser?.role === 'owner' && currentUser.permissions.includes('resources.manage')}
+                canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
                 initialTab={settingsInitialTab}
             />
             <ProjectHistoryModal
