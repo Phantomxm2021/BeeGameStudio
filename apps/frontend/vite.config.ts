@@ -18,7 +18,7 @@ const frontendSrcPath = fileURLToPath(new URL('./src', import.meta.url))
 function tolerateIncompleteFbxUvLayers() {
   const loaderSuffix = '/three/examples/jsm/loaders/FBXLoader.js'
   const vulnerableCondition = 'if ( geoNode.LayerElementUV[ i ].UV ) {'
-  const guardedCondition = 'if ( geoNode.LayerElementUV[ i ].UV && geoNode.LayerElementUV[ i ].UV.a ) {'
+  const guardedCondition = "if ( geoNode.LayerElementUV[ i ].UV && geoNode.LayerElementUV[ i ].UV.a && ( geoNode.LayerElementUV[ i ].ReferenceInformationType !== 'IndexToDirect' || ( geoNode.LayerElementUV[ i ].UVIndex && geoNode.LayerElementUV[ i ].UVIndex.a ) ) ) {"
   return {
     name: 'beegame-tolerate-incomplete-fbx-uv-layers',
     enforce: 'pre' as const,

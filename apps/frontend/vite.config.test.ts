@@ -38,5 +38,6 @@ describe('vite production build config', () => {
     expect(configSource).toContain('beegame-tolerate-incomplete-fbx-uv-layers');
     expect(configSource).toContain("exclude: ['three/examples/jsm/loaders/FBXLoader.js']");
     expect(configSource).toContain('geoNode.LayerElementUV[ i ].UV && geoNode.LayerElementUV[ i ].UV.a');
+    expect(configSource).toContain("ReferenceInformationType !== 'IndexToDirect' || ( geoNode.LayerElementUV[ i ].UVIndex && geoNode.LayerElementUV[ i ].UVIndex.a )");
   });
 });
