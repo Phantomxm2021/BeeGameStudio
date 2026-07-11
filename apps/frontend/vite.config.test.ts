@@ -31,4 +31,12 @@ describe('vite production build config', () => {
     expect(configSource).toContain("noExternal: ['@shadcn/react']");
     expect(configSource).toContain("inline: ['@shadcn/react']");
   });
+
+  it('keeps malformed FBX UV layers from aborting an otherwise previewable model', () => {
+    const configSource = readFileSync(configPath, 'utf8');
+
+    expect(configSource).toContain('beegame-tolerate-incomplete-fbx-uv-layers');
+    expect(configSource).toContain("exclude: ['three/examples/jsm/loaders/FBXLoader.js']");
+    expect(configSource).toContain('geoNode.LayerElementUV[ i ].UV && geoNode.LayerElementUV[ i ].UV.a');
+  });
 });
