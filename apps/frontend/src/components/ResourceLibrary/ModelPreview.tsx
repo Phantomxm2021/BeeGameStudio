@@ -18,6 +18,12 @@ export type ModelMetrics = {
   bounds: { width: number; height: number; depth: number }
 }
 
+type LoadedModel = {
+  object: THREE.Object3D
+  /** Only direct FBX loads need a neutral material for unresolved external textures. */
+  applyMissingTextureFallback: boolean
+}
+
 type ModelPreviewProps = {
   url: string
   extension: string
@@ -153,11 +159,25 @@ export function applyMissingTextureFallback(object: THREE.Object3D, unresolvedTe
         roughness: 0.72,
         metalness: 0.08,
         side: THREE.DoubleSide,
+        vertexColors: node.geometry.getAttribute('color') !== undefined,
       })
       fallback.name = material.name
       return fallback
     })
     node.material = Array.isArray(node.material) ? fallbackMaterials : fallbackMaterials[0]
+  })
+}
+
+/** Preserve imported per-vertex color data even when a material is later rebound to a Pack texture. */
+export function enableVertexColors(object: THREE.Object3D): void {
+  object.traverse(node => {
+    if (!(node instanceof THREE.Mesh) || node.geometry.getAttribute('color') === undefined) return
+    const materials = Array.isArray(node.material) ? node.material : [node.material]
+    materials.forEach(material => {
+      if (!('vertexColors' in material)) return
+      material.vertexColors = true
+      material.needsUpdate = true
+    })
   })
 }
 
@@ -188,10 +208,10 @@ export function normalizeModelPreviewError(reason: unknown): Error {
   return new Error(typeof reason === 'string' && reason.trim() ? reason : 'Unknown model loading error')
 }
 
-async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<THREE.Object3D> {
+async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<LoadedModel> {
   const normalized = extension.toLowerCase()
-  if (normalized === 'glb' || normalized === 'gltf') return (await new GLTFLoader().loadAsync(url)).scene
-  if (normalized === 'obj') return new OBJLoader().loadAsync(url)
+  if (normalized === 'glb' || normalized === 'gltf') return { object: (await new GLTFLoader().loadAsync(url)).scene, applyMissingTextureFallback: false }
+  if (normalized === 'obj') return { object: await new OBJLoader().loadAsync(url), applyMissingTextureFallback: false }
   if (normalized === 'fbx') {
     const manager = new THREE.LoadingManager()
     manager.setURLModifier((requestedUrl) => {
@@ -199,7 +219,7 @@ async function loadModel(url: string, extension: string, onUnresolvedTexture?: (
       return requestedUrl
     })
     try {
-      return await new FBXLoader(manager).loadAsync(url)
+      return { object: await new FBXLoader(manager).loadAsync(url), applyMissingTextureFallback: true }
     } catch (threeError) {
       return loadFbxWithAssimpFallback(url, threeError)
     }
@@ -213,7 +233,7 @@ async function loadModel(url: string, extension: string, onUnresolvedTexture?: (
  * to a canonical GLB through Assimp's WebAssembly build. The source FBX stays
  * untouched in the Pack.
  */
-async function loadFbxWithAssimpFallback(url: string, originalError: unknown): Promise<THREE.Object3D> {
+async function loadFbxWithAssimpFallback(url: string, originalError: unknown): Promise<LoadedModel> {
   const response = await fetch(url)
   if (!response.ok) throw normalizeModelPreviewError(originalError)
   try {
@@ -233,7 +253,7 @@ async function loadFbxWithAssimpFallback(url: string, originalError: unknown): P
     glbBytes.set(glb)
     const blobUrl = URL.createObjectURL(new Blob([glbBytes.buffer], { type: 'model/gltf-binary' }))
     try {
-      return (await new GLTFLoader().loadAsync(blobUrl)).scene
+      return { object: (await new GLTFLoader().loadAsync(blobUrl)).scene, applyMissingTextureFallback: false }
     } finally {
       URL.revokeObjectURL(blobUrl)
     }
@@ -294,14 +314,15 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
     loadModel(url, extension, (reference) => unresolvedTextures.add(reference))
       .then(async loaded => {
         if (!active) {
-          disposeObject(loaded)
+          disposeObject(loaded.object)
           return
         }
-        applyMissingTextureFallback(loaded, [...unresolvedTextures])
-        await applyBoundBaseColorTextures(loaded, materialTextureBindings, textureUrls).catch(() => undefined)
-        model = loaded
-        scene.add(loaded)
-        const bounds = new THREE.Box3().setFromObject(loaded)
+        if (loaded.applyMissingTextureFallback) applyMissingTextureFallback(loaded.object, [...unresolvedTextures])
+        enableVertexColors(loaded.object)
+        await applyBoundBaseColorTextures(loaded.object, materialTextureBindings, textureUrls).catch(() => undefined)
+        model = loaded.object
+        scene.add(loaded.object)
+        const bounds = new THREE.Box3().setFromObject(loaded.object)
         const center = bounds.getCenter(new THREE.Vector3())
         const radius = Math.max(bounds.getSize(new THREE.Vector3()).length() / 2, 0.5)
         controls.target.copy(center)
@@ -314,7 +335,7 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
         camera.lookAt(center)
         controls.update()
         if (onMetricsRef.current) {
-          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded, [...unresolvedTextures])).then(metricsError => {
+          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, loaded.applyMissingTextureFallback ? [...unresolvedTextures] : [])).then(metricsError => {
             if (!metricsError || !active) return
             setError('模型信息保存失败，请重试。')
             onMetricsErrorRef.current?.(metricsError)

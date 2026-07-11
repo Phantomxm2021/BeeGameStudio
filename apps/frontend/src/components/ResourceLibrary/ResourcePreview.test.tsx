@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, normalizeModelPreviewError, persistModelMetrics } from './ModelPreview'
+import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, enableVertexColors, normalizeModelPreviewError, persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -49,14 +49,28 @@ describe('renderPreview', () => {
   })
 
   test('replaces unresolved FBX texture materials with a visible neutral material', () => {
+    const geometry = new THREE.BoxGeometry(1, 1, 1)
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geometry.getAttribute('position').count * 3).fill(1), 3))
     const material = new THREE.MeshPhongMaterial({ map: new THREE.Texture(), color: 0x111111, name: 'Body' })
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)
+    const mesh = new THREE.Mesh(geometry, material)
 
     applyMissingTextureFallback(mesh, ['albedo.png'])
 
     expect(mesh.material).toBeInstanceOf(THREE.MeshStandardMaterial)
     expect((mesh.material as THREE.MeshStandardMaterial).color.getHex()).toBe(0xd8dce5)
     expect((mesh.material as THREE.MeshStandardMaterial).name).toBe('Body')
+    expect((mesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true)
+  })
+
+  test('enables imported vertex colors without replacing the converted material', () => {
+    const geometry = new THREE.BoxGeometry(1, 1, 1)
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geometry.getAttribute('position').count * 3).fill(0.5), 3))
+    const material = new THREE.MeshStandardMaterial({ vertexColors: false })
+    const mesh = new THREE.Mesh(geometry, material)
+
+    enableVertexColors(mesh)
+
+    expect(material.vertexColors).toBe(true)
   })
 
   test('configures the physical sky with a finite sun direction for HDRI generation', () => {
