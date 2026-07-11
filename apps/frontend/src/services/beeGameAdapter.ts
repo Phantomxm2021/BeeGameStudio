@@ -2,6 +2,8 @@ import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
   BeeGameResourceBindingPayload,
+  BeeGameResourceCandidatePayload,
+  BeeGameResourcePackImpactPayload,
   BeeGameResourceIntegrationPayload,
   BeeGameAutoResourceBindingPayload,
   BeeGameResourceUnbindingPayload,
@@ -734,10 +736,19 @@ export const beeGameAdapter = {
     );
   },
 
-  async bindProjectResource(projectId: string, slotId: string, requirement: Record<string, unknown>): Promise<BeeGameResourceBindingPayload> {
+  async getProjectResourceCandidates(projectId: string, slotId: string): Promise<BeeGameResourceCandidatePayload[]> {
+    const result = await getJson<{ candidates: BeeGameResourceCandidatePayload[] }>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-candidates`)
+    return result.candidates
+  },
+
+  async getResourcePackImpact(packId: string): Promise<BeeGameResourcePackImpactPayload> {
+    return getJson<BeeGameResourcePackImpactPayload>(`/api/resource-packs/${encodeURIComponent(packId)}/impact`)
+  },
+
+  async bindProjectResource(projectId: string, slotId: string, requirement: Record<string, unknown>, selection?: { packId: string; elementId: string }): Promise<BeeGameResourceBindingPayload> {
     return postJson<BeeGameResourceBindingPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
-      { requirement },
+      { requirement, ...(selection ? { selection } : {}) },
     );
   },
 

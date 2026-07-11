@@ -24,4 +24,18 @@ describe('resource pack publish readiness', () => {
     expect(report.canPublish).toBe(false)
     expect(report.blocking.map((issue) => issue.code)).toEqual(expect.arrayContaining(['license_missing', 'version_missing', 'dependency_missing', 'unresolved_texture', 'duplicate_path']))
   })
+
+  test('reports actionable non-blocking processing and governance warnings', () => {
+    const report = evaluateResourcePackPublishReadiness(
+      { ...pack, license: 'CC-BY-4.0' },
+      [
+        { ...ready, id: 'binary', specs: { ...ready.specs, inspectionStatus: 'binary_fbx_requires_processor', previewStatus: 'failed', contentHash: 'same-content' } },
+        { ...ready, id: 'copy', name: 'Tree Copy', path: 'models/tree-copy.glb', specs: { ...ready.specs, contentHash: 'same-content', size: 513 * 1024 * 1024 } },
+      ],
+    )
+    expect(report.canPublish).toBe(true)
+    expect(report.warnings.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'license_evidence_missing', 'model_inspection_incomplete', 'preview_failed', 'duplicate_content', 'file_size_large',
+    ]))
+  })
 })

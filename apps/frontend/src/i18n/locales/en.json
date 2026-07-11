@@ -885,5 +885,45 @@
   },
   "livePreview": {
     "rollback": "Rollback"
+  },
+  "resourceLibrary": {
+    "library": "Resource library",
+    "name": "Name",
+    "dimension": "Dimension",
+    "category": "Primary category",
+    "mixed": "Mixed",
+    "selectResourceType": "Select a resource type",
+    "style": "Style",
+    "gameTypes": "Game types",
+    "multiSelect": "Multiple selection",
+    "add": "Add",
+    "customStyle": "Add custom style",
+    "customGameType": "Add custom game type",
+    "create": "Create Pack",
+    "creating": "Creating…",
+    "createRequired": "Enter a Pack name, style and game type, then select a primary category.",
+    "update": "Save Pack",
+    "updating": "Saving…",
+    "updateRequired": "Enter a Pack name, style and game type.",
+    "cover": "Cover",
+    "coverOptional": "Optional; uploads before saving.",
+    "uploadCover": "Upload cover",
+    "editDescription": "Update Pack metadata and cover.",
+    "close": "Close",
+    "archive": "Archive Pack",
+    "archived": "Archived",
+    "editPack": "Edit Pack",
+    "publish": "Publish",
+    "deletePack": "Delete Pack",
+    "metadata": {
+      "description": "Description",
+      "tags": "Tags",
+      "version": "Version",
+      "license": "License",
+      "author": "Author",
+      "source": "Source",
+      "licenseEvidence": "License evidence",
+      "compatibleTargets": "Compatible targets"
+    }
   }
 }

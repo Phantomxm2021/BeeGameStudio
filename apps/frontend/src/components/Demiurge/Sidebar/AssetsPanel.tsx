@@ -12,7 +12,7 @@ import {
     Unlink,
     Upload,
 } from 'lucide-react';
-import type { BeeGameAssetManifestPayload, BeeGameAssetSlotPayload } from '../../../services/api';
+import type { BeeGameAssetManifestPayload, BeeGameAssetSlotPayload, BeeGameResourceCandidatePayload } from '../../../services/api';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
@@ -29,6 +29,8 @@ interface AssetsPanelProps {
     onUnbind?: (slotId: string) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
+    onCandidates?: (slot: BeeGameAssetSlotPayload) => Promise<BeeGameResourceCandidatePayload[]>;
+    onBindCandidate?: (slot: BeeGameAssetSlotPayload, candidate: BeeGameResourceCandidatePayload) => Promise<void>;
     lang?: Language;
 }
 
@@ -46,6 +48,8 @@ export const AssetsPanel = memo(({
     onUnbind,
     onRequestIntegration,
     onRequestAllIntegration,
+    onCandidates,
+    onBindCandidate,
     lang = 'en',
 }: AssetsPanelProps) => {
     const { i18n } = useTranslation('beegame');
@@ -59,6 +63,12 @@ export const AssetsPanel = memo(({
     const [unbindSlot, setUnbindSlot] = useState<BeeGameAssetSlotPayload | null>(null);
     const [isUnbinding, setIsUnbinding] = useState(false);
     const [unbindError, setUnbindError] = useState('');
+    const [candidateSlot, setCandidateSlot] = useState<BeeGameAssetSlotPayload | null>(null);
+    const [candidates, setCandidates] = useState<BeeGameResourceCandidatePayload[]>([]);
+    const [candidateError, setCandidateError] = useState('');
+    const [candidateLoading, setCandidateLoading] = useState(false);
+    const [candidateToBind, setCandidateToBind] = useState<BeeGameResourceCandidatePayload | null>(null);
+    const [isBindingCandidate, setIsBindingCandidate] = useState(false);
 
     if (isLoading && slots.length === 0) {
         return (
@@ -154,6 +164,19 @@ export const AssetsPanel = memo(({
                         onReintegrate={onReintegrate}
                         onRequestUnbind={onUnbind ? () => { setUnbindError(''); setUnbindSlot(slot); } : undefined}
                         onRequestIntegration={onRequestIntegration}
+                        onRequestCandidates={onCandidates ? async () => {
+                            setCandidateSlot(slot);
+                            setCandidateToBind(null);
+                            setCandidateLoading(true);
+                            setCandidateError('');
+                            try {
+                                setCandidates(await onCandidates(slot));
+                            } catch (error) {
+                                setCandidateError(error instanceof Error ? error.message : String(error));
+                            } finally {
+                                setCandidateLoading(false);
+                            }
+                        } : undefined}
                     />
                 ))}
             </div>
@@ -188,6 +211,64 @@ export const AssetsPanel = memo(({
                     </div>
                 </div>
             ) : null}
+            {candidateSlot ? (
+                <div className="fixed inset-0 z-[81] grid place-items-center bg-black/60 p-5 backdrop-blur-sm">
+                    <div role="dialog" aria-modal="true" aria-label="资源候选" className="glass-panel w-full max-w-lg rounded-3xl p-6 text-zinc-100">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="type-title-3">资源候选</div>
+                            <button type="button" onClick={() => setCandidateSlot(null)} className="glass-icon-button h-8 w-8" aria-label="关闭">×</button>
+                        </div>
+                        <p className="type-footnote mt-2 text-zinc-400">{candidateSlot.name || candidateSlot.id}</p>
+                        {candidateLoading ? <p className="type-footnote mt-5 text-zinc-400">正在加载候选资源…</p> : null}
+                        {!candidateLoading && candidateError ? <p className="type-footnote mt-5 text-red-300">{candidateError}</p> : null}
+                        {!candidateLoading && !candidateError ? (
+                            <div className="mt-5 space-y-2">
+                                {candidates.length ? candidates.map(candidate => (
+                                    <button
+                                        key={`${candidate.packId}:${candidate.elementId}`}
+                                        type="button"
+                                        onClick={() => setCandidateToBind(candidate)}
+                                        className={`w-full rounded-xl border p-3 text-left transition hover:bg-white/5 ${candidateToBind?.elementId === candidate.elementId && candidateToBind.packId === candidate.packId ? 'border-sky-300/70 bg-sky-400/10' : 'border-white/10'}`}
+                                    >
+                                        <div className="type-footnote text-white">{candidate.elementPath}</div>
+                                        <div className="type-caption-2 mt-1 text-zinc-500">{candidate.packId} · v{candidate.packVersion} · {candidate.reasons.join(' · ')}</div>
+                                    </button>
+                                )) : <p className="type-footnote text-zinc-500">没有兼容候选资源。</p>}
+                            </div>
+                        ) : null}
+                        {candidateToBind ? (
+                            <div className="mt-5 rounded-2xl border border-sky-300/20 bg-sky-400/5 p-4">
+                                <p className="type-footnote text-zinc-200">
+                                    {candidateSlot.resource_binding ? '确认替换当前资源绑定？' : '确认使用此资源？'}
+                                </p>
+                                <p className="type-caption-2 mt-1 text-zinc-500">{candidateToBind.elementPath}</p>
+                                <div className="mt-4 flex justify-end gap-2">
+                                    <button type="button" disabled={isBindingCandidate} onClick={() => setCandidateToBind(null)} className="secondary-pill type-button px-4 py-2">取消</button>
+                                    <button
+                                        type="button"
+                                        disabled={isBindingCandidate || !onBindCandidate}
+                                        onClick={() => {
+                                            if (!onBindCandidate) return;
+                                            setIsBindingCandidate(true);
+                                            setCandidateError('');
+                                            void onBindCandidate(candidateSlot, candidateToBind)
+                                                .then(() => {
+                                                    setCandidateToBind(null);
+                                                    setCandidateSlot(null);
+                                                })
+                                                .catch(error => setCandidateError(error instanceof Error ? error.message : String(error)))
+                                                .finally(() => setIsBindingCandidate(false));
+                                        }}
+                                        className="type-button rounded-full bg-white px-4 py-2 text-zinc-950 transition hover:bg-zinc-200 disabled:opacity-60"
+                                    >
+                                        {isBindingCandidate ? '正在绑定…' : (candidateSlot.resource_binding ? '确认替换' : '确认使用')}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 });
@@ -203,6 +284,7 @@ function AssetSlotCard({
     onReintegrate,
     onRequestUnbind,
     onRequestIntegration,
+    onRequestCandidates,
 }: {
     slot: BeeGameAssetSlotPayload;
     text: AssetsPanelText;
@@ -212,6 +294,7 @@ function AssetSlotCard({
     onReintegrate?: (slotId: string) => Promise<void>;
     onRequestUnbind?: () => void;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
+    onRequestCandidates?: () => Promise<void>;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
     const [error, setError] = useState('');
@@ -278,6 +361,7 @@ function AssetSlotCard({
                             <div className="mt-1 truncate">{slot.resource_binding.pack_id} · {slot.resource_binding.element_id}</div>
                         </div>
                     ) : null}
+                    {slot.resource_requirement && onRequestCandidates ? <button type="button" onClick={() => void onRequestCandidates()} className="type-button mt-3 rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 text-sky-100">{slot.resource_binding ? '替换资源' : '查看候选资源'}</button> : null}
 
                     {status === 'uploaded' ? (
                         <div className="type-footnote mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">

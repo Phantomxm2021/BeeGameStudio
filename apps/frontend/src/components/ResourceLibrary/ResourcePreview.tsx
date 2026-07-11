@@ -53,23 +53,24 @@ type ResourcePreviewProps = {
   onMetrics?: (metrics: ModelMetrics) => void
   materialTextureBindings?: MaterialTextureBindings
   textureUrls?: Readonly<Record<string, string>>
+  onPreviewError?: (error: Error) => void
 }
 
-export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls }: ResourcePreviewProps) {
+export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls, onPreviewError }: ResourcePreviewProps) {
   const renderer = renderPreview(element)
   const extension = extensionFor(element)
 
-  if (renderer === 'image') return <img src={url} alt={element.name} className="h-full w-full object-contain" />
-  if (renderer === 'audio') return <div className="grid h-full w-full place-items-center"><audio controls src={url}>Your browser cannot play this audio file.</audio></div>
-  if (renderer === 'video') return <video controls src={url} className="h-full w-full object-contain">Your browser cannot play this video file.</video>
-  if (renderer === 'font') return <FontPreview url={url} element={element} />
+  if (renderer === 'image') return <img src={url} alt={element.name} onError={() => onPreviewError?.(new Error('Image preview failed'))} className="h-full w-full object-contain" />
+  if (renderer === 'audio') return <div className="grid h-full w-full place-items-center"><audio controls src={url} onError={() => onPreviewError?.(new Error('Audio preview failed'))}>Your browser cannot play this audio file.</audio></div>
+  if (renderer === 'video') return <video controls src={url} onError={() => onPreviewError?.(new Error('Video preview failed'))} className="h-full w-full object-contain">Your browser cannot play this video file.</video>
+  if (renderer === 'font') return <FontPreview url={url} element={element} onPreviewError={onPreviewError} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
-  if (renderer === 'text') return <SafeTextPreview url={url} />
-  if (renderer === 'model') return <ModelPreview url={url} extension={extension} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} />
+  if (renderer === 'text') return <SafeTextPreview url={url} onPreviewError={onPreviewError} />
+  if (renderer === 'model') return <ModelPreview url={url} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} />
   return <DocumentCard element={element} url={url} />
 }
 
-function FontPreview({ url }: { url: string; element: ResourceElement }) {
+function FontPreview({ url, onPreviewError }: { url: string; element: ResourceElement; onPreviewError?: (error: Error) => void }) {
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -77,14 +78,14 @@ function FontPreview({ url }: { url: string; element: ResourceElement }) {
     let active = true
     font.load()
       .then(loadedFont => { document.fonts.add(loadedFont); if (active) setLoaded(true) })
-      .catch(() => { if (active) setLoaded(false) })
+      .catch(error => { if (active) { setLoaded(false); onPreviewError?.(error instanceof Error ? error : new Error('Font preview failed')) } })
     return () => { active = false; document.fonts.delete(font) }
   }, [url])
 
   return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-white" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p></div>
 }
 
-function SafeTextPreview({ url }: { url: string }) {
+function SafeTextPreview({ url, onPreviewError }: { url: string; onPreviewError?: (error: Error) => void }) {
   const [content, setContent] = useState('Loading text preview…')
 
   useEffect(() => {
@@ -92,7 +93,7 @@ function SafeTextPreview({ url }: { url: string }) {
     fetch(url, { signal: controller.signal })
       .then(response => response.ok ? response.text() : Promise.reject(new Error('Unable to load text preview')))
       .then(setContent)
-      .catch(error => { if (error.name !== 'AbortError') setContent('Text preview is unavailable.') })
+      .catch(error => { if (error.name !== 'AbortError') { setContent('Text preview is unavailable.'); onPreviewError?.(error instanceof Error ? error : new Error('Text preview failed')) } })
     return () => controller.abort()
   }, [url])
 

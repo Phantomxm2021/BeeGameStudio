@@ -280,6 +280,12 @@ export function RightSidebar({
         const result = await api.unbindProjectResource(projectId, slotId);
         setAssetManifest(result.manifest);
     };
+    const handleResourceCandidates = async (slot: BeeGameAssetSlotPayload) => api.getProjectResourceCandidates(projectId, slot.id);
+    const handleBindResourceCandidate = async (slot: BeeGameAssetSlotPayload, candidate: { packId: string; elementId: string }) => {
+        const result = await api.bindProjectResource(projectId, slot.id, slot.resource_requirement || {}, candidate);
+        setAssetManifest(result.manifest);
+    };
+
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
         if (!canSendMessage || !canIntegrateAssets) return;
@@ -508,6 +514,8 @@ export function RightSidebar({
                                 onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
                                 onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
                                 onUnbind={canUploadAssets ? handleUnbindLibraryResource : undefined}
+                                onCandidates={canUploadAssets ? handleResourceCandidates : undefined}
+                                onBindCandidate={canUploadAssets ? handleBindResourceCandidate : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}

@@ -288,6 +288,23 @@ export interface BeeGameResourceBindingPayload {
   path?: string;
 }
 
+export interface BeeGameResourceCandidatePayload {
+  slotId: string;
+  packId: string;
+  packVersion: string;
+  elementId: string;
+  elementPath: string;
+  sourceUrl: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface BeeGameResourcePackImpactPayload {
+  packId: string;
+  projectCount: number;
+  references: Array<{ projectId: string; projectName: string; slotId: string; packVersion: string; elementId: string; status?: string }>;
+}
+
 export interface BeeGameResourceIntegrationPayload {
   manifest: BeeGameAssetManifestPayload;
   slot: BeeGameAssetSlotPayload;
@@ -1141,9 +1158,19 @@ export const api = {
     throw new Error('Project asset upload is only available for BeeGame projects');
   },
 
-  bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement);
+  bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>, selection?: { packId: string; elementId: string }) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement, selection);
     throw new Error('Project resource binding is only available for BeeGame projects');
+  },
+
+  getProjectResourceCandidates: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.getProjectResourceCandidates(projectId, slotId);
+    throw new Error('Project resource candidates are only available for BeeGame projects');
+  },
+
+  getResourcePackImpact: (packId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.getResourcePackImpact(packId);
+    throw new Error('Resource Pack impact analysis is only available for BeeGame projects');
   },
 
   integrateProjectResource: (projectId: string, slotId: string) => {

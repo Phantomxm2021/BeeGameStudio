@@ -30,6 +30,9 @@ export function evaluateResourcePackPublishReadiness(
   if (!pack.license.trim() || ['unassigned', 'unknown', 'none'].includes(pack.license.trim().toLowerCase())) {
     blocking.push({ code: 'license_missing', message: 'Pack license must be recorded before publishing' })
   }
+  if (pack.license.trim().toLowerCase() !== 'internal' && !pack.licenseEvidence?.trim()) {
+    warnings.push({ code: 'license_evidence_missing', message: 'Pack license has no recorded evidence' })
+  }
   if (!pack.version.trim()) blocking.push({ code: 'version_missing', message: 'Pack version must be recorded before publishing' })
   if (!readyElements.length) blocking.push({ code: 'no_ready_elements', message: 'Pack has no ready elements to publish' })
 
@@ -47,6 +50,15 @@ export function evaluateResourcePackPublishReadiness(
     if (element.status === 'ready' && (typeof element.specs.mimeType !== 'string' || !element.specs.mimeType.trim())) {
       warnings.push({ code: 'mime_type_missing', message: `Element ${element.name} has no recorded MIME type`, elementId: element.id })
     }
+    if (element.specs.previewStatus === 'failed') {
+      warnings.push({ code: 'preview_failed', message: `Element ${element.name} preview generation failed`, elementId: element.id })
+    }
+    if (element.specs.inspectionStatus === 'binary_fbx_requires_processor') {
+      warnings.push({ code: 'model_inspection_incomplete', message: `Element ${element.name} requires binary FBX inspection`, elementId: element.id })
+    }
+    if (Number(element.specs.size) > 512 * 1024 * 1024) {
+      warnings.push({ code: 'file_size_large', message: `Element ${element.name} exceeds the recommended 512 MB size`, elementId: element.id })
+    }
   }
 
   const ids = new Set(elements.map((element) => element.id))
@@ -59,10 +71,17 @@ export function evaluateResourcePackPublishReadiness(
   }
 
   const seenPaths = new Map<string, string>()
+  const seenContentHashes = new Map<string, string>()
   for (const element of readyElements) {
     const existing = seenPaths.get(element.path)
     if (existing) blocking.push({ code: 'duplicate_path', message: `Elements ${existing} and ${element.name} share the same path`, elementId: element.id })
     else seenPaths.set(element.path, element.name)
+    const contentHash = typeof element.specs.contentHash === 'string' ? element.specs.contentHash.trim() : ''
+    if (contentHash) {
+      const duplicate = seenContentHashes.get(contentHash)
+      if (duplicate) warnings.push({ code: 'duplicate_content', message: `Elements ${duplicate} and ${element.name} have identical file content`, elementId: element.id })
+      else seenContentHashes.set(contentHash, element.name)
+    }
   }
 
   return { blocking, warnings, canPublish: blocking.length === 0 }

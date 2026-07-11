@@ -220,6 +220,14 @@ export function createSupabaseResourceRepository(
       const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published' }) }, { id: `eq.${packId}` })
       return await toPack(rows[0])
     },
+    async archivePack(packId) {
+      const rows = await mutate<PackRow>('beegame_resource_packs', {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'archived', deprecated_at: new Date().toISOString() }),
+      }, { id: `eq.${packId}` })
+      if (!rows[0]) throw new Error('Resource Pack not found')
+      return await toPack(rows[0])
+    },
     async deletePack(packId) {
       const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'DELETE' }, { id: `eq.${packId}` })
       return rows.length > 0

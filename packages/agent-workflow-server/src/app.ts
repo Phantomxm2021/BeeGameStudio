@@ -1046,6 +1046,30 @@ export function createAgentWorkflowApp(
     return c.json(await dashboardRepository.listProjects(c.req.raw, user))
   })
 
+  app.get('/api/resource-packs/:packId/impact', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const packId = c.req.param('packId')
+    try {
+      const projects = await dashboardRepository.listProjects(c.req.raw, user)
+      const impacts: Array<{ projectId: string; projectName: string; slotId: string; packVersion: string; elementId: string; status?: string }> = []
+      for (const project of projects) {
+        if (!project.root_path) continue
+        const workspacePath = await resolveSessionWorkspacePath(project.root_path, options.defaultWorkspacePath)
+        const manifest = await readBeeGameAssetManifest(workspacePath)
+        for (const slot of manifest.slots) {
+          const binding = slot.resource_binding
+          if (!binding || binding.pack_id !== packId) continue
+          impacts.push({ projectId: project.id, projectName: project.name, slotId: slot.id, packVersion: binding.pack_version, elementId: binding.element_id, ...(slot.status ? { status: slot.status } : {}) })
+        }
+      }
+      return c.json({ packId, references: impacts, projectCount: new Set(impacts.map(item => item.projectId)).size })
+    } catch (err) {
+      return tracedRouteError(c, 'resource-pack.impact', err)
+    }
+  })
+
   app.post('/api/projects', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
@@ -1527,7 +1551,11 @@ export function createAgentWorkflowApp(
       const body = await c.req.raw.json().catch(() => ({})) as { requirement?: ResourceSelectionRequirement; selection?: { packId?: string; elementId?: string } }
       const slotId = c.req.param('slotId')
       const contractSlot = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === slotId)
-      const requirement = body.requirement ?? (contractSlot ? resourceRequirementForSlot(contractSlot) : undefined)
+      const previousBinding = contractSlot?.resource_binding
+      // A browser may provide a requirement for an uncontracted slot, but it must
+      // never be able to relax or replace the requirement recorded in the project
+      // asset contract. Candidate IDs and signed URLs are always re-derived below.
+      const requirement = contractSlot ? resourceRequirementForSlot(contractSlot) : body.requirement
       if (!requirement || requirement.slotId !== slotId) return c.json({ error: 'Asset requirement does not match slot' }, 400)
       const selection = body.selection?.packId && body.selection.elementId
         ? (await options.resourceSelectionClient.candidates?.(requirement) ?? []).find(candidate => candidate.packId === body.selection!.packId && candidate.elementId === body.selection!.elementId)
@@ -1541,7 +1569,23 @@ export function createAgentWorkflowApp(
         action: result.path ? 'resource.integrated' : 'resource.bound',
         targetType: 'project_asset_slot',
         targetId: `${c.req.param('id')}:${requirement.slotId}`,
-        metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, reasons: selection.reasons, ...(result.path ? { path: result.path } : {}) },
+        metadata: {
+          packId: selection.packId,
+          packVersion: selection.packVersion,
+          elementId: selection.elementId,
+          reasons: selection.reasons,
+          previousBinding: previousBinding ? {
+            packId: previousBinding.pack_id,
+            packVersion: previousBinding.pack_version,
+            elementId: previousBinding.element_id,
+          } : null,
+          nextBinding: {
+            packId: selection.packId,
+            packVersion: selection.packVersion,
+            elementId: selection.elementId,
+          },
+          ...(result.path ? { path: result.path } : {}),
+        },
       })
       return c.json({ manifest: result.manifest, slot: result.slot, selection, ...(result.path ? { path: result.path } : {}), boundSlot: bound.slot })
     } catch (err) {

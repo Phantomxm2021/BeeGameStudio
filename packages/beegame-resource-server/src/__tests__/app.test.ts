@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createInMemoryResourceRepository } from '../../../beegame-resource-core/src'
 import { createBeeGameResourceServerApp } from '../app'
-import { createSupabaseResourceLifecycleHandlers } from '../index'
+import { createSupabaseResourceLifecycleHandlers, createSupabaseResourcePackAccessChecker } from '../index'
 
 const repository = createInMemoryResourceRepository({
   packs: [{
@@ -81,6 +81,34 @@ describe('resource service app', () => {
     expect(response.status).toBe(403)
   })
 
+  test('enforces Pack ownership in the service layer when a service-role repository is used', async () => {
+    const attempted: string[] = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'manager-1', role: 'admin', permissions: ['resources.manage'] },
+      canManagePack: async (_user, packId) => packId === 'owned-pack',
+      deleteResourcePack: async packId => { attempted.push(packId); return true },
+    })
+
+    const list = await app.fetch(new Request('http://resource.test/api/resource-packs'))
+    expect(await list.json()).toEqual({ packs: [] })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1', { method: 'DELETE' }))
+    expect(response.status).toBe(403)
+    expect(attempted).toEqual([])
+  })
+
+  test('permits service-role lifecycle access only to the Pack creator or platform owner', async () => {
+    const checker = createSupabaseResourcePackAccessChecker({
+      baseUrl: 'https://supabase.example',
+      serviceRoleKey: 'service-key',
+      fetchImpl: async () => Response.json([{ created_by: 'creator-1' }]),
+    })
+    await expect(checker({ id: 'creator-1', role: 'admin' }, 'pack-1')).resolves.toBe(true)
+    await expect(checker({ id: 'other-user', role: 'admin' }, 'pack-1')).resolves.toBe(false)
+    await expect(checker({ id: 'platform-owner', role: 'owner' }, 'pack-1')).resolves.toBe(true)
+  })
+
   test('deletes an administrator Pack through the DELETE route', async () => {
     const deleted: string[] = []
     const app = createBeeGameResourceServerApp({
@@ -93,6 +121,19 @@ describe('resource service app', () => {
 
     expect(response.status).toBe(204)
     expect(deleted).toEqual(['pack-1'])
+  })
+
+  test('archives a Pack without deleting its resource history', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository: createInMemoryResourceRepository({
+        packs: [{ id: 'archive-pack', name: 'Archive', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'published' }],
+        elements: [],
+      }),
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/archive-pack/archive', { method: 'POST' }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ pack: expect.objectContaining({ id: 'archive-pack', status: 'archived', deprecatedAt: expect.any(String) }) })
   })
 
   test('returns 404 when a lifecycle update or deletion reports no Pack', async () => {

@@ -885,5 +885,45 @@
   },
   "livePreview": {
     "rollback": "回滚"
+  },
+  "resourceLibrary": {
+    "library": "资源库",
+    "name": "名称",
+    "dimension": "维度",
+    "category": "主分类",
+    "mixed": "混合",
+    "selectResourceType": "请选择资源类型",
+    "style": "风格",
+    "gameTypes": "适用游戏类型",
+    "multiSelect": "可多选",
+    "add": "添加",
+    "customStyle": "添加自定义风格",
+    "customGameType": "添加自定义类型",
+    "create": "创建 Pack",
+    "creating": "创建中…",
+    "createRequired": "请填写 Pack 名称、风格和适用游戏类型，并选择主分类",
+    "update": "保存 Pack",
+    "updating": "保存中…",
+    "updateRequired": "请填写 Pack 名称、风格和适用游戏类型",
+    "cover": "封面",
+    "coverOptional": "可选；保存时先上传",
+    "uploadCover": "上传封面",
+    "editDescription": "更新 Pack 元数据与封面。",
+    "close": "关闭",
+    "archive": "归档 Pack",
+    "archived": "已归档",
+    "editPack": "编辑 Pack",
+    "publish": "发布",
+    "deletePack": "删除 Pack",
+    "metadata": {
+      "description": "描述",
+      "tags": "标签",
+      "version": "版本",
+      "license": "许可证",
+      "author": "作者",
+      "source": "来源",
+      "licenseEvidence": "许可证凭证",
+      "compatibleTargets": "兼容目标"
+    }
   }
 }

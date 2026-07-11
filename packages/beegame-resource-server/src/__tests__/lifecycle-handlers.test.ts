@@ -1,9 +1,29 @@
 import { describe, expect, test } from 'bun:test'
-import { buildElementUploadRow, createSupabaseResourceLifecycleHandlers, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
+import { buildElementUploadRow, createSupabaseResourceLifecycleHandlers, createSupabaseResourceStorageInspector, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
 
 const packRow = { id: 'pack-1', name: 'Pack', style: 'Stylized', game_types: [], dimension: 'agnostic', primary_category: 'world-scene', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'cover/new.png' }
 
 describe('Supabase resource lifecycle handlers', () => {
+  test('reports missing and orphaned Storage objects without mutating either side', async () => {
+    const inspector = createSupabaseResourceStorageInspector({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('beegame_resource_packs')) return Response.json([{ cover_path: 'cover/preview.png' }])
+        if (url.includes('beegame_resource_elements')) return Response.json([{ path: 'models/tree.glb' }, { path: 'textures/tree.png' }])
+        if (url.includes('/object/list/')) {
+          const prefix = (JSON.parse(String(init?.body)) as { prefix: string }).prefix
+          if (prefix === 'pack-1/') return Response.json([{ name: 'cover' }, { name: 'models' }, { name: 'unused.txt', id: 'unused' }])
+          if (prefix === 'pack-1/cover/') return Response.json([{ name: 'preview.png', id: 'cover' }])
+          if (prefix === 'pack-1/models/') return Response.json([{ name: 'tree.glb', id: 'model' }])
+          return Response.json([])
+        }
+        return new Response(null, { status: 500 })
+      },
+    })
+    await expect(inspector('pack-1')).resolves.toEqual({ missingPaths: ['textures/tree.png'], orphanPaths: ['unused.txt'] })
+  })
+
   test('restarts storage listing after deletion so shifted objects are not skipped', async () => {
     const deleted: string[] = []
     const offsets: number[] = []
@@ -308,7 +328,7 @@ describe('Supabase resource lifecycle handlers', () => {
 
   test('builds universal element upload specs and infers a conservative kind', () => {
     expect(buildElementUploadRow('pack-1', 'assets', new File(['mesh'], 'mesh.GLB', { type: 'model/gltf-binary' }))).toMatchObject({
-      pack_id: 'pack-1', category: 'assets', kind: 'model', specs: { size: 4, mimeType: 'model/gltf-binary', extension: 'glb' },
+      pack_id: 'pack-1', category: 'assets', kind: 'model', preview: { kind: 'model', path: 'assets/mesh.GLB' }, specs: { size: 4, mimeType: 'model/gltf-binary', extension: 'glb', previewStatus: 'ready' },
     })
   })
 

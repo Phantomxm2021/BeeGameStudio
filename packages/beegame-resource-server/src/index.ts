@@ -15,8 +15,10 @@ if (import.meta.main) {
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
+    ...(baseUrl && serviceRoleKey ? { canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey }) } : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
+    ...(baseUrl && serviceRoleKey ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey }) } : {}),
     ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
       const form = await request.formData(); const file = form.get('file'); const category = String(form.get('category') || 'assets'); const folderPath = safeRelativeStoragePath(trimPath(String(form.get('folderPath') || category)), 'Element folder path')
@@ -52,6 +54,69 @@ export function createSupabaseResourceAuditWriter(options: { baseUrl: string; se
       body: JSON.stringify({ actor_id: event.actorId, action: event.action, pack_id: event.packId ?? null, element_id: event.elementId ?? null, metadata: event.metadata ?? {} }),
     })
     if (!response.ok) throw new Error(`Resource audit persistence failed (${response.status})`)
+  }
+}
+
+/**
+ * Service-role requests bypass Postgres RLS. Keep the same Pack ownership
+ * boundary in the resource API before any lifecycle handler reaches Storage.
+ */
+export function createSupabaseResourcePackAccessChecker(options: { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation }) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  return async (user: { id: string; role?: string }, packId: string): Promise<boolean> => {
+    if (user.role === 'owner') return true
+    const response = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=created_by&limit=1`, {
+      headers: { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}`, accept: 'application/json' },
+    })
+    if (!response.ok) throw new Error(`Resource Pack ownership lookup failed (${response.status})`)
+    const row = (await response.json() as Array<{ created_by?: unknown }>)[0]
+    return typeof row?.created_by === 'string' && row.created_by === user.id
+  }
+}
+
+/** Read-only reconciliation for the publication gate; no Storage mutation occurs here. */
+export function createSupabaseResourceStorageInspector(options: SupabaseLifecycleOptions) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  const storageBucket = options.storageBucket ?? 'beegame-resource-packs'
+  const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
+  return async (packId: string): Promise<{ missingPaths: string[]; orphanPaths: string[] }> => {
+    const safePackId = safeStorageComponent(packId, 'Pack id')
+    const [packResponse, elementResponse] = await Promise.all([
+      fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path`, { headers }),
+      fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&select=path`, { headers }),
+    ])
+    if (!packResponse.ok || !elementResponse.ok) throw new Error('Resource storage reconciliation metadata lookup failed')
+    const pack = (await packResponse.json() as Array<{ cover_path?: unknown }>)[0]
+    const elements = await elementResponse.json() as Array<{ path?: unknown }>
+    const expected = new Set<string>()
+    if (typeof pack?.cover_path === 'string' && isSafeRelativeStoragePath(pack.cover_path)) expected.add(pack.cover_path)
+    for (const element of elements) if (typeof element.path === 'string' && isSafeRelativeStoragePath(element.path)) expected.add(element.path)
+
+    const actual = new Set<string>()
+    const prefix = `${safePackId}/`
+    const visited = new Set<string>()
+    const listPrefix = async (currentPrefix: string): Promise<void> => {
+      if (visited.has(currentPrefix)) return
+      visited.add(currentPrefix)
+      const response = await fetchImpl(`${baseUrl}/storage/v1/object/list/${storageBucket}`, {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ prefix: currentPrefix, limit: 1000, offset: 0 }),
+      })
+      if (!response.ok) throw new Error(`Resource storage reconciliation listing failed (${response.status})`)
+      for (const entry of await response.json() as Array<{ name?: unknown; id?: unknown; metadata?: unknown }>) {
+        if (typeof entry.name !== 'string' || !entry.name) continue
+        const fullPath = storageListEntryPath(currentPrefix, entry.name)
+        if (!isSafeStoragePath(fullPath, prefix)) throw new Error('Resource storage contains an unsafe resource storage entry')
+        if (entry.id != null || entry.metadata != null) actual.add(fullPath.slice(prefix.length))
+        else await listPrefix(`${fullPath.replace(/\/+$/, '')}/`)
+      }
+    }
+    await listPrefix(prefix)
+    return {
+      missingPaths: [...expected].filter(path => !actual.has(path)).sort(),
+      orphanPaths: [...actual].filter(path => !expected.has(path)).sort(),
+    }
   }
 }
 
@@ -225,7 +290,33 @@ export function inferElementKind(file: File): string {
 }
 
 export function buildElementUploadRow(packId: string, category: string, file: File, id = `${packId}-${crypto.randomUUID()}`, path = `${category}/${file.name}`, name = file.name): Record<string, unknown> {
-  return { id, pack_id: packId, name, path, category, kind: inferElementKind(file), specs: { size: file.size, mimeType: file.type || 'application/octet-stream', extension: extensionFromName(name) }, dependencies: [], status: 'ready' }
+  const kind = inferElementKind(file)
+  const preview = previewDescriptor(kind, path)
+  return {
+    id,
+    pack_id: packId,
+    name,
+    path,
+    category,
+    kind,
+    ...(preview ? { preview } : {}),
+    specs: {
+      size: file.size,
+      mimeType: file.type || 'application/octet-stream',
+      extension: extensionFromName(name),
+      previewStatus: preview ? 'ready' : 'unsupported',
+    },
+    dependencies: [],
+    status: 'ready',
+  }
+}
+
+function previewDescriptor(kind: string, path: string): { kind: 'image' | 'model' | 'audio' | 'document'; path: string } | undefined {
+  if (kind === 'image') return { kind: 'image', path }
+  if (kind === 'model') return { kind: 'model', path }
+  if (kind === 'audio') return { kind: 'audio', path }
+  if (kind === 'video' || kind === 'font' || kind === 'document') return { kind: 'document', path }
+  return undefined
 }
 
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>

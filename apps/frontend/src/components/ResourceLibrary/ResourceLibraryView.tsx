@@ -21,13 +21,21 @@ import type { ModelMetrics } from './ModelPreview';
 import { automaticallyBindBaseColorTextures, decodeMaterialTextureBindings, encodeMaterialTextureBindings, suggestMaterialTextureCandidates, type MaterialTextureBindings } from './materialTextureBindings';
 import { decodeStyleOverride, encodeStyleOverride, packStyleOptions } from './styleOverride';
 import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } from './resourceLibraryRoute';
+import { api as beeGameApi, type BeeGameResourcePackImpactPayload } from '../../services/api';
+import {
+  createResourceUploadTask,
+  listResourceUploadTasks,
+  removeResourceUploadTask,
+  saveResourceUploadTask,
+  type ResourceUploadTask,
+} from '../../services/resourceUploadQueue';
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
   'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder' | 'updateFolder' | 'deleteFolder'
   | 'updateElement' | 'getElementResourceUrl'
-  | 'deleteElement' | 'publishPack' | 'getPublishReadiness'
+  | 'deleteElement' | 'publishPack' | 'archivePack' | 'getPublishReadiness'
 >;
 
 type ResourceLibraryViewProps = {
@@ -36,8 +44,16 @@ type ResourceLibraryViewProps = {
 };
 
 type UploadDestination = { category: string; folderPath: string };
-type FailedElementUpload = { file: File; destination: UploadDestination; message: string };
-type ElementUploadStatus = { done: number; total: number; failed: FailedElementUpload[]; phase: 'uploading' | 'failed' | 'complete' | 'cancelled' };
+type FailedElementUpload = { file: File; destination: UploadDestination; message: string; taskId?: string };
+type ElementUploadStatus = {
+  done: number;
+  total: number;
+  failed: FailedElementUpload[];
+  phase: 'uploading' | 'failed' | 'complete' | 'cancelled';
+  bytesDone?: number;
+  bytesTotal?: number;
+  activeFileName?: string;
+};
 
 const uploadRetryDelaysMs = [500, 1_250] as const;
 
@@ -125,8 +141,10 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const isZh = i18n.language.startsWith('zh');
   const copy = isZh ? {
     all: '所有资源包', search: '搜索资源包', empty: '暂无资源包', emptyHint: '创建一个 Pack 后，按风格、类型和维度管理其中的资源。', previous: '上一页', next: '下一页',
+    allDimensions: '全部维度', allStatuses: '全部状态', allGameTypes: '全部游戏类型', allTags: '全部标签', draft: '草稿', published: '已发布', archived: '已归档',
   } : {
     all: 'All resource packs', search: 'Search resource packs', empty: 'No resource packs', emptyHint: 'Create a Pack to manage its resources by style, type, and dimension.', previous: 'Previous', next: 'Next',
+    allDimensions: 'All dimensions', allStatuses: 'All statuses', allGameTypes: 'All game types', allTags: 'All tags', draft: 'Draft', published: 'Published', archived: 'Archived',
   };
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
@@ -140,17 +158,22 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [dimension, setDimension] = useState<'all' | '2D' | '3D'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'archived'>('all');
+  const [gameTypeFilter, setGameTypeFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(1);
   const [elementUpload, setElementUpload] = useState<ElementUploadStatus | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [publishReadiness, setPublishReadiness] = useState<ResourcePublishReadiness | null>(null);
+  const [archiveImpact, setArchiveImpact] = useState<BeeGameResourcePackImpactPayload | null>(null);
 
   const packSessionRef = useRef(0);
   const categoryRequestRef = useRef(0);
   const consumedInitialPackIdRef = useRef<string | undefined>(undefined);
   const cancelUploadRef = useRef(false);
+  const activeUploadAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,23 +230,38 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     }
   }, [initialPackId, loading, packs, selectedPack]);
 
+  const gameTypeOptions = useMemo(() => [...new Set(packs.flatMap((pack) => pack.gameTypes ?? []))].sort((left, right) => left.localeCompare(right)), [packs]);
+  const tagOptions = useMemo(() => [...new Set(packs.flatMap((pack) => pack.tags ?? []))].sort((left, right) => left.localeCompare(right)), [packs]);
   const visiblePacks = useMemo(() => packs.filter((pack) => {
     const matchesQuery = !query.trim() || [pack.name, pack.style, ...(pack.gameTypes || [])].join(' ').toLowerCase().includes(query.trim().toLowerCase());
-    return matchesQuery && (dimension === 'all' || pack.dimension === dimension);
-  }), [dimension, packs, query]);
+    const matchesStatus = statusFilter === 'all' || pack.status === statusFilter;
+    const matchesGameType = !gameTypeFilter || (pack.gameTypes ?? []).some((gameType) => gameType.localeCompare(gameTypeFilter, undefined, { sensitivity: 'accent' }) === 0);
+    const matchesTag = !tagFilter || (pack.tags ?? []).some((tag) => tag.localeCompare(tagFilter, undefined, { sensitivity: 'accent' }) === 0);
+    return matchesQuery &&
+      (dimension === 'all' || pack.dimension === dimension) &&
+      matchesStatus &&
+      matchesGameType &&
+      matchesTag;
+  }), [dimension, gameTypeFilter, packs, query, statusFilter, tagFilter]);
   const pageCount = Math.max(1, Math.ceil(visiblePacks.length / 64));
   const pagedPacks = visiblePacks.slice((page - 1) * 64, page * 64);
 
-  const uploadQueuedElements = async (uploads: Array<{ file: File; destination: UploadDestination }>) => {
+  const uploadQueuedElements = async (uploads: Array<{ file: File; destination: UploadDestination; task?: ResourceUploadTask }>) => {
     if (!selectedPack || uploads.length === 0) return;
     const session = packSessionRef.current;
     cancelUploadRef.current = false;
     setError('');
-    setElementUpload({ done: 0, total: uploads.length, failed: [], phase: 'uploading' });
+    const queue = uploads.map(({ file, destination, task }) => task ?? createResourceUploadTask(selectedPack.id, file, destination));
+    await Promise.all(queue.map((task) => saveResourceUploadTask({ ...task, status: 'queued', message: undefined })));
+    const bytesTotal = queue.reduce((total, task) => total + task.file.size, 0);
+    let completedBytes = 0;
+    setElementUpload({ done: 0, total: queue.length, failed: [], phase: 'uploading', bytesDone: 0, bytesTotal });
     const failed: FailedElementUpload[] = [];
-    for (const { file, destination } of uploads) {
+    for (const task of queue) {
+      const { file, destination } = task;
       if (cancelUploadRef.current) {
-        failed.push({ file, destination, message: '上传已取消' });
+        await saveResourceUploadTask({ ...task, status: 'cancelled', message: '上传已取消' });
+        failed.push({ file, destination, message: '上传已取消', taskId: task.id });
         setElementUpload((current) => current ? { ...current, done: current.done + 1 } : current);
         continue;
       }
@@ -232,15 +270,27 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         let lastError: unknown;
         for (let attempt = 0; attempt <= uploadRetryDelaysMs.length; attempt += 1) {
           try {
-            next = await apiClient.addElement(selectedPack.id, file, destination.category, destination.folderPath);
+            const controller = new AbortController();
+            activeUploadAbortRef.current = controller;
+            await saveResourceUploadTask({ ...task, status: 'uploading', attempts: task.attempts + attempt + 1, message: undefined });
+            setElementUpload((current) => current ? { ...current, activeFileName: file.name } : current);
+            next = await apiClient.addElement(selectedPack.id, file, destination.category, destination.folderPath, {
+              signal: controller.signal,
+              onProgress: (loaded) => setElementUpload((current) => current ? { ...current, bytesDone: Math.min(current.bytesTotal || 0, completedBytes + loaded) } : current),
+            });
+            activeUploadAbortRef.current = null;
             break;
           } catch (err) {
+            activeUploadAbortRef.current = null;
             lastError = err;
+            if (cancelUploadRef.current || (err instanceof DOMException && err.name === 'AbortError')) break;
             if (!isRetryableUploadError(err) || attempt === uploadRetryDelaysMs.length) break;
             await waitForUploadRetry(uploadRetryDelaysMs[attempt]);
           }
         }
         if (!next) throw lastError instanceof Error ? lastError : new Error('元素上传失败');
+        await removeResourceUploadTask(task.id);
+        completedBytes += file.size;
         if (session !== packSessionRef.current) continue;
         setElements((current) => [...current, next]);
         setLoadedElementCategories((current) => [...new Set([...current, next.category])]);
@@ -249,10 +299,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         // Uploading must not steal the current inspector/preview focus. The
         // user can select any uploaded item deliberately from the tree.
       } catch (err) {
-        const message = err instanceof Error ? err.message : '元素上传失败';
-        failed.push({ file, destination, message });
+        const message = cancelUploadRef.current ? '上传已取消' : (err instanceof Error ? err.message : '元素上传失败');
+        const status = cancelUploadRef.current ? 'cancelled' : 'failed';
+        await saveResourceUploadTask({ ...task, status, attempts: task.attempts + 1, message });
+        failed.push({ file, destination, message, taskId: task.id });
       } finally {
-        setElementUpload((current) => current ? { ...current, done: current.done + 1 } : current);
+        setElementUpload((current) => current ? { ...current, done: current.done + 1, bytesDone: Math.min(current.bytesTotal || 0, completedBytes), activeFileName: undefined } : current);
       }
     }
     if (session !== packSessionRef.current) return;
@@ -261,7 +313,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       setError(`${failed.length} 个文件上传失败；请重试或检查文件与权限。`);
       return;
     }
-    setElementUpload({ done: uploads.length, total: uploads.length, failed: [], phase: 'complete' });
+    setElementUpload({ done: uploads.length, total: uploads.length, failed: [], phase: 'complete', bytesDone: bytesTotal, bytesTotal });
     window.setTimeout(() => setElementUpload((current) => current?.phase === 'complete' ? null : current), 1_200);
   };
 
@@ -273,14 +325,36 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   const retryFailedUploads = async () => {
     if (!elementUpload?.failed.length) return;
+    await Promise.all(elementUpload.failed.map((upload) => upload.taskId ? removeResourceUploadTask(upload.taskId) : Promise.resolve()));
     await uploadQueuedElements(elementUpload.failed.map(({ file, destination }) => ({ file, destination })));
   };
+
+  useEffect(() => {
+    if (!selectedPack) return;
+    let disposed = false;
+    void listResourceUploadTasks(selectedPack.id).then((tasks) => {
+      if (disposed || !tasks.length) return;
+      const pending = tasks.filter((task) => task.status === 'queued' || task.status === 'uploading');
+      const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'cancelled');
+      const resumable = [...pending, ...failed];
+      setElementUpload({
+        done: 0,
+        total: resumable.length,
+        failed: resumable.map((task) => ({ file: task.file, destination: task.destination, message: task.message || '等待继续上传', taskId: task.id })),
+        phase: failed.length ? (failed.some((task) => task.status === 'failed') ? 'failed' : 'cancelled') : 'cancelled',
+        bytesDone: 0,
+        bytesTotal: resumable.reduce((total, task) => total + task.file.size, 0),
+      });
+    });
+    return () => { disposed = true; };
+  }, [selectedPack?.id]);
 
   if (selectedPack) {
     return (
       <>
       {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} /> : null}
       {deleteDialogOpen ? <DeleteResourcePackDialog open pack={selectedPack} onClose={() => setDeleteDialogOpen(false)} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setDeleteDialogOpen(false); setLoading(false); }} /> : null}
+      {archiveImpact ? <ArchivePackDialog pack={selectedPack} impact={archiveImpact} onClose={() => setArchiveImpact(null)} onArchive={async () => { const archived = await apiClient.archivePack(selectedPack.id); setSelectedPack(archived); setPacks((current) => current.map((item) => item.id === archived.id ? archived : item)); setArchiveImpact(null); }} /> : null}
       {publishReadiness ? <PublishReadinessDialog report={publishReadiness} onClose={() => setPublishReadiness(null)} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(null); }} /> : null}
       <PackBrowser
         apiClient={apiClient}
@@ -304,11 +378,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onElement={setSelectedElement}
         onEditPack={() => setEditDialogOpen(true)}
         onDeletePack={() => setDeleteDialogOpen(true)}
+        onArchivePack={async () => { try { setArchiveImpact(await beeGameApi.getResourcePackImpact(selectedPack.id)); } catch (cause) { setError(cause instanceof Error ? cause.message : '无法读取引用项目'); } }}
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
         onRetryFailedUploads={() => void retryFailedUploads()}
-        onCancelUploads={() => { cancelUploadRef.current = true; }}
+        onCancelUploads={() => { cancelUploadRef.current = true; activeUploadAbortRef.current?.abort(); }}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
@@ -332,34 +407,28 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       {loading && packs.length === 0 ? (
         <div className="type-caption-2 text-zinc-500">正在加载资源包…</div>
       ) : null}
-      <div className="mb-5 flex items-center gap-2 border-b border-white/10 pb-4">
+      <div className="mb-5 flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
         <div className="type-headline flex items-center gap-3">{copy.all} <button type="button" aria-label="创建 Pack" onClick={() => setCreateDialogOpen(true)} className="glass-icon-button h-8 w-8 text-lg">+</button></div>
         <div className="flex-1" />
-        <label className="glass-control flex h-9 w-64 items-center gap-2 rounded-xl px-3 text-zinc-500">
+        <label className="glass-control flex h-9 w-64 min-w-48 items-center gap-2 rounded-xl px-3 text-zinc-500">
           <Search className="h-4 w-4" />
           <input aria-label={copy.search} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={copy.search} className="type-input min-w-0 flex-1 bg-transparent outline-none" />
         </label>
-        <button
-          type="button"
-          onClick={() => setDimension('all')}
-          className="type-caption-1 rounded-full border border-orange-300/30 bg-orange-400/10 px-3 py-2 text-orange-200"
-        >
-          全部
-        </button>
-        <button
-          type="button"
-          onClick={() => setDimension('2D')}
-          className="type-caption-1 rounded-full border border-white/10 px-3 py-2 text-zinc-400"
-        >
-          2D
-        </button>
-        <button
-          type="button"
-          onClick={() => setDimension('3D')}
-          className="type-caption-1 rounded-full border border-white/10 px-3 py-2 text-zinc-400"
-        >
-          3D
-        </button>
+        <div aria-label={copy.allDimensions} className="flex rounded-xl border border-white/10 p-0.5">
+          {(['all', '2D', '3D'] as const).map((value) => (
+            <button key={value} type="button" onClick={() => { setDimension(value); setPage(1); }} className={`type-caption-1 rounded-lg px-3 py-1.5 ${dimension === value ? 'bg-orange-400/10 text-orange-200' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              {value === 'all' ? copy.allDimensions : value}
+            </button>
+          ))}
+        </div>
+        <select aria-label={copy.allStatuses} value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as typeof statusFilter); setPage(1); }} className="glass-control h-9 rounded-xl px-3 type-caption-2 text-zinc-300">
+          <option value="all">{copy.allStatuses}</option>
+          <option value="draft">{copy.draft}</option>
+          <option value="published">{copy.published}</option>
+          <option value="archived">{copy.archived}</option>
+        </select>
+        {gameTypeOptions.length > 0 ? <select aria-label={copy.allGameTypes} value={gameTypeFilter} onChange={(event) => { setGameTypeFilter(event.target.value); setPage(1); }} className="glass-control h-9 max-w-44 rounded-xl px-3 type-caption-2 text-zinc-300"><option value="">{copy.allGameTypes}</option>{gameTypeOptions.map((gameType) => <option key={gameType} value={gameType}>{gameType}</option>)}</select> : null}
+        {tagOptions.length > 0 ? <select aria-label={copy.allTags} value={tagFilter} onChange={(event) => { setTagFilter(event.target.value); setPage(1); }} className="glass-control h-9 max-w-40 rounded-xl px-3 type-caption-2 text-zinc-300"><option value="">{copy.allTags}</option>{tagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select> : null}
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {pagedPacks.map((pack) => (
@@ -442,6 +511,7 @@ function PackBrowser({
   onElement,
   onEditPack,
   onDeletePack,
+  onArchivePack,
   onAddFiles,
   onDropFiles,
   folders,
@@ -465,6 +535,7 @@ function PackBrowser({
   onElement: (element: ResourceElement) => void;
   onEditPack: () => void;
   onDeletePack: () => void;
+  onArchivePack: () => Promise<void>;
   onAddFiles: (files: File[], destination: UploadDestination) => void;
   onDropFiles: (files: File[], destination: UploadDestination) => void;
   folders: ResourceFolder[];
@@ -534,6 +605,8 @@ function PackBrowser({
       boundsWidth: metrics.bounds.width,
       boundsHeight: metrics.bounds.height,
       boundsDepth: metrics.bounds.depth,
+      previewStatus: 'ready',
+      inspectionStatus: 'complete',
     };
     const suggestedBindings = suggestMaterialTextureCandidates(selectedElement.name, metrics.materialSlots, elements);
     const existingBindings = decodeMaterialTextureBindings(selectedElement.specs.materialTextureBindings);
@@ -586,8 +659,9 @@ function PackBrowser({
         <div className="flex shrink-0 items-center gap-2.5">
           <div className="flex overflow-hidden rounded-full border border-[#474850] bg-transparent">
           <button type="button" className="h-[33px] border-0 px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05]" onClick={onEditPack}>编辑 Pack</button>
-          <button type="button" disabled={pack.status === 'published'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>发布</button>
+          <button type="button" disabled={pack.status === 'published' || pack.status === 'archived'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>发布</button>
           </div>
+          {pack.status !== 'archived' ? <button type="button" onClick={() => void onArchivePack()} className="h-[33px] rounded-full border border-amber-300/35 px-[13px] text-[11px] font-medium text-amber-100 transition-colors hover:bg-amber-300/10">归档 Pack</button> : <span className="type-caption-2 text-amber-200">已归档</span>}
           <button type="button" onClick={onDeletePack} className="h-[33px] rounded-full border border-red-300/35 px-[13px] text-[11px] font-medium text-red-200 transition-colors hover:bg-red-400/10">删除 Pack</button>
         </div>
       </header>
@@ -628,14 +702,22 @@ function PackBrowser({
 
 function UploadProgressCover({ status, onRetryFailed, onCancel }: { status: ElementUploadStatus; onRetryFailed: () => void; onCancel: () => void }) {
   const percent = status.total ? Math.min(100, Math.round(status.done / status.total * 100)) : 0;
+  const bytePercent = status.bytesTotal ? Math.min(100, Math.round((status.bytesDone || 0) / status.bytesTotal * 100)) : undefined;
   return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-black/55 backdrop-blur-sm">
     <div className="flex flex-col items-center text-center">
       <span aria-hidden="true" className={`h-12 w-12 animate-spin rounded-full border-2 border-white/15 border-t-orange-200 ${status.phase === 'failed' ? 'border-t-red-300' : status.phase === 'complete' ? 'border-t-emerald-300' : ''}`} />
       <p className="type-headline mt-4 text-zinc-50">{percent}%</p>
-      {status.phase === 'failed' ? <button type="button" onClick={onRetryFailed} className="secondary-pill type-button mt-5 px-4 py-2 text-red-100">重试失败文件</button> : null}
+      {status.phase === 'uploading' && status.activeFileName ? <p className="type-caption-2 mt-2 max-w-72 truncate text-zinc-400">{status.activeFileName}{bytePercent !== undefined ? ` · ${bytePercent}%` : ''}</p> : null}
+      {status.phase === 'failed' || status.phase === 'cancelled' ? <button type="button" onClick={onRetryFailed} className="secondary-pill type-button mt-5 px-4 py-2 text-red-100">{status.phase === 'cancelled' ? '继续上传' : '重试失败文件'}</button> : null}
       {status.phase === 'uploading' ? <button type="button" onClick={onCancel} className="type-caption-2 mt-5 text-zinc-400 hover:text-white">取消剩余上传</button> : null}
     </div>
   </div>;
+}
+
+function ArchivePackDialog({ pack, impact, onClose, onArchive }: { pack: ResourcePackSummary; impact: BeeGameResourcePackImpactPayload; onClose: () => void; onArchive: () => Promise<void> }) {
+  const [archiving, setArchiving] = useState(false)
+  const [error, setError] = useState('')
+  return <div role="dialog" aria-modal="true" aria-label="归档 Pack" className="fixed inset-0 z-[270] grid place-items-center bg-black/65 p-5 backdrop-blur-sm"><div className="glass-panel w-full max-w-md rounded-3xl p-6 text-zinc-100"><div className="type-title-3">归档 {pack.name}</div><p className="type-footnote mt-3 text-zinc-400">归档不会删除资源或已复制到项目的文件。已有项目会继续锁定当前版本。</p>{impact.references.length ? <div className="mt-4 max-h-44 overflow-y-auto rounded-xl border border-amber-300/20 bg-amber-300/5 p-3"><p className="type-footnote text-amber-100">{impact.projectCount} 个项目正在引用此 Pack</p><div className="mt-2 space-y-1">{impact.references.map(reference => <p key={`${reference.projectId}:${reference.slotId}`} className="type-caption-2 text-zinc-300">{reference.projectName} · {reference.slotId} · v{reference.packVersion}</p>)}</div></div> : <p className="type-footnote mt-4 text-zinc-500">没有项目引用此 Pack。</p>}{error ? <p role="alert" className="type-footnote mt-4 text-red-300">{error}</p> : null}<div className="mt-6 flex justify-end gap-2"><button type="button" disabled={archiving} onClick={onClose} className="secondary-pill type-button px-4 py-2">取消</button><button type="button" disabled={archiving} onClick={() => { setArchiving(true); void onArchive().catch(cause => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setArchiving(false)); }} className="type-button rounded-full border border-amber-300/40 bg-amber-300/10 px-4 py-2 text-amber-100 disabled:opacity-60">{archiving ? '归档中…' : '确认归档'}</button></div></div></div>
 }
 
 function BatchElementInspector({ elements, onApply }: { elements: ResourceElement[]; onApply: (input: { kind?: string; addUsageTags?: string[]; removeUsageTags?: string[] }) => Promise<void> }) {
@@ -706,7 +788,7 @@ function Preview({ element, pack, url, elements, materialTextureBindings, textur
     <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
       {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
-      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} /></div>
+      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} onPreviewError={() => { if (element.specs.previewStatus !== 'failed') void onSave(element.id, { specs: { ...element.specs, previewStatus: 'failed' } }); }} /></div>
       {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} elements={elements} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
   );

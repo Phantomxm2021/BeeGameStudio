@@ -4136,6 +4136,101 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('reports only the current user projects bound to a Pack version', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-resource-impact-'))
+    const workspace = join(projectsRoot, 'impact-project')
+    const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner, defaultWorkspacePath: projectsRoot })
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 1,
+        slots: [{ id: 'hero', status: 'integrated', resource_binding: { pack_id: 'forest-pack', pack_version: '2.0.0', element_id: 'tree', source_url: 'https://resource.example/tree', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] } }],
+      }))
+      const projectId = 'project_resource_impact'
+      const created = await app.request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: projectId, name: 'Impact Project', root_path: workspace, created_at: Date.now() }) })
+      expect(created.status).toBe(200)
+
+      const response = await app.request('/api/resource-packs/forest-pack/impact')
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ packId: 'forest-pack', projectCount: 1, references: [expect.objectContaining({ projectId, slotId: 'hero', packVersion: '2.0.0', elementId: 'tree', status: 'integrated' })] })
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('only binds a resource candidate re-derived from the project asset contract', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-explicit-resource-candidate-'))
+    const workspace = join(projectsRoot, 'explicit-resource-project')
+    const candidateRequirements: Array<{ slotId: string; category?: string }> = []
+    const candidate = {
+      slotId: 'slot-1',
+      packId: 'library-pack',
+      packVersion: '1.0.0',
+      elementId: 'library-model',
+      elementPath: 'models/library-model.glb',
+      sourceUrl: 'https://resource.example/signed/library-model.glb',
+      score: 100,
+      reasons: ['category:models', 'status:ready'],
+    }
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+      resourceSelectionClient: {
+        select: async () => [candidate],
+        candidates: async requirement => {
+          candidateRequirements.push(requirement)
+          return [{ ...candidate, slotId: requirement.slotId }]
+        },
+      },
+    })
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 1,
+        project_target: { integration_mode: 'mcp' },
+        slots: [{
+          id: 'slot-1',
+          resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'] },
+        }],
+      }))
+      const projectId = 'project_explicit_resource_candidate'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: projectId, name: 'Explicit Resource Candidate', root_path: workspace, created_at: Date.now() }),
+      })
+      expect(projectRes.status).toBe(200)
+
+      const candidatesRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-candidates`)
+      expect(candidatesRes.status).toBe(200)
+      expect(await candidatesRes.json()).toEqual({ candidates: [candidate] })
+
+      const bindRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-binding`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          // This conflicting client requirement must be ignored in favour of the contract.
+          requirement: { slotId: 'slot-1', category: 'audio', accepted_formats: ['wav'] },
+          selection: { packId: candidate.packId, elementId: candidate.elementId },
+        }),
+      })
+      expect(bindRes.status).toBe(200)
+      expect(await bindRes.json()).toEqual(expect.objectContaining({
+        selection: expect.objectContaining({ packId: candidate.packId, elementId: candidate.elementId }),
+      }))
+      expect(candidateRequirements.at(-1)).toEqual(expect.objectContaining({ slotId: 'slot-1', category: 'models' }))
+
+      const forgedRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-binding`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ selection: { packId: candidate.packId, elementId: 'forged-element' } }),
+      })
+      expect(forgedRes.status).toBe(422)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('loads project asset manifest from project root without requiring a live session', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-project-assets-root-'))
     const workspace = join(projectsRoot, 'asset-root-project')

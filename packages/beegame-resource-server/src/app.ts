@@ -1,8 +1,10 @@
 import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
+  RESOURCE_PACK_PRIMARY_CATEGORIES,
   evaluateResourcePackPublishReadiness,
   rankResourceCandidates,
+  searchResourcePacks,
   selectResourceCandidates,
   type ResourceDimension,
   type ResourceCategory,
@@ -25,6 +27,8 @@ export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
+  /** Required when the backing repository uses a service-role credential that bypasses RLS. */
+  canManagePack?: (user: ResourceUserContext, packId: string) => Promise<boolean> | boolean
   corsOrigin?: string
   updateResourcePack?: (packId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourcePack?: (packId: string) => Promise<boolean>
@@ -35,6 +39,7 @@ export type BeeGameResourceServerAppOptions = {
   updateResourceFolder?: (packId: string, folderId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourceFolder?: (packId: string, folderId: string) => Promise<boolean>
   getElementResourceUrl?: (packId: string, elementId: string) => Promise<string>
+  inspectPackStorage?: (packId: string) => Promise<{ missingPaths: string[]; orphanPaths: string[] }>
   recordAuditEvent?: (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => Promise<void>
   serviceSelectionToken?: string
 }
@@ -59,7 +64,27 @@ export function createBeeGameResourceServerApp(
       if (!serviceSelectionRequest && !hasResourceAdminPermission(user!)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
+      const packPathMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)(?:\/|$)/)
+      if (!serviceSelectionRequest && packPathMatch && options.canManagePack) {
+        try {
+          if (!await options.canManagePack(user!, decodeURIComponent(packPathMatch[1]))) {
+            return corsResponse(jsonError(403, 'forbidden', 'You are not allowed to manage this Resource Pack'), options.corsOrigin)
+          }
+        } catch (error) {
+          return corsResponse(jsonError(500, 'resource_access_failed', error instanceof Error ? error.message : 'Resource Pack ownership could not be verified'), options.corsOrigin)
+        }
+      }
       try {
+      if (request.method === 'GET' && pathname === '/api/resource-search') {
+        const url = new URL(request.url)
+        return corsResponse(Response.json({ packs: searchResourcePacks(await options.repository.listPacks(), {
+          dimensions: enumQuery(url.searchParams, 'dimension', RESOURCE_DIMENSIONS),
+          primaryCategories: enumQuery(url.searchParams, 'primaryCategory', RESOURCE_PACK_PRIMARY_CATEGORIES),
+          statuses: enumQuery(url.searchParams, 'status', ['draft', 'published', 'archived'] as const),
+          tags: listQuery(url.searchParams, 'tag'),
+          gameTypes: listQuery(url.searchParams, 'gameType'),
+        }) }), options.corsOrigin)
+      }
       if (request.method === 'POST' && pathname === '/api/resource-selections') {
         if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource selection URLs are not configured'), options.corsOrigin)
         let requirements: ResourceSlotRequirement[]
@@ -110,6 +135,11 @@ export function createBeeGameResourceServerApp(
         } catch (error) {
           return corsResponse(jsonError(400, 'invalid_pack', error instanceof Error ? error.message : 'Invalid Pack'), options.corsOrigin)
         }
+      }
+      if (request.method === 'GET' && pathname === '/api/resource-packs' && options.canManagePack) {
+        const packs = await options.repository.listPacks()
+        const permitted = await Promise.all(packs.map(async pack => ({ pack, allowed: await options.canManagePack!(user!, pack.id) })))
+        return corsResponse(Response.json({ packs: permitted.filter(entry => entry.allowed).map(entry => entry.pack) }), options.corsOrigin)
       }
       const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
       if (request.method === 'DELETE' && patchMatch) {
@@ -185,7 +215,11 @@ export function createBeeGameResourceServerApp(
         const pack = await options.repository.getPack(packId)
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         const elements = await options.repository.listElements(packId)
-        return corsResponse(Response.json({ report: evaluateResourcePackPublishReadiness(pack, elements) }), options.corsOrigin)
+        const baseline = evaluateResourcePackPublishReadiness(pack, elements)
+        const storage = options.inspectPackStorage ? await options.inspectPackStorage(packId) : undefined
+        const blocking = [...baseline.blocking, ...(storage?.missingPaths || []).map(path => ({ code: 'storage_object_missing', message: `Storage object is missing: ${path}` }))]
+        const warnings = [...baseline.warnings, ...(storage?.orphanPaths || []).map(path => ({ code: 'storage_object_orphaned', message: `Storage object is not referenced by this Pack: ${path}` }))]
+        return corsResponse(Response.json({ report: { blocking, warnings, canPublish: blocking.length === 0 } }), options.corsOrigin)
       }
       const publishMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish$/)
       if (publishMatch && request.method === 'POST') {
@@ -195,6 +229,17 @@ export function createBeeGameResourceServerApp(
           return corsResponse(Response.json({ pack }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'publish_blocked', error instanceof Error ? error.message : 'Pack cannot be published'), options.corsOrigin)
+        }
+      }
+      const archiveMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/archive$/)
+      if (archiveMatch && request.method === 'POST') {
+        try {
+          const packId = decodeURIComponent(archiveMatch[1])
+          const pack = await options.repository.archivePack(packId)
+          await audit({ actorId: user!.id, action: 'pack.archived', packId, metadata: { version: pack.version, deprecatedAt: pack.deprecatedAt } })
+          return corsResponse(Response.json({ pack }), options.corsOrigin)
+        } catch (error) {
+          return corsResponse(jsonError(400, 'archive_failed', error instanceof Error ? error.message : 'Pack could not be archived'), options.corsOrigin)
         }
       }
       const elementMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements$/)
@@ -322,6 +367,18 @@ function stringList(value: unknown): string[] | undefined {
   const values = value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
   if (values.length !== value.length) throw new Error('Resource requirement list values must be strings')
   return values.length ? values : undefined
+}
+
+function listQuery(params: URLSearchParams, key: string): string[] | undefined {
+  const values = params.getAll(key).map(value => value.trim()).filter(Boolean)
+  return values.length ? values : undefined
+}
+
+function enumQuery<T extends string>(params: URLSearchParams, key: string, allowed: readonly T[]): T[] | undefined {
+  const values = listQuery(params, key)
+  if (!values) return undefined
+  if (values.some(value => !allowed.includes(value as T))) throw new Error(`Unsupported ${key}`)
+  return values as T[]
 }
 
 function jsonError(status: number, code: string, message: string): Response {

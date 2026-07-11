@@ -23,6 +23,13 @@ export type ResourcePackSummary = {
   version?: string
   status?: string
   coverPath?: string
+  description?: string
+  tags?: readonly string[]
+  source?: string
+  author?: string
+  licenseEvidence?: string
+  compatibleEngines?: readonly string[]
+  deprecatedAt?: string
   elementCount: number
 }
 
@@ -35,11 +42,18 @@ export type CreateResourcePackInput = {
   categories: string[]
   license?: string
   version?: string
+  description?: string
+  tags?: string[]
+  source?: string
+  author?: string
+  licenseEvidence?: string
+  compatibleEngines?: string[]
+  deprecatedAt?: string
 }
 
 export type UpdateResourcePackInput = Partial<Pick<
   CreateResourcePackInput,
-  'name' | 'style' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version'
+  'name' | 'style' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version' | 'description' | 'tags' | 'source' | 'author' | 'licenseEvidence' | 'compatibleEngines' | 'deprecatedAt'
 >>
 
 export type ResourceElement = {
@@ -61,6 +75,10 @@ export type ResourceFolder = { id: string; packId: string; name: string; parentI
 
 export type ResourcePublishIssue = { code: string; message: string; elementId?: string }
 export type ResourcePublishReadiness = { blocking: readonly ResourcePublishIssue[]; warnings: readonly ResourcePublishIssue[]; canPublish: boolean }
+export type ResourceElementUploadOptions = {
+  signal?: AbortSignal;
+  onProgress?: (loaded: number, total: number) => void;
+}
 
 export class ResourceLibraryApiError extends Error {
   readonly status: number
@@ -140,13 +158,23 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack publish failed (${response.status})`, response.status, result.error?.code || 'resource_publish_failed')
       return result.pack
     },
+    async archivePack(packId: string): Promise<ResourcePackSummary> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/archive`, { method: 'POST' })
+      const result = await response.json() as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack archive failed (${response.status})`, response.status, result.error?.code || 'resource_archive_failed')
+      return result.pack
+    },
     async getPublishReadiness(packId: string): Promise<ResourcePublishReadiness> {
       const result = await request<{ report: ResourcePublishReadiness }>(`/api/resource-packs/${encodeURIComponent(packId)}/publish-readiness`)
       return result.report
     },
-    async addElement(packId: string, file: File, category: string, folderPath?: string): Promise<ResourceElement> {
+    async addElement(packId: string, file: File, category: string, folderPath?: string, options?: ResourceElementUploadOptions): Promise<ResourceElement> {
       const form = new FormData(); form.set('file', file); form.set('category', category); if (folderPath) form.set('folderPath', folderPath)
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`, { method: 'POST', body: form })
+      const url = `${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`
+      if (options && typeof XMLHttpRequest !== 'undefined' && fetchImpl === authenticatedResourceFetch) {
+        return uploadElementWithProgress(url, form, options)
+      }
+      const response = await fetchImpl(url, { method: 'POST', body: form, signal: options?.signal })
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element upload failed (${response.status})`, response.status, result.error?.code || 'element_upload_failed')
       return result.element
@@ -215,6 +243,46 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       const result = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined
       throw new ResourceLibraryApiError(result?.error?.message || `Element deletion failed (${response.status})`, response.status, result?.error?.code || 'element_delete_failed')
     },
+  }
+}
+
+async function uploadElementWithProgress(
+  url: string,
+  form: FormData,
+  options: ResourceElementUploadOptions,
+): Promise<ResourceElement> {
+  const token = await resolveAuthTokenAsync()
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    const abort = () => request.abort()
+    request.open('POST', url)
+    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`)
+    request.responseType = 'json'
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) options.onProgress?.(event.loaded, event.total)
+    }
+    request.onerror = () => reject(new ResourceLibraryApiError('Element upload failed', 0, 'element_upload_network_failed'))
+    request.onabort = () => reject(new DOMException('Element upload was cancelled', 'AbortError'))
+    request.onload = () => {
+      const result = request.response && typeof request.response === 'object'
+        ? request.response as { element?: ResourceElement; error?: { code?: string; message?: string } }
+        : parseUploadResponse(request.responseText)
+      if (request.status >= 200 && request.status < 300 && result.element) {
+        resolve(result.element)
+      } else {
+        reject(new ResourceLibraryApiError(result.error?.message || `Element upload failed (${request.status})`, request.status, result.error?.code || 'element_upload_failed'))
+      }
+    }
+    options.signal?.addEventListener('abort', abort, { once: true })
+    request.send(form)
+  })
+}
+
+function parseUploadResponse(value: string): { element?: ResourceElement; error?: { code?: string; message?: string } } {
+  try {
+    return JSON.parse(value) as { element?: ResourceElement; error?: { code?: string; message?: string } }
+  } catch {
+    return {}
   }
 }
 

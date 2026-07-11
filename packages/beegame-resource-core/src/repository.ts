@@ -17,6 +17,7 @@ export type ResourceRepository = {
   updateElement(packId: string, elementId: string, input: Partial<ResourceElement>): Promise<ResourceElement | undefined>
   deleteElement(packId: string, elementId: string): Promise<boolean>
   publishPack(packId: string): Promise<ResourcePack>
+  archivePack(packId: string): Promise<ResourcePack>
   deletePack(packId: string): Promise<boolean>
 }
 
@@ -106,6 +107,13 @@ export function createInMemoryResourceRepository(input: {
       const published = { ...pack, status: 'published' as const }
       packs[packs.indexOf(pack)] = published
       return published
+    },
+    async archivePack(packId) {
+      const pack = packs.find(item => item.id === packId)
+      if (!pack) throw new Error('Resource Pack not found')
+      const archived = { ...pack, status: 'archived' as const, deprecatedAt: pack.deprecatedAt ?? new Date().toISOString() }
+      packs[packs.indexOf(pack)] = archived
+      return archived
     },
     async deletePack(packId) {
       const index = packs.findIndex(item => item.id === packId)
