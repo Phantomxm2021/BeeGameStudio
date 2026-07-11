@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, persistModelMetrics } from './ModelPreview'
+import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, normalizeModelPreviewError, persistModelMetrics } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -27,6 +27,12 @@ describe('renderPreview', () => {
     })
 
     expect(result).toBe(error)
+  })
+
+  test('retains a model loader failure for diagnostics instead of replacing it with a generic message', () => {
+    const original = new Error('THREE.FBXLoader: Unexpected token')
+    expect(normalizeModelPreviewError(original)).toBe(original)
+    expect(normalizeModelPreviewError('Model bytes are invalid').message).toBe('Model bytes are invalid')
   })
 
   test('extracts material and texture metadata from a loaded model', () => {

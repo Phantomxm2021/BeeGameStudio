@@ -409,7 +409,12 @@ export function createAgentWorkflowApp(
   }
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
-  app.use('/api/*', cors())
+  app.use('/api/*', cors({
+    origin: resolveApiCorsOrigin,
+    credentials: true,
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  }))
   registerBeeGameBillingPublicRoutes(app, {
     billingConfig,
     dashboardRepository,
@@ -3879,6 +3884,20 @@ function withPreviewCorsHeaders(headers: Headers): Headers {
   headers.set('access-control-allow-methods', 'GET, HEAD, OPTIONS')
   headers.set('access-control-allow-headers', '*')
   return headers
+}
+
+/**
+ * API callers use session cookies/credentials, so a wildcard CORS response is
+ * rejected by browsers. Keep local dashboard origins available by default and
+ * require deployment origins to be configured explicitly.
+ */
+export function resolveApiCorsOrigin(origin: string): string | undefined {
+  const configured = (process.env.BEEGAME_API_CORS_ORIGINS || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+  const localOrigins = ['http://127.0.0.1:62173', 'http://localhost:62173']
+  return [...localOrigins, ...configured].includes(origin) ? origin : undefined
 }
 
 function injectBeeGamePreviewConsoleBridge(html: string, sessionId: string): string {

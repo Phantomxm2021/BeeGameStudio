@@ -710,6 +710,20 @@ describe('beegame session routes', () => {
     ))
   })
 
+  test('allows credentialed local dashboard API requests without a wildcard CORS origin', async () => {
+    const app = createAgentWorkflowApp()
+    const response = await app.request('/api/current-user', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://127.0.0.1:62173',
+        'access-control-request-method': 'GET',
+      },
+    })
+
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:62173')
+    expect(response.headers.get('access-control-allow-credentials')).toBe('true')
+  })
+
   test('rejects private model and MCP service targets without exposing the URL', async () => {
     const app = createAgentWorkflowApp()
     const privateTarget = 'http://127.0.0.1:43111/private?api_key=secret-value'

@@ -788,7 +788,7 @@ function Preview({ element, pack, url, elements, materialTextureBindings, textur
     <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
       {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
-      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} onPreviewError={() => { if (element.specs.previewStatus !== 'failed') void onSave(element.id, { specs: { ...element.specs, previewStatus: 'failed' } }); }} /></div>
+      <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} onPreviewError={(error) => { console.error('Resource preview failed', { elementId: element.id, name: element.name, error }); if (element.specs.previewStatus !== 'failed') void onSave(element.id, { specs: { ...element.specs, previewStatus: 'failed', previewError: error.message || 'Preview loading failed' } }); }} /></div>
       {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} elements={elements} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
   );

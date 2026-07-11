@@ -182,6 +182,11 @@ export function createProceduralSkyScene(): { scene: THREE.Scene; sky: Sky } {
   return { scene, sky }
 }
 
+export function normalizeModelPreviewError(reason: unknown): Error {
+  if (reason instanceof Error) return reason
+  return new Error(typeof reason === 'string' && reason.trim() ? reason : 'Unknown model loading error')
+}
+
 async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<THREE.Object3D> {
   const normalized = extension.toLowerCase()
   if (normalized === 'glb' || normalized === 'gltf') return (await new GLTFLoader().loadAsync(url)).scene
@@ -274,7 +279,13 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
           })
         }
       })
-      .catch(() => { if (active) setError('Model preview is unavailable.') })
+      .catch(reason => {
+        if (!active) return
+        const error = normalizeModelPreviewError(reason)
+        console.error('Resource model preview failed', { extension, url, error })
+        onMetricsErrorRef.current?.(error)
+        setError(`Model preview failed: ${error.message || 'Unknown model loading error'}`)
+      })
 
     return () => {
       active = false
