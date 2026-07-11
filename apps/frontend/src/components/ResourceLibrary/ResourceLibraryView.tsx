@@ -8,6 +8,7 @@ import {
   type ResourceFolder,
   type ResourcePackPrimaryCategory,
   type ResourcePackSummary,
+  type ResourcePublishReadiness,
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
@@ -23,10 +24,10 @@ import { closeResourcePackRoute, getResourcePackRoute, openResourcePackRoute } f
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'importPack' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder' | 'updateFolder' | 'deleteFolder'
   | 'updateElement' | 'getElementResourceUrl'
-  | 'deleteElement' | 'publishPack'
+  | 'deleteElement' | 'publishPack' | 'getPublishReadiness'
 >;
 
 type ResourceLibraryViewProps = {
@@ -36,7 +37,7 @@ type ResourceLibraryViewProps = {
 
 type UploadDestination = { category: string; folderPath: string };
 type FailedElementUpload = { file: File; destination: UploadDestination; message: string };
-type ElementUploadStatus = { done: number; total: number; failed: FailedElementUpload[]; phase: 'uploading' | 'failed' | 'complete' };
+type ElementUploadStatus = { done: number; total: number; failed: FailedElementUpload[]; phase: 'uploading' | 'failed' | 'complete' | 'cancelled' };
 
 const uploadRetryDelaysMs = [500, 1_250] as const;
 
@@ -123,9 +124,9 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const { i18n } = useTranslation();
   const isZh = i18n.language.startsWith('zh');
   const copy = isZh ? {
-    all: '所有资源包', search: '搜索资源包', import: '导入资源包', empty: '暂无资源包', emptyHint: '导入一个 Pack 后，它会出现在这里并按风格、类型和维度进行管理。', previous: '上一页', next: '下一页',
+    all: '所有资源包', search: '搜索资源包', empty: '暂无资源包', emptyHint: '创建一个 Pack 后，按风格、类型和维度管理其中的资源。', previous: '上一页', next: '下一页',
   } : {
-    all: 'All resource packs', search: 'Search resource packs', import: 'Import resource pack', empty: 'No resource packs', emptyHint: 'Import a Pack to manage it by style, type, and dimension.', previous: 'Previous', next: 'Next',
+    all: 'All resource packs', search: 'Search resource packs', empty: 'No resource packs', emptyHint: 'Create a Pack to manage its resources by style, type, and dimension.', previous: 'Previous', next: 'Next',
   };
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
   const [selectedPack, setSelectedPack] = useState<ResourcePackSummary | null>(null);
@@ -144,10 +145,12 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [publishReadiness, setPublishReadiness] = useState<ResourcePublishReadiness | null>(null);
 
   const packSessionRef = useRef(0);
   const categoryRequestRef = useRef(0);
   const consumedInitialPackIdRef = useRef<string | undefined>(undefined);
+  const cancelUploadRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,8 +180,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     try {
       const detail = await apiClient.getPack(pack.id);
       const nextFolders = await apiClient.listFolders(pack.id);
-      // The Pack category list may contain legacy folder names from ZIP imports.
-      // Initial workspace loading must not treat those values as a validated category filter.
+      // Workspace loading intentionally lists every element; folders are not categories.
       const nextElements = await apiClient.listElements(pack.id);
       if (session !== packSessionRef.current) return;
       const category = nextElements[0]?.category;
@@ -215,10 +217,16 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const uploadQueuedElements = async (uploads: Array<{ file: File; destination: UploadDestination }>) => {
     if (!selectedPack || uploads.length === 0) return;
     const session = packSessionRef.current;
+    cancelUploadRef.current = false;
     setError('');
     setElementUpload({ done: 0, total: uploads.length, failed: [], phase: 'uploading' });
     const failed: FailedElementUpload[] = [];
     for (const { file, destination } of uploads) {
+      if (cancelUploadRef.current) {
+        failed.push({ file, destination, message: '上传已取消' });
+        setElementUpload((current) => current ? { ...current, done: current.done + 1 } : current);
+        continue;
+      }
       try {
         let next: ResourceElement | undefined;
         let lastError: unknown;
@@ -249,7 +257,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     }
     if (session !== packSessionRef.current) return;
     if (failed.length) {
-      setElementUpload({ done: uploads.length, total: uploads.length, failed, phase: 'failed' });
+      setElementUpload({ done: uploads.length, total: uploads.length, failed, phase: cancelUploadRef.current ? 'cancelled' : 'failed' });
       setError(`${failed.length} 个文件上传失败；请重试或检查文件与权限。`);
       return;
     }
@@ -273,6 +281,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
       <>
       {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} /> : null}
       {deleteDialogOpen ? <DeleteResourcePackDialog open pack={selectedPack} onClose={() => setDeleteDialogOpen(false)} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setDeleteDialogOpen(false); setLoading(false); }} /> : null}
+      {publishReadiness ? <PublishReadinessDialog report={publishReadiness} onClose={() => setPublishReadiness(null)} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(null); }} /> : null}
       <PackBrowser
         apiClient={apiClient}
         pack={selectedPack}
@@ -299,10 +308,11 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
         uploadStatus={elementUpload}
         onRetryFailedUploads={() => void retryFailedUploads()}
+        onCancelUploads={() => { cancelUploadRef.current = true; }}
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
-        onPublish={async () => { const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
+        onPublish={async () => { const report = await apiClient.getPublishReadiness(selectedPack.id); if (!report.canPublish) { setPublishReadiness(report); return; } const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
         onRefreshWorkspace={async () => { const [nextFolders, nextElements] = await Promise.all([apiClient.listFolders(selectedPack.id), apiClient.listElements(selectedPack.id)]); setFolders(nextFolders); setElements(nextElements); setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]); setSelectedElement((current) => current ? nextElements.find((element) => element.id === current.id) ?? null : null); }}
       /></>
     );
@@ -388,6 +398,11 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
+function PublishReadinessDialog({ report, onClose, onSelectElement }: { report: ResourcePublishReadiness; onClose: () => void; onSelectElement: (elementId: string) => void }) {
+  const IssueList = ({ issues, tone }: { issues: readonly { code: string; message: string; elementId?: string }[]; tone: 'blocking' | 'warning' }) => <ul className="space-y-2">{issues.map((issue, index) => <li key={`${issue.code}-${issue.elementId || index}`} className={`flex items-start gap-2 rounded-lg border px-3 py-2 type-caption-2 ${tone === 'blocking' ? 'border-red-300/20 bg-red-400/10 text-red-100' : 'border-amber-200/15 bg-amber-300/10 text-amber-100'}`}><span className="mt-0.5">{tone === 'blocking' ? '×' : '!'}</span><span className="min-w-0 flex-1">{issue.message}</span>{issue.elementId ? <button type="button" onClick={() => onSelectElement(issue.elementId!)} className="shrink-0 text-zinc-50 underline underline-offset-2">定位</button> : null}</li>)}</ul>
+  return <div role="dialog" aria-modal="true" aria-label="发布检查" className="fixed inset-0 z-[220] grid place-items-center bg-black/60 p-5 backdrop-blur-sm"><section className="w-full max-w-md rounded-2xl border border-white/12 bg-[#17181d] p-5 shadow-2xl"><div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4"><div><p className="type-caption-1 text-[#c6a367]">资源库</p><h2 className="type-headline mt-1 text-zinc-50">发布检查</h2><p className="type-caption-2 mt-1 text-zinc-500">发布前需先处理所有阻塞项。</p></div><button type="button" aria-label="关闭发布检查" onClick={onClose} className="glass-icon-button h-8 w-8">×</button></div><div className="max-h-[52vh] space-y-4 overflow-y-auto py-4">{report.blocking.length ? <section><h3 className="type-caption-1 mb-2 text-red-200">阻塞项 · {report.blocking.length}</h3><IssueList issues={report.blocking} tone="blocking" /></section> : null}{report.warnings.length ? <section><h3 className="type-caption-1 mb-2 text-amber-100">警告 · {report.warnings.length}</h3><IssueList issues={report.warnings} tone="warning" /></section> : null}</div><button type="button" onClick={onClose} className="secondary-pill type-button w-full px-4 py-2">返回继续修复</button></section></div>
+}
+
 function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boolean; onOpen: () => void }) {
   const [coverUnavailable, setCoverUnavailable] = useState(false);
   const hasCover = Boolean(pack.coverPath) && !coverUnavailable;
@@ -433,6 +448,7 @@ function PackBrowser({
   onCreateFolder,
   uploadStatus,
   onRetryFailedUploads,
+  onCancelUploads,
   onPublish,
   onUpdateElement,
   onRefreshWorkspace,
@@ -457,6 +473,7 @@ function PackBrowser({
   onRefreshWorkspace: () => Promise<void>;
   uploadStatus: ElementUploadStatus | null;
   onRetryFailedUploads: () => void;
+  onCancelUploads: () => void;
   onPublish: () => Promise<void>;
 }) {
   const categories = useMemo(() => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))], [elements, loadedElementCategories]);
@@ -603,37 +620,20 @@ function PackBrowser({
           </div>
         </main>
       </div>
-      {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} /> : null}
+      {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} onCancel={onCancelUploads} /> : null}
       {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );
 }
 
-function UploadProgressCover({ status, onRetryFailed }: { status: ElementUploadStatus; onRetryFailed: () => void }) {
+function UploadProgressCover({ status, onRetryFailed, onCancel }: { status: ElementUploadStatus; onRetryFailed: () => void; onCancel: () => void }) {
   const percent = status.total ? Math.min(100, Math.round(status.done / status.total * 100)) : 0;
-  return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-[radial-gradient(circle_at_50%_42%,rgba(47,49,57,0.45),rgba(8,9,13,0.9)_52%)] p-6 backdrop-blur-md">
-    <div className="w-full max-w-sm rounded-2xl border border-[#34363e] bg-[#17181d]/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
-      <div className="flex items-center justify-between border-b border-[#2d2e34] pb-4">
-        <div>
-          <p className="type-caption-1 text-[#c6a367]">资源库</p>
-          <h2 className="type-headline mt-1 text-zinc-100">{status.phase === 'failed' ? '部分文件未上传' : status.phase === 'complete' ? '上传完成' : '正在上传资源'}</h2>
-        </div>
-        <span className="type-caption-2 inline-flex items-center gap-1.5 text-zinc-500"><span className={`h-1.5 w-1.5 rounded-full ${status.phase === 'uploading' ? 'animate-pulse bg-orange-200' : status.phase === 'failed' ? 'bg-red-300' : 'bg-emerald-300'}`} />{status.phase === 'uploading' ? '进行中' : status.phase === 'failed' ? '需要处理' : '已完成'}</span>
-      </div>
-      <div className="flex items-center gap-5 py-5">
-        <div className="relative grid h-16 w-16 shrink-0 place-items-center">
-          <svg aria-hidden="true" viewBox="0 0 36 36" className="h-16 w-16 -rotate-90">
-            <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2" />
-            <circle cx="18" cy="18" r="15.5" fill="none" pathLength="100" stroke="rgb(236 197 139)" strokeDasharray={`${percent} ${100 - percent}`} strokeLinecap="round" strokeWidth="2" className="transition-[stroke-dasharray] duration-300" />
-          </svg>
-          <span className="type-caption-1 text-zinc-100">{percent}%</span>
-        </div>
-        <div className="min-w-0">
-          <p className="type-footnote text-zinc-200">{status.done} / {status.total} 个文件已完成</p>
-          <p className="type-caption-2 mt-1 text-zinc-500">{status.phase === 'uploading' ? '上传完成前请保持此页面打开。' : status.phase === 'failed' ? '失败文件会保留在当前任务中，可直接重试。' : '文件已写入资源库。'}</p>
-        </div>
-      </div>
-      {status.failed.length ? <div className="space-y-3 rounded-lg border border-red-300/15 bg-red-400/10 p-3"><p className="type-caption-2 text-red-200">{status.failed.length} 个文件上传失败，将在任务结束后保留失败记录。</p><ul className="max-h-20 space-y-1 overflow-y-auto text-[11px] leading-4 text-red-100/80">{status.failed.map(({ file, message }) => <li key={`${file.name}-${file.lastModified}`}>{file.name} · {message}</li>)}</ul><button type="button" onClick={onRetryFailed} className="secondary-pill type-button w-full px-3 py-2 text-red-100">重试失败文件</button></div> : null}
+  return <div role="status" aria-live="polite" aria-label="正在上传资源" className="fixed inset-0 z-[100] grid place-items-center bg-black/55 backdrop-blur-sm">
+    <div className="flex flex-col items-center text-center">
+      <span aria-hidden="true" className={`h-12 w-12 animate-spin rounded-full border-2 border-white/15 border-t-orange-200 ${status.phase === 'failed' ? 'border-t-red-300' : status.phase === 'complete' ? 'border-t-emerald-300' : ''}`} />
+      <p className="type-headline mt-4 text-zinc-50">{percent}%</p>
+      {status.phase === 'failed' ? <button type="button" onClick={onRetryFailed} className="secondary-pill type-button mt-5 px-4 py-2 text-red-100">重试失败文件</button> : null}
+      {status.phase === 'uploading' ? <button type="button" onClick={onCancel} className="type-caption-2 mt-5 text-zinc-400 hover:text-white">取消剩余上传</button> : null}
     </div>
   </div>;
 }

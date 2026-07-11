@@ -2,6 +2,7 @@ import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
   evaluateResourcePackPublishReadiness,
+  rankResourceCandidates,
   selectResourceCandidates,
   type ResourceDimension,
   type ResourceCategory,
@@ -17,7 +18,6 @@ import {
   type ResourceUserContext,
   type ResourceUserResolver,
 } from './auth'
-import { ResourceImportError } from './import-resource-pack'
 
 export class ResourceLifecycleNotFoundError extends Error {}
 
@@ -26,7 +26,6 @@ export type BeeGameResourceServerAppOptions = {
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
   corsOrigin?: string
-  importResourcePack?: (request: Request) => Promise<unknown>
   updateResourcePack?: (packId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourcePack?: (packId: string) => Promise<boolean>
   uploadPackCover?: (packId: string, request: Request) => Promise<ResourcePack>
@@ -53,7 +52,7 @@ export function createBeeGameResourceServerApp(
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
-      const serviceSelectionRequest = request.method === 'POST' && pathname === '/api/resource-selections' &&
+      const serviceSelectionRequest = request.method === 'POST' && (pathname === '/api/resource-selections' || pathname === '/api/resource-candidates') &&
         Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
       const user = options.currentUser ?? await resolveUser(request)
       if (!serviceSelectionRequest && !user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
@@ -78,6 +77,15 @@ export function createBeeGameResourceServerApp(
         })))
         return corsResponse(Response.json({ selections, unmatchedSlotIds: manifest.unmatchedSlotIds }), options.corsOrigin)
       }
+      if (request.method === 'POST' && pathname === '/api/resource-candidates') {
+        if (!serviceSelectionRequest || !options.getElementResourceUrl) return corsResponse(jsonError(403, 'forbidden', 'Resource candidate access is not allowed'), options.corsOrigin)
+        const requirements = parseSelectionRequirements(await request.json())
+        const requirement = requirements[0]
+        if (!requirement) return corsResponse(jsonError(400, 'invalid_selection_request', 'A resource requirement is required'), options.corsOrigin)
+        const packs = await options.repository.listPacks(); const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
+        const candidates = await Promise.all(rankResourceCandidates(packs, elements, requirement).slice(0, 24).map(async selection => ({ ...selection, sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId) })))
+        return corsResponse(Response.json({ candidates }), options.corsOrigin)
+      }
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
           const body = await request.json() as Record<string, unknown>
@@ -90,23 +98,17 @@ export function createBeeGameResourceServerApp(
             categories: body.categories as ResourceCategory[],
             license: typeof body.license === 'string' ? body.license : 'unassigned',
             version: typeof body.version === 'string' ? body.version : '0.1.0', status: 'draft',
+            ...(typeof body.description === 'string' && body.description.trim() ? { description: body.description.trim() } : {}),
+            ...(stringList(body.tags) ? { tags: stringList(body.tags) } : {}),
+            ...(typeof body.source === 'string' && body.source.trim() ? { source: body.source.trim() } : {}),
+            ...(typeof body.author === 'string' && body.author.trim() ? { author: body.author.trim() } : {}),
+            ...(typeof body.licenseEvidence === 'string' && body.licenseEvidence.trim() ? { licenseEvidence: body.licenseEvidence.trim() } : {}),
+            ...(stringList(body.compatibleEngines) ? { compatibleEngines: stringList(body.compatibleEngines) } : {}),
           }, { createdBy: user!.id })
           await audit({ actorId: user!.id, action: 'pack.created', packId: pack.id, metadata: { primaryCategory: pack.primaryCategory, dimension: pack.dimension } })
           return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'invalid_pack', error instanceof Error ? error.message : 'Invalid Pack'), options.corsOrigin)
-        }
-      }
-      if (request.method === 'POST' && new URL(request.url).pathname === '/api/resource-packs/import') {
-        if (!options.importResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource import is not configured'), options.corsOrigin)
-        try {
-          const pack = await options.importResourcePack(request)
-          const packId = pack && typeof pack === 'object' && 'id' in pack && typeof (pack as { id?: unknown }).id === 'string' ? (pack as { id: string }).id : undefined
-          await audit({ actorId: user!.id, action: 'pack.imported', ...(packId ? { packId } : {}) })
-          return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
-        } catch (error) {
-          if (error instanceof ResourceImportError) return corsResponse(jsonError(error.status, error.code, error.message), options.corsOrigin)
-          return corsResponse(jsonError(500, 'import_failed', error instanceof Error ? error.message : 'Resource import failed'), options.corsOrigin)
         }
       }
       const patchMatch = new URL(request.url).pathname.match(/^\/api\/resource-packs\/([^/]+)$/)
@@ -309,6 +311,7 @@ function parseSelectionRequirements(value: unknown): ResourceSlotRequirement[] {
       ...(stringList(record.acceptedFormats) ? { acceptedFormats: stringList(record.acceptedFormats)! } : {}),
       ...(stringList(record.styles) ? { styles: stringList(record.styles)! } : {}),
       ...(stringList(record.gameTypes) ? { gameTypes: stringList(record.gameTypes)! } : {}),
+      ...(stringList(record.tags) ? { tags: stringList(record.tags)! } : {}),
       ...(typeof record.purpose === 'string' && record.purpose.trim() ? { purpose: record.purpose.trim() } : {}),
     }
   })

@@ -11,7 +11,7 @@ const element: ResourceElement = { id: 'element-1', packId: 'pack-1', name: 'kni
 const api = {
   createPack: async () => pack, listPacks: async () => [pack], getPack: async () => pack, listElements: async () => [element], getElement: async () => element,
   listFolders: async () => [], createFolder: async () => ({ id: 'folder-1', packId: pack.id, name: 'Models', path: 'Models' }), updateFolder: async () => ({ id: 'folder-1', packId: pack.id, name: 'Models', path: 'Models' }), deleteFolder: async () => undefined,
-  addElement: async () => element, updateElement: async () => element, deleteElement: async () => undefined, getElementResourceUrl: async () => 'https://signed.example/knight.png', publishPack: async () => pack, updatePack: async () => pack, uploadPackCover: async () => pack, deletePack: async () => undefined, importPack: async () => pack,
+  addElement: async () => element, updateElement: async () => element, deleteElement: async () => undefined, getElementResourceUrl: async () => 'https://signed.example/knight.png', getPublishReadiness: async () => ({ canPublish: true, blocking: [], warnings: [] }), publishPack: async () => pack, updatePack: async () => pack, uploadPackCover: async () => pack, deletePack: async () => undefined,
 }
 
 describe('ResourceLibraryView workspace', () => {
@@ -72,6 +72,18 @@ describe('ResourceLibraryView workspace', () => {
     expect(addElement).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: '重试失败文件' }))
     await waitFor(() => expect(addElement).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('上传完成')).toBeInTheDocument()
+    expect(await screen.findByRole('status', { name: '正在上传资源' })).toHaveTextContent('100%')
+  })
+
+  test('shows structured publish blockers and can locate the affected element', async () => {
+    const user = userEvent.setup()
+    const draftPack = { ...pack, status: 'draft' }
+    render(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [draftPack], getPack: async () => draftPack, getPublishReadiness: async () => ({ canPublish: false, blocking: [{ code: 'dependency_missing', message: 'Element knight.png references a missing dependency', elementId: element.id }], warnings: [] }) }} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+    await user.click(screen.getByRole('button', { name: '发布' }))
+    const dialog = await screen.findByRole('dialog', { name: '发布检查' })
+    expect(within(dialog).getByText('Element knight.png references a missing dependency')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '定位' }))
+    expect(await screen.findByRole('button', { name: '显示元素信息' })).toBeInTheDocument()
   })
 })

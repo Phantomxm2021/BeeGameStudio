@@ -59,6 +59,9 @@ export type ResourceElement = {
 
 export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string }
 
+export type ResourcePublishIssue = { code: string; message: string; elementId?: string }
+export type ResourcePublishReadiness = { blocking: readonly ResourcePublishIssue[]; warnings: readonly ResourcePublishIssue[]; canPublish: boolean }
+
 export class ResourceLibraryApiError extends Error {
   readonly status: number
   readonly code: string
@@ -137,21 +140,16 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       if (!response.ok || !result.pack) throw new ResourceLibraryApiError(result.error?.message || `Pack publish failed (${response.status})`, response.status, result.error?.code || 'resource_publish_failed')
       return result.pack
     },
+    async getPublishReadiness(packId: string): Promise<ResourcePublishReadiness> {
+      const result = await request<{ report: ResourcePublishReadiness }>(`/api/resource-packs/${encodeURIComponent(packId)}/publish-readiness`)
+      return result.report
+    },
     async addElement(packId: string, file: File, category: string, folderPath?: string): Promise<ResourceElement> {
       const form = new FormData(); form.set('file', file); form.set('category', category); if (folderPath) form.set('folderPath', folderPath)
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements`, { method: 'POST', body: form })
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element upload failed (${response.status})`, response.status, result.error?.code || 'element_upload_failed')
       return result.element
-    },
-    async importPack(file: File, onProgress?: (progress: number, phase: 'uploading' | 'processing') => void): Promise<ResourcePackSummary> {
-      onProgress?.(8, 'uploading')
-      const response = await fetchImpl(`${baseUrl}/api/resource-packs/import`, { method: 'POST', body: (() => { const form = new FormData(); form.set('file', file); return form })() })
-      onProgress?.(72, 'processing')
-      const body = await response.json().catch(() => undefined) as { pack?: ResourcePackSummary; error?: { code?: string; message?: string } } | undefined
-      if (!response.ok || !body?.pack) throw new ResourceLibraryApiError(body?.error?.message || `Resource import failed (${response.status})`, response.status, body?.error?.code || 'resource_import_failed')
-      onProgress?.(100, 'processing')
-      return body.pack
     },
     async listPacks(): Promise<ResourcePackSummary[]> {
       const result = await request<{ packs: ResourcePackSummary[] }>('/api/resource-packs')

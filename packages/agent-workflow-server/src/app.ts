@@ -241,7 +241,7 @@ export type AgentWorkflowAppOptions = {
   skillsConfig?: BeeGameSkillsConfig | false
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
-  resourceSelectionClient?: { select(requirements: ResourceSelectionRequirement[]): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>> }
+  resourceSelectionClient?: { select(requirements: ResourceSelectionRequirement[]): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>>; candidates(requirement: ResourceSelectionRequirement): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>> }
 }
 
 export function createAgentWorkflowApp(

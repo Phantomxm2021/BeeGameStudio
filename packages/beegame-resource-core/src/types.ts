@@ -58,6 +58,13 @@ export type ResourcePack = {
   version: string
   status: ResourcePackStatus
   coverPath?: string
+  description?: string
+  tags?: readonly string[]
+  source?: string
+  author?: string
+  licenseEvidence?: string
+  compatibleEngines?: readonly string[]
+  deprecatedAt?: string
 }
 
 export type ResourcePreview = {
@@ -87,6 +94,7 @@ export type ResourceSlotRequirement = {
   acceptedFormats?: readonly string[]
   styles?: readonly string[]
   gameTypes?: readonly string[]
+  tags?: readonly string[]
   purpose?: string
 }
 

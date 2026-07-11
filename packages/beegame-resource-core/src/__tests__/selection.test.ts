@@ -26,6 +26,16 @@ describe('resource selection', () => {
     expect(result.selections[0]?.reasons).toEqual(expect.arrayContaining(['category:models', 'format:glb', 'dimension:3D', 'style:Fantasy', 'game-type:RPG']))
   })
 
+  test('treats requested governance tags as a structured compatibility constraint', () => {
+    const result = selectResourceCandidates(
+      [{ ...published3dPack, tags: ['foliage', 'outdoor'] }],
+      [{ id: 'oak', packId: published3dPack.id, name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }],
+      [{ slotId: 'tree', category: 'models', tags: ['foliage'] }],
+    )
+    expect(result.selections[0]).toEqual(expect.objectContaining({ elementId: 'oak', reasons: expect.arrayContaining(['tag:foliage']) }))
+    expect(selectResourceCandidates([{ ...published3dPack, tags: ['indoor'] }], [{ id: 'oak', packId: published3dPack.id, name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }], [{ slotId: 'tree', tags: ['foliage'] }]).unmatchedSlotIds).toEqual(['tree'])
+  })
+
   test('uses stable Pack and element ids as a deterministic tie break', () => {
     const result = selectResourceCandidates(
       [{ ...published3dPack, id: 'z-pack' }, { ...published3dPack, id: 'a-pack' }],

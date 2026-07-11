@@ -18,16 +18,19 @@ export function selectResourceCandidates(
   const unmatchedSlotIds: string[] = []
 
   for (const requirement of requirements) {
-    const candidates = elements
-      .filter(element => isEligible(element, packById.get(element.packId), requirement, readyElementIds))
-      .map(element => scoreCandidate(element, packById.get(element.packId)!, requirement))
-      .sort(compareSelection)
+    const candidates = rankResourceCandidates(packs, elements, requirement)
     const selected = candidates[0]
     if (selected) selections.push(selected)
     else unmatchedSlotIds.push(requirement.slotId)
   }
 
   return { selections, unmatchedSlotIds }
+}
+
+export function rankResourceCandidates(packs: readonly ResourcePack[], elements: readonly ResourceElement[], requirement: ResourceSlotRequirement): ResourceSelection[] {
+  const packById = new Map(packs.map(pack => [pack.id, pack]))
+  const readyElementIds = new Set(elements.filter(element => element.status === 'ready').map(element => element.id))
+  return elements.filter(element => isEligible(element, packById.get(element.packId), requirement, readyElementIds)).map(element => scoreCandidate(element, packById.get(element.packId)!, requirement)).sort(compareSelection)
 }
 
 function isEligible(
@@ -40,6 +43,7 @@ function isEligible(
   if (requirement.category && element.category !== requirement.category) return false
   if (requirement.acceptedFormats?.length && !requirement.acceptedFormats.map(normalize).includes(fileExtension(element.path))) return false
   if (element.dependencies.some(dependencyId => !readyElementIds.has(dependencyId))) return false
+  if (requirement.tags?.length && !firstIntersection(requirement.tags, pack.tags ?? [])) return false
   return dimensionCompatible(requirement.dimension, element.dimensionOverride ?? pack.dimension)
 }
 
@@ -69,6 +73,11 @@ function scoreCandidate(element: ResourceElement, pack: ResourcePack, requiremen
   if (gameTypeMatch) {
     score += 10
     reasons.push(`game-type:${gameTypeMatch}`)
+  }
+  const tagMatch = firstIntersection(requirement.tags, pack.tags ?? [])
+  if (tagMatch) {
+    score += 10
+    reasons.push(`tag:${tagMatch}`)
   }
   return { slotId: requirement.slotId, packId: pack.id, packVersion: pack.version, elementId: element.id, elementPath: element.path, score, reasons }
 }

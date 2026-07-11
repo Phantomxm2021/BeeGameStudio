@@ -20,6 +20,13 @@ type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath'>
   primary_category: ResourcePack['primaryCategory']
   cover_path?: string | null
   element_count?: number
+  description?: string | null
+  tags?: string[] | null
+  source?: string | null
+  author?: string | null
+  license_evidence?: string | null
+  compatible_engines?: string[] | null
+  deprecated_at?: string | null
 }
 
 type ElementRow = Omit<ResourceElement, 'packId' | 'preview' | 'styleOverride' | 'dimensionOverride'> & {
@@ -94,6 +101,13 @@ export function createSupabaseResourceRepository(
     license: row.license,
     version: row.version,
     status: row.status,
+    ...(row.description ? { description: row.description } : {}),
+    ...(row.tags?.length ? { tags: row.tags } : {}),
+    ...(row.source ? { source: row.source } : {}),
+    ...(row.author ? { author: row.author } : {}),
+    ...(row.license_evidence ? { licenseEvidence: row.license_evidence } : {}),
+    ...(row.compatible_engines?.length ? { compatibleEngines: row.compatible_engines } : {}),
+    ...(row.deprecated_at ? { deprecatedAt: row.deprecated_at } : {}),
     ...(row.cover_path ? { coverPath: await signPath(packCoverStoragePath(row.id, row.cover_path)) } : {}),
     elementCount: row.element_count ?? 0,
   })
@@ -139,7 +153,7 @@ export function createSupabaseResourceRepository(
       return rows[0] ? toElement(rows[0]) : undefined
     },
     async createPack(pack, lifecycle) {
-      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, primary_category: pack.primaryCategory, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0, ...(lifecycle?.createdBy ? { created_by: lifecycle.createdBy } : {}) }) })
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'POST', body: JSON.stringify({ id: pack.id, name: pack.name, style: pack.style, game_types: pack.gameTypes, dimension: pack.dimension, primary_category: pack.primaryCategory, categories: pack.categories, license: pack.license, version: pack.version, status: 'draft', cover_path: pack.coverPath ?? null, element_count: 0, description: pack.description ?? null, tags: pack.tags ?? [], source: pack.source ?? null, author: pack.author ?? null, license_evidence: pack.licenseEvidence ?? null, compatible_engines: pack.compatibleEngines ?? [], deprecated_at: pack.deprecatedAt ?? null, ...(lifecycle?.createdBy ? { created_by: lifecycle.createdBy } : {}) }) })
       return await toPack(rows[0])
     },
     async listFolders(packId) {

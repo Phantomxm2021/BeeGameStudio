@@ -2,7 +2,7 @@ import { createInMemoryResourceRepository, type PackSummary, type ResourceElemen
 import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
-import { createSupabaseResourcePackImporter } from './import-resource-pack'
+import { inspectUploadedResource } from './resource-inspection'
 
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
@@ -15,7 +15,6 @@ if (import.meta.main) {
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
-    importResourcePack: baseUrl && serviceRoleKey ? createSupabaseResourcePackImporter({ baseUrl, serviceRoleKey, uploadConcurrency: Number(process.env.BEEGAME_RESOURCE_UPLOAD_CONCURRENCY || 1) }) : undefined,
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
     ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
@@ -31,6 +30,7 @@ if (import.meta.main) {
       const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error('Element storage upload failed')
       const row = buildElementUploadRow(storagePackId, category, file, `${storagePackId}-${crypto.randomUUID()}`, relativePath, filename)
+      row.specs = { ...(row.specs as Record<string, unknown>), ...await inspectUploadedResource(file) }
       const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
       return toResourceElement((await saved.json() as Array<Record<string, unknown>>)[0])
@@ -198,6 +198,7 @@ export function toPackUpdateRow(body: Record<string, unknown>): Record<string, u
   const editable: Record<string, string> = {
     name: 'name', style: 'style', gameTypes: 'game_types', dimension: 'dimension',
     primaryCategory: 'primary_category', categories: 'categories', license: 'license', version: 'version',
+    description: 'description', tags: 'tags', source: 'source', author: 'author', licenseEvidence: 'license_evidence', compatibleEngines: 'compatible_engines', deprecatedAt: 'deprecated_at',
   }
   const row: Record<string, unknown> = {}
   for (const [input, column] of Object.entries(editable)) {

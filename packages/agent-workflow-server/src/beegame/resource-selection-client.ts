@@ -1,4 +1,4 @@
-export type ResourceSelectionRequirement = { slotId: string; category?: string; dimension?: '2D' | '3D' | 'agnostic'; acceptedFormats?: string[]; styles?: string[]; gameTypes?: string[]; purpose?: string }
+export type ResourceSelectionRequirement = { slotId: string; category?: string; dimension?: '2D' | '3D' | 'agnostic'; acceptedFormats?: string[]; styles?: string[]; gameTypes?: string[]; tags?: string[]; purpose?: string }
 export type ResourceSelectionResult = { slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }
 
 export function createResourceSelectionClient(options: { baseUrl: string; serviceToken: string; fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> }) {
@@ -10,6 +10,12 @@ export function createResourceSelectionClient(options: { baseUrl: string; servic
       const body = await response.json().catch(() => undefined) as { selections?: unknown; error?: { message?: string } } | undefined
       if (!response.ok || !Array.isArray(body?.selections)) throw new Error(body?.error?.message || `Resource selection failed (${response.status})`)
       return body.selections.map(parseSelection)
+    },
+    async candidates(requirement: ResourceSelectionRequirement): Promise<ResourceSelectionResult[]> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-candidates`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-beegame-resource-service-token': options.serviceToken }, body: JSON.stringify({ requirements: [requirement] }) })
+      const body = await response.json().catch(() => undefined) as { candidates?: unknown; error?: { message?: string } } | undefined
+      if (!response.ok || !Array.isArray(body?.candidates)) throw new Error(body?.error?.message || `Resource candidates failed (${response.status})`)
+      return body.candidates.map(parseSelection)
     },
   }
 }
