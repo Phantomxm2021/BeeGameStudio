@@ -1,5 +1,6 @@
 import type { PackSummary, ResourceCategory, ResourceElement, ResourceFolder, ResourcePack } from './types'
 import { validateResourceElement, validateResourcePack } from './validation'
+import { assertResourcePackPublishable } from './publish-readiness'
 
 export type { ResourceElement, ResourceFolder, ResourcePack } from './types'
 
@@ -101,7 +102,7 @@ export function createInMemoryResourceRepository(input: {
     async publishPack(packId) {
       const pack = packs.find(item => item.id === packId)
       if (!pack) throw new Error('Resource Pack not found')
-      if (elements.some(element => element.packId === packId && ['queued', 'uploading', 'failed'].includes(element.status))) throw new Error('Pack has incomplete uploads')
+      assertResourcePackPublishable(pack, elements.filter((element) => element.packId === packId))
       const published = { ...pack, status: 'published' as const }
       packs[packs.indexOf(pack)] = published
       return published

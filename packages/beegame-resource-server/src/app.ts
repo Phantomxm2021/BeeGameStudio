@@ -1,6 +1,7 @@
 import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
+  evaluateResourcePackPublishReadiness,
   selectResourceCandidates,
   type ResourceDimension,
   type ResourceCategory,
@@ -171,6 +172,14 @@ export function createBeeGameResourceServerApp(
         const deleted = options.deleteResourceFolder ? await options.deleteResourceFolder(packId, folderId) : await options.repository.deleteFolder(packId, folderId)
         if (!deleted) return corsResponse(jsonError(404, 'not_found', 'Resource folder not found'), options.corsOrigin)
         return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
+      }
+      const readinessMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish-readiness$/)
+      if (readinessMatch && request.method === 'GET') {
+        const packId = decodeURIComponent(readinessMatch[1])
+        const pack = await options.repository.getPack(packId)
+        if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
+        const elements = await options.repository.listElements(packId)
+        return corsResponse(Response.json({ report: evaluateResourcePackPublishReadiness(pack, elements) }), options.corsOrigin)
       }
       const publishMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish$/)
       if (publishMatch && request.method === 'POST') {

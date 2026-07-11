@@ -6,6 +6,7 @@ import type {
   ResourcePack,
   ResourceRepository,
 } from '@bee-game-studio/beegame-resource-core'
+import { assertResourcePackPublishable } from '@bee-game-studio/beegame-resource-core'
 
 type SupabaseResourceRepositoryOptions = {
   baseUrl: string
@@ -195,8 +196,13 @@ export function createSupabaseResourceRepository(
       return rows.length > 0
     },
     async publishPack(packId) {
-      const incomplete = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}`, status: 'in.(queued,uploading,failed)' })
-      if (incomplete.length > 0) throw new Error('Pack has incomplete uploads')
+      const pack = (await request<PackRow>('beegame_resource_packs', { id: `eq.${packId}` }))[0]
+      if (!pack) throw new Error('Resource Pack not found')
+      assertResourcePackPublishable({
+        id: pack.id, name: pack.name, style: pack.style, gameTypes: pack.game_types, dimension: pack.dimension,
+        primaryCategory: pack.primary_category, categories: pack.categories, license: pack.license, version: pack.version,
+        status: pack.status, ...(pack.cover_path ? { coverPath: pack.cover_path } : {}),
+      }, (await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}` })).map(toElement))
       const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published' }) }, { id: `eq.${packId}` })
       return await toPack(rows[0])
     },

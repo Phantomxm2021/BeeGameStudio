@@ -198,6 +198,16 @@ describe('resource service app', () => {
     expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
   })
 
+  test('returns a publish readiness report before changing Pack state', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/publish-readiness'))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ report: expect.objectContaining({ canPublish: true, blocking: [] }) })
+  })
+
   test('filters elements by folder path without treating it as a category', async () => {
     const app = createBeeGameResourceServerApp({
       repository,
