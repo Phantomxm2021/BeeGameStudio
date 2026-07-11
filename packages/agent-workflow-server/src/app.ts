@@ -43,9 +43,14 @@ import {
 } from './beegame/deployment-manager'
 import {
   readBeeGameAssetManifest,
+  bindBeeGameLibraryResourceInWorkspace,
+  unbindBeeGameLibraryResourceInWorkspace,
+  integrateBeeGameLibraryResourceInWorkspace,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
+  type BeeGameAssetSlot,
 } from './beegame/asset-contracts'
+import type { ResourceSelectionRequirement } from './beegame/resource-selection-client'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
@@ -247,6 +252,7 @@ export type AgentWorkflowAppOptions = {
   skillsConfig?: BeeGameSkillsConfig | false
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
+  resourceSelectionClient?: { select(requirements: ResourceSelectionRequirement[]): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>>; candidates(requirement: ResourceSelectionRequirement): Promise<Array<{ slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; sourceUrl: string; score: number; reasons: string[] }>> }
 }
 
 export const ROUTE_PERMISSION = {
@@ -361,6 +367,10 @@ export function createAgentWorkflowApp(
     Boolean(supabaseRuntimeEnvClient),
     outboundTargetPolicyOptions,
     resolveOutboundTarget,
+    async metadata => {
+      if (!metadata.projectId || !options.resourceSelectionClient) return
+      await autoBindLibraryResourcesInWorkspace(metadata.workspacePath, options.resourceSelectionClient)
+    },
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -1483,6 +1493,158 @@ export function createAgentWorkflowApp(
       }
     } catch (err) {
       return tracedRouteError(c, 'project.assets.list', err)
+    }
+  })
+
+  app.post('/api/projects/:id/assets/:slotId/resource-binding', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!options.resourceSelectionClient) return c.json({ error: 'Resource selection is not configured' }, 503)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const body = await c.req.raw.json().catch(() => ({})) as { requirement?: ResourceSelectionRequirement }
+      const slotId = c.req.param('slotId')
+      const contractSlot = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === slotId)
+      const requirement = body.requirement ?? (contractSlot ? resourceRequirementForSlot(contractSlot) : undefined)
+      if (!requirement || requirement.slotId !== slotId) return c.json({ error: 'Asset requirement does not match slot' }, 400)
+      const selection = (await options.resourceSelectionClient.select([requirement]))[0]
+      if (!selection) return c.json({ error: 'No compatible resource was found' }, 422)
+      const bound = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, { pack_id: selection.packId, pack_version: selection.packVersion, element_id: selection.elementId, source_url: selection.sourceUrl, selected_at: new Date().toISOString(), selection_reason: selection.reasons })
+      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId)
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: result.path ? 'resource.integrated' : 'resource.bound',
+        targetType: 'project_asset_slot',
+        targetId: `${c.req.param('id')}:${requirement.slotId}`,
+        metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, reasons: selection.reasons, ...(result.path ? { path: result.path } : {}) },
+      })
+      return c.json({ manifest: result.manifest, slot: result.slot, selection, ...(result.path ? { path: result.path } : {}), boundSlot: bound.slot })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource binding failed' }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/assets/:slotId/resource-integration', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: result.path ? 'resource.reintegrated' : 'resource.integration_requested',
+        targetType: 'project_asset_slot',
+        targetId: `${c.req.param('id')}:${c.req.param('slotId')}`,
+        metadata: {
+          packId: result.slot.resource_binding?.pack_id,
+          packVersion: result.slot.resource_binding?.pack_version,
+          elementId: result.slot.resource_binding?.element_id,
+          ...(result.path ? { path: result.path } : {}),
+        },
+      })
+      return c.json({ manifest: result.manifest, slot: result.slot, ...(result.path ? { path: result.path } : {}) })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource integration failed' }, 400)
+    }
+  })
+
+  app.delete('/api/projects/:id/assets/:slotId/resource-binding', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const existing = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === c.req.param('slotId'))
+      if (!existing) return c.json({ error: 'Asset slot not found' }, 404)
+      const existingBinding = existing.resource_binding
+      if (!existingBinding) return c.json({ error: 'Asset slot has no library resource binding' }, 409)
+      const result = await unbindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
+      await appendAuditEventBestEffort('resource.unbound', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id,
+        action: 'resource.unbound',
+        targetType: 'project_asset_slot',
+        targetId: `${project.id}:${c.req.param('slotId')}`,
+        metadata: { packId: existingBinding.pack_id, packVersion: existingBinding.pack_version, elementId: existingBinding.element_id, retainedFiles: existing.uploaded_files ?? [] },
+      }))
+      return c.json({ manifest: result.manifest, slot: result.slot, retained_files: existing.uploaded_files ?? [] })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Resource unbinding failed' }, 400)
+    }
+  })
+
+  app.post('/api/projects/:id/assets/resource-bindings/auto', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'assets.upload')
+    if (forbidden) return c.json(forbidden, 403)
+    if (!options.resourceSelectionClient) return c.json({ error: 'Resource selection is not configured' }, 503)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const initialManifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
+      const requirements = initialManifest.slots
+        .filter(slot => !slot.resource_binding && slot.status !== 'integrated')
+        .map(resourceRequirementForSlot)
+        .filter((requirement): requirement is ResourceSelectionRequirement => Boolean(requirement))
+      const selections = requirements.length
+        ? await options.resourceSelectionClient.select(requirements)
+        : []
+      const selectedSlotIds = new Set(selections.map(selection => selection.slotId))
+      const results: Array<{ slotId: string; status: 'integrated' | 'bound' | 'failed'; packId: string; elementId: string; path?: string; error?: string }> = []
+
+      for (const selection of selections) {
+        try {
+          await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, selection.slotId, {
+            pack_id: selection.packId,
+            pack_version: selection.packVersion,
+            element_id: selection.elementId,
+            source_url: selection.sourceUrl,
+            selected_at: new Date().toISOString(),
+            selection_reason: selection.reasons,
+          })
+          const integration = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, selection.slotId)
+          const status = integration.path ? 'integrated' : 'bound'
+          results.push({ slotId: selection.slotId, status, packId: selection.packId, elementId: selection.elementId, ...(integration.path ? { path: integration.path } : {}) })
+          await appendAuditEventBestEffort('resource.auto_bound', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
+            actorId: user.id,
+            action: integration.path ? 'resource.integrated' : 'resource.bound',
+            targetType: 'project_asset_slot',
+            targetId: `${project.id}:${selection.slotId}`,
+            metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, reasons: selection.reasons, ...(integration.path ? { path: integration.path } : {}) },
+          }))
+        } catch (err) {
+          const message = toErrorMessage(err)
+          results.push({ slotId: selection.slotId, status: 'failed', packId: selection.packId, elementId: selection.elementId, error: message })
+          await appendAuditEventBestEffort('resource.integration_failed', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
+            actorId: user.id,
+            action: 'resource.integration_failed',
+            targetType: 'project_asset_slot',
+            targetId: `${project.id}:${selection.slotId}`,
+            metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, error: message },
+          }))
+        }
+      }
+
+      const manifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
+      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), manifest)
+      return c.json({
+        manifest,
+        results,
+        unmatched_slot_ids: requirements.map(requirement => requirement.slotId).filter(slotId => !selectedSlotIds.has(slotId)),
+      })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Automatic resource binding failed' }, 400)
     }
   })
 
@@ -4892,4 +5054,52 @@ function getHttpErrorMessage(body: JsonObject): string {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Request failed'
+}
+
+function resourceRequirementForSlot(slot: BeeGameAssetSlot): ResourceSelectionRequirement | undefined {
+  const requirement = slot.resource_requirement
+  if (!requirement) return undefined
+  return {
+    slotId: slot.id,
+    category: requirement.category,
+    dimension: requirement.dimension,
+    acceptedFormats: requirement.accepted_formats,
+    styles: requirement.styles,
+    gameTypes: requirement.game_types,
+    purpose: requirement.purpose,
+  }
+}
+
+/**
+ * Post-turn integration entrypoint. It only consumes explicit asset contracts,
+ * never names or inferred categories, and leaves existing bindings untouched.
+ */
+async function autoBindLibraryResourcesInWorkspace(
+  workspacePath: string,
+  resourceSelectionClient: NonNullable<AgentWorkflowAppOptions['resourceSelectionClient']>,
+): Promise<void> {
+  const manifest = await readBeeGameAssetManifest(workspacePath)
+  const requirements = manifest.slots
+    .filter(slot => !slot.resource_binding && slot.status !== 'integrated')
+    .map(resourceRequirementForSlot)
+    .filter((requirement): requirement is ResourceSelectionRequirement => Boolean(requirement))
+  if (!requirements.length) return
+  const selections = await resourceSelectionClient.select(requirements)
+  for (const selection of selections) {
+    try {
+      await bindBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId, {
+        pack_id: selection.packId,
+        pack_version: selection.packVersion,
+        element_id: selection.elementId,
+        source_url: selection.sourceUrl,
+        selected_at: new Date().toISOString(),
+        selection_reason: selection.reasons,
+      })
+      await integrateBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId)
+    } catch (error) {
+      // A failed signed download or an adapter-only target retains its binding
+      // for retry, while the Agent turn and existing project files stay intact.
+      console.warn(`BeeGame resource integration failed for ${selection.slotId}:`, toErrorMessage(error))
+    }
+  }
 }

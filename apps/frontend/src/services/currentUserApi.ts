@@ -20,6 +20,7 @@ export type BeeGamePermission =
   | 'model_config.manage'
   | 'mcp.manage'
   | 'skills.manage'
+  | 'resources.manage'
   | 'runtime_settings.manage'
   | 'secrets.manage'
   | 'audit.read';

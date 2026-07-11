@@ -244,6 +244,22 @@ export interface BeeGameAssetSlotPayload {
   };
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed';
   uploaded_files?: string[];
+  resource_requirement?: {
+    category?: string;
+    dimension?: '2D' | '3D' | 'agnostic';
+    accepted_formats?: string[];
+    styles?: string[];
+    game_types?: string[];
+    purpose?: string;
+  };
+  resource_binding?: {
+    pack_id: string;
+    pack_version: string;
+    element_id: string;
+    source_url: string;
+    selected_at: string;
+    selection_reason: string[];
+  };
   updated_at?: string;
 }
 
@@ -263,6 +279,38 @@ export interface BeeGameAssetUploadPayload {
   slot: BeeGameAssetSlotPayload;
   path: string;
   message: string;
+}
+
+export interface BeeGameResourceBindingPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  selection: { slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; score: number; reasons: string[] };
+  path?: string;
+}
+
+export interface BeeGameResourceIntegrationPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  path?: string;
+}
+
+export interface BeeGameAutoResourceBindingPayload {
+  manifest: BeeGameAssetManifestPayload;
+  results: Array<{
+    slotId: string;
+    status: 'integrated' | 'bound' | 'failed';
+    packId: string;
+    elementId: string;
+    path?: string;
+    error?: string;
+  }>;
+  unmatched_slot_ids: string[];
+}
+
+export interface BeeGameResourceUnbindingPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  retained_files: string[];
 }
 
 export interface ExecutionEvidencePayload {
@@ -1091,6 +1139,26 @@ export const api = {
       return beeGameAdapter.uploadProjectAsset(projectId, slotId, file);
     }
     throw new Error('Project asset upload is only available for BeeGame projects');
+  },
+
+  bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement);
+    throw new Error('Project resource binding is only available for BeeGame projects');
+  },
+
+  integrateProjectResource: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.integrateProjectResource(projectId, slotId);
+    throw new Error('Project resource integration is only available for BeeGame projects');
+  },
+
+  autoBindProjectResources: (projectId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.autoBindProjectResources(projectId);
+    throw new Error('Automatic project resource binding is only available for BeeGame projects');
+  },
+
+  unbindProjectResource: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.unbindProjectResource(projectId, slotId);
+    throw new Error('Project resource unbinding is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

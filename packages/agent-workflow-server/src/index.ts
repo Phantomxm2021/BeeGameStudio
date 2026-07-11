@@ -1,5 +1,6 @@
 import { createAgentWorkflowApp } from './app'
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
+import { createResourceSelectionClient } from './beegame/resource-selection-client'
 
 export { createAgentWorkflowApp }
 
@@ -9,10 +10,17 @@ let activeServer: ReturnType<typeof Bun.serve> | null = null
 
 if (import.meta.main) {
   validateSecretStorageAtStartup()
+  const resourceServerUrl = process.env.BEEGAME_RESOURCE_SERVER_URL?.trim()
+  const resourceServiceToken = process.env.BEEGAME_RESOURCE_SERVICE_TOKEN?.trim()
   activeServer = Bun.serve({
     hostname: host,
     port,
-    fetch: createAgentWorkflowApp({ modelConfigStore: {} }).fetch,
+    fetch: createAgentWorkflowApp({
+      modelConfigStore: {},
+      ...(resourceServerUrl && resourceServiceToken
+        ? { resourceSelectionClient: createResourceSelectionClient({ baseUrl: resourceServerUrl, serviceToken: resourceServiceToken }) }
+        : {}),
+    }).fetch,
   })
   console.log(
     `Agent workflow server listening on http://${host}:${activeServer.port}`,

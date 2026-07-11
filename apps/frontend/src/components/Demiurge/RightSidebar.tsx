@@ -113,6 +113,8 @@ export function RightSidebar({
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
     const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
+    const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
+    const [isAutoBindingResources, setIsAutoBindingResources] = useState(false);
     const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -249,6 +251,34 @@ export function RightSidebar({
         if (!canSendMessage || !canIntegrateAssets) return;
         const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
         onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage, 'asset_integration');
+    };
+
+    const handleReintegrateLibraryResource = async (slotId: string) => {
+        if (!canUploadAssets) return;
+        setReintegratingAssetSlotId(slotId);
+        try {
+            const result = await api.integrateProjectResource(projectId, slotId);
+            setAssetManifest(result.manifest);
+        } finally {
+            setReintegratingAssetSlotId(null);
+        }
+    };
+
+    const handleAutoBindLibraryResources = async () => {
+        if (!canUploadAssets) return;
+        setIsAutoBindingResources(true);
+        try {
+            const result = await api.autoBindProjectResources(projectId);
+            setAssetManifest(result.manifest);
+        } finally {
+            setIsAutoBindingResources(false);
+        }
+    };
+
+    const handleUnbindLibraryResource = async (slotId: string) => {
+        if (!canUploadAssets) return;
+        const result = await api.unbindProjectResource(projectId, slotId);
+        setAssetManifest(result.manifest);
     };
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
@@ -472,7 +502,12 @@ export function RightSidebar({
                                 manifest={assetManifest}
                                 isLoading={isAssetsLoading}
                                 isUploadingSlotId={uploadingAssetSlotId}
+                                isReintegratingSlotId={reintegratingAssetSlotId}
+                                isAutoBinding={isAutoBindingResources}
                                 onUpload={canUploadAssets ? handleUploadAsset : undefined}
+                                onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
+                                onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
+                                onUnbind={canUploadAssets ? handleUnbindLibraryResource : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 lang={lang}

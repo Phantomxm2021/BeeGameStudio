@@ -17,6 +17,29 @@ export type BeeGameAssetIntegrationProvider = {
   capabilities?: string[]
 }
 
+export type BeeGameResourceBinding = {
+  pack_id: string
+  pack_version: string
+  element_id: string
+  source_url: string
+  selected_at: string
+  selection_reason: string[]
+}
+
+/**
+ * The machine-readable matching contract for one project asset slot. This is
+ * deliberately independent of the project's target engine: adapters decide
+ * how an approved resource is integrated, while selection stays deterministic.
+ */
+export type BeeGameResourceRequirement = {
+  category?: string
+  dimension?: '2D' | '3D' | 'agnostic'
+  accepted_formats?: string[]
+  styles?: string[]
+  game_types?: string[]
+  purpose?: string
+}
+
 export type BeeGameAssetSlot = {
   id: string
   name?: string
@@ -34,6 +57,8 @@ export type BeeGameAssetSlot = {
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed'
   uploaded_files?: string[]
   uploaded_urls?: string[]
+  resource_requirement?: BeeGameResourceRequirement
+  resource_binding?: BeeGameResourceBinding
   updated_at?: string
 }
 
@@ -102,6 +127,87 @@ export async function uploadBeeGameAsset(
   }
 }
 
+export function bindBeeGameLibraryResource(
+  manifest: BeeGameAssetManifest,
+  slotId: string,
+  binding: BeeGameResourceBinding,
+): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const validatedBinding = normalizeResourceBinding(binding)
+  if (!validatedBinding) throw new Error('Invalid resource binding')
+  const slot = { ...manifest.slots[slotIndex], resource_binding: validatedBinding, updated_at: new Date().toISOString() }
+  const slots = [...manifest.slots]
+  slots[slotIndex] = slot
+  return { manifest: { ...manifest, slots }, slot }
+}
+
+export async function bindBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+  binding: BeeGameResourceBinding,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const result = bindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId, binding)
+  await writeAssetManifest(root, result.manifest)
+  return result
+}
+
+/** Removes the library provenance only; copied project files deliberately remain intact. */
+export function unbindBeeGameLibraryResource(
+  manifest: BeeGameAssetManifest,
+  slotId: string,
+): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const { resource_binding: _binding, ...slotWithoutBinding } = manifest.slots[slotIndex]
+  const slot: BeeGameAssetSlot = { ...slotWithoutBinding, updated_at: new Date().toISOString() }
+  const slots = [...manifest.slots]
+  slots[slotIndex] = slot
+  return { manifest: { ...manifest, slots }, slot }
+}
+
+export async function unbindBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const result = unbindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId)
+  await writeAssetManifest(root, result.manifest)
+  return result
+}
+
+export async function integrateBeeGameLibraryResourceInWorkspace(
+  workspacePath: string,
+  slotId: string,
+  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = fetch,
+): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot; path?: string }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifest = await readBeeGameAssetManifest(root)
+  const normalizedSlotId = normalizeSlotId(slotId)
+  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
+  const slot = manifest.slots[slotIndex]
+  const binding = slot.resource_binding
+  if (!binding) throw new Error(`Asset slot has no library resource binding: ${normalizedSlotId}`)
+  const mode = slot.integration_provider?.type || manifest.project_target?.integration_mode || 'filesystem'
+  if (mode !== 'filesystem') return { manifest, slot }
+  const filename = binding.source_url.split('/').at(-1)?.split('?')[0] || binding.element_id
+  const targetPath = resolveUploadTarget(root, slot, filename)
+  const response = await fetchImpl(binding.source_url)
+  if (!response.ok) throw new Error(`Resource download failed (${response.status})`)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  await mkdir(resolve(targetPath, '..'), { recursive: true })
+  await writeFile(targetPath, bytes)
+  const relativePath = normalizeRelativePath(root, targetPath)
+  const updatedSlot: BeeGameAssetSlot = { ...slot, status: 'integrated', placeholder: false, uploaded_files: [...new Set([...(slot.uploaded_files ?? []), relativePath])], updated_at: new Date().toISOString() }
+  manifest.slots[slotIndex] = updatedSlot
+  await writeAssetManifest(root, manifest)
+  return { manifest, slot: updatedSlot, path: relativePath }
+}
+
 export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid asset manifest')
@@ -162,7 +268,50 @@ function normalizeAssetSlot(
     status: normalizeSlotStatus(record.status ?? record.placeholder_status),
     uploaded_files: stringArray(record.uploaded_files),
     uploaded_urls: stringArray(record.uploaded_urls),
+    resource_requirement: normalizeResourceRequirement(record.resource_requirement),
+    resource_binding: normalizeResourceBinding(record.resource_binding),
     updated_at: trimString(record.updated_at),
+  }
+}
+
+function normalizeResourceRequirement(value: unknown): BeeGameResourceRequirement | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const category = trimString(record.category)
+  const dimension = record.dimension === '2D' || record.dimension === '3D' || record.dimension === 'agnostic'
+    ? record.dimension
+    : undefined
+  const acceptedFormats = stringArray(record.accepted_formats ?? record.acceptedFormats)
+  const styles = stringArray(record.styles)
+  const gameTypes = stringArray(record.game_types ?? record.gameTypes)
+  const purpose = trimString(record.purpose)
+  if (!category && !dimension && !acceptedFormats.length && !styles.length && !gameTypes.length && !purpose) return undefined
+  return {
+    category: category || undefined,
+    dimension,
+    accepted_formats: acceptedFormats,
+    styles,
+    game_types: gameTypes,
+    purpose: purpose || undefined,
+  }
+}
+
+function normalizeResourceBinding(value: unknown): BeeGameResourceBinding | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const packId = trimString(record.pack_id)
+  const packVersion = trimString(record.pack_version)
+  const elementId = trimString(record.element_id)
+  const sourceUrl = trimString(record.source_url)
+  const selectedAt = trimString(record.selected_at)
+  if (!packId || !packVersion || !elementId || !sourceUrl || !selectedAt) return undefined
+  return {
+    pack_id: packId,
+    pack_version: packVersion,
+    element_id: elementId,
+    source_url: sourceUrl,
+    selected_at: selectedAt,
+    selection_reason: stringArray(record.selection_reason),
   }
 }
 

@@ -775,6 +775,30 @@ describe('beegame session routes', () => {
     } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 
+  test('runs post-turn integration hooks after an Agent turn completes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-post-turn-hook-'))
+    const completed: Array<{ workspacePath: string; projectId?: string }> = []
+    const fake = createFakeRunner()
+    const manager = new BeeGameSessionManager(
+      fake.runner,
+      workspace,
+      undefined,
+      undefined,
+      false,
+      {},
+      undefined,
+      async metadata => { completed.push({ workspacePath: metadata.workspacePath, projectId: metadata.projectId }) },
+    )
+    try {
+      const session = manager.start({ workspacePath: workspace, projectId: 'project-resource-auto-bind', userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Build the project')
+      await waitFor(() => completed.length === 1)
+      expect(completed).toEqual([{ workspacePath: workspace, projectId: 'project-resource-auto-bind' }])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('validates remote runtime provider endpoints before starting the session runner', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-remote-runtime-endpoints-'))
     const resolvedUrls: string[] = []
@@ -4053,6 +4077,59 @@ describe('beegame session routes', () => {
       expect(uploadRes.status).toBe(200)
       expect(upload).toEqual(expect.objectContaining({
         path: 'public/assets/title-logo.png',
+      }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('automatically binds contract-defined resources without inferring asset categories', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auto-resource-binding-'))
+    const workspace = join(projectsRoot, 'auto-bound-project')
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+      resourceSelectionClient: {
+        select: async requirements => requirements.map(requirement => ({
+          slotId: requirement.slotId,
+          packId: 'library-pack',
+          packVersion: '1.0.0',
+          elementId: 'library-model',
+          elementPath: 'models/library-model.glb',
+          sourceUrl: 'https://resource.example/signed/library-model.glb',
+          score: 100,
+          reasons: ['category:models', 'status:ready'],
+        })),
+      },
+    })
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 1,
+        project_target: { integration_mode: 'mcp' },
+        slots: [{
+          id: 'slot-1',
+          name: 'A deliberately unrelated label',
+          resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'] },
+        }],
+      }))
+      const projectId = 'project_auto_resource_binding'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: projectId, name: 'Auto Resource Binding', root_path: workspace, created_at: Date.now() }),
+      })
+      expect(projectRes.status).toBe(200)
+
+      const response = await app.request(`/api/projects/${projectId}/assets/resource-bindings/auto`, { method: 'POST' })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(expect.objectContaining({
+        results: [expect.objectContaining({ slotId: 'slot-1', status: 'bound', packId: 'library-pack' })],
+        unmatched_slot_ids: [],
+      }))
+      const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
+      expect(manifest.slots[0].resource_binding).toEqual(expect.objectContaining({
+        pack_id: 'library-pack', element_id: 'library-model',
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })

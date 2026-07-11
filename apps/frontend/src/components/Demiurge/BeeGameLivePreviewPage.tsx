@@ -6,6 +6,8 @@ import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../ui/button';
 import { ButtonGroup } from '../ui/button-group';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { ResourceLibraryPage } from '../ResourceLibrary/ResourceLibraryView';
+import { closeResourceLibraryRoute, isResourceLibraryRoute, openResourceLibraryRoute } from '../ResourceLibrary/resourceLibraryRoute';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
@@ -144,9 +146,15 @@ export function BeeGameLivePreviewPage({
 }: BeeGameLivePreviewPageProps) {
     const [isProjectHintOpen, setProjectHintOpen] = useState(false);
     const [isSettingsOpen, setSettingsOpen] = useState(false);
+    const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
     const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
     const [isHistoryOpen, setHistoryOpen] = useState(false);
     const [isProfileOpen, setProfileOpen] = useState(false);
+    useEffect(() => {
+        const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
+        window.addEventListener('popstate', syncResourceRoute);
+        return () => window.removeEventListener('popstate', syncResourceRoute);
+    }, []);
     const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
     const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
     const [isStartingPreview, setStartingPreview] = useState(false);
@@ -351,6 +359,7 @@ export function BeeGameLivePreviewPage({
                 isHistoryOpen={isHistoryOpen}
                 isProfileOpen={isProfileOpen}
                 isCreditStoreOpen={isCreditStoreOpen}
+                isResourceLibraryOpen={isResourceLibraryOpen}
                 currentUserId={currentUser?.id}
                 currentUserDisplayName={currentUser?.displayName || currentUser?.email}
                 currentUserEmail={currentUser?.email}
@@ -368,6 +377,13 @@ export function BeeGameLivePreviewPage({
                 onToggleSettings={() => {
                     closeAccountSurfaces();
                     setSettingsOpen(true);
+                }}
+                canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
+                onOpenResourceLibrary={() => {
+                    openResourceLibraryRoute();
+                    closeAccountSurfaces();
+                    setIsResourceLibraryOpen(true);
+                    setSettingsOpen(false);
                 }}
                 onToggleHistory={() => {
                     closeAccountSurfaces();
@@ -530,6 +546,7 @@ export function BeeGameLivePreviewPage({
                 onClose={() => setSettingsOpen(false)}
                 onSetLang={onSetLang}
             />
+            {isResourceLibraryOpen ? <ResourceLibraryPage onBack={() => { closeResourceLibraryRoute(); setIsResourceLibraryOpen(false); }} /> : null}
             <ProjectHistoryModal
                 isOpen={isHistoryOpen}
                 lang={lang}

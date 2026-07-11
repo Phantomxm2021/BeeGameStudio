@@ -4,15 +4,17 @@ export const DEFAULT_BEEGAME_RUNTIME_PORT = 62174
 export const DEFAULT_BEEGAME_FRONTEND_PORT = 62173
 export const DEFAULT_BEEGAME_BILLING_PORT = 62175
 export const DEFAULT_BEEGAME_SKILLS_PORT = 62176
+export const DEFAULT_BEEGAME_RESOURCE_PORT = 62177
 
 export type BeeGameDevPorts = {
   runtime: number
   frontend: number
   billing: number
   skills: number
+  resources: number
 }
 
-export type BeeGameDevProcessName = 'billing' | 'skills' | 'runtime' | 'frontend'
+export type BeeGameDevProcessName = 'billing' | 'skills' | 'resources' | 'runtime' | 'frontend'
 
 export type BeeGameDevProcessPlan = {
   name: BeeGameDevProcessName
@@ -30,6 +32,7 @@ export type BeeGameDevPlan = {
     runtime: string
     billing: string
     skills: string
+    resources: string
   }
   processes: BeeGameDevProcessPlan[]
 }
@@ -63,6 +66,10 @@ export function buildBeeGameDevPlan(
       values['skills-port'] || input.env.BEEGAME_SKILLS_PORT,
       input.ports.skills,
     ),
+    resources: parsePort(
+      values['resources-port'] || input.env.BEEGAME_RESOURCE_PORT,
+      input.ports.resources,
+    ),
   }
   const workspacePath = resolve(
     input.cwd,
@@ -78,6 +85,7 @@ export function buildBeeGameDevPlan(
     runtime: `http://127.0.0.1:${ports.runtime}`,
     billing: `http://127.0.0.1:${ports.billing}`,
     skills: `http://127.0.0.1:${ports.skills}`,
+    resources: `http://127.0.0.1:${ports.resources}`,
   }
 
   return {
@@ -97,6 +105,12 @@ export function buildBeeGameDevPlan(
         command: [bunExecutable, 'packages/beegame-skills-server/src/index.ts'],
         cwd: input.cwd,
         env: buildSkillsEnv(input.env, ports),
+      },
+      {
+        name: 'resources',
+        command: [bunExecutable, 'packages/beegame-resource-server/src/index.ts'],
+        cwd: input.cwd,
+        env: buildResourceEnv(input.env, ports),
       },
       {
         name: 'runtime',
@@ -153,6 +167,17 @@ function buildSkillsEnv(
   })
 }
 
+function buildResourceEnv(
+  baseEnv: Record<string, string | undefined>,
+  ports: BeeGameDevPorts,
+): Record<string, string> {
+  return compactEnv({
+    ...baseEnv,
+    BEEGAME_RESOURCE_HOST: '127.0.0.1',
+    BEEGAME_RESOURCE_PORT: String(ports.resources),
+  })
+}
+
 function buildRuntimeEnv(input: {
   baseEnv: Record<string, string | undefined>
   ports: BeeGameDevPorts
@@ -177,6 +202,7 @@ function buildFrontendEnv(input: {
     PORT: String(input.ports.frontend),
     VITE_API_BASE_URL: `http://127.0.0.1:${input.ports.runtime}`,
     VITE_WS_BASE_URL: `ws://127.0.0.1:${input.ports.runtime}`,
+    VITE_RESOURCE_API_BASE_URL: `http://127.0.0.1:${input.ports.resources}`,
   })
 }
 

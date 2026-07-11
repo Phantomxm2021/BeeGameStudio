@@ -8,6 +8,7 @@ interface LandingActionsProps {
     isHistoryOpen: boolean;
     isProfileOpen?: boolean;
     isCreditStoreOpen?: boolean;
+    isResourceLibraryOpen?: boolean;
     currentUserId?: string;
     currentUserDisplayName?: string;
     currentUserEmail?: string;
@@ -15,6 +16,7 @@ interface LandingActionsProps {
     creditBalance?: number;
     canManageResources?: boolean;
     onToggleSettings: () => void;
+    onOpenResourceLibrary?: () => void;
     onToggleHistory: () => void;
     onOpenCreditStore: () => void;
     onOpenProfile: () => void;
@@ -29,12 +31,14 @@ export function LandingActions({
     isHistoryOpen,
     isProfileOpen,
     isCreditStoreOpen,
+    isResourceLibraryOpen,
     currentUserId,
     currentUserDisplayName,
     currentUserEmail,
     currentUserAvatarUrl,
     creditBalance,
     onToggleSettings,
+    onOpenResourceLibrary,
     onToggleHistory,
     onOpenCreditStore,
     onOpenProfile,
@@ -51,6 +55,7 @@ export function LandingActions({
             isHistoryOpen={isHistoryOpen}
             isProfileOpen={isProfileOpen}
             isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
             currentUserId={currentUserId}
             currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}
@@ -58,6 +63,7 @@ export function LandingActions({
             creditBalance={creditBalance}
             canManageResources={canManageResources}
             onToggleSettings={onToggleSettings}
+            onOpenResourceLibrary={onOpenResourceLibrary}
             onToggleHistory={onToggleHistory}
             onOpenCreditStore={onOpenCreditStore}
             onOpenProfile={onOpenProfile}

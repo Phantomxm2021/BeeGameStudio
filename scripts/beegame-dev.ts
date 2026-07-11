@@ -5,6 +5,7 @@ import {
   DEFAULT_BEEGAME_BILLING_PORT,
   DEFAULT_BEEGAME_FRONTEND_PORT,
   DEFAULT_BEEGAME_RUNTIME_PORT,
+  DEFAULT_BEEGAME_RESOURCE_PORT,
   DEFAULT_BEEGAME_SKILLS_PORT,
   type BeeGameDevPorts,
 } from './beegame-dev-lib'
@@ -18,6 +19,7 @@ const preferredPlan = buildBeeGameDevPlan(argv, {
     frontend: DEFAULT_BEEGAME_FRONTEND_PORT,
     billing: DEFAULT_BEEGAME_BILLING_PORT,
     skills: DEFAULT_BEEGAME_SKILLS_PORT,
+    resources: DEFAULT_BEEGAME_RESOURCE_PORT,
   },
   bunExecutable: process.execPath,
 })
@@ -27,6 +29,7 @@ const ports: BeeGameDevPorts = {
   frontend: await reservePort(preferredPlan.ports.frontend),
   billing: await reservePort(preferredPlan.ports.billing),
   skills: await reservePort(preferredPlan.ports.skills),
+  resources: await reservePort(preferredPlan.ports.resources),
 }
 const plan = buildBeeGameDevPlan(argv, {
   cwd: process.cwd(),
@@ -60,6 +63,7 @@ console.log(`Frontend: http://127.0.0.1:${plan.ports.frontend}`)
 console.log(`Runtime:  http://127.0.0.1:${plan.ports.runtime}`)
 console.log(`Billing:  http://127.0.0.1:${plan.ports.billing}`)
 console.log(`Skills:   http://127.0.0.1:${plan.ports.skills}`)
+console.log(`Resources: http://127.0.0.1:${plan.ports.resources}`)
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

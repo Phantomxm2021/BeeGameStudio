@@ -1,0 +1,23 @@
+{
+  "name": "@bee-game-studio/beegame-resource-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./app": "./src/app.ts",
+    "./auth": "./src/auth.ts",
+    "./env": "./src/env.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "bun src/index.ts",
+    "test": "bun test src/__tests__",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bee-game-studio/beegame-resource-core": "workspace:*"
+  }
+}

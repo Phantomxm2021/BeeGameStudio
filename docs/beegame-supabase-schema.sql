@@ -8,9 +8,19 @@ insert into storage.buckets (id, name, public)
 values
   ('avatars', 'avatars', true),
   ('beegame-assets', 'beegame-assets', false),
+  ('beegame-resource-packs', 'beegame-resource-packs', false),
   ('beegame-deployments', 'beegame-deployments', true)
 on conflict (id) do update
 set public = excluded.public;
+
+drop policy if exists "beegame resource pack platform read" on storage.objects;
+create policy "beegame resource pack platform read" on storage.objects
+  for select using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
+
+drop policy if exists "beegame resource pack platform write" on storage.objects;
+create policy "beegame resource pack platform write" on storage.objects
+  for all using (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner())
+  with check (bucket_id = 'beegame-resource-packs' and public.beegame_is_platform_owner());
 
 drop policy if exists "beegame avatar public read" on storage.objects;
 create policy "beegame avatar public read" on storage.objects
@@ -262,7 +272,7 @@ create table if not exists public.beegame_user_skills (
   description text not null,
   enabled boolean not null default true,
   content text not null,
-  references jsonb not null default '[]'::jsonb,
+  "references" jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (owner_id, slug)
@@ -276,6 +286,72 @@ create table if not exists public.beegame_assets (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create table if not exists public.beegame_resource_packs (
+  id text primary key,
+  name text not null,
+  style text not null,
+  primary_category text not null default 'mixed' check (primary_category in ('2d-art', '3d-assets', 'animation-rig', 'ui-kit', 'vfx', 'audio', 'fonts', 'world-scene', 'mixed')),
+  game_types jsonb not null default '[]'::jsonb,
+  dimension text not null check (dimension in ('2D', '3D', 'agnostic')),
+  categories jsonb not null default '[]'::jsonb,
+  license text not null,
+  version text not null,
+  status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
+  cover_path text,
+  element_count integer not null default 0 check (element_count >= 0),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_resource_elements (
+  id text primary key,
+  pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
+  name text not null,
+  path text not null,
+  category text not null,
+  kind text not null,
+  preview jsonb,
+  specs jsonb not null default '{}'::jsonb,
+  dependencies jsonb not null default '[]'::jsonb,
+  status text not null default 'ready' check (status in ('ready', 'hidden', 'archived')),
+  style_override text,
+  dimension_override text check (dimension_override is null or dimension_override in ('2D', '3D', 'agnostic')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (pack_id, path)
+);
+
+create table if not exists public.beegame_resource_folders (
+  id text primary key,
+  pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
+  name text not null,
+  parent_id text references public.beegame_resource_folders(id) on delete cascade,
+  path text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (pack_id, path)
+);
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_status_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_status_check
+  check (status in ('queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'));
+
+create index if not exists beegame_resource_folders_pack_parent_idx
+  on public.beegame_resource_folders (pack_id, parent_id, path);
+
+create table if not exists public.beegame_resource_dependencies (
+  element_id text not null references public.beegame_resource_elements(id) on delete cascade,
+  dependency_path text not null,
+  dependency_kind text,
+  primary key (element_id, dependency_path)
+);
+
+create index if not exists beegame_resource_elements_pack_category_idx
+  on public.beegame_resource_elements (pack_id, category, path);
 
 create table if not exists public.beegame_previews (
   id text primary key,
@@ -1861,6 +1937,10 @@ alter table public.beegame_web_tools enable row level security;
 alter table public.beegame_mcp_servers enable row level security;
 alter table public.beegame_user_skills enable row level security;
 alter table public.beegame_assets enable row level security;
+alter table public.beegame_resource_packs enable row level security;
+alter table public.beegame_resource_elements enable row level security;
+alter table public.beegame_resource_folders enable row level security;
+alter table public.beegame_resource_dependencies enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
 alter table public.beegame_account_links enable row level security;
@@ -1971,6 +2051,26 @@ create policy "user skill owner access" on public.beegame_user_skills
 drop policy if exists "asset owner access" on public.beegame_assets;
 create policy "asset owner access" on public.beegame_assets
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists "resource Pack platform owner access" on public.beegame_resource_packs;
+create policy "resource Pack platform owner access" on public.beegame_resource_packs
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource element platform owner access" on public.beegame_resource_elements;
+create policy "resource element platform owner access" on public.beegame_resource_elements
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource folder platform owner access" on public.beegame_resource_folders;
+create policy "resource folder platform owner access" on public.beegame_resource_folders
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource dependency platform owner access" on public.beegame_resource_dependencies;
+create policy "resource dependency platform owner access" on public.beegame_resource_dependencies
+  for all using (exists (select 1 from public.beegame_resource_elements e where e.id = element_id and public.beegame_is_platform_owner()))
+  with check (exists (select 1 from public.beegame_resource_elements e where e.id = element_id and public.beegame_is_platform_owner()));
 
 drop policy if exists "preview owner access" on public.beegame_previews;
 create policy "preview owner access" on public.beegame_previews

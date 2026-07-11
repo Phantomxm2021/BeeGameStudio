@@ -1,6 +1,10 @@
 import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
+  BeeGameResourceBindingPayload,
+  BeeGameResourceIntegrationPayload,
+  BeeGameAutoResourceBindingPayload,
+  BeeGameResourceUnbindingPayload,
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
   ContinueTaskResponse,
@@ -727,6 +731,33 @@ export const beeGameAdapter = {
     return postForm<BeeGameAssetUploadPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/upload`,
       form,
+    );
+  },
+
+  async bindProjectResource(projectId: string, slotId: string, requirement: Record<string, unknown>): Promise<BeeGameResourceBindingPayload> {
+    return postJson<BeeGameResourceBindingPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
+      { requirement },
+    );
+  },
+
+  async integrateProjectResource(projectId: string, slotId: string): Promise<BeeGameResourceIntegrationPayload> {
+    return postJson<BeeGameResourceIntegrationPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-integration`,
+      {},
+    );
+  },
+
+  async autoBindProjectResources(projectId: string): Promise<BeeGameAutoResourceBindingPayload> {
+    return postJson<BeeGameAutoResourceBindingPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/resource-bindings/auto`,
+      {},
+    );
+  },
+
+  async unbindProjectResource(projectId: string, slotId: string): Promise<BeeGameResourceUnbindingPayload> {
+    return deleteJson<BeeGameResourceUnbindingPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
     );
   },
 
@@ -2062,7 +2093,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       brief.confirmedGdd
         ? '用户已确认 GDD。请先将其保存为 docs/GDD.md，再直接依据它实现；不要重新生成游戏方案或要求用户选择方向。'
         : '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
-      '同时创建平台无关的 assets/asset-manifest.json，声明项目资源合同：2D/3D/动画/材质/VFX/音频/字体/数据/本地化等资源位、用途、推荐规格、placeholder 状态、目标位置，以及 integration_mode。React/Web 等普通文件项目使用 filesystem；Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp 和对应 mcp_server。',
+      '同时创建平台无关的 assets/asset-manifest.json，声明项目资源合同：2D/3D/动画/材质/VFX/音频/字体/数据/本地化等资源位、用途、推荐规格、placeholder 状态、目标位置，以及 integration_mode。每个可由资源库自动填充的 slot 必须写 resource_requirement（category、dimension、accepted_formats、styles、game_types、purpose）；无法确定时保持 placeholder/missing，禁止用不兼容资源静默替代。React/Web 等普通文件项目使用 filesystem；Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp 和对应 mcp_server。',
       '这些文档必须区分“本次交付已实现”和“后续路线图”。不要把 roadmap 写成已交付能力。',
       'docs 里的 acceptance/checklist 只能作为验收标准，不要预先打勾或写成已通过；只有最终验证报告可以基于真实证据记录 pass/fail/untested。',
       '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder 或 asset slot，并说明替换规则。',
@@ -2100,7 +2131,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     brief.confirmedGdd
       ? 'The user confirmed a GDD. Save it as docs/GDD.md first, then implement directly from it. Do not regenerate a game plan or ask the user to choose a direction.'
       : 'First create project documents under docs/: GDD, technical design, art direction, UI/UX, audio direction, placeholder/asset slots, tuning, and acceptance notes.',
-    'Also create a platform-neutral assets/asset-manifest.json that declares the project asset contracts: 2D/3D assets, animation, materials, VFX, audio, fonts, text data, localization, purpose, recommended specs, placeholder state, target location, and integration_mode. Use filesystem for React/Web or normal file projects; use mcp with the matching mcp_server only for Unity/Godot/Unreal/Blender-style projects that need editor context.',
+    'Also create a platform-neutral assets/asset-manifest.json that declares the project asset contracts: 2D/3D assets, animation, materials, VFX, audio, fonts, text data, localization, purpose, recommended specs, placeholder state, target location, and integration_mode. Every slot eligible for automatic library selection must include resource_requirement (category, dimension, accepted_formats, styles, game_types, purpose). Keep uncertain slots as placeholder/missing; never silently substitute an incompatible resource. Use filesystem for React/Web or normal file projects; use mcp with the matching mcp_server only for Unity/Godot/Unreal/Blender-style projects that need editor context.',
     'Those docs must separate what is implemented in this delivery from roadmap/future work. Do not present roadmap items as delivered features.',
     'Acceptance criteria or checklists in docs are requirements only. Do not pre-check them or mark them as passed there; only a final verification report may record pass/fail/untested based on real evidence.',
     'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder assets or asset slots that are easy to replace and document the replacement rules.',
