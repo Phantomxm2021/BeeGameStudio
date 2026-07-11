@@ -9,6 +9,11 @@ import {
   DEFAULT_BEEGAME_SKILLS_PORT,
   type BeeGameDevPorts,
 } from './beegame-dev-lib'
+import { loadEnvFile } from './beegame-migration-cli'
+
+// Local service credentials live outside version control. Explicit shell
+// environment variables remain authoritative over this local fallback.
+loadEnvFile('.env.local')
 
 const argv = process.argv.slice(2)
 const preferredPlan = buildBeeGameDevPlan(argv, {
