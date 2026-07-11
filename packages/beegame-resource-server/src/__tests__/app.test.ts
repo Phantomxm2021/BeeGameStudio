@@ -53,6 +53,25 @@ describe('resource service app', () => {
     expect(events).toEqual([expect.objectContaining({ actorId: 'admin-1', action: 'pack.created' })])
   })
 
+  test('records element and folder lifecycle actions in the audit stream', async () => {
+    const events: Array<{ action: string; packId?: string; elementId?: string }> = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      addResourceElement: async () => ({ id: 'uploaded-1', name: 'New image' }),
+      recordAuditEvent: async (event) => { events.push(event) },
+    })
+    const folder = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/folders', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'New folder' }) }))
+    expect(folder.status).toBe(201)
+    const form = new FormData(); form.set('file', new File(['x'], 'new.png', { type: 'image/png' }))
+    const upload = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements', { method: 'POST', body: form }))
+    expect(upload.status).toBe(201)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'folder.created', packId: 'pack-1' }),
+      expect.objectContaining({ action: 'element.uploaded', packId: 'pack-1', elementId: 'uploaded-1' }),
+    ]))
+  })
+
   test('accepts an Admin Pack import through the multipart route', async () => {
     const app = createBeeGameResourceServerApp({
       repository,
