@@ -412,7 +412,11 @@ export function createAgentWorkflowApp(
   app.use('/api/*', cors({
     origin: resolveApiCorsOrigin,
     credentials: true,
-    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With'],
+    // These client-only error presentation headers are intentionally sent on
+    // authenticated bootstrap requests. They must participate in CORS
+    // preflight, otherwise a successful third-party login looks like a
+    // network failure before the API can inspect its bearer token.
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'Hide-Error-Log', 'Hide-Error-Toast', 'X-BeeGame-Auth-Retry'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   }))
   registerBeeGameBillingPublicRoutes(app, {
