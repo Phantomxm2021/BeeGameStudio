@@ -9,27 +9,6 @@ const frontendReactDomPath = fileURLToPath(new URL('./node_modules/react-dom/ind
 const frontendReactDomClientPath = fileURLToPath(new URL('./node_modules/react-dom/client.js', import.meta.url))
 const frontendSrcPath = fileURLToPath(new URL('./src', import.meta.url))
 
-/**
- * Some exporters emit an FBX LayerElementUV node without its numeric UV array.
- * Three's loader otherwise dereferences `UV.a` and rejects the complete model.
- * Excluding this module from dependency prebundling ensures this focused
- * compatibility transform is applied in both dev and production builds.
- */
-function tolerateIncompleteFbxUvLayers() {
-  const loaderSuffix = '/three/examples/jsm/loaders/FBXLoader.js'
-  const vulnerableCondition = 'if ( geoNode.LayerElementUV[ i ].UV ) {'
-  const guardedCondition = "if ( geoNode.LayerElementUV[ i ].UV && geoNode.LayerElementUV[ i ].UV.a && ( geoNode.LayerElementUV[ i ].ReferenceInformationType !== 'IndexToDirect' || ( geoNode.LayerElementUV[ i ].UVIndex && geoNode.LayerElementUV[ i ].UVIndex.a ) ) ) {"
-  return {
-    name: 'beegame-tolerate-incomplete-fbx-uv-layers',
-    enforce: 'pre' as const,
-    transform(code: string, id: string) {
-      const normalizedId = id.replace(/\\/g, '/').split('?')[0]
-      if (!normalizedId.endsWith(loaderSuffix) || !code.includes(vulnerableCondition)) return null
-      return { code: code.replace(vulnerableCondition, guardedCondition), map: null }
-    },
-  }
-}
-
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
@@ -37,7 +16,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
-    plugins: [tolerateIncompleteFbxUvLayers(), react()],
+    plugins: [react()],
 
     resolve: {
       alias: [
@@ -154,7 +133,6 @@ export default defineConfig(({ mode }) => {
 
     // Optimize dependencies
     optimizeDeps: {
-      exclude: ['three/examples/jsm/loaders/FBXLoader.js'],
       include: [
         'react',
         'react-dom',

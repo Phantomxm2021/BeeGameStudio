@@ -5,6 +5,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
+import assimpWasmUrl from 'assimpjs/dist/assimpjs.wasm?url'
 import type { MaterialTextureBindings } from './materialTextureBindings'
 
 export type ModelMetrics = {
@@ -197,9 +198,50 @@ async function loadModel(url: string, extension: string, onUnresolvedTexture?: (
       if (requestedUrl !== url) onUnresolvedTexture?.(requestedUrl)
       return requestedUrl
     })
-    return new FBXLoader(manager).loadAsync(url)
+    try {
+      return await new FBXLoader(manager).loadAsync(url)
+    } catch (threeError) {
+      return loadFbxWithAssimpFallback(url, threeError)
+    }
   }
   throw new Error('Unsupported model format')
+}
+
+/**
+ * FBX is an interchange format with many exporter-specific variants. When the
+ * browser's lightweight loader rejects one, convert only that preview request
+ * to a canonical GLB through Assimp's WebAssembly build. The source FBX stays
+ * untouched in the Pack.
+ */
+async function loadFbxWithAssimpFallback(url: string, originalError: unknown): Promise<THREE.Object3D> {
+  const response = await fetch(url)
+  if (!response.ok) throw normalizeModelPreviewError(originalError)
+  try {
+    const [{ default: createAssimp }, bytes] = await Promise.all([
+      import('assimpjs'),
+      response.arrayBuffer(),
+    ])
+    const assimp = await createAssimp({ locateFile: () => assimpWasmUrl })
+    const files = new assimp.FileList()
+    files.AddFile('preview.fbx', new Uint8Array(bytes))
+    const converted = assimp.ConvertFileList(files, 'glb2')
+    if (!converted.IsSuccess() || converted.FileCount() < 1) {
+      throw new Error(converted.GetErrorCode() || 'Assimp could not convert this FBX')
+    }
+    const glb = converted.GetFile(0).GetContent()
+    const glbBytes = new Uint8Array(glb.byteLength)
+    glbBytes.set(glb)
+    const blobUrl = URL.createObjectURL(new Blob([glbBytes.buffer], { type: 'model/gltf-binary' }))
+    try {
+      return (await new GLTFLoader().loadAsync(blobUrl)).scene
+    } finally {
+      URL.revokeObjectURL(blobUrl)
+    }
+  } catch (fallbackError) {
+    const primary = normalizeModelPreviewError(originalError)
+    const fallback = normalizeModelPreviewError(fallbackError)
+    throw new Error(`FBX loader failed (${primary.message}); GLB preview conversion failed (${fallback.message})`)
+  }
 }
 
 export function ModelPreview({ url, extension, materialTextureBindings = {}, textureUrls = {}, onMetrics, onMetricsError }: ModelPreviewProps) {
