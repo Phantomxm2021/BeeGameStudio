@@ -416,7 +416,7 @@ export function createAgentWorkflowApp(
     // authenticated bootstrap requests. They must participate in CORS
     // preflight, otherwise a successful third-party login looks like a
     // network failure before the API can inspect its bearer token.
-    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'Hide-Error-Log', 'Hide-Error-Toast', 'X-BeeGame-Auth-Retry'],
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'Hide-Error-Log', 'Hide-Error-Toast', 'X-BeeGame-Auth-Retry', 'X-BeeGame-Workspace-Path'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   }))
   registerBeeGameBillingPublicRoutes(app, {

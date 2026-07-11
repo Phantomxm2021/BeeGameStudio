@@ -717,7 +717,7 @@ describe('beegame session routes', () => {
       headers: {
         origin: 'http://127.0.0.1:62173',
         'access-control-request-method': 'GET',
-        'access-control-request-headers': 'authorization,hide-error-log,hide-error-toast',
+        'access-control-request-headers': 'authorization,hide-error-log,hide-error-toast,x-beegame-workspace-path',
       },
     })
 
@@ -725,6 +725,7 @@ describe('beegame session routes', () => {
     expect(response.headers.get('access-control-allow-credentials')).toBe('true')
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('hide-error-log')
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('hide-error-toast')
+    expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-beegame-workspace-path')
   })
 
   test('rejects private model and MCP service targets without exposing the URL', async () => {
