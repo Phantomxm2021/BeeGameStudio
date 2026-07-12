@@ -86,6 +86,23 @@ type ProjectRuntimeStateWithPermissions = ProjectBaselineStatusPayload & {
   pending_permissions?: BeeGamePendingPermissionPayload[];
 };
 
+const projectRuntimeStateRequests = new Map<string, Promise<ProjectRuntimeStateWithPermissions>>();
+
+function fetchProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStateWithPermissions> {
+  const normalizedProjectId = String(projectId || '').trim();
+  const existing = projectRuntimeStateRequests.get(normalizedProjectId);
+  if (existing) return existing;
+  const request = getJson<ProjectRuntimeStateWithPermissions>(
+    `/api/projects/${encodeURIComponent(normalizedProjectId)}/runtime-state`,
+  ).finally(() => {
+    if (projectRuntimeStateRequests.get(normalizedProjectId) === request) {
+      projectRuntimeStateRequests.delete(normalizedProjectId);
+    }
+  });
+  projectRuntimeStateRequests.set(normalizedProjectId, request);
+  return request;
+}
+
 type ProjectSessionBinding = {
   projectId: string;
   sessionId: string;
@@ -559,13 +576,11 @@ export const beeGameAdapter = {
   },
 
   async getProjectStatus(projectId: string): Promise<ProjectBaselineStatusPayload> {
-    return getJson(`/api/projects/${encodeURIComponent(projectId)}/runtime-state`);
+    return fetchProjectRuntimeState(projectId);
   },
 
   async getPendingUserReviews(projectId: string): Promise<{ items: PendingUserReviewItem[] }> {
-    const runtimeState = await getJson<ProjectRuntimeStateWithPermissions>(
-      `/api/projects/${encodeURIComponent(projectId)}/runtime-state`,
-    );
+    const runtimeState = await fetchProjectRuntimeState(projectId);
     const pendingPermissions = Array.isArray(runtimeState.pending_permissions)
       ? runtimeState.pending_permissions
       : [];

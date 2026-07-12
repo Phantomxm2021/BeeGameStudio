@@ -1355,6 +1355,26 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/events?after='))).toBe(false);
   });
 
+  it('coalesces concurrent runtime-state consumers for the same project', async () => {
+    let resolveResponse!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const statusPromise = beeGameAdapter.getProjectStatus('project_shared_runtime');
+    const reviewsPromise = beeGameAdapter.getPendingUserReviews('project_shared_runtime');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    resolveResponse(jsonResponse({
+      project_id: 'project_shared_runtime',
+      phase: 'running',
+      pending_permissions: [],
+    }));
+    await expect(statusPromise).resolves.toMatchObject({ project_id: 'project_shared_runtime' });
+    await expect(reviewsPromise).resolves.toEqual({ items: [] });
+  });
+
   it('delegates missing-session recovery to the backend ensure endpoint before sending input', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

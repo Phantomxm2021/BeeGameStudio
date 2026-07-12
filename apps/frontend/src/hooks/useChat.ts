@@ -580,7 +580,6 @@ export const useChat = ({
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_start', message);
-          refs.refreshProjectVisibility().catch(err => console.error('[useChat] Tool start visibility refresh failed:', err));
           console.log('[useChat] Tool started:', message.tool);
         }
         break;
