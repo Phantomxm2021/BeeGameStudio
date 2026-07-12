@@ -305,6 +305,8 @@ type SessionRecord = {
   latestDeliveryContract?: DeliveryContract
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
+  deliveryPipelineResumeFailures: number
+  deliveryPipelineResumeTimer?: ReturnType<typeof setTimeout>
 }
 
 type RuntimeObservationFeature = {
@@ -485,6 +487,7 @@ export class BeeGameSessionManager {
       pendingCreditOperation: recoverPendingCreditOperation(
         recoveredTranscript?.events ?? [],
       ),
+      deliveryPipelineResumeFailures: 0,
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
@@ -515,6 +518,7 @@ export class BeeGameSessionManager {
   async resumePendingDeliveryPipeline(sessionId: string): Promise<boolean> {
     const record = this.sessions.get(sessionId)
     if (!record || record.session.status !== 'running' || record.session.turnStatus !== 'idle') return false
+    if (record.deliveryPipelineResumeFailures > 3) return false
     const transition = getLatestDeliveryPipelineTransition(record.events)
     if (!transition) return false
     const contract = recoverLatestDeliveryContract(record.events)
@@ -545,12 +549,28 @@ export class BeeGameSessionManager {
       await this.startDeliveryRepair(record, contract)
       return true
     } catch (error) {
+      record.deliveryPipelineResumeFailures += 1
+      const retryDelayMs = Math.min(15_000, record.deliveryPipelineResumeFailures * 3_000)
       this.append(record, 'system.status', 'Queued delivery repair could not resume', {
         type: 'delivery.repair.resume_failed',
         status: 'queued',
         attempt: record.deliveryRepairAttempts + 1,
         error: toErrorMessage(error),
+        retryCount: record.deliveryPipelineResumeFailures,
+        retryDelayMs,
       })
+      if (record.deliveryPipelineResumeFailures <= 3 && !record.deliveryPipelineResumeTimer) {
+        record.deliveryPipelineResumeTimer = setTimeout(() => {
+          record.deliveryPipelineResumeTimer = undefined
+          void this.resumePendingDeliveryPipeline(record.session.id)
+        }, retryDelayMs)
+      } else if (record.deliveryPipelineResumeFailures > 3) {
+        this.append(record, 'system.status', 'Delivery pipeline requires user attention', {
+          type: 'delivery.pipeline.resume_exhausted',
+          status: 'needs_user',
+          error: toErrorMessage(error),
+        })
+      }
       return false
     }
   }
@@ -795,6 +815,7 @@ export class BeeGameSessionManager {
       language?: BeeGameSessionLanguage
       attachments?: BeeGameAttachment[]
       thinkingMode?: BeeGameChatThinkingMode
+      onTurnAccepted?: () => void
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -825,6 +846,7 @@ export class BeeGameSessionManager {
     record.nextTurnIndex += 1
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
+    display?.onTurnAccepted?.()
     record.session.turnStatus = 'running'
     record.abortController = new AbortController()
     this.append(record, 'turn.started', text)
@@ -856,6 +878,8 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status === 'running') {
+      if (record.deliveryPipelineResumeTimer) clearTimeout(record.deliveryPipelineResumeTimer)
+      record.deliveryPipelineResumeTimer = undefined
       record.abortController?.abort()
       record.runner?.stop()
       this.resolveAllPendingPermissions(record, {
@@ -878,6 +902,8 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
 
     if (record.session.status === 'running') {
+      if (record.deliveryPipelineResumeTimer) clearTimeout(record.deliveryPipelineResumeTimer)
+      record.deliveryPipelineResumeTimer = undefined
       record.abortController?.abort()
       record.runner?.stop()
       this.resolveAllPendingPermissions(record, {
@@ -1131,12 +1157,6 @@ export class BeeGameSessionManager {
 
   private async startDeliveryValidation(record: SessionRecord): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    this.append(record, 'delivery.validation.started', 'Independent delivery validation started', {
-      type: 'delivery.validation.started',
-      status: 'validating',
-      attempt: record.deliveryRepairAttempts,
-      validatorTypes: [...DELIVERY_VALIDATOR_AGENT_TYPES],
-    })
     await this.sendWithDisplay(
       record.session.id,
       `${deliveryValidationCoordinatorPrompt()}\n\n${deliveryValidationResponseSchema()}`,
@@ -1145,27 +1165,37 @@ export class BeeGameSessionManager {
         displayKind: 'delivery_validation',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
+        onTurnAccepted: () => {
+          record.deliveryPipelineResumeFailures = 0
+          this.append(record, 'delivery.validation.started', 'Independent delivery validation started', {
+            type: 'delivery.validation.started',
+            status: 'validating',
+            attempt: record.deliveryRepairAttempts,
+            validatorTypes: [...DELIVERY_VALIDATOR_AGENT_TYPES],
+          })
+        },
       },
     )
   }
 
   private async startDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    record.deliveryRepairAttempts += 1
-    this.append(record, 'delivery.repair.started', 'Delivery repair started', {
-      type: 'delivery.repair.started',
-      status: 'running',
-      attempt: record.deliveryRepairAttempts,
-      contract,
-    })
+    const attempt = record.deliveryRepairAttempts + 1
     await this.sendWithDisplay(
       record.session.id,
-      buildDeliveryRepairPrompt(contract, record.deliveryRepairAttempts),
+      buildDeliveryRepairPrompt(contract, attempt),
       {
-        displayText: `Fixing delivery gaps (attempt ${record.deliveryRepairAttempts}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
+        displayText: `Fixing delivery gaps (attempt ${attempt}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
         displayKind: 'delivery_repair',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
+        onTurnAccepted: () => {
+          record.deliveryPipelineResumeFailures = 0
+          record.deliveryRepairAttempts = attempt
+          this.append(record, 'delivery.repair.started', 'Delivery repair started', {
+            type: 'delivery.repair.started', status: 'running', attempt, contract,
+          })
+        },
       },
     )
   }
@@ -1173,13 +1203,6 @@ export class BeeGameSessionManager {
   private async restartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
     const attempt = Math.max(1, record.deliveryRepairAttempts)
-    this.append(record, 'delivery.repair.started', 'Delivery repair resumed', {
-      type: 'delivery.repair.started',
-      status: 'running',
-      attempt,
-      resumed: true,
-      contract,
-    })
     await this.sendWithDisplay(
       record.session.id,
       buildDeliveryRepairPrompt(contract, attempt),
@@ -1188,6 +1211,12 @@ export class BeeGameSessionManager {
         displayKind: 'delivery_repair',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
+        onTurnAccepted: () => {
+          record.deliveryPipelineResumeFailures = 0
+          this.append(record, 'delivery.repair.started', 'Delivery repair resumed', {
+            type: 'delivery.repair.started', status: 'running', attempt, resumed: true, contract,
+          })
+        },
       },
     )
   }

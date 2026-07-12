@@ -4425,6 +4425,7 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
+    await beeGameSessions.resumePendingDeliveryPipeline(c.req.param('id'))
     const session = beeGameSessions.get(c.req.param('id'))
     return session
       ? c.json(session)
@@ -4467,6 +4468,7 @@ function registerBeeGameSessionRoutes(
     }
     await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
+      await beeGameSessions.resumePendingDeliveryPipeline(c.req.param('id'))
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       return c.json(beeGameSessions.events(c.req.param('id'), after))
     } catch (err) {
