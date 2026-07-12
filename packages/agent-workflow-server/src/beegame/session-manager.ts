@@ -62,7 +62,7 @@ export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_DELIVERY_REPAIR_ATTEMPTS = 2
-const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 3 * 60 * 1000
+const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 10 * 60 * 1000
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -1068,8 +1068,13 @@ export class BeeGameSessionManager {
       } else if (completedTurnKind === 'delivery_validation' && record.session.status === 'running') {
         const contract = record.latestDeliveryContract
         const validationEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
+        const validationTimedOut = [...record.events].reverse().some(event => (
+          event.turnId === validationEvent?.turnId &&
+          event.type === 'system.status' &&
+          getDashboardPayloadString(event.payload, 'type') === 'delivery.validation.timeout'
+        ))
         const unresolvedPendingValidators = getUnresolvedPendingDeliveryValidators(record.events, validationEvent)
-        if (unresolvedPendingValidators.length > 0) {
+        if (!validationTimedOut && unresolvedPendingValidators.length > 0) {
           // Async validator completion restarts validation after all reports arrive.
         } else if (contract && contract.status !== 'passed' && record.deliveryRepairAttempts < MAX_DELIVERY_REPAIR_ATTEMPTS) {
           this.appendDeliveryRepairQueued(record, contract)
@@ -1382,12 +1387,20 @@ export class BeeGameSessionManager {
     thinkingMode: BeeGameChatThinkingMode | undefined,
     signal: AbortSignal,
   ): Promise<void> {
+    const submittedTurnId = record.currentTurnId
+    let executionError: Error | undefined
     await runner.submit({
       prompt,
       thinkingMode: thinkingMode ?? 'disabled',
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
+        if (isSDKExecutionError(message)) {
+          executionError = new Error(getSDKExecutionErrorDetail(message))
+        }
+        // Timed-out runtimes can flush synthetic messages after their turn closed.
+        // Preserve raw diagnostics without leaking them into chat or a later turn.
+        if (!submittedTurnId || record.currentTurnId !== submittedTurnId) return
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
@@ -1414,6 +1427,7 @@ export class BeeGameSessionManager {
       },
       requestPermission: request => this.requestPermission(record, request),
     })
+    if (executionError && !signal.aborted) throw executionError
   }
 
   private appendAssistantPartialText(
@@ -3968,6 +3982,17 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
     default:
       return mapTextEvent('system.status', extractMessageText(message))
   }
+}
+
+function isSDKExecutionError(message: DashboardSDKMessage): boolean {
+  return message.type === 'result' && getBooleanField(message, 'is_error') === true
+}
+
+function getSDKExecutionErrorDetail(message: DashboardSDKMessage): string {
+  const errors = Array.isArray(message.errors)
+    ? message.errors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : []
+  return errors[0]?.trim() || 'Model runtime returned an execution error.'
 }
 
 function mapTextEvent(

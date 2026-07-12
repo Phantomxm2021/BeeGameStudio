@@ -966,6 +966,7 @@ describe('beegame session routes', () => {
       const completed = manager.events(session.id).find(event => event.type === 'delivery.validation.completed')
       expect(completed).toBeDefined()
       expect(completed?.payload?.status).not.toBe('passed')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.repair.started'))
       manager.stop(session.id)
     } finally {
       if (previousTimeout === undefined) delete process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS
