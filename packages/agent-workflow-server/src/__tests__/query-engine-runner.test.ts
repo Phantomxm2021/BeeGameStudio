@@ -4,6 +4,7 @@ import {
   createBeeGamePinnedFetch,
   createBeeGameThinkingFetch,
   ensureBeeGameMacroGlobals,
+  mergeManagedAgentDefinitions,
   sanitizeBeeGameResumeMessages,
   type MutableAppState,
   stopRunningLocalShellTasks,
@@ -12,6 +13,32 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('injects managed validators while preserving unrelated project agents', () => {
+    const projectAgent = { agentType: 'project-helper', source: 'project' }
+    const staleManagedAgent = { agentType: 'beegame-runtime-validator', source: 'project' }
+    const managedAgent = {
+      agentType: 'beegame-runtime-validator',
+      source: 'policySettings' as const,
+      whenToUse: 'validate runtime',
+      getSystemPrompt: () => 'validate',
+      permissionMode: 'plan' as const,
+    }
+
+    const merged = mergeManagedAgentDefinitions({
+      activeAgents: [projectAgent, staleManagedAgent],
+      allAgents: [projectAgent, staleManagedAgent],
+      allowedAgentTypes: ['project-helper'],
+    }, [managedAgent])
+
+    expect(merged.activeAgents).toEqual([projectAgent, managedAgent])
+    expect(merged.allAgents).toEqual([projectAgent, managedAgent])
+    expect(merged.allowedAgentTypes).toEqual(['project-helper', 'beegame-runtime-validator'])
+    expect((merged.activeAgents as Array<Record<string, unknown>>)[1]).toMatchObject({
+      source: 'policySettings',
+      permissionMode: 'plan',
+    })
+  })
 
   test('closes runtime dispatchers across supported Undici lifecycle shapes', async () => {
     const closed: string[] = []

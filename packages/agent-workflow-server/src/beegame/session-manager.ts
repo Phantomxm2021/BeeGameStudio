@@ -28,6 +28,11 @@ import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { auditAssetContract } from './asset-contract-audit'
 import { auditProjectDeliveryContract } from './project-delivery-contract-audit'
 import {
+  createDeliveryValidationAgentDefinitions,
+  deliveryValidationCoordinatorPrompt,
+  DELIVERY_VALIDATOR_AGENT_TYPES,
+} from './delivery-validation-agents'
+import {
   buildDeliveryRepairPrompt,
   createDeliveryContract,
   parseDeliveryReview,
@@ -56,6 +61,7 @@ export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_DELIVERY_REPAIR_ATTEMPTS = 2
+const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 3 * 60 * 1000
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -123,10 +129,16 @@ export type BeeGameEventType =
   | 'turn.completed'
   | 'turn.empty'
   | 'turn.failed'
+  // Legacy transcript types remain readable during migration; new runs never emit them.
   | 'delivery.review.started'
   | 'delivery.review.completed'
+  | 'delivery.validation.started'
+  | 'delivery.validation.completed'
   | 'delivery.contract.updated'
   | 'delivery.repair.started'
+  | 'delivery.repair.completed'
+  | 'delivery.repair.queued'
+  | 'delivery.repair.exhausted'
   | 'session.stopped'
   | 'session.failed'
 
@@ -191,6 +203,16 @@ export type BeeGameSessionRunnerStartInput = {
   cwd: string
   env: Record<string, string>
   approvedOutboundTargets: BeeGameApprovedOutboundTargets
+  agentDefinitions?: Array<{
+    agentType: string
+    whenToUse: string
+    tools?: string[]
+    disallowedTools?: string[]
+    source: string
+    permissionMode?: 'plan'
+    getSystemPrompt: () => string
+    maxTurns?: number
+  }>
 }
 
 const RUNTIME_PROVIDER_URL_KEYS = [
@@ -454,7 +476,7 @@ export class BeeGameSessionManager {
         : 1,
       currentTurnId: null,
       currentTurnKind: undefined,
-      deliveryRepairAttempts: 0,
+      deliveryRepairAttempts: recoverDeliveryRepairAttempts(recoveredTranscript?.events ?? []),
       latestDeliveryContract: recoverLatestDeliveryContract(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
@@ -487,6 +509,49 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
+  }
+
+  async resumePendingDeliveryPipeline(sessionId: string): Promise<boolean> {
+    const record = this.sessions.get(sessionId)
+    if (!record || record.session.status !== 'running' || record.session.turnStatus !== 'idle') return false
+    const transition = getLatestDeliveryPipelineTransition(record.events)
+    if (!transition) return false
+    const contract = recoverLatestDeliveryContract(record.events)
+    try {
+      if (transition.type === 'delivery.validation.started' || (
+        transition.type === 'delivery.validation.completed' &&
+        getDashboardPayloadBoolean(transition.payload, 'retryable')
+      )) {
+        await this.startDeliveryValidation(record)
+        return true
+      }
+      if (transition.type === 'delivery.repair.completed') {
+        await this.startDeliveryValidation(record)
+        return true
+      }
+      if (!contract || contract.status === 'passed') return false
+      if (transition.type === 'delivery.validation.completed') {
+        if (record.deliveryRepairAttempts >= MAX_DELIVERY_REPAIR_ATTEMPTS) return false
+        this.appendDeliveryRepairQueued(record, contract)
+        await this.startDeliveryRepair(record, contract)
+        return true
+      }
+      if (transition.type === 'delivery.repair.started') {
+        await this.restartDeliveryRepair(record, contract)
+        return true
+      }
+      if (transition.type !== 'delivery.repair.queued') return false
+      await this.startDeliveryRepair(record, contract)
+      return true
+    } catch (error) {
+      this.append(record, 'system.status', 'Queued delivery repair could not resume', {
+        type: 'delivery.repair.resume_failed',
+        status: 'queued',
+        attempt: record.deliveryRepairAttempts + 1,
+        error: toErrorMessage(error),
+      })
+      return false
+    }
   }
 
   updateAuthToken(sessionId: string, authToken?: string): void {
@@ -908,12 +973,15 @@ export class BeeGameSessionManager {
         cwd: record.session.cwd,
         env,
         approvedOutboundTargets,
+        agentDefinitions: createDeliveryValidationAgentDefinitions(),
       })
       record.runner = runner
       try {
         const eventCountBeforeTurn = record.events.length
         const toolUseCountBeforeTurn = record.toolUses.size
-        await this.submitToRunner(record, runner, prompt, thinkingMode, signal)
+        const validationTimedOut = record.currentTurnKind === 'delivery_validation'
+          ? await this.submitDeliveryValidationWithTimeout(record, runner, prompt, thinkingMode, signal)
+          : await this.submitToRunner(record, runner, prompt, thinkingMode, signal).then(() => false)
         const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
         const hadRuntimeActivity = hadToolUse || record.events
           .slice(eventCountBeforeTurn)
@@ -922,7 +990,8 @@ export class BeeGameSessionManager {
             event.type.startsWith('permission.')
           ))
         if (!signal.aborted && record.session.status === 'running') {
-          if (!hadRuntimeActivity) {
+          const isControlTurn = record.currentTurnKind === 'delivery_validation'
+          if (!hadRuntimeActivity && !isControlTurn) {
             this.appendRuntimeObservation(record, 'empty_turn')
             this.append(
               record,
@@ -930,8 +999,15 @@ export class BeeGameSessionManager {
               'Agent ended this turn without using tools. Send continue or retry to start implementation.',
             )
           } else {
-            if (record.currentTurnKind === 'delivery_review') {
-              record.latestDeliveryContract = this.completeDeliveryReview(record, eventCountBeforeTurn)
+            if (isControlTurn) {
+              record.latestDeliveryContract = this.completeDeliveryValidation(record, eventCountBeforeTurn)
+              if (validationTimedOut) {
+                this.append(record, 'system.status', 'Independent delivery validation timed out', {
+                  type: 'delivery.validation.timeout',
+                  status: 'blocked',
+                  timeoutMs: getDeliveryValidationTimeoutMs(),
+                })
+              }
             }
             this.appendRuntimeObservation(record, 'turn_completed')
             this.append(record, 'turn.completed', 'Turn ended')
@@ -985,59 +1061,82 @@ export class BeeGameSessionManager {
         })
       }
       if (completedTurnKind === 'confirmed_brief' && record.session.status === 'running') {
-        queueMicrotask(() => {
-          void this.startDeliveryReview(record).catch(error => {
-            this.append(record, 'delivery.review.completed', 'Delivery review could not start', {
-              type: 'delivery.review.completed',
-              status: 'blocked',
-              summary: toErrorMessage(error),
-              findings: [],
-              evidenceEventIds: [],
-            })
-          })
+        void this.startDeliveryValidation(record).catch(error => {
+          this.appendDeliveryValidationFailure(record, 'Delivery validation could not start', error)
         })
-      } else if (completedTurnKind === 'delivery_review' && record.session.status === 'running') {
+      } else if (completedTurnKind === 'delivery_validation' && record.session.status === 'running') {
         const contract = record.latestDeliveryContract
-        if (contract && contract.status !== 'passed' && record.deliveryRepairAttempts < MAX_DELIVERY_REPAIR_ATTEMPTS) {
-          queueMicrotask(() => {
-            void this.startDeliveryRepair(record, contract).catch(error => {
-              this.append(record, 'delivery.repair.started', 'Delivery repair could not start', {
-                type: 'delivery.repair.started',
-                status: 'blocked',
-                summary: toErrorMessage(error),
-                attempt: record.deliveryRepairAttempts,
-              })
-            })
+        const validationEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
+        const unresolvedPendingValidators = getUnresolvedPendingDeliveryValidators(record.events, validationEvent)
+        if (unresolvedPendingValidators.length > 0) {
+          // Async validator completion restarts validation after all reports arrive.
+        } else if (contract && contract.status !== 'passed' && record.deliveryRepairAttempts < MAX_DELIVERY_REPAIR_ATTEMPTS) {
+          this.appendDeliveryRepairQueued(record, contract)
+          void this.startDeliveryRepair(record, contract).catch(error => {
+            this.appendDeliveryRepairResumeFailure(record, error)
+          })
+        } else if (contract && contract.status !== 'passed') {
+          this.append(record, 'delivery.repair.exhausted', 'Delivery repair attempts exhausted', {
+            type: 'delivery.repair.exhausted',
+            status: 'needs_user',
+            attempt: record.deliveryRepairAttempts,
+            contract,
           })
         }
       } else if (completedTurnKind === 'delivery_repair' && record.session.status === 'running') {
-        queueMicrotask(() => {
-          void this.startDeliveryReview(record).catch(error => {
-            this.append(record, 'delivery.review.completed', 'Delivery review could not restart', {
-              type: 'delivery.review.completed',
-              status: 'blocked',
-              summary: toErrorMessage(error),
-              findings: [],
-              evidenceEventIds: [],
-            })
-          })
+        this.append(record, 'delivery.repair.completed', 'Delivery repair turn completed', {
+          type: 'delivery.repair.completed',
+          status: 'completed',
+          attempt: record.deliveryRepairAttempts,
+          contract: record.latestDeliveryContract,
+        })
+        void this.startDeliveryValidation(record).catch(error => {
+          this.appendDeliveryValidationFailure(record, 'Delivery validation could not restart', error)
         })
       }
     }
   }
 
-  private async startDeliveryReview(record: SessionRecord): Promise<void> {
+  private async submitDeliveryValidationWithTimeout(
+    record: SessionRecord,
+    runner: BeeGameSessionRuntime,
+    prompt: BeeGamePromptInput,
+    thinkingMode: BeeGameChatThinkingMode | undefined,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const timeoutMs = getDeliveryValidationTimeoutMs()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<'timeout'>(resolveTimeout => {
+      timeout = setTimeout(() => resolveTimeout('timeout'), timeoutMs)
+    })
+    try {
+      const outcome = await Promise.race([
+        this.submitToRunner(record, runner, prompt, thinkingMode, signal).then(() => 'completed' as const),
+        timedOut,
+      ])
+      if (outcome === 'completed') return false
+      runner.stop()
+      if (record.runner === runner) record.runner = null
+      return true
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+  }
+
+  private async startDeliveryValidation(record: SessionRecord): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    this.append(record, 'delivery.review.started', 'Delivery review started', {
-      type: 'delivery.review.started',
+    this.append(record, 'delivery.validation.started', 'Independent delivery validation started', {
+      type: 'delivery.validation.started',
       status: 'validating',
+      attempt: record.deliveryRepairAttempts,
+      validatorTypes: [...DELIVERY_VALIDATOR_AGENT_TYPES],
     })
     await this.sendWithDisplay(
       record.session.id,
-      deliveryReviewPrompt(),
+      `${deliveryValidationCoordinatorPrompt()}\n\n${deliveryValidationResponseSchema()}`,
       {
-        displayText: 'Validating delivery against project documents',
-        displayKind: 'delivery_review',
+        displayText: 'Running independent delivery validators',
+        displayKind: 'delivery_validation',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
       },
@@ -1065,15 +1164,69 @@ export class BeeGameSessionManager {
     )
   }
 
-  private completeDeliveryReview(record: SessionRecord, eventStartIndex: number): DeliveryContract {
+  private async restartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
+    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
+    const attempt = Math.max(1, record.deliveryRepairAttempts)
+    this.append(record, 'delivery.repair.started', 'Delivery repair resumed', {
+      type: 'delivery.repair.started',
+      status: 'running',
+      attempt,
+      resumed: true,
+      contract,
+    })
+    await this.sendWithDisplay(
+      record.session.id,
+      buildDeliveryRepairPrompt(contract, attempt),
+      {
+        displayText: `Resuming delivery repair (attempt ${attempt}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
+        displayKind: 'delivery_repair',
+        taskType: 'agent_turn',
+        thinkingMode: 'enabled',
+      },
+    )
+  }
+
+  private appendDeliveryRepairQueued(record: SessionRecord, contract: DeliveryContract): void {
+    this.append(record, 'delivery.repair.queued', 'Delivery repair queued', {
+      type: 'delivery.repair.queued',
+      status: 'queued',
+      attempt: record.deliveryRepairAttempts + 1,
+      contract,
+    })
+  }
+
+  private appendDeliveryRepairResumeFailure(record: SessionRecord, error: unknown): void {
+    this.append(record, 'system.status', 'Queued delivery repair could not start', {
+      type: 'delivery.repair.resume_failed',
+      status: 'queued',
+      attempt: record.deliveryRepairAttempts + 1,
+      error: toErrorMessage(error),
+    })
+  }
+
+  private completeDeliveryValidation(record: SessionRecord, eventStartIndex: number): DeliveryContract {
     const reviewEvents = record.events.slice(eventStartIndex)
     const result = [...reviewEvents].reverse().find(event => event.type === 'result')
     const failedEvidence = reviewEvents.filter(event =>
       event.type === 'tool.failed' ||
       (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
     )
+    const completedValidators = getCompletedDeliveryValidators(reviewEvents)
+    const pendingValidators = getPendingDeliveryValidators(reviewEvents)
+    const missingValidators = DELIVERY_VALIDATOR_AGENT_TYPES.filter(type => !completedValidators.has(type))
     const parsed = parseDeliveryReview(result?.text) ?? invalidDeliveryReview()
-    const verifiedEvidenceIds = getVerifiedDeliveryEvidenceIds(reviewEvents)
+    const verifiedEvidenceIds = getValidatorEvidenceIds(completedValidators)
+    if (missingValidators.length > 0) {
+      parsed.status = 'blocked'
+      parsed.summary = `Independent delivery validation was incomplete: ${missingValidators.length} validator(s) did not complete.`
+      parsed.findings.push({
+        requirementId: 'independent-validation-protocol',
+        requirement: 'Independent validation protocol',
+        status: 'blocked',
+        detail: 'One or more required validators did not return evidence.',
+        evidence: [],
+      })
+    }
     const documentAuditEvidenceId = `delivery-contract-audit:${record.currentTurnId ?? record.session.id}`
     const documentAudit = auditProjectDeliveryContract(record.session.cwd)
     verifiedEvidenceIds.add(documentAuditEvidenceId)
@@ -1159,7 +1312,7 @@ export class BeeGameSessionManager {
         })
       }
     }
-    const verifiedCapabilities = getVerifiedDeliveryCapabilities(reviewEvents)
+    const verifiedCapabilities = getVerifiedDeliveryCapabilities(reviewEvents, completedValidators)
     const verifiedReview = retainVerifiedDeliveryEvidence(parsed, verifiedEvidenceIds)
     if (failedEvidence.length > 0) {
       verifiedReview.status = 'failed'
@@ -1171,17 +1324,35 @@ export class BeeGameSessionManager {
       contract,
       attempt: record.deliveryRepairAttempts,
     })
-    this.append(record, 'delivery.review.completed', contract.summary, {
-      type: 'delivery.review.completed',
+    this.append(record, 'delivery.validation.completed', contract.summary, {
+      type: 'delivery.validation.completed',
       status: contract.status,
       summary: contract.summary,
       findings: verifiedReview.findings,
       evidenceEventIds: [...verifiedEvidenceIds],
+      validators: [...completedValidators].map(([agentType, event]) => ({
+        agentType,
+        toolUseID: getDashboardPayloadString(event.payload, 'toolUseID'),
+        status: 'completed',
+        evidenceEventId: String(event.id),
+      })),
+      pendingValidatorTypes: [...pendingValidators],
       contract,
       attempt: record.deliveryRepairAttempts,
     })
     if (contract.status === 'passed') record.deliveryRepairAttempts = 0
     return contract
+  }
+
+  private appendDeliveryValidationFailure(record: SessionRecord, text: string, error: unknown): void {
+    this.append(record, 'delivery.validation.completed', text, {
+      type: 'delivery.validation.completed',
+      status: 'blocked',
+      summary: toErrorMessage(error),
+      findings: [],
+      evidenceEventIds: [],
+      retryable: true,
+    })
   }
 
   private async resolveRuntimeOutboundTargets(
@@ -1306,7 +1477,7 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
-    if (record.currentTurnKind === 'delivery_review' && isFileMutationTool(request.toolName)) {
+    if (record.currentTurnKind === 'delivery_validation' && isFileMutationTool(request.toolName)) {
       const message = 'Delivery review is read-only and cannot modify project files.'
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
@@ -1351,7 +1522,7 @@ export class BeeGameSessionManager {
       })
     }
     if (request.toolName === 'Bash' && hasReachedBashPermissionRequestLimit(record)) {
-      const message = `BeeGame stopped this turn after too many Bash permission requests (${MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS}). The agent should summarize the current result instead of continuing validation.`
+      const message = `BeeGame stopped this turn after too many Bash permission requests requiring user resolution (${MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS}). The agent should summarize the current result instead of requesting more permissions.`
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved',
         toolUseID: request.toolUseID,
@@ -1809,6 +1980,23 @@ export class BeeGameSessionManager {
         content: [{ type: 'text', text: result }],
       },
     })
+    this.resumeDelayedDeliveryValidationIfReady(record)
+  }
+
+  private resumeDelayedDeliveryValidationIfReady(record: SessionRecord): void {
+    if (record.session.status !== 'running' || record.session.turnStatus !== 'idle') return
+    const completedEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
+    if (!completedEvent) return
+    const pending = Array.isArray(completedEvent.payload?.pendingValidatorTypes)
+      ? completedEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
+      : []
+    if (pending.length === 0) return
+    const validationStartIndex = record.events.findLastIndex(event => event.type === 'delivery.validation.started')
+    const completed = getCompletedDeliveryValidators(record.events.slice(Math.max(0, validationStartIndex)))
+    if (pending.some(agentType => !completed.has(agentType))) return
+    void this.startDeliveryValidation(record).catch(error => {
+      this.appendDeliveryValidationFailure(record, 'Delayed delivery validation could not restart', error)
+    })
   }
 }
 
@@ -1871,6 +2059,13 @@ function extractCompletedSubagentMessage(raw: string): string {
 function getSubagentMonitorTimeoutMs(): number {
   const raw = Number(process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS)
   return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000
+}
+
+function getDeliveryValidationTimeoutMs(): number {
+  const raw = Number(process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS)
+  return Number.isFinite(raw) && raw > 0
+    ? raw
+    : DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS
 }
 
 function getSubagentMonitorPollMs(): number {
@@ -2299,38 +2494,74 @@ function withAssetIntegrationContract(prompt: string): string {
 }
 
 function withDeliveryContract(prompt: string): string {
-  return `${prompt}\n\nEvidence-backed delivery contract:\n- Create docs/delivery-contract.json before implementation. Use stable requirement ids, explicit mvp/roadmap scope, required evidence kinds, required capabilities, and structured player paths with actions and observable assertions.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Requirement status may advance only through planned -> implemented -> statically_verified -> runtime_verified -> accepted. Build/typecheck alone cannot accept player-facing behavior.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- Final delivery output is generated from recorded evidence. If validation fails, fix the project and rerun the affected path; do not rewrite the contract to make the failure disappear.`
+  return `${prompt}\n\nEvidence-backed delivery contract:\n- Create docs/delivery-contract.json before implementation. Use stable requirement ids, explicit mvp/roadmap scope, required evidence kinds, required capabilities, and structured player paths with actions and observable assertions.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Treat the current project directory as the complete implementation boundary. Never inspect parent or sibling directories to discover adapters, skills, templates, or host implementation details.\n- Adapter identity comes from the explicit project target selected in the build brief. Skill availability comes only from the runtime Skill tool catalog; if a capability is unavailable, record it as required and continue valid project implementation so independent validation can report the blocker.\n- Requirement status may advance only through planned -> implemented -> statically_verified -> runtime_verified -> accepted. Build/typecheck alone cannot accept player-facing behavior.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- Final delivery output is generated from recorded evidence. If validation fails, fix the project and rerun the affected path; do not rewrite the contract to make the failure disappear.`
 }
 
-function deliveryReviewPrompt(): string {
+function deliveryValidationResponseSchema(): string {
   return [
-    'Perform a read-only delivery review of the current game project.',
-    'Treat docs/delivery-contract.json, the project GDD, technical design, UI/UX design, and acceptance checklist as the source of truth. If the structured delivery contract is missing or inconsistent, report untested or failed.',
-    'Compare those documents with the actual implementation. Run safe project-native build, test, preview, or player-path checks when available.',
-    'Do not edit files, install dependencies, change configuration, or claim success from build/typecheck alone.',
-    'Use available validation skills when their declared capability matches the project. Record required capabilities explicitly; do not infer them from project names or natural-language keywords.',
-    'A passed MVP requirement needs its declared evidence kinds and runtime evidence for player-facing behavior. Evidence eventId must reference the real tool-use ID that produced it; unsupported evidence is discarded.',
-    'Inspect assets/asset-manifest.json structurally when present: declared slots, copied files, target compatibility, code/runtime reference evidence, and runtime load evidence are separate states.',
-    'If executable player-path evidence is unavailable, return untested rather than passed. Roadmap requirements never block the MVP.',
-    'Your final response must be one JSON object only, with this shape:',
-    '{"status":"passed|failed|untested|blocked","summary":"...","requiredCapabilities":["skill:<invoked-skill-slug>"],"requirements":[{"id":"stable-id-from-project-contract","title":"...","scope":"mvp|roadmap","status":"planned|implemented|statically_verified|runtime_verified|accepted|failed|blocked","evidenceRequired":["implementation|build|test|runtime|asset|skill|document"],"evidence":[{"kind":"runtime","eventId":"real-tool-use-id","source":"...","detail":"..."}],"detail":"..."}],"findings":[{"requirementId":"...","requirement":"...","status":"passed|failed|untested|blocked","detail":"...","evidence":[]}]}',
+    'Return one JSON object only with this exact response shape:',
+    '{"status":"passed|failed|untested|blocked","summary":"...","requiredCapabilities":["skill:<invoked-skill-slug>"],"requirements":[{"id":"stable-id-from-project-contract","title":"...","scope":"mvp|roadmap","status":"planned|implemented|statically_verified|runtime_verified|accepted|failed|blocked","evidenceRequired":["implementation|build|test|runtime|asset|skill|document"],"evidence":[{"kind":"runtime","eventId":"validator-task-tool-use-id","source":"...","detail":"..."}],"detail":"..."}],"findings":[{"requirementId":"...","requirement":"...","status":"passed|failed|untested|blocked","detail":"...","evidence":[]}]}',
+    'Evidence eventId must be the Task tool-use id of the validator that observed it. Unsupported ids are discarded.',
   ].join('\n')
 }
 
 function invalidDeliveryReview(): ParsedDeliveryReview {
   return {
     status: 'untested',
-    summary: 'Delivery review did not return a valid structured contract.',
+    summary: 'Independent delivery validators did not return a valid structured contract.',
     requirements: [],
     requiredCapabilities: [],
     findings: [],
   }
 }
 
-function getVerifiedDeliveryEvidenceIds(events: BeeGameEvent[]): Set<string> {
-  const ids = new Set<string>()
+function getCompletedDeliveryValidators(events: BeeGameEvent[]): Map<string, BeeGameEvent> {
+  const completed = new Map<string, BeeGameEvent>()
   for (const event of events) {
     if (event.type !== 'tool.completed') continue
+    const toolName = getDashboardPayloadString(event.payload, 'toolName')
+    if (toolName !== 'Task' && toolName !== 'Agent') continue
+    if (parseAsyncSubagentLaunch(getDashboardPayloadString(event.payload, 'output'))) continue
+    const input = getDashboardPayloadRecord(event.payload, 'input')
+    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
+    if (!agentType || !DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) continue
+    completed.set(agentType, event)
+  }
+  return completed
+}
+
+function getPendingDeliveryValidators(events: BeeGameEvent[]): Set<string> {
+  const pending = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'tool.completed') continue
+    const toolName = getDashboardPayloadString(event.payload, 'toolName')
+    if (toolName !== 'Task' && toolName !== 'Agent') continue
+    if (!parseAsyncSubagentLaunch(getDashboardPayloadString(event.payload, 'output'))) continue
+    const input = getDashboardPayloadRecord(event.payload, 'input')
+    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
+    if (agentType && DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) {
+      pending.add(agentType)
+    }
+  }
+  return pending
+}
+
+function getUnresolvedPendingDeliveryValidators(
+  events: BeeGameEvent[],
+  completedEvent: BeeGameEvent | undefined,
+): string[] {
+  const pending = Array.isArray(completedEvent?.payload?.pendingValidatorTypes)
+    ? completedEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
+    : []
+  if (pending.length === 0) return []
+  const validationStartIndex = events.findLastIndex(event => event.type === 'delivery.validation.started')
+  const completed = getCompletedDeliveryValidators(events.slice(Math.max(0, validationStartIndex)))
+  return pending.filter(agentType => !completed.has(agentType))
+}
+
+function getValidatorEvidenceIds(validators: Map<string, BeeGameEvent>): Set<string> {
+  const ids = new Set<string>()
+  for (const event of validators.values()) {
     ids.add(String(event.id))
     const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
     if (toolUseID) ids.add(toolUseID)
@@ -2338,7 +2569,10 @@ function getVerifiedDeliveryEvidenceIds(events: BeeGameEvent[]): Set<string> {
   return ids
 }
 
-function getVerifiedDeliveryCapabilities(events: BeeGameEvent[]): string[] {
+function getVerifiedDeliveryCapabilities(
+  events: BeeGameEvent[],
+  validators?: Map<string, BeeGameEvent>,
+): string[] {
   const capabilities = new Set<string>()
   for (const event of events) {
     if (event.type !== 'tool.completed') continue
@@ -2351,7 +2585,28 @@ function getVerifiedDeliveryCapabilities(events: BeeGameEvent[]): string[] {
       .find(Boolean)
     if (skill) capabilities.add(`skill:${skill}`)
   }
+  for (const [agentType, event] of validators ?? []) {
+    capabilities.add(`agent:${agentType}`)
+    const output = getDashboardPayloadString(event.payload, 'output')
+    const report = parseValidatorReport(output)
+    for (const capability of report?.verifiedCapabilities ?? []) capabilities.add(capability)
+  }
   return [...capabilities].sort((left, right) => left.localeCompare(right))
+}
+
+function parseValidatorReport(value: string): { verifiedCapabilities: string[] } | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const report = parsed as Record<string, unknown>
+    if (!Array.isArray(report.verifiedCapabilities)) return undefined
+    const verifiedCapabilities = report.verifiedCapabilities.filter((item): item is string => (
+      typeof item === 'string' && item.trim().length > 0
+    ))
+    return { verifiedCapabilities }
+  } catch {
+    return undefined
+  }
 }
 
 function retainVerifiedDeliveryEvidence(
@@ -2380,6 +2635,28 @@ function recoverLatestDeliveryContract(events: BeeGameEvent[]): DeliveryContract
   if (!isObject(contract) || contract.version !== 1 || !Array.isArray(contract.requirements)) return undefined
   if (!['passed', 'failed', 'untested', 'blocked'].includes(String(contract.status))) return undefined
   return contract as DeliveryContract
+}
+
+function recoverDeliveryRepairAttempts(events: BeeGameEvent[]): number {
+  let latest = 0
+  for (const event of events) {
+    if (event.type !== 'delivery.repair.started') continue
+    const attempt = Number(isObject(event.payload) ? event.payload.attempt : 0)
+    if (Number.isInteger(attempt) && attempt > latest) latest = attempt
+  }
+  const latestContract = recoverLatestDeliveryContract(events)
+  return latestContract?.status === 'passed' ? 0 : latest
+}
+
+function getLatestDeliveryPipelineTransition(events: BeeGameEvent[]): BeeGameEvent | undefined {
+  return [...events].reverse().find(event => (
+    event.type === 'delivery.validation.started' ||
+    event.type === 'delivery.validation.completed' ||
+    event.type === 'delivery.repair.queued' ||
+    event.type === 'delivery.repair.started' ||
+    event.type === 'delivery.repair.completed' ||
+    event.type === 'delivery.repair.exhausted'
+  ))
 }
 
 async function prepareBeeGamePromptInput(input: {
@@ -3009,12 +3286,20 @@ function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
 
 function hasReachedBashPermissionRequestLimit(record: SessionRecord): boolean {
   if (!record.currentTurnId) return false
+  return countBashPermissionRequestsRequiringUserResolution(
+    record.events,
+    record.currentTurnId,
+  ) >= MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS
+}
+
+export function countBashPermissionRequestsRequiringUserResolution(
+  events: BeeGameEvent[],
+  turnId: string,
+): number {
   const toolUseIDs = new Set<string>()
-  for (const event of record.events) {
-    if (event.turnId !== record.currentTurnId) continue
-    if (event.type !== 'permission.requested' && event.type !== 'permission.resolved') {
-      continue
-    }
+  for (const event of events) {
+    if (event.turnId !== turnId) continue
+    if (event.type !== 'permission.requested') continue
     const payload = event.payload
     if (payload?.toolName !== 'Bash') continue
     const toolUseID = typeof payload.toolUseID === 'string'
@@ -3022,7 +3307,7 @@ function hasReachedBashPermissionRequestLimit(record: SessionRecord): boolean {
       : `${event.id}`
     toolUseIDs.add(toolUseID)
   }
-  return toolUseIDs.size >= MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS
+  return toolUseIDs.size
 }
 
 function isGlobalProcessControlBashCommand(input: Record<string, unknown>): boolean {
@@ -3236,7 +3521,21 @@ function isSafeProjectFilesystemMutationCommand(
     return pathArgs.length > 0 &&
       pathArgs.every(path => isSafeDependencyCleanupPath(cwd, allowedRoot, path))
   }
+  if (command === 'mv') {
+    const pathArgs = tokens.slice(1).filter(token => !token.startsWith('-'))
+    return pathArgs.length === 2 && pathArgs.every(path => (
+      isSafeProjectMovePath(cwd, allowedRoot, path)
+    ))
+  }
   return false
+}
+
+function isSafeProjectMovePath(cwd: string, allowedRoot: string, path: string): boolean {
+  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+  const workspaceRoot = resolve(allowedRoot)
+  const rel = relative(workspaceRoot, resolvedPath).split('\\').join('/')
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) &&
+    !isSensitiveProjectMutationPath(rel)
 }
 
 function isSafeDependencyCleanupPath(
@@ -3314,6 +3613,13 @@ function getDashboardPayloadString(
 ): string {
   const value = payload?.[field]
   return typeof value === 'string' ? value : ''
+}
+
+function getDashboardPayloadBoolean(
+  payload: DashboardSDKMessage | undefined,
+  field: string,
+): boolean {
+  return payload?.[field] === true
 }
 
 function getDashboardPayloadRecord(

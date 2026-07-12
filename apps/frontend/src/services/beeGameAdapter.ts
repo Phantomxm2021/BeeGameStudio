@@ -57,6 +57,14 @@ type BeeGameEvent = {
     | 'turn.completed'
     | 'turn.empty'
     | 'turn.failed'
+    | 'delivery.validation.started'
+    | 'delivery.validation.completed'
+    | 'delivery.repair.queued'
+    | 'delivery.repair.started'
+    | 'delivery.repair.completed'
+    | 'delivery.repair.exhausted'
+    | 'delivery.review.started'
+    | 'delivery.review.completed'
     | 'session.stopped'
     | 'session.failed';
   text: string;
@@ -224,7 +232,6 @@ const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ??
 const ALLOW_CLIENT_WORKSPACE_ROOT = String(import.meta.env.VITE_BEEGAME_ALLOW_CLIENT_WORKSPACE_ROOT ?? '').trim() === '1' ||
   import.meta.env.MODE === 'test';
 const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId';
-const CONTINUE_FROM_LAST_FAILED_CHECK_ACTION = 'continue_from_last_failed_check';
 const missingRuntimeSessionIds = new Set<string>();
 
 export function isBeeGameAdapterEnabled(): boolean {
@@ -1273,8 +1280,10 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
 
 function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = '', events: BeeGameEvent[] = []): WebSocketMessage[] {
   const taskId = event.sessionId;
+  const isValidationControlTurn = isDeliveryValidationControlTurn(event, events);
   switch (event.type) {
     case 'user.message':
+      if (isValidationControlTurn) return [];
       return [baseMessage('agent_message', { ...event, text: resolveUserMessageDisplayText(event) }, projectId, 'user')];
     case 'turn.started':
       return [
@@ -1303,6 +1312,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'assistant.partial':
       return [];
     case 'assistant.thinking':
+      if (isValidationControlTurn) return [];
       if (getPayloadString(event, 'status') === 'ended') return [];
       return [{
         ...baseMessage('agent_message', event, projectId, 'beegame'),
@@ -1311,6 +1321,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         task_kind: 'assistant_thinking',
       } as WebSocketMessage];
     case 'assistant.message': {
+      if (isValidationControlTurn) return [];
       const usage = getUsageFromEventPayload(event.payload);
       return [
         baseMessage('agent_message', event, projectId, 'beegame'),
@@ -1334,6 +1345,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       } as WebSocketMessage] : [];
     }
     case 'tool.started':
+      if (isValidationControlTurn) return [];
       if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return [];
       const startedInput = getPayloadRecord(event, 'input');
       const startedTool = getPayloadString(event, 'toolName') || event.text;
@@ -1354,6 +1366,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
     case 'tool.progress': {
+      if (isValidationControlTurn) return [];
       const progressInput = getPayloadRecord(event, 'input');
       const progressTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
@@ -1377,6 +1390,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     }
     case 'tool.completed':
     case 'tool.failed': {
+      if (isValidationControlTurn) return [];
       const finishedInput = getPayloadRecord(event, 'input');
       const finishedTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
@@ -1425,15 +1439,15 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'runtime.observation':
       return [];
     case 'turn.completed': {
-      const failedCheckAlert = buildLastFailedCheckAlert(projectId, event, events);
-      const reviewAlert = failedCheckAlert ? null : buildDeliveryReviewAlert(projectId, event, events);
-      return [
-        ...(failedCheckAlert ? [failedCheckAlert] : []),
-        ...(reviewAlert ? [reviewAlert] : []),
-        { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
-      ];
+      if (isValidationControlTurn) {
+        return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
+      }
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
     }
     case 'turn.empty':
+      if (isValidationControlTurn) {
+        return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
+      }
       return [
         baseMessage('agent_message', event, projectId, 'system'),
         { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
@@ -1443,152 +1457,34 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'turn.failed':
     case 'session.failed':
       return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as WebSocketMessage];
+    case 'delivery.validation.started':
+      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage];
+    case 'delivery.validation.completed':
+      return [{
+        ...baseMessage('agent_message', event, projectId, 'system'),
+        content: getPayloadString(event, 'summary') || event.text,
+        task_kind: 'delivery_validation',
+      } as WebSocketMessage];
+    case 'delivery.repair.queued':
+    case 'delivery.repair.started':
+    case 'delivery.repair.completed':
+    case 'delivery.repair.exhausted':
+    case 'delivery.review.started':
+    case 'delivery.review.completed':
+      return [];
     default:
       return [];
   }
 }
 
-function buildLastFailedCheckAlert(projectId: string, completedEvent: BeeGameEvent, events: BeeGameEvent[]): WebSocketMessage | null {
-  const failedCheck = findUnresolvedValidationFailure(completedEvent, events);
-  if (!failedCheck) return null;
-  const command = getBashCommand(failedCheck);
-  const output = getEventOutput(failedCheck);
-  const content = [
-    'Last check failed.',
-    command ? `Command: ${command}` : '',
-    output ? `Output: ${truncateForChatAlert(output)}` : '',
-  ].filter(Boolean).join('\n');
-  return {
-    type: 'agent_message',
-    task_id: completedEvent.sessionId,
-    project_id: projectId,
-    sender: 'system',
-    content,
-    message_id: `beegame-last-check-failed-${completedEvent.sessionId}-${completedEvent.turnId || completedEvent.id}-${failedCheck.id}`,
-    timestamp: Date.parse(completedEvent.createdAt) || Date.now(),
-    task_kind: 'last_check_failed',
-    next_action: CONTINUE_FROM_LAST_FAILED_CHECK_ACTION,
-    requires_user_action: true,
-  } as WebSocketMessage;
-}
-
-function buildDeliveryReviewAlert(projectId: string, completedEvent: BeeGameEvent, events: BeeGameEvent[]): WebSocketMessage | null {
-  const turnEvents = events.filter(event => (
-    event.sessionId === completedEvent.sessionId &&
-    (!completedEvent.turnId || event.turnId === completedEvent.turnId) &&
-    event.id <= completedEvent.id
+function isDeliveryValidationControlTurn(event: BeeGameEvent, events: BeeGameEvent[]): boolean {
+  if (!event.turnId) return false;
+  return events.some(candidate => (
+    candidate.sessionId === event.sessionId &&
+    candidate.turnId === event.turnId &&
+    candidate.type === 'user.message' &&
+    getPayloadString(candidate, 'displayKind') === 'delivery_validation'
   ));
-  const evidence = summarizeTurnEvidence(turnEvents);
-  if (evidence.length === 0) return null;
-  const content = [
-    'Evidence for review.',
-    'The agent ended this turn. BeeGame is idle and has not marked the project delivered.',
-    'Use the observed evidence below to compare against the agent final summary.',
-    '',
-    'Observed evidence:',
-    ...evidence.map(item => `- ${item}`),
-    '',
-    'Agent claims without matching evidence should be treated as unverified. Continue with fixes if the game is not ready.',
-  ].join('\n');
-  return {
-    type: 'agent_message',
-    task_id: completedEvent.sessionId,
-    project_id: projectId,
-    sender: 'system',
-    content,
-    message_id: `beegame-delivery-review-${completedEvent.sessionId}-${completedEvent.turnId || completedEvent.id}`,
-    timestamp: Date.parse(completedEvent.createdAt) || Date.now(),
-    task_kind: 'delivery_review',
-  } as WebSocketMessage;
-}
-
-function summarizeTurnEvidence(events: BeeGameEvent[]): string[] {
-  const items: string[] = [];
-  for (const event of events) {
-    if (event.type !== 'tool.completed' && event.type !== 'tool.failed') continue;
-    const toolName = getPayloadString(event, 'toolName') || 'Tool';
-    const status = event.type === 'tool.failed' ? 'failed' : 'completed';
-    const input = getPayloadRecord(event, 'input');
-    const command = typeof input.command === 'string' ? input.command.trim() : '';
-    const filePath = typeof input.file_path === 'string' ? input.file_path.trim() : '';
-    const path = typeof input.path === 'string' ? input.path.trim() : '';
-    const detail = command || filePath || path;
-    const outputHint = summarizeEvidenceOutput(getEventOutput(event));
-    const suffix = [
-      detail ? truncateEvidenceDetail(detail) : '',
-      outputHint,
-    ].filter(Boolean).join(' | ');
-    items.push(`${toolName} ${status}${suffix ? `: ${suffix}` : ''}`);
-  }
-  return items.slice(-8);
-}
-
-function summarizeEvidenceOutput(output: string): string {
-  const compact = output.replace(/\s+/g, ' ').trim();
-  if (!compact) return '';
-  const urlMatch = compact.match(PREVIEW_URL_PATTERN);
-  if (urlMatch) return `observed URL ${urlMatch[0]}`;
-  if (/\b(error|failed|failure|exception)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
-  if (/\b(pass(?:ed)?|success(?:ful)?|built|compiled|ready)\b/i.test(compact)) return `output ${truncateEvidenceDetail(compact)}`;
-  return '';
-}
-
-const PREVIEW_URL_PATTERN = /https?:\/\/(?:localhost|127\.0\.0\.1|\[[^\]]+\]|[^\s/]+)(?::\d+)?\/?[^\s)]*/i;
-
-function truncateEvidenceDetail(value: string): string {
-  const compact = value.replace(/\s+/g, ' ').trim();
-  if (compact.length <= 180) return compact;
-  return `${compact.slice(0, 180)}...`;
-}
-
-function findUnresolvedValidationFailure(completedEvent: BeeGameEvent, events: BeeGameEvent[]): BeeGameEvent | null {
-  const commandState = new Map<string, BeeGameEvent>();
-  for (const event of events) {
-    if (event.sessionId !== completedEvent.sessionId) continue;
-    if (completedEvent.turnId && event.turnId !== completedEvent.turnId) continue;
-    if (event.id > completedEvent.id) continue;
-    if (event.type !== 'tool.completed' && event.type !== 'tool.failed') continue;
-    if (!isBashToolEvent(event)) continue;
-    const command = getBashCommand(event);
-    if (!command || !isValidationCommand(command)) continue;
-    commandState.set(normalizeCommandForState(command), event);
-  }
-  const unresolvedFailures = [...commandState.values()]
-    .filter(event => event.type === 'tool.failed')
-    .sort((a, b) => b.id - a.id);
-  return unresolvedFailures[0] || null;
-}
-
-function isBashToolEvent(event: BeeGameEvent): boolean {
-  return (getPayloadString(event, 'toolName') || '').toLowerCase() === 'bash';
-}
-
-function getBashCommand(event: BeeGameEvent): string {
-  return String(getPayloadRecord(event, 'input').command || '').trim();
-}
-
-function getEventOutput(event: BeeGameEvent): string {
-  return typeof event.payload?.output === 'string' ? event.payload.output : event.text;
-}
-
-function isValidationCommand(command: string): boolean {
-  const normalized = command.toLowerCase();
-  return /\b(build|test|typecheck|lint|check|verify|compile)\b/.test(normalized)
-    || /\btsc\b/.test(normalized);
-}
-
-function normalizeCommandForState(command: string): string {
-  return command
-    .replace(/\s+/g, ' ')
-    .replace(/\s+2>&1\b/g, '')
-    .replace(/\s+\|\s*head\s+-\d+\b/g, '')
-    .trim();
-}
-
-function truncateForChatAlert(output: string): string {
-  const text = output.trim();
-  if (text.length <= 1200) return text;
-  return `${text.slice(0, 1200)}...`;
 }
 
 function normalizeDisplayEvents(events: BeeGameEvent[]): BeeGameEvent[] {

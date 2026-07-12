@@ -164,7 +164,7 @@ export function buildDeliveryRepairPrompt(contract: DeliveryContract, attempt: n
     }))
   return [
     `Delivery repair attempt ${attempt}.`,
-    'The read-only delivery review did not pass. Fix the project-level implementation and evidence gaps listed below.',
+    'Independent delivery validation did not pass. Fix the project-level implementation and evidence gaps listed below.',
     'Do not weaken the acceptance contract, mark unchecked requirements as accepted, or replace runtime evidence with model claims.',
     'Use the project-selected platform adapter and project-native toolchain. Do not bind shared logic to a particular engine or platform.',
     'After fixing, add or update executable regression coverage for the affected player path and run it.',

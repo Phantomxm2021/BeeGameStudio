@@ -189,10 +189,14 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       'getEmptyToolPermissionContext',
     ) as Record<string, unknown>
     const tools = call(toolsModule, 'getTools', permissionContext)
-    const [commands, agentDefinitions] = await Promise.all([
+    const [commands, discoveredAgentDefinitions] = await Promise.all([
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
     ])
+    const agentDefinitions = mergeManagedAgentDefinitions(
+      discoveredAgentDefinitions,
+      this.input.agentDefinitions ?? [],
+    )
 
     const appState = {
       ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
@@ -316,6 +320,34 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
     return this.engine
   }
+}
+
+export function mergeManagedAgentDefinitions(
+  discovered: unknown,
+  managed: BeeGameSessionRunnerStartInput['agentDefinitions'],
+): Record<string, unknown> {
+  const current = isRecord(discovered) ? discovered : {}
+  const active = arrayOfRecords(current.activeAgents)
+  const all = arrayOfRecords(current.allAgents)
+  const managedByType = new Map((managed ?? []).map(agent => [agent.agentType, agent]))
+  const allowedAgentTypes = Array.isArray(current.allowedAgentTypes)
+    ? current.allowedAgentTypes.filter((item): item is string => typeof item === 'string')
+    : undefined
+  const retainUnmanaged = (agents: Record<string, unknown>[]) => agents.filter(agent => (
+    typeof agent.agentType !== 'string' || !managedByType.has(agent.agentType)
+  ))
+  return {
+    ...current,
+    activeAgents: [...retainUnmanaged(active), ...managedByType.values()],
+    allAgents: [...retainUnmanaged(all), ...managedByType.values()],
+    ...(allowedAgentTypes
+      ? { allowedAgentTypes: [...new Set([...allowedAgentTypes, ...managedByType.keys()])] }
+      : {}),
+  }
+}
+
+function arrayOfRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : []
 }
 
 export function toQueryEngineThinkingConfig(

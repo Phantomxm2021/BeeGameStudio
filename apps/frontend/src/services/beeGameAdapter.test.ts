@@ -2292,7 +2292,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 
-  it('shows an evidence review reminder with tool evidence when a turn ends successfully', async () => {
+  it('does not synthesize delivery evidence from ordinary tool activity', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -2335,22 +2335,14 @@ describe('beeGameAdapter prompt rules', () => {
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'agent_message',
-        sender: 'system',
-        task_kind: 'delivery_review',
-        content: expect.stringContaining('Evidence for review.'),
-      }),
+      expect.objectContaining({ type: 'tool_end', tool: 'Bash' }),
       expect.objectContaining({ type: 'status', status: 'idle' }),
     ]));
-    expect(polled.messages.find(message => message.task_kind === 'delivery_review')?.content)
-      .toContain('game-engine verify');
-    expect(polled.messages.find(message => message.task_kind === 'delivery_review')?.content)
-      .toContain('Agent claims without matching evidence should be treated as unverified');
+    expect(polled.messages.some(message => message.task_kind === 'delivery_review')).toBe(false);
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 
-  it('shows a recoverable alert when a turn ends after a failed validation command', async () => {
+  it('does not classify failed commands through command-name heuristics', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -2399,16 +2391,10 @@ describe('beeGameAdapter prompt rules', () => {
     const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
 
     expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'agent_message',
-        sender: 'system',
-        task_kind: 'last_check_failed',
-        requires_user_action: true,
-        next_action: 'continue_from_last_failed_check',
-        content: expect.stringContaining('Last check failed'),
-      }),
+      expect.objectContaining({ type: 'tool_end', tool: 'Bash', tool_status: 'failed' }),
       expect.objectContaining({ type: 'status', status: 'idle' }),
     ]));
+    expect(polled.messages.some(message => message.task_kind === 'last_check_failed')).toBe(false);
   });
 
   it('hides streaming partials and shows only the final assistant message', async () => {

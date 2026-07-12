@@ -214,7 +214,6 @@ export const ChatPanel = memo(({
     chatInput,
     onChatInputChange,
     onSend,
-    onSendMessage,
     onEditMessage,
     editingMessageId = null,
     onCancelEdit,
@@ -294,10 +293,6 @@ export const ChatPanel = memo(({
         : undefined;
     const shouldShowApprovalBar = Boolean(onApprovePlan && activeComposerReview && !activeBeeGamePermissionReview);
     const shouldShowWaitingBanner = waitingApproval.isBlockingChat && !shouldShowApprovalBar;
-    const handleContinueFixing = (message: string) => {
-        if (!canSendMessage || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage?.(message);
-    };
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingApproval.isBlockingChat || Boolean(activeBeeGamePermissionReview);
     const canSubmitComposer = Boolean(chatInput.trim() || attachments.length > 0);
     const isBeeGameVariant = variant === 'beegame';
@@ -448,7 +443,6 @@ export const ChatPanel = memo(({
                                 key={m.id}
                                 m={m}
                                 onPreviewArtifact={onPreviewArtifact}
-                                onContinueFixing={onSendMessage ? handleContinueFixing : undefined}
                                 variant={variant}
                                 lang={lang}
                             />

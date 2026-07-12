@@ -532,37 +532,14 @@ const EvidenceDivider = memo(({ label, content, messageId }: { label: string; co
 });
 EvidenceDivider.displayName = 'EvidenceDivider';
 
-const DeliveryReviewAlert = memo(({ message, variant = 'legacy', lang = 'en' }: { message: ChatDisplayMessage; variant?: 'legacy' | 'beegame'; lang?: Language }) => {
-    const text = useBeeGameText(lang);
-    return (
-    <div
-        className={variant === 'beegame'
-            ? 'glass-control w-full rounded-2xl p-3 text-zinc-100 backdrop-blur-2xl'
-            : 'w-full rounded-2xl border border-sky-200 bg-sky-50/80 p-4 text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/20 dark:text-sky-100'
-        }
-    >
-        <div className={variant === 'beegame' ? 'type-caption-1 mb-2 flex items-center gap-2 text-zinc-300' : 'type-caption-1 mb-2 flex items-center gap-2 text-sky-600 dark:text-sky-300'}>
-            <CheckCircle2 className="h-4 w-4" />
-            {text.evidenceForReview}
-        </div>
-        <div className="type-callout opacity-85 [overflow-wrap:anywhere]">
-            <MarkdownRenderer content={message.content} isUser={false} messageId={message.id} variant={variant} lang={lang} />
-        </div>
-    </div>
-    );
-});
-DeliveryReviewAlert.displayName = 'DeliveryReviewAlert';
-
 export const MessageItem = memo(({
     m,
     onPreviewArtifact,
-    onContinueFixing,
     variant = 'legacy',
     lang = 'en',
 }: {
     m: ChatDisplayMessage,
     onPreviewArtifact?: (artifactId: string, title: string, content?: string) => void,
-    onContinueFixing?: (content: string) => void,
     variant?: 'legacy' | 'beegame',
     lang?: Language,
 }) => {
@@ -590,40 +567,6 @@ export const MessageItem = memo(({
 
     if (!isUser && isContextUseMessage(m)) {
         return <EvidenceDivider label={text.useContext} content={m.content} messageId={m.id} />;
-    }
-
-    if (!isUser && m.taskKind === 'last_check_failed') {
-        const continueMessage = text.continueFromLastFailedCheckPrompt;
-        return (
-            <div
-                className={isBeeGameVariant
-                    ? 'glass-control flex w-full items-start space-x-3 rounded-2xl p-4 text-zinc-100 backdrop-blur-2xl'
-                    : 'w-full p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-start space-x-3'
-                }
-            >
-                <AlertCircle className={isBeeGameVariant ? 'mt-0.5 h-5 w-5 flex-shrink-0 text-amber-200' : 'w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5'} />
-                <div className="flex-1 min-w-0">
-                    <div className={isBeeGameVariant ? 'type-caption-1 mb-1 text-zinc-300' : 'type-caption-1 text-amber-600 dark:text-amber-400 mb-1'}>
-                        {text.lastCheckFailed}
-                    </div>
-                    <div className={isBeeGameVariant ? 'type-callout text-zinc-200 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap' : 'type-callout text-amber-950 dark:text-amber-100 opacity-85 break-words [overflow-wrap:anywhere] whitespace-pre-wrap'}>
-                        {m.content}
-                    </div>
-                    <button
-                        type="button"
-                        disabled={!onContinueFixing}
-                        onClick={() => onContinueFixing?.(continueMessage)}
-                        className="primary-pill mt-3 inline-flex items-center justify-center px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        {text.continueFixing}
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    if (!isUser && m.taskKind === 'delivery_review') {
-        return <DeliveryReviewAlert message={m} variant={variant} lang={lang} />;
     }
 
     if (isError) {

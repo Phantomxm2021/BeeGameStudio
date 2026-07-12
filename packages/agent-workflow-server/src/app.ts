@@ -3575,6 +3575,7 @@ async function ensureBeeGameProjectSession(input: {
     ...(getBearerToken(input.request) ? { authToken: getBearerToken(input.request) } : {}),
     userDataRoot: input.getUserDataRoot(input.request),
   })
+  await input.beeGameSessions.resumePendingDeliveryPipeline(session.id)
   const metadata = input.beeGameSessions.metadata(session.id)
   await input.dashboardRepository.upsertSessionMetadata(
     input.request,
@@ -3758,15 +3759,15 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
 }
 
 function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
-  const event = [...events].reverse().find(item =>
-    item.type === 'delivery.review.completed' || item.type === 'delivery.review.started'
-  )
+  const event = findLatestDeliveryValidationEvent(events)
   if (!event) return null
   const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
   return {
     status: typeof payload.status === 'string'
       ? payload.status
-      : event.type === 'delivery.review.started' ? 'validating' : 'untested',
+      : event.type === 'delivery.validation.started' || event.type === 'delivery.review.started'
+        ? 'validating'
+        : 'untested',
     summary: typeof payload.summary === 'string' ? payload.summary : event.text,
     findings: Array.isArray(payload.findings) ? payload.findings : [],
     evidence_event_ids: Array.isArray(payload.evidenceEventIds) ? payload.evidenceEventIds : [],
@@ -3777,8 +3778,11 @@ function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
 }
 
 function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
+  const hasNewValidation = events.some(item => item.type === 'delivery.validation.completed')
   return events
-    .filter(item => item.type === 'delivery.review.completed')
+    .filter(item => hasNewValidation
+      ? item.type === 'delivery.validation.completed'
+      : item.type === 'delivery.review.completed')
     .slice(-20)
     .map(event => {
       const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
@@ -3790,6 +3794,16 @@ function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
         updated_at: normalizeBeeGameCreatedAt(event.createdAt),
       }
     })
+}
+
+function findLatestDeliveryValidationEvent(events: BeeGameEvent[]): BeeGameEvent | undefined {
+  const current = [...events].reverse().find(item => (
+    item.type === 'delivery.validation.completed' || item.type === 'delivery.validation.started'
+  ))
+  if (current) return current
+  return [...events].reverse().find(item => (
+    item.type === 'delivery.review.completed' || item.type === 'delivery.review.started'
+  ))
 }
 
 function deriveDeliveryMetricTrends(history: JsonObject[]): JsonObject[] {
@@ -4394,6 +4408,7 @@ function registerBeeGameSessionRoutes(
             : {}),
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
+      await beeGameSessions.resumePendingDeliveryPipeline(session.id)
       await options.persistSessionMetadata(
         c.req.raw,
         beeGameSessions.metadata(session.id),

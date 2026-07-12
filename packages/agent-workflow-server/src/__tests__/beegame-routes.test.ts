@@ -22,6 +22,7 @@ import type {
 } from '../beegame/session-manager'
 import {
   BeeGameSessionManager,
+  countBashPermissionRequestsRequiringUserResolution,
   materializeBeeGameFileAttachments,
 } from '../beegame/session-manager'
 import type {
@@ -817,7 +818,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('blocks a failed delivery review, repairs findings, and re-reviews before acceptance', async () => {
+  test('blocks a missing validator, repairs findings, and revalidates before acceptance', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-review-'))
     await mkdir(join(workspace, 'docs'), { recursive: true })
     await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
@@ -847,11 +848,14 @@ describe('beegame session routes', () => {
               return
             }
             if (submitCount === 2) {
-              const decision = await input.requestPermission({
-                toolUseID: 'review-write', toolName: 'Write', message: 'Change implementation?',
-                input: { file_path: 'src/main.ts', content: 'changed' },
-              })
-              expect(decision.behavior).toBe('deny')
+              input.onMessage({ type: 'assistant', message: { content: [
+                { type: 'tool_use', id: 'contract-validator-1', name: 'Task', input: { subagent_type: 'beegame-contract-validator', prompt: 'validate' } },
+                { type: 'tool_use', id: 'runtime-validator-1', name: 'Task', input: { subagent_type: 'beegame-runtime-validator', prompt: 'validate' } },
+              ] } })
+              input.onMessage({ type: 'user', message: { content: [
+                { type: 'tool_result', tool_use_id: 'contract-validator-1', content: JSON.stringify({ status: 'failed', verifiedCapabilities: [] }) },
+                { type: 'tool_result', tool_use_id: 'runtime-validator-1', content: JSON.stringify({ status: 'failed', verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
+              ] } })
               input.onMessage({ type: 'result', result: JSON.stringify({
                 status: 'failed',
                 summary: 'Core path failed.',
@@ -878,12 +882,14 @@ describe('beegame session routes', () => {
               return
             }
             input.onMessage({ type: 'assistant', message: { content: [
-              { type: 'tool_use', id: 'skill-acceptance', name: 'Skill', input: { skill: 'beegame-game-acceptance' } },
-              { type: 'tool_use', id: 'runtime-path', name: 'Bash', input: { command: 'project-native-player-path-check' } },
+              { type: 'tool_use', id: 'contract-validator-2', name: 'Task', input: { subagent_type: 'beegame-contract-validator', prompt: 'validate' } },
+              { type: 'tool_use', id: 'runtime-validator-2', name: 'Task', input: { subagent_type: 'beegame-runtime-validator', prompt: 'validate' } },
+              { type: 'tool_use', id: 'asset-validator-2', name: 'Task', input: { subagent_type: 'beegame-asset-validator', prompt: 'validate' } },
             ] } })
             input.onMessage({ type: 'user', message: { content: [
-              { type: 'tool_result', tool_use_id: 'skill-acceptance', content: 'loaded' },
-              { type: 'tool_result', tool_use_id: 'runtime-path', content: 'assertions passed' },
+              { type: 'tool_result', tool_use_id: 'contract-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: [] }) },
+              { type: 'tool_result', tool_use_id: 'runtime-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
+              { type: 'tool_result', tool_use_id: 'asset-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: [] }) },
             ] } })
             input.onMessage({ type: 'result', result: JSON.stringify({
               status: 'passed',
@@ -893,14 +899,14 @@ describe('beegame session routes', () => {
                 id: 'core-path', title: 'Core player path', scope: 'mvp', status: 'runtime_verified',
                 evidenceRequired: ['runtime', 'skill'],
                 evidence: [
-                  { kind: 'runtime', eventId: 'runtime-path', detail: 'Player path assertions passed.' },
-                  { kind: 'skill', eventId: 'skill-acceptance', detail: 'Acceptance capability used.' },
+                  { kind: 'runtime', eventId: 'runtime-validator-2', detail: 'Player path assertions passed.' },
+                  { kind: 'skill', eventId: 'runtime-validator-2', detail: 'Acceptance capability used.' },
                 ],
               }],
               findings: [{
                 requirementId: 'core-path', requirement: 'Core player path', status: 'passed',
                 detail: 'Executable assertions passed.',
-                evidence: [{ kind: 'runtime', eventId: 'runtime-path', detail: 'Player path assertions passed.' }],
+                evidence: [{ kind: 'runtime', eventId: 'runtime-validator-2', detail: 'Player path assertions passed.' }],
               }],
             }) })
           },
@@ -911,14 +917,181 @@ describe('beegame session routes', () => {
     try {
       const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
       await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
-      await waitFor(() => manager.events(session.id).filter(event => event.type === 'delivery.review.completed').length === 2)
-      const reviews = manager.events(session.id).filter(event => event.type === 'delivery.review.completed')
-      expect(reviews[0]?.payload).toEqual(expect.objectContaining({ status: 'failed' }))
+      await waitFor(() => manager.events(session.id).filter(event => event.type === 'delivery.validation.completed').length === 2)
+      const reviews = manager.events(session.id).filter(event => event.type === 'delivery.validation.completed')
+      expect(reviews[0]?.payload).toEqual(expect.objectContaining({
+        status: 'blocked',
+        validators: expect.arrayContaining([
+          expect.objectContaining({ agentType: 'beegame-contract-validator' }),
+          expect.objectContaining({ agentType: 'beegame-runtime-validator' }),
+        ]),
+      }))
+      expect((reviews[0]?.payload?.validators as unknown[] | undefined)).toHaveLength(2)
       expect(reviews[1]?.payload).toEqual(expect.objectContaining({ status: 'passed' }))
       expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(true)
       expect(submitCount).toBe(4)
     } finally {
       await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('terminates a stalled delivery coordinator with a blocked validation event', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-timeout-'))
+    const previousTimeout = process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS
+    process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS = '10'
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'build-read', name: 'Read', input: { file_path: 'docs/delivery-contract.json' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'build-read', content: 'read' }] } })
+              input.onMessage({ type: 'result', result: 'Build complete' })
+              return
+            }
+            await new Promise<void>(() => {})
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => (
+        event.type === 'system.status' && event.payload?.type === 'delivery.validation.timeout'
+      )))
+      const completed = manager.events(session.id).find(event => event.type === 'delivery.validation.completed')
+      expect(completed).toBeDefined()
+      expect(completed?.payload?.status).not.toBe('passed')
+      manager.stop(session.id)
+    } finally {
+      if (previousTimeout === undefined) delete process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS
+      else process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS = previousTimeout
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('resumes a persisted queued delivery repair exactly once after restart', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-resume-'))
+    const sessionId = 'beegame_delivery_resume'
+    const transcriptDir = join(workspace, 'transcripts')
+    const prefix = basename(workspace)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48)
+    const transcriptPath = join(
+      transcriptDir,
+      `${prefix}__${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}.jsonl`,
+    )
+    const contract = {
+      version: 1,
+      status: 'failed',
+      summary: 'Runtime path is unresolved.',
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp', status: 'failed',
+        evidenceRequired: ['runtime'], evidence: [],
+      }],
+      requiredCapabilities: [],
+      verifiedCapabilities: [],
+    }
+    const persisted = [
+      { id: 1, sessionId, type: 'delivery.contract.updated', text: contract.summary, payload: { type: 'delivery.contract.updated', contract, attempt: 0 }, createdAt: new Date().toISOString() },
+      { id: 2, sessionId, type: 'delivery.repair.queued', text: 'Delivery repair queued', payload: { type: 'delivery.repair.queued', status: 'queued', attempt: 1, contract }, createdAt: new Date().toISOString() },
+    ]
+    await mkdir(transcriptDir, { recursive: true })
+    await writeFile(transcriptPath, `${persisted.map(event => JSON.stringify(event)).join('\n')}\n`)
+
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            await new Promise<void>(resolveAbort => {
+              if (input.signal.aborted) return resolveAbort()
+              input.signal.addEventListener('abort', () => resolveAbort(), { once: true })
+            })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
+      expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(true)
+      expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(false)
+      expect(manager.events(session.id).filter(event => event.type === 'delivery.repair.started')).toHaveLength(1)
+      expect(submits).toBe(1)
+      manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('counts only Bash permissions that actually require user resolution', () => {
+    const base = { sessionId: 'session', turnId: 'turn', text: 'permission', createdAt: new Date() }
+    const events = [
+      { ...base, id: 1, type: 'permission.resolved' as const, payload: { type: 'permission.resolved', toolName: 'Bash', toolUseID: 'auto-allowed', decision: 'allow', autoApproved: true } },
+      { ...base, id: 2, type: 'permission.resolved' as const, payload: { type: 'permission.resolved', toolName: 'Bash', toolUseID: 'auto-denied', decision: 'deny', autoDenied: true } },
+      { ...base, id: 3, type: 'permission.requested' as const, payload: { type: 'permission.requested', toolName: 'Bash', toolUseID: 'needs-user' } },
+      { ...base, id: 4, type: 'permission.resolved' as const, payload: { type: 'permission.resolved', toolName: 'Bash', toolUseID: 'needs-user', decision: 'allow' } },
+    ]
+    expect(countBashPermissionRequestsRequiringUserResolution(events, 'turn')).toBe(1)
+  })
+
+  test('resumes interrupted validation and an in-flight repair without advancing the repair attempt', async () => {
+    for (const scenario of [
+      { transition: 'delivery.validation.started', expectedTurnKind: 'delivery.validation.started', attempt: 0 },
+      { transition: 'delivery.repair.started', expectedTurnKind: 'delivery.repair.started', attempt: 1 },
+    ] as const) {
+      const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-transition-'))
+      const sessionId = `beegame_transition_${scenario.attempt}`
+      const transcriptDir = join(workspace, 'transcripts')
+      const prefix = basename(workspace).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
+      const transcriptPath = join(transcriptDir, `${prefix}__${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}.jsonl`)
+      const contract = {
+        version: 1, status: 'failed', summary: 'Delivery remains unresolved.',
+        requirements: [{ id: 'core-path', title: 'Core path', scope: 'mvp', status: 'failed', evidenceRequired: ['runtime'], evidence: [] }],
+        requiredCapabilities: [], verifiedCapabilities: [],
+      }
+      const events = [
+        { id: 1, sessionId, type: 'delivery.contract.updated', text: contract.summary, payload: { type: 'delivery.contract.updated', contract, attempt: scenario.attempt }, createdAt: new Date().toISOString() },
+        { id: 2, sessionId, type: scenario.transition, text: 'Interrupted transition', payload: { type: scenario.transition, status: 'running', attempt: scenario.attempt, contract }, createdAt: new Date().toISOString() },
+      ]
+      await mkdir(transcriptDir, { recursive: true })
+      await writeFile(transcriptPath, `${events.map(event => JSON.stringify(event)).join('\n')}\n`)
+      let submits = 0
+      const manager = new BeeGameSessionManager({
+        async start() {
+          return {
+            async submit(input) {
+              submits += 1
+              await new Promise<void>(resolveAbort => input.signal.addEventListener('abort', () => resolveAbort(), { once: true }))
+            },
+            stop() {},
+          }
+        },
+      }, workspace)
+      try {
+        const session = manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
+        expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(true)
+        expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(false)
+        const resumed = manager.events(session.id).filter(event => event.type === scenario.expectedTurnKind)
+        expect(resumed).toHaveLength(2)
+        if (scenario.transition === 'delivery.repair.started') {
+          expect(resumed.at(-1)?.payload).toEqual(expect.objectContaining({ attempt: 1, resumed: true }))
+        }
+        expect(submits).toBe(1)
+        manager.stop(session.id)
+      } finally {
+        await rm(workspace, { recursive: true, force: true })
+      }
     }
   })
 
