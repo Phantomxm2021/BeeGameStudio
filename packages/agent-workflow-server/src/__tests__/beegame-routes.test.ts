@@ -817,6 +817,43 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('runs a read-only delivery review after a confirmed build and records a non-passing result when mutation is attempted', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-review-'))
+    let submitCount = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submitCount += 1
+            if (submitCount === 1) {
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'docs/GDD.md' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'GDD' }] } })
+              input.onMessage({ type: 'result', result: 'Build finished' })
+              return
+            }
+            const decision = await input.requestPermission({
+              toolUseID: 'review-write', toolName: 'Write', message: 'Change implementation?',
+              input: { file_path: 'src/main.ts', content: 'changed' },
+            })
+            expect(decision.behavior).toBe('deny')
+            input.onMessage({ type: 'result', result: JSON.stringify({ status: 'passed', summary: 'Looks good', findings: [] }) })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.review.completed'))
+      const review = manager.events(session.id).find(event => event.type === 'delivery.review.completed')
+      expect(review?.payload).toEqual(expect.objectContaining({ status: 'failed' }))
+      expect(submitCount).toBe(2)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('validates remote runtime provider endpoints before starting the session runner', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-remote-runtime-endpoints-'))
     const resolvedUrls: string[] = []

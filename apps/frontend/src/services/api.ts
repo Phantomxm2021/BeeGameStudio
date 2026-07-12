@@ -137,8 +137,18 @@ export interface ProjectBaselineStatusPayload {
   context?: ContextVisibilityPayload | null;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
+  delivery_review?: DeliveryReviewPayload | null;
+  delivery_status?: string;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
+}
+
+export interface DeliveryReviewPayload {
+  status?: 'validating' | 'passed' | 'failed' | 'untested' | 'blocked';
+  summary?: string;
+  findings?: Array<{ requirement?: string; status?: string; detail?: string }>;
+  evidence_event_ids?: string[];
+  updated_at?: string;
 }
 
 export interface OperatorVisibilityPayload {
@@ -761,6 +771,8 @@ export const normalizeProjectBaselineStatusPayload = (
       context: undefined,
       execution_evidence: undefined,
       build_report: null,
+      delivery_review: null,
+      delivery_status: 'implementation',
       document_bundle: null,
     };
   }
@@ -807,6 +819,8 @@ export const normalizeProjectBaselineStatusPayload = (
     review_status: normalizeReviewStatusPayload(normalizedPayload.review_status),
     context: normalizeContextVisibilityPayload(normalizedPayload.context),
     build_report: normalizeBuildReportPayload(normalizedPayload.build_report) ?? null,
+    delivery_review: normalizedPayload.delivery_review ?? null,
+    delivery_status: String(normalizedPayload.delivery_status ?? 'implementation'),
     document_bundle: normalizeDocumentBundleStatusPayload(normalizedPayload.document_bundle) ?? null,
   };
 };

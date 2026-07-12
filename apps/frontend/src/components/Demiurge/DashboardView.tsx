@@ -574,6 +574,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 isSyncing={isSyncing}
                 isInteractionLocked={isProjectInteractionLocked}
                 buildReport={projectStatus?.build_report || null}
+                deliveryReview={projectStatus?.delivery_review || null}
                 deployments={deploymentHistory}
                 previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}

@@ -111,6 +111,8 @@ export type BeeGameEventType =
   | 'turn.completed'
   | 'turn.empty'
   | 'turn.failed'
+  | 'delivery.review.started'
+  | 'delivery.review.completed'
   | 'session.stopped'
   | 'session.failed'
 
@@ -261,6 +263,7 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
+  currentTurnKind?: string
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
 }
@@ -434,6 +437,7 @@ export class BeeGameSessionManager {
         ? getNextTurnIndex(session.id, recoveredTranscript.events)
         : 1,
       currentTurnId: null,
+      currentTurnKind: undefined,
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
@@ -733,6 +737,7 @@ export class BeeGameSessionManager {
     })
 
     record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+    record.currentTurnKind = display?.displayKind
     record.nextTurnIndex += 1
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
@@ -907,6 +912,9 @@ export class BeeGameSessionManager {
               'Agent ended this turn without using tools. Send continue or retry to start implementation.',
             )
           } else {
+            if (record.currentTurnKind === 'delivery_review') {
+              this.completeDeliveryReview(record, eventCountBeforeTurn)
+            }
             this.appendRuntimeObservation(record, 'turn_completed')
             this.append(record, 'turn.completed', 'Turn ended')
           }
@@ -947,7 +955,9 @@ export class BeeGameSessionManager {
       if (attachmentDirectory) {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
+      const completedTurnKind = record.currentTurnKind
       record.currentTurnId = null
+      record.currentTurnKind = undefined
       record.abortController = null
       record.session.updatedAt = new Date()
       const metadata = this.metadata(record.session.id)
@@ -956,7 +966,68 @@ export class BeeGameSessionManager {
           console.warn('BeeGame post-turn integration failed:', toErrorMessage(error))
         })
       }
+      if (completedTurnKind === 'confirmed_brief' && record.session.status === 'running') {
+        queueMicrotask(() => {
+          void this.startDeliveryReview(record).catch(error => {
+            this.append(record, 'delivery.review.completed', 'Delivery review could not start', {
+              type: 'delivery.review.completed',
+              status: 'blocked',
+              summary: toErrorMessage(error),
+              findings: [],
+              evidenceEventIds: [],
+            })
+          })
+        })
+      }
     }
+  }
+
+  private async startDeliveryReview(record: SessionRecord): Promise<void> {
+    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
+    this.append(record, 'delivery.review.started', 'Delivery review started', {
+      type: 'delivery.review.started',
+      status: 'validating',
+    })
+    await this.sendWithDisplay(
+      record.session.id,
+      deliveryReviewPrompt(),
+      {
+        displayText: 'Validating delivery against project documents',
+        displayKind: 'delivery_review',
+        taskType: 'agent_turn',
+        thinkingMode: 'enabled',
+      },
+    )
+  }
+
+  private completeDeliveryReview(record: SessionRecord, eventStartIndex: number): void {
+    const reviewEvents = record.events.slice(eventStartIndex)
+    const result = [...reviewEvents].reverse().find(event => event.type === 'result')
+    const executableEvidence = reviewEvents.filter(event =>
+      event.type === 'tool.completed' &&
+      !isReadOnlyTool(getDashboardPayloadString(event.payload, 'toolName'))
+    )
+    const failedEvidence = reviewEvents.filter(event =>
+      event.type === 'tool.failed' ||
+      (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
+    )
+    const parsed = parseDeliveryReview(result?.text)
+    const status = !parsed
+      ? 'untested'
+      : failedEvidence.length > 0 && parsed.status === 'passed'
+        ? 'failed'
+        : parsed.status === 'passed' && (parsed.findings.length === 0 || parsed.findings.some(finding => finding.status !== 'passed'))
+          ? 'untested'
+        : executableEvidence.length === 0 && parsed.status === 'passed'
+          ? 'untested'
+          : parsed.status
+    this.append(record, 'delivery.review.completed', parsed?.summary || 'Delivery review did not return a valid structured result', {
+      type: 'delivery.review.completed',
+      status,
+      summary: parsed?.summary || 'Structured review result was unavailable.',
+      findings: parsed?.findings || [],
+      evidenceEventIds: executableEvidence.map(event => String(event.id)),
+    })
   }
 
   private async resolveRuntimeOutboundTargets(
@@ -1081,6 +1152,14 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
+    if (record.currentTurnKind === 'delivery_review' && isFileMutationTool(request.toolName)) {
+      const message = 'Delivery review is read-only and cannot modify project files.'
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
+        decision: 'deny', autoDenied: true, reason: message, input: request.input,
+      })
+      return { behavior: 'deny', message }
+    }
     if (isUserQuestionTool(request.toolName)) {
       this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
         type: 'permission.resolved',
@@ -2063,6 +2142,51 @@ function withSessionLanguageContract(
 
 function withAssetIntegrationContract(prompt: string): string {
   return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities is the explicit format capability contract of the selected runtime adapter. Set it from the project adapter/build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with that runtime contract. If the adapter capability or the format is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the target adapter/loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
+}
+
+type ParsedDeliveryReview = {
+  status: 'passed' | 'failed' | 'untested' | 'blocked'
+  summary: string
+  findings: Array<{
+    requirement: string
+    status: 'passed' | 'failed' | 'untested' | 'blocked'
+    detail: string
+  }>
+}
+
+function deliveryReviewPrompt(): string {
+  return [
+    'Perform a read-only delivery review of the current game project.',
+    'Treat the project GDD, technical design, UI/UX design, and acceptance checklist as the source of truth.',
+    'Compare those documents with the actual implementation. Run safe project-native build, test, preview, or player-path checks when available.',
+    'Do not edit files, install dependencies, change configuration, or claim success from build/typecheck alone.',
+    'A passed result requires executable evidence for the core player path. If that evidence is unavailable, return untested rather than passed.',
+    'Your final response must be one JSON object only, with this shape:',
+    '{"status":"passed|failed|untested|blocked","summary":"...","findings":[{"requirement":"...","status":"passed|failed|untested|blocked","detail":"..."}]}',
+  ].join('\n')
+}
+
+function parseDeliveryReview(text: string | undefined): ParsedDeliveryReview | undefined {
+  if (!text?.trim()) return undefined
+  try {
+    const value = JSON.parse(text.trim()) as Record<string, unknown>
+    if (!isDeliveryReviewStatus(value.status) || typeof value.summary !== 'string' || !Array.isArray(value.findings)) {
+      return undefined
+    }
+    const findings = value.findings.flatMap(item => {
+      if (!isObject(item) || typeof item.requirement !== 'string' || !isDeliveryReviewStatus(item.status) || typeof item.detail !== 'string') {
+        return []
+      }
+      return [{ requirement: item.requirement, status: item.status, detail: item.detail }]
+    })
+    return { status: value.status, summary: value.summary, findings }
+  } catch {
+    return undefined
+  }
+}
+
+function isDeliveryReviewStatus(value: unknown): value is ParsedDeliveryReview['status'] {
+  return value === 'passed' || value === 'failed' || value === 'untested' || value === 'blocked'
 }
 
 async function prepareBeeGamePromptInput(input: {

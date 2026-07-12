@@ -479,6 +479,17 @@ describe('DashboardView runtime loading', () => {
         expect(syncStatus.querySelector('svg')).not.toBeNull();
     });
 
+    it('shows the authoritative delivery review state in the project header', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            delivery_review: { status: 'failed', summary: 'Core player path did not pass.' },
+        } as ProjectBaselineStatusPayload;
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        expect(await screen.findByTestId('beegame-delivery-review-status')).toHaveTextContent('需要修复');
+    });
+
     it('locks project-changing interactions while project sync is active', async () => {
         const user = userEvent.setup();
         mockedIsSyncing = true;

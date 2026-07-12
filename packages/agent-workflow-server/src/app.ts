@@ -3565,6 +3565,7 @@ async function getBeeGameProjectRuntimeState(input: {
     workspacePath: sessionRef.workspacePath,
     beeGamePreviews: input.beeGamePreviews,
   })
+  const deliveryReview = deriveDeliveryReview(events)
   return {
     project_id: input.project.id,
     phase: runtime.phase,
@@ -3573,8 +3574,14 @@ async function getBeeGameProjectRuntimeState(input: {
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
     approval_required: pending.length > 0,
-    next_action: runtime.nextAction,
+    next_action: deliveryReview?.status === 'failed'
+      ? 'Fix delivery review findings'
+      : deliveryReview?.status === 'blocked'
+        ? 'Resolve delivery review blocker'
+        : runtime.nextAction,
     context: deriveBeeGameContextVisibility(events, snapshot),
+    delivery_status: deliveryReview?.status ?? 'implementation',
+    delivery_review: deliveryReview,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
@@ -3684,10 +3691,29 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     approval_required: false,
     next_action: 'Ready for next request',
     context: null,
+    delivery_review: null,
+    delivery_status: 'implementation',
     build_report: null,
     review_status: null,
     model_config_id: null,
     pending_permissions: [],
+  }
+}
+
+function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
+  const event = [...events].reverse().find(item =>
+    item.type === 'delivery.review.completed' || item.type === 'delivery.review.started'
+  )
+  if (!event) return null
+  const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
+  return {
+    status: typeof payload.status === 'string'
+      ? payload.status
+      : event.type === 'delivery.review.started' ? 'validating' : 'untested',
+    summary: typeof payload.summary === 'string' ? payload.summary : event.text,
+    findings: Array.isArray(payload.findings) ? payload.findings : [],
+    evidence_event_ids: Array.isArray(payload.evidenceEventIds) ? payload.evidenceEventIds : [],
+    updated_at: normalizeBeeGameCreatedAt(event.createdAt),
   }
 }
 
