@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveApprovedOutboundTarget } from './outbound-target-policy'
+import {
+  createPinnedUndiciDispatcher,
+  resolveApprovedOutboundTarget,
+} from './outbound-target-policy'
 
 const publicResolvers = {
   resolve4: async () => ['93.184.216.34'],
@@ -86,6 +89,17 @@ describe('resolveApprovedOutboundTarget', () => {
 
     expect(target?.url.hostname).toBe('api.example.test')
     await expect(lookupAddress(target!)).resolves.toEqual({ address: '93.184.216.34', family: 4 })
+  })
+
+  test('creates a real Undici dispatcher under the Bun runtime', async () => {
+    const target = await resolveApprovedOutboundTarget('https://api.example.test/v1', publicResolvers)
+    expect(target).not.toBeNull()
+
+    const dispatcher = createPinnedUndiciDispatcher(target!)
+    expect(typeof dispatcher.dispatch).toBe('function')
+    expect(typeof dispatcher.close).toBe('function')
+    expect(typeof dispatcher.destroy).toBe('function')
+    await dispatcher.close()
   })
 
   test('permits the development proxy range only for an explicitly allowlisted hostname', async () => {

@@ -2,7 +2,10 @@ import { resolve4 as resolve4FromDns, resolve6 as resolve6FromDns } from 'node:d
 import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
 import { isIP } from 'node:net'
-import { Agent as UndiciAgent } from 'undici'
+// Bun resolves the bare `undici` specifier to its compatibility shim, whose
+// Agent does not implement the Dispatcher lifecycle. Use the package entrypoint
+// explicitly so pinned DNS lookups are enforced by a real Undici dispatcher.
+import { Agent as UndiciAgent } from 'undici/index.js'
 
 type Resolver = (hostname: string) => Promise<string[]> | string[]
 type LookupCallback = (error: NodeJS.ErrnoException | null, address: string, family: 4 | 6) => void

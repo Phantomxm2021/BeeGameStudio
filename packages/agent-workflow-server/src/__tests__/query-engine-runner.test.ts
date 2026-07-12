@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  closeBeeGameRuntimeDispatcher,
   createBeeGamePinnedFetch,
   createBeeGameThinkingFetch,
   ensureBeeGameMacroGlobals,
@@ -11,6 +12,21 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('closes runtime dispatchers across supported Undici lifecycle shapes', async () => {
+    const closed: string[] = []
+
+    await closeBeeGameRuntimeDispatcher({
+      close: () => { closed.push('close') },
+      destroy: () => { closed.push('unexpected-destroy') },
+    })
+    await closeBeeGameRuntimeDispatcher({
+      destroy: () => { closed.push('destroy') },
+    })
+    await closeBeeGameRuntimeDispatcher({})
+
+    expect(closed).toEqual(['close', 'destroy'])
+  })
 
   test('routes an approved provider origin through its pinned dispatcher and denies unapproved HTTP(S) origins', async () => {
     let pinnedLookupCalls = 0

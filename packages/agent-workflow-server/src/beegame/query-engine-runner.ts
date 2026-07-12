@@ -539,6 +539,21 @@ type PinnedRuntimeFetch = typeof fetch & {
   close(): Promise<void>
 }
 
+type RuntimeDispatcher = {
+  close?: () => Promise<void> | void
+  destroy?: () => Promise<void> | void
+}
+
+export async function closeBeeGameRuntimeDispatcher(dispatcher: RuntimeDispatcher): Promise<void> {
+  if (typeof dispatcher.close === 'function') {
+    await dispatcher.close()
+    return
+  }
+  if (typeof dispatcher.destroy === 'function') {
+    await dispatcher.destroy()
+  }
+}
+
 export function createBeeGamePinnedFetch(
   baseFetch: typeof fetch,
   approvedOutboundTargets: Record<string, ApprovedOutboundTarget>,
@@ -563,7 +578,7 @@ export function createBeeGamePinnedFetch(
       : baseFetch(input, init)
   }) as PinnedRuntimeFetch
   pinnedFetch.close = async () => {
-    await Promise.all([...dispatchers.values()].map(dispatcher => dispatcher.close()))
+    await Promise.all([...dispatchers.values()].map(closeBeeGameRuntimeDispatcher))
   }
   return pinnedFetch
 }

@@ -4384,7 +4384,31 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    if (sessionForbidden) {
+      const legacyWorkspacePath = getWorkspacePathHint(
+        c.req.query('workspacePath'),
+        { workspacePath: c.req.header('x-beegame-workspace-path') },
+      )
+      if (sessionForbidden.error === 'Session not found' && legacyWorkspacePath) {
+        try {
+          const workspacePath = await getSessionWorkspacePath(
+            c.req.raw,
+            c.req.param('id'),
+            legacyWorkspacePath,
+          )
+          return await readTranscriptFromWorkspace(
+            c.req.param('id'),
+            workspacePath,
+            defaultWorkspacePath,
+            getDashboardDataRoot(defaultWorkspacePath),
+          )
+        } catch {
+          // Keep the session/workspace relationship opaque when ownership or
+          // path validation fails.
+        }
+      }
+      return c.json(sessionForbidden, 404)
+    }
     await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))

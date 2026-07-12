@@ -101,6 +101,37 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
+  it('does not probe a stale project session while loading global agents on the homepage', async () => {
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: 'project_stale',
+      sessionId: 'beegame_stale',
+      workspacePath: '/tmp/beegame-projects/stale',
+    }]));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getAgents()).resolves.toEqual([
+      { id: 'beegame', name: 'BeeGame', status: 'idle' },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('removes bindings for projects no longer returned by the account project list', async () => {
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
+      { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
+      { projectId: 'project_removed', sessionId: 'beegame_removed', workspacePath: '/tmp/removed' },
+    ]));
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([
+      { id: 'project_kept', name: 'Kept', created_at: 1710000000000 },
+    ])));
+
+    await beeGameAdapter.getProjects();
+
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
+      { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
+    ]);
+  });
+
   it('stops a BeeGame session by resolving the current project binding', async () => {
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
@@ -3390,6 +3421,33 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock.mock.calls.some(([path, init]) => (
       String(path) === '/api/beegame-sessions' && init?.method === 'POST'
     ))).toBe(false);
+  });
+
+  it('does not replay a persisted terminal failure as a live dashboard error', async () => {
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: 'project_failed_history',
+      sessionId: 'beegame_failed_history',
+      workspacePath: '/tmp/beegame-projects/failed-history',
+    }]));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_failed_history/events?after=0') {
+        return jsonResponse([{
+          id: 7,
+          sessionId: 'beegame_failed_history',
+          turnId: 'turn-1',
+          type: 'turn.failed',
+          text: 'Historical runtime failure',
+          createdAt: '2026-07-12T00:00:00.000Z',
+        }]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    }));
+
+    const initial = await beeGameAdapter.pollMessages('project_failed_history', 0);
+
+    expect(initial.lastEventId).toBe(7);
+    expect(initial.messages).toEqual([]);
   });
 
   it('does not keep polling missing sessions after read-only status falls back to transcript', async () => {

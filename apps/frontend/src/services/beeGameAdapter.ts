@@ -283,6 +283,7 @@ export const beeGameAdapter = {
         return localProjects;
       }
       saveProjects(projects);
+      reconcileProjectBindings(projects);
       return projects;
     } catch (error) {
       if (hasCloudSession()) throw error;
@@ -538,10 +539,15 @@ export const beeGameAdapter = {
     const events = eventResult.events;
     const lastEventId = events.length > 0 ? events[events.length - 1].id : afterEventId;
     const normalizedEvents = normalizeLiveEvents(projectId, events);
+    const isInitialHistorySync = afterEventId === 0;
     return {
       lastEventId,
       messages: normalizedEvents
-        .flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath, normalizedEvents)),
+        .flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath, normalizedEvents))
+        // Chat history already renders persisted terminal failures. Replaying
+        // them through the live channel would invoke onError again on every
+        // dashboard mount and make a historical failure look current.
+        .filter(message => !(isInitialHistorySync && message.type === 'error')),
     };
   },
 
@@ -585,20 +591,10 @@ export const beeGameAdapter = {
   },
 
   async getAgents(): Promise<Array<Record<string, unknown>>> {
-    const bindings = readBindings();
-    const latest = bindings[0];
-    if (!latest) return [{ id: 'beegame', name: 'BeeGame', status: 'idle' }];
-    try {
-      const events = await fetchBeeGameEvents(latest.sessionId, 0, latest.workspacePath);
-      const runtimeStatus = deriveRuntimeStatus(events, getPendingPermissionEvents(events));
-      return [{
-        id: 'beegame',
-        name: 'BeeGame',
-        status: runtimeStatus.agentStatus,
-      }];
-    } catch {
-      return [{ id: 'beegame', name: 'BeeGame', status: 'idle' }];
-    }
+    // Agent activity is project-scoped and comes from /projects/:id/runtime-state.
+    // Probing the most recent local binding here made the account homepage call
+    // stale in-memory session IDs after a refresh or backend restart.
+    return [{ id: 'beegame', name: 'BeeGame', status: 'idle' }];
   },
 
   async getActivity(): Promise<unknown[]> {
@@ -891,6 +887,17 @@ function deleteBinding(projectId: string): void {
 
 function getBinding(projectId: string): ProjectSessionBinding | undefined {
   return readBindings().find(binding => binding.projectId === projectId);
+}
+
+function reconcileProjectBindings(projects: Project[]): void {
+  const projectIds = new Set(projects.map(project => project.id));
+  const current = readBindings();
+  const retained = current.filter(binding => projectIds.has(binding.projectId));
+  if (retained.length === current.length) return;
+  for (const binding of current) {
+    if (!projectIds.has(binding.projectId)) missingRuntimeSessionIds.delete(binding.sessionId);
+  }
+  writeJson(scopedAdapterCacheKey(BINDINGS_KEY), retained);
 }
 
 async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHandle> {
@@ -1687,123 +1694,6 @@ function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGam
   });
 }
 
-function deriveRuntimeStatus(
-  events: BeeGameEvent[],
-  pending: BeeGameEvent[],
-  recoveredFromTranscript = false,
-): {
-  phase: string;
-  nextAction: string;
-  updatedAt: string;
-  activeAgents: string[];
-  agentStatus: string;
-} {
-  const latest = events.at(-1);
-  const updatedAt = latest?.createdAt || new Date().toISOString();
-  if (pending.length > 0) {
-    return {
-      phase: 'waiting_approval',
-      nextAction: 'Review BeeGame permission request',
-      updatedAt,
-      activeAgents: ['beegame'],
-      agentStatus: 'waiting',
-    };
-  }
-
-  const activeTurn = getActiveTurn(events);
-  if (activeTurn) {
-    if (recoveredFromTranscript) {
-      return {
-        phase: 'idle',
-        nextAction: 'Ready for next request',
-        updatedAt,
-        activeAgents: [],
-        agentStatus: 'idle',
-      };
-    }
-    const latestActiveEvent = [...events].reverse().find(event => event.turnId === activeTurn) || latest;
-    return {
-      phase: 'running',
-      nextAction: describeRuntimeAction(latestActiveEvent),
-      updatedAt,
-      activeAgents: ['beegame'],
-      agentStatus: 'working',
-    };
-  }
-
-  if (latest?.type === 'turn.failed' || latest?.type === 'session.failed') {
-    return {
-      phase: 'paused',
-      nextAction: latest.text || 'BeeGame turn failed',
-      updatedAt,
-      activeAgents: [],
-      agentStatus: 'failed',
-    };
-  }
-  if (latest?.type === 'turn.completed' || latest?.type === 'turn.empty' || latest?.type === 'assistant.message' || latest?.type === 'result') {
-    return {
-      phase: 'idle',
-      nextAction: 'Ready for next request',
-      updatedAt,
-      activeAgents: [],
-      agentStatus: 'idle',
-    };
-  }
-  return {
-    phase: 'idle',
-    nextAction: 'Ready for input',
-    updatedAt,
-    activeAgents: [],
-    agentStatus: 'idle',
-  };
-}
-
-function getActiveTurn(events: BeeGameEvent[]): string | null {
-  const openTurns = new Set<string>();
-  for (const event of events) {
-    if (event.type === 'turn.started') {
-      openTurns.add(getTurnDisplayId(event));
-      continue;
-    }
-    if (
-      event.type === 'turn.completed' ||
-      event.type === 'turn.empty' ||
-      event.type === 'turn.failed' ||
-      event.type === 'session.stopped' ||
-      event.type === 'session.failed'
-    ) {
-      openTurns.delete(getTurnDisplayId(event));
-      continue;
-    }
-  }
-  return [...openTurns].at(-1) || null;
-}
-
-function describeRuntimeAction(event?: BeeGameEvent): string {
-  if (!event) return 'BeeGame is working';
-  if (event.type === 'assistant.partial') return 'Streaming BeeGame response';
-  if (event.type === 'assistant.thinking') {
-    return getPayloadString(event, 'status') === 'ended' ? 'BeeGame is working' : 'BeeGame is thinking';
-  }
-  if (event.type === 'assistant.message') return 'Finalizing BeeGame response';
-  if (event.type === 'permission.resolved') {
-    const decision = getPayloadString(event, 'decision');
-    const toolName = getPayloadString(event, 'toolName') || 'tool';
-    const reason = getPayloadString(event, 'reason');
-    if (decision === 'deny' && reason) return reason;
-    if (decision === 'deny') return `${toolName} was denied`;
-    return `${toolName} permission resolved`;
-  }
-  if (event.type.startsWith('tool.')) {
-    const toolName = getPayloadString(event, 'toolName') || 'tool';
-    if (event.type === 'tool.started') return `Running ${toolName}`;
-    if (event.type === 'tool.completed') return `${toolName} completed`;
-    if (event.type === 'tool.failed') return `${toolName} failed`;
-    return `${toolName} in progress`;
-  }
-  return 'BeeGame is working';
-}
-
 function baseMessage(type: 'token' | 'agent_message', event: BeeGameEvent, projectId: string, sender: string): WebSocketMessage {
   const clientMessageId = sender === 'user'
     ? getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id')
@@ -2199,21 +2089,6 @@ function stableTextHash(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return Math.abs(hash >>> 0).toString(36);
-}
-
-function getPendingPermissionEvents(events: BeeGameEvent[]): BeeGameEvent[] {
-  const resolved = new Set(
-    events
-      .filter(event => event.type === 'permission.resolved')
-      .map(event => getPayloadString(event, 'toolUseID'))
-      .filter(Boolean),
-  );
-  return events
-    .filter(event => event.type === 'permission.requested')
-    .filter(event => {
-      const toolUseID = getPayloadString(event, 'toolUseID');
-      return toolUseID && !resolved.has(toolUseID);
-    });
 }
 
 function isUserQuestionPermissionEvent(event: BeeGameEvent): boolean {
