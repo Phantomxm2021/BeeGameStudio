@@ -2,6 +2,7 @@ import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
   RESOURCE_PACK_PRIMARY_CATEGORIES,
+  RESOURCE_USAGE_TAGS,
   evaluateResourcePackPublishReadiness,
   rankResourceCandidates,
   searchResourcePacks,
@@ -22,6 +23,7 @@ import {
 } from './auth'
 
 export class ResourceLifecycleNotFoundError extends Error {}
+export class ResourceRequestValidationError extends Error {}
 
 export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
@@ -57,7 +59,7 @@ export function createBeeGameResourceServerApp(
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
-      const serviceSelectionRequest = request.method === 'POST' && (pathname === '/api/resource-selections' || pathname === '/api/resource-candidates') &&
+      const serviceSelectionRequest = request.method === 'POST' && (pathname === '/api/resource-selections' || pathname === '/api/resource-candidates' || pathname === '/api/resource-bindings/refresh') &&
         Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
       const user = options.currentUser ?? await resolveUser(request)
       if (!serviceSelectionRequest && !user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
@@ -99,8 +101,39 @@ export function createBeeGameResourceServerApp(
         const selections = await Promise.all(manifest.selections.map(async selection => ({
           ...selection,
           sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId),
+          dependencies: await Promise.all((selection.dependencies ?? []).map(async dependency => ({
+            ...dependency,
+            sourceUrl: await options.getElementResourceUrl!(selection.packId, dependency.elementId),
+          }))),
         })))
         return corsResponse(Response.json({ selections, unmatchedSlotIds: manifest.unmatchedSlotIds }), options.corsOrigin)
+      }
+      if (request.method === 'POST' && pathname === '/api/resource-bindings/refresh') {
+        if (!serviceSelectionRequest || !options.getElementResourceUrl) return corsResponse(jsonError(403, 'forbidden', 'Resource binding refresh is not allowed'), options.corsOrigin)
+        const body = await request.json().catch(() => undefined)
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return corsResponse(jsonError(400, 'invalid_binding', 'A resource binding is required'), options.corsOrigin)
+        const binding = body as Record<string, unknown>
+        const packId = typeof binding.packId === 'string' ? binding.packId : ''
+        const packVersion = typeof binding.packVersion === 'string' ? binding.packVersion : ''
+        const elementId = typeof binding.elementId === 'string' ? binding.elementId : ''
+        if (!packId || !packVersion || !elementId) return corsResponse(jsonError(400, 'invalid_binding', 'Resource binding is incomplete'), options.corsOrigin)
+        const pack = await options.repository.getPack(packId)
+        if (!pack || pack.version !== packVersion) return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'The pinned Pack version is no longer available'), options.corsOrigin)
+        const element = await options.repository.getElement(packId, elementId)
+        if (!element || element.status !== 'ready') return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'The pinned resource is no longer ready'), options.corsOrigin)
+        const dependencies = Array.isArray(binding.dependencies) ? binding.dependencies : []
+        const refreshedDependencies: Array<{ key: string; sourceUrl: string }> = []
+        for (const dependency of dependencies) {
+          if (!dependency || typeof dependency !== 'object' || Array.isArray(dependency)) return corsResponse(jsonError(400, 'invalid_binding', 'Resource dependency is invalid'), options.corsOrigin)
+          const value = dependency as Record<string, unknown>
+          const key = typeof value.key === 'string' ? value.key : ''
+          const dependencyElementId = typeof value.elementId === 'string' ? value.elementId : ''
+          if (!key || !dependencyElementId) return corsResponse(jsonError(400, 'invalid_binding', 'Resource dependency is incomplete'), options.corsOrigin)
+          const dependencyElement = await options.repository.getElement(packId, dependencyElementId)
+          if (!dependencyElement || dependencyElement.status !== 'ready') return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'A pinned dependency is no longer ready'), options.corsOrigin)
+          refreshedDependencies.push({ key, sourceUrl: await options.getElementResourceUrl(packId, dependencyElementId) })
+        }
+        return corsResponse(Response.json({ sourceUrl: await options.getElementResourceUrl(packId, elementId), dependencies: refreshedDependencies }), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-candidates') {
         if (!serviceSelectionRequest || !options.getElementResourceUrl) return corsResponse(jsonError(403, 'forbidden', 'Resource candidate access is not allowed'), options.corsOrigin)
@@ -108,7 +141,18 @@ export function createBeeGameResourceServerApp(
         const requirement = requirements[0]
         if (!requirement) return corsResponse(jsonError(400, 'invalid_selection_request', 'A resource requirement is required'), options.corsOrigin)
         const packs = await options.repository.listPacks(); const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
-        const candidates = await Promise.all(rankResourceCandidates(packs, elements, requirement).slice(0, 24).map(async selection => ({ ...selection, sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId) })))
+        const candidates = await Promise.all(
+          rankResourceCandidates(packs, elements, requirement).slice(0, 24).map(async selection => ({
+            ...selection,
+            sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId),
+            dependencies: await Promise.all(
+              (selection.dependencies ?? []).map(async dependency => ({
+                ...dependency,
+                sourceUrl: await options.getElementResourceUrl!(selection.packId, dependency.elementId),
+              })),
+            ),
+          })),
+        )
         return corsResponse(Response.json({ candidates }), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
@@ -262,6 +306,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'PATCH' && elementPatchMatch) {
         if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
+        assertElementUsageTags(body)
         const element = await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body)
         if (!element) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'element.updated', packId: decodeURIComponent(elementPatchMatch[1]), elementId: decodeURIComponent(elementPatchMatch[2]), metadata: { fields: Object.keys(body).sort() } })
@@ -283,6 +328,9 @@ export function createBeeGameResourceServerApp(
       } catch (error) {
         if (error instanceof ResourceLifecycleNotFoundError) {
           return corsResponse(jsonError(404, 'not_found', error.message), options.corsOrigin)
+        }
+        if (error instanceof ResourceRequestValidationError) {
+          return corsResponse(jsonError(400, 'invalid_request', error.message), options.corsOrigin)
         }
         return corsResponse(jsonError(500, 'resource_lifecycle_failed', error instanceof Error ? error.message : 'Resource lifecycle operation failed'), options.corsOrigin)
       }
@@ -333,22 +381,23 @@ function parseCategory(value: string | null): ResourceCategory | undefined {
 }
 
 function parseSelectionRequirements(value: unknown): ResourceSlotRequirement[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Selection request must be an object')
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Selection request must be an object')
   const requirements = (value as Record<string, unknown>).requirements
-  if (!Array.isArray(requirements) || requirements.length === 0) throw new Error('At least one resource requirement is required')
+  if (!Array.isArray(requirements) || requirements.length === 0) throw new ResourceRequestValidationError('At least one resource requirement is required')
   return requirements.map((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`Resource requirement ${index + 1} is invalid`)
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} is invalid`)
     const record = entry as Record<string, unknown>
     const slotId = typeof record.slotId === 'string' ? record.slotId.trim() : ''
-    if (!slotId) throw new Error(`Resource requirement ${index + 1} slotId is required`)
+    if (!slotId) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} slotId is required`)
     const category = typeof record.category === 'string' && (RESOURCE_CATEGORIES as readonly string[]).includes(record.category)
       ? record.category as ResourceCategory
       : undefined
-    if (record.category !== undefined && !category) throw new Error(`Resource requirement ${index + 1} category is unsupported`)
+    if (record.category !== undefined && !category) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} category is unsupported`)
     const dimension = typeof record.dimension === 'string' && (RESOURCE_DIMENSIONS as readonly string[]).includes(record.dimension)
       ? record.dimension as ResourceDimension
       : undefined
-    if (record.dimension !== undefined && !dimension) throw new Error(`Resource requirement ${index + 1} dimension is unsupported`)
+    if (record.dimension !== undefined && !dimension) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} dimension is unsupported`)
+    const tags = validatedUsageTags(record.tags, `Resource requirement ${index + 1}`)
     return {
       slotId,
       ...(category ? { category } : {}),
@@ -356,16 +405,33 @@ function parseSelectionRequirements(value: unknown): ResourceSlotRequirement[] {
       ...(stringList(record.acceptedFormats) ? { acceptedFormats: stringList(record.acceptedFormats)! } : {}),
       ...(stringList(record.styles) ? { styles: stringList(record.styles)! } : {}),
       ...(stringList(record.gameTypes) ? { gameTypes: stringList(record.gameTypes)! } : {}),
-      ...(stringList(record.tags) ? { tags: stringList(record.tags)! } : {}),
+      ...(tags ? { tags } : {}),
       ...(typeof record.purpose === 'string' && record.purpose.trim() ? { purpose: record.purpose.trim() } : {}),
     }
   })
 }
 
+function validatedUsageTags(value: unknown, label: string): string[] | undefined {
+  const values = stringList(value)
+  if (!values) return undefined
+  if (values.some(value => !(RESOURCE_USAGE_TAGS as readonly string[]).includes(value))) {
+    throw new ResourceRequestValidationError(`${label} tags contain unsupported values`)
+  }
+  return values
+}
+
+function assertElementUsageTags(body: Record<string, unknown>): void {
+  if (!Object.hasOwn(body, 'usageTags')) return
+  const value = body.usageTags
+  if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string' || !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag))) {
+    throw new ResourceRequestValidationError('Element usageTags must contain supported values')
+  }
+}
+
 function stringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const values = value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
-  if (values.length !== value.length) throw new Error('Resource requirement list values must be strings')
+  if (values.length !== value.length) throw new ResourceRequestValidationError('Resource requirement list values must be strings')
   return values.length ? values : undefined
 }
 

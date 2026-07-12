@@ -8,7 +8,11 @@ import {
     Cuboid,
     FileJson,
     Image,
+    Info,
+    Library,
+    MoreHorizontal,
     Music,
+    Sparkles,
     Unlink,
     Upload,
 } from 'lucide-react';
@@ -16,6 +20,13 @@ import type { BeeGameAssetManifestPayload, BeeGameAssetSlotPayload, BeeGameResou
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 
 interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
@@ -23,12 +34,15 @@ interface AssetsPanelProps {
     isUploadingSlotId?: string | null;
     isReintegratingSlotId?: string | null;
     isAutoBinding?: boolean;
+    autoBindFeedback?: { message: string; tone: 'success' | 'warning' | 'error' } | null;
     onUpload?: (slotId: string, file: File) => Promise<void>;
     onReintegrate?: (slotId: string) => Promise<void>;
+    onRemoveIntegration?: (slotId: string) => Promise<void>;
     onAutoBind?: () => Promise<void>;
     onUnbind?: (slotId: string) => Promise<void>;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestAllIntegration?: (slots: BeeGameAssetSlotPayload[]) => void;
+    onRequestSelectionPreparation?: (slots: BeeGameAssetSlotPayload[]) => void;
     onCandidates?: (slot: BeeGameAssetSlotPayload) => Promise<BeeGameResourceCandidatePayload[]>;
     onBindCandidate?: (slot: BeeGameAssetSlotPayload, candidate: BeeGameResourceCandidatePayload) => Promise<void>;
     lang?: Language;
@@ -42,12 +56,15 @@ export const AssetsPanel = memo(({
     isUploadingSlotId = null,
     isReintegratingSlotId = null,
     isAutoBinding = false,
+    autoBindFeedback = null,
     onUpload,
     onReintegrate,
+    onRemoveIntegration,
     onAutoBind,
     onUnbind,
     onRequestIntegration,
     onRequestAllIntegration,
+    onRequestSelectionPreparation,
     onCandidates,
     onBindCandidate,
     lang = 'en',
@@ -60,9 +77,20 @@ export const AssetsPanel = memo(({
         return status === 'uploaded';
     });
     const selectableSlots = slots.filter(slot => !slot.resource_binding && slot.resource_requirement && slot.status !== 'integrated');
+    const runtimeFormats = manifest?.project_target?.asset_format_capabilities ?? [];
+    const slotsMissingSelectionContract = selectableSlots.filter(slot => (
+        !slot.resource_requirement?.tags?.length || runtimeFormats.length === 0
+    ));
+    const safelySelectableSlots = selectableSlots.filter(slot => (
+        Boolean(slot.resource_requirement?.tags?.length) && runtimeFormats.length > 0
+    ));
+    const repairableLibrarySlots = slots.filter(slot => slot.resource_binding && slot.status === 'missing');
     const [unbindSlot, setUnbindSlot] = useState<BeeGameAssetSlotPayload | null>(null);
     const [isUnbinding, setIsUnbinding] = useState(false);
     const [unbindError, setUnbindError] = useState('');
+    const [removeIntegrationSlot, setRemoveIntegrationSlot] = useState<BeeGameAssetSlotPayload | null>(null);
+    const [isRemovingIntegration, setIsRemovingIntegration] = useState(false);
+    const [removeIntegrationError, setRemoveIntegrationError] = useState('');
     const [candidateSlot, setCandidateSlot] = useState<BeeGameAssetSlotPayload | null>(null);
     const [candidates, setCandidates] = useState<BeeGameResourceCandidatePayload[]>([]);
     const [candidateError, setCandidateError] = useState('');
@@ -117,42 +145,58 @@ export const AssetsPanel = memo(({
     }
 
     return (
-        <div className="h-full overflow-y-auto p-5">
-            <div className="mb-4 flex items-center justify-between">
-                <div className="min-w-0">
-                    <div className="type-caption-1 text-orange-300">{text.title}</div>
-                    <div className="type-footnote mt-1 text-zinc-500">
-                        {manifest?.project_target?.engine || manifest?.project_target?.kind || 'Project'} · {formatMode(manifest?.project_target?.integration_mode, text)}
+        <div className="h-full overflow-y-auto px-4 pb-6 pt-4 sm:px-5">
+            <div className="mb-4 border-b border-white/[0.07] pb-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="type-caption-1 text-orange-300">{text.title}</div>
+                        <div className="type-body-sm mt-1 truncate text-zinc-300">
+                            {manifest?.project_target?.engine || manifest?.project_target?.kind || 'Project'} · {formatMode(manifest?.project_target?.integration_mode, text)}
+                        </div>
+                    </div>
+                    <div className="type-caption-2 shrink-0 rounded-full border border-white/[0.08] bg-zinc-900 px-2.5 py-1 text-zinc-500">
+                        {slots.filter(slot => slot.status === 'uploaded' || slot.status === 'integrated').length}/{slots.length}
                     </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                    {selectableSlots.length > 0 && onAutoBind ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                    {slotsMissingSelectionContract.length > 0 && onRequestSelectionPreparation ? (
+                        <button
+                            type="button"
+                            onClick={() => onRequestSelectionPreparation(slotsMissingSelectionContract)}
+                            className="type-button inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-3 py-1.5 text-amber-100 transition hover:bg-amber-400/[0.14]"
+                        >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            {text.prepareSelection}
+                        </button>
+                    ) : null}
+                    {(safelySelectableSlots.length > 0 || repairableLibrarySlots.length > 0) && onAutoBind ? (
                         <button
                             type="button"
                             disabled={isAutoBinding}
                             onClick={() => void onAutoBind()}
-                            className="type-button rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1 text-sky-100 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="type-button inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
                         >
+                            <Library className="h-3.5 w-3.5" />
                             {isAutoBinding
                                 ? (text.autoSelecting || text.uploading)
-                                : (text.autoSelectLibrary || text.requestIntegration)}
+                                : (safelySelectableSlots.length > 0
+                                    ? (text.autoSelectLibrary || text.requestIntegration)
+                                    : (text.syncLibraryResources || text.autoSelectLibrary || text.requestIntegration))}
                         </button>
                     ) : null}
                     {pendingSlots.length && onRequestAllIntegration ? (
                         <button
                             type="button"
                             onClick={() => onRequestAllIntegration(pendingSlots)}
-                            className="type-button rounded-full border border-orange-400/40 bg-orange-400/10 px-3 py-1 text-orange-200 transition hover:bg-orange-400/20"
+                            className="type-button rounded-full border border-white/[0.12] px-3 py-1.5 text-zinc-300 transition hover:bg-white/[0.06]"
                         >
                             {text.integrateAllPending}
                         </button>
                     ) : null}
-                    <div className="type-footnote rounded-full bg-zinc-900 px-3 py-1 text-zinc-400">
-                        {slots.filter(slot => slot.status === 'uploaded' || slot.status === 'integrated').length}/{slots.length}
-                    </div>
                 </div>
+                {autoBindFeedback ? <div role="status" className={`type-caption-2 mt-3 border-l-2 py-1 pl-2.5 ${autoBindFeedback.tone === 'error' ? 'border-red-400 text-red-200' : autoBindFeedback.tone === 'warning' ? 'border-amber-400 text-amber-100' : 'border-emerald-400 text-emerald-100'}`}>{autoBindFeedback.message}</div> : null}
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2.5">
                 {slots.map(slot => (
                     <AssetSlotCard
                         key={slot.id}
@@ -162,7 +206,11 @@ export const AssetsPanel = memo(({
                         isReintegrating={isReintegratingSlotId === slot.id}
                         onUpload={onUpload}
                         onReintegrate={onReintegrate}
-                        onRequestUnbind={onUnbind ? () => { setUnbindError(''); setUnbindSlot(slot); } : undefined}
+                        onRequestRemoveIntegration={slot.uploaded_files?.length && onRemoveIntegration ? () => {
+                            setRemoveIntegrationError('');
+                            setRemoveIntegrationSlot(slot);
+                        } : undefined}
+                        onRequestUnbind={slot.resource_binding && onUnbind ? () => { setUnbindError(''); setUnbindSlot(slot); } : undefined}
                         onRequestIntegration={onRequestIntegration}
                         onRequestCandidates={onCandidates ? async () => {
                             setCandidateSlot(slot);
@@ -177,6 +225,7 @@ export const AssetsPanel = memo(({
                                 setCandidateLoading(false);
                             }
                         } : undefined}
+                        selectionNeedsPreparation={slotsMissingSelectionContract.some(candidate => candidate.id === slot.id)}
                     />
                 ))}
             </div>
@@ -206,6 +255,33 @@ export const AssetsPanel = memo(({
                                 className="type-button rounded-full border border-red-400/40 bg-red-400/10 px-4 py-2 text-red-200 transition hover:bg-red-400/20 disabled:opacity-60"
                             >
                                 {isUnbinding ? (text.unbinding || text.uploading) : (text.unbind || 'Disconnect')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+            {removeIntegrationSlot ? (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm">
+                    <div role="dialog" aria-modal="true" className="glass-panel w-full max-w-md rounded-3xl p-6 text-zinc-100">
+                        <div className="type-title-3 text-white">{text.removeIntegrationTitle}</div>
+                        <p className="type-footnote mt-3 text-zinc-400">{text.removeIntegrationDescription}</p>
+                        {removeIntegrationError ? <p className="type-footnote mt-3 text-red-300">{removeIntegrationError}</p> : null}
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button type="button" disabled={isRemovingIntegration} onClick={() => setRemoveIntegrationSlot(null)} className="secondary-pill type-button px-4 py-2">{text.cancel}</button>
+                            <button
+                                type="button"
+                                disabled={isRemovingIntegration || !onRemoveIntegration}
+                                onClick={() => {
+                                    if (!onRemoveIntegration) return;
+                                    setIsRemovingIntegration(true);
+                                    void onRemoveIntegration(removeIntegrationSlot.id)
+                                        .then(() => setRemoveIntegrationSlot(null))
+                                        .catch(err => setRemoveIntegrationError(err instanceof Error ? err.message : String(err)))
+                                        .finally(() => setIsRemovingIntegration(false));
+                                }}
+                                className="type-button rounded-full border border-red-400/40 bg-red-400/10 px-4 py-2 text-red-200 transition hover:bg-red-400/20 disabled:opacity-60"
+                            >
+                                {isRemovingIntegration ? text.removingIntegration : text.removeIntegration}
                             </button>
                         </div>
                     </div>
@@ -282,9 +358,11 @@ function AssetSlotCard({
     isReintegrating,
     onUpload,
     onReintegrate,
+    onRequestRemoveIntegration,
     onRequestUnbind,
     onRequestIntegration,
     onRequestCandidates,
+    selectionNeedsPreparation,
 }: {
     slot: BeeGameAssetSlotPayload;
     text: AssetsPanelText;
@@ -292,9 +370,11 @@ function AssetSlotCard({
     isReintegrating: boolean;
     onUpload?: (slotId: string, file: File) => Promise<void>;
     onReintegrate?: (slotId: string) => Promise<void>;
+    onRequestRemoveIntegration?: () => void;
     onRequestUnbind?: () => void;
     onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
     onRequestCandidates?: () => Promise<void>;
+    selectionNeedsPreparation: boolean;
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
     const [error, setError] = useState('');
@@ -318,128 +398,220 @@ function AssetSlotCard({
         <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4"
+            className="relative rounded-2xl border border-white/[0.08] bg-zinc-950/45 p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-white/[0.13]"
         >
             <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-orange-300">
-                    <Icon className="h-5 w-5" />
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-orange-300">
+                    <Icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-3 pr-16">
                         <div className="min-w-0">
-                            <div className="type-footnote truncate text-zinc-100">{slot.name || slot.id}</div>
-                            <div className="type-footnote mt-1 text-zinc-400">{slot.purpose || text.noPurpose}</div>
+                            <div className="type-body-sm truncate text-zinc-100" title={slot.name || slot.id}>{slot.name || slot.id}</div>
+                            <div className="type-caption-1 mt-1 line-clamp-2 text-zinc-400">{slot.purpose || text.noPurpose}</div>
                         </div>
+                    </div>
+
+                    <div className="type-caption-2 mt-2.5 flex flex-wrap gap-1.5">
                         <StatusBadge status={status} text={text} />
+                        <span className="rounded-full bg-zinc-900 px-2 py-1 text-zinc-500">{slot.required ? text.required : text.optional}</span>
                     </div>
 
-                    <div className="type-caption-1 mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-zinc-900 px-2 py-1 text-zinc-400">{slot.required ? text.required : text.optional}</span>
-                        {slot.type ? <span className="rounded-full bg-zinc-900 px-2 py-1 text-zinc-400">{slot.type}</span> : null}
-	                        {mode ? <span className="rounded-full bg-zinc-900 px-2 py-1 text-emerald-300">{formatMode(mode, text)}</span> : null}
-                    </div>
-
-                    <div className="type-footnote mt-3 space-y-1 text-zinc-500">
-                        {slot.target?.path ? <MetaLine label={text.target} value={slot.target.path} /> : null}
-                        {slot.accepted_formats?.length ? <MetaLine label={text.formats} value={slot.accepted_formats.join(', ')} /> : null}
-                        {slot.recommended_specs ? <MetaLine label={text.specs} value={formatSpecs(slot.recommended_specs)} /> : null}
-                    </div>
-
-                    {slot.uploaded_files?.length ? (
-                        <div className="mt-3 space-y-1">
-                            {slot.uploaded_files.map(path => (
-	                                <div key={path} className="type-code-sm truncate rounded-lg bg-zinc-900 px-2 py-1 text-emerald-300">
-                                    {path}
-                                </div>
-                            ))}
+                    {status === 'missing' ? (
+                        <div role="alert" className="type-caption-2 mt-3 border-l-2 border-red-400 py-1 pl-2.5 text-red-200">
+                            {slot.integration_error || text.missingFile}
                         </div>
                     ) : null}
 
-                    {slot.resource_binding ? (
-                        <div className="type-footnote mt-3 rounded-xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-sky-100">
-                            <div className="type-caption-1 text-sky-300">Library</div>
-                            <div className="mt-1 truncate">{slot.resource_binding.pack_id} · {slot.resource_binding.element_id}</div>
-                        </div>
-                    ) : null}
-                    {slot.resource_requirement && onRequestCandidates ? <button type="button" onClick={() => void onRequestCandidates()} className="type-button mt-3 rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 text-sky-100">{slot.resource_binding ? '替换资源' : '查看候选资源'}</button> : null}
+                    {selectionNeedsPreparation ? <p className="type-caption-2 mt-3 text-amber-200/80">{text.missingSelectionContract}</p> : null}
 
                     {status === 'uploaded' ? (
-                        <div className="type-footnote mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">
+                        <div className="type-caption-2 mt-3 border-l-2 border-amber-400 py-1 pl-2.5 text-amber-100">
                             {text.uploadedHint}
                         </div>
                     ) : null}
 
                     {error ? <div className="type-footnote mt-3 text-red-300">{error}</div> : null}
 
-                    <div className="mt-4 flex flex-wrap gap-2">
-                        {onUpload ? (
-                            <>
-                                <input
-                                    ref={inputRef}
-                                    type="file"
-                                    aria-label={text.upload}
-                                    className="hidden"
-                                    onChange={event => void handleFile(event.currentTarget.files?.[0])}
-                                />
-                                <button
-                                    type="button"
-                                    disabled={isUploading}
-                                    onClick={() => inputRef.current?.click()}
-                                    className="type-button inline-flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <Upload className="h-4 w-4" />
-                                    {isUploading ? text.uploading : text.upload}
-                                </button>
-                            </>
-                        ) : null}
-                        {(status === 'uploaded' || status === 'integrated') && onRequestIntegration ? (
-                            <button
-                                type="button"
-                                onClick={() => onRequestIntegration(slot)}
-                                className="type-button inline-flex items-center gap-2 rounded-full border border-orange-400/40 bg-orange-400/10 px-4 py-2 text-orange-200 transition hover:bg-orange-400/20"
-                            >
-                                <CheckCircle2 className="h-4 w-4" />
-                                {status === 'integrated' ? text.verifyIntegration : text.requestIntegration}
-                            </button>
-                        ) : null}
-                        {slot.resource_binding && onReintegrate ? (
-                            <button
-                                type="button"
-                                disabled={isReintegrating}
-                                onClick={() => void onReintegrate(slot.id).catch(err => setError(err instanceof Error ? err.message : String(err)))}
-                                className="type-button inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-sky-400/10 px-4 py-2 text-sky-100 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                <CheckCircle2 className="h-4 w-4" />
-                                {isReintegrating ? text.uploading : text.verifyIntegration}
-                            </button>
-                        ) : null}
-                        {slot.resource_binding && onRequestUnbind ? (
-                            <button
-                                type="button"
-                                onClick={onRequestUnbind}
-                                className="type-button inline-flex items-center gap-2 rounded-full border border-red-400/40 bg-red-400/10 px-4 py-2 text-red-200 transition hover:bg-red-400/20"
-                            >
-                                <Unlink className="h-4 w-4" />
-                                {text.unbind || 'Disconnect'}
-                            </button>
-                        ) : null}
-                    </div>
+                    <input
+                        ref={inputRef}
+                        type="file"
+                        aria-label={text.upload}
+                        className="hidden"
+                        onChange={event => void handleFile(event.currentTarget.files?.[0])}
+                    />
                 </div>
+                <AssetInfoTooltip slot={slot} text={text} mode={mode} />
+                <AssetActionsMenu
+                    slot={slot}
+                    text={text}
+                    isUploading={isUploading}
+                    isReintegrating={isReintegrating}
+                    selectionNeedsPreparation={selectionNeedsPreparation}
+                    onUpload={onUpload ? () => inputRef.current?.click() : undefined}
+                    onCandidates={onRequestCandidates}
+                    onRequestIntegration={onRequestIntegration}
+                    onReintegrate={slot.resource_binding && onReintegrate ? () => void onReintegrate(slot.id).catch(err => setError(err instanceof Error ? err.message : String(err))) : undefined}
+                    onRemoveIntegration={onRequestRemoveIntegration}
+                    onUnbind={onRequestUnbind}
+                />
             </div>
         </motion.div>
     );
 }
 
+function AssetInfoTooltip({
+    slot,
+    text,
+    mode,
+}: {
+    slot: BeeGameAssetSlotPayload;
+    text: AssetsPanelText;
+    mode?: string;
+}) {
+    const formats = slot.resource_requirement?.accepted_formats?.length
+        ? slot.resource_requirement.accepted_formats
+        : slot.accepted_formats;
+    return (
+        <div className="group absolute right-12 top-3.5 z-20">
+            <button
+                type="button"
+                aria-label={text.assetInfo}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+                <Info className="h-4 w-4" />
+            </button>
+            <div role="tooltip" className="pointer-events-none invisible absolute right-0 top-10 w-72 origin-top-right rounded-xl border border-white/[0.1] bg-zinc-950/95 p-3 opacity-0 shadow-2xl backdrop-blur transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                <div className="type-caption-1 text-zinc-100">{text.assetInfo}</div>
+                <div className="mt-2.5 space-y-2">
+                    {slot.target?.path ? <InfoLine label={text.target} value={slot.target.path} code /> : null}
+                    {formats?.length ? <InfoLine label={text.formats} value={formats.join(' · ')} /> : null}
+                    {slot.type ? <InfoLine label={text.type} value={slot.type} /> : null}
+                    {mode ? <InfoLine label={text.integration} value={formatMode(mode, text)} /> : null}
+                </div>
+                {slot.resource_binding ? (
+                    <div className="mt-3 border-t border-white/[0.08] pt-3">
+                        <div className="type-caption-2 text-sky-300">{text.libraryBinding}</div>
+                        <div className="type-footnote mt-1 truncate text-zinc-200" title={slot.resource_binding.element_id}>{slot.resource_binding.element_id}</div>
+                        <div className="type-caption-2 mt-1 text-zinc-500">{text.sourcePack} · {shortIdentifier(slot.resource_binding.pack_id)} · v{slot.resource_binding.pack_version}</div>
+                    </div>
+                ) : null}
+                {slot.uploaded_files?.length ? (
+                    <div className="mt-3 border-t border-white/[0.08] pt-3">
+                        <div className="type-caption-2 text-emerald-300/80">{text.copiedFile} · {slot.uploaded_files.length}</div>
+                        <div className="mt-1 space-y-1">
+                            {slot.uploaded_files.slice(0, 3).map(path => <div key={path} title={path} className="type-code-sm truncate text-emerald-200/80">{path}</div>)}
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+function AssetActionsMenu({
+    slot,
+    text,
+    isUploading,
+    isReintegrating,
+    selectionNeedsPreparation,
+    onUpload,
+    onCandidates,
+    onRequestIntegration,
+    onReintegrate,
+    onRemoveIntegration,
+    onUnbind,
+}: {
+    slot: BeeGameAssetSlotPayload;
+    text: AssetsPanelText;
+    isUploading: boolean;
+    isReintegrating: boolean;
+    selectionNeedsPreparation: boolean;
+    onUpload?: () => void;
+    onCandidates?: () => Promise<void>;
+    onRequestIntegration?: (slot: BeeGameAssetSlotPayload) => void;
+    onReintegrate?: () => void;
+    onRemoveIntegration?: () => void;
+    onUnbind?: () => void;
+}) {
+    const status = slot.status || (slot.placeholder === false ? 'uploaded' : 'placeholder');
+    const hasCandidateAction = Boolean(slot.resource_requirement && onCandidates && !selectionNeedsPreparation);
+    const hasIntegrationAction = !slot.resource_binding && (status === 'uploaded' || status === 'integrated') && onRequestIntegration;
+    const hasAnyAction = onUpload || hasCandidateAction || hasIntegrationAction || onReintegrate || onRemoveIntegration || onUnbind;
+    if (!hasAnyAction) return null;
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger
+                aria-label={text.moreActions}
+                className="absolute right-3.5 top-3.5 flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+                <MoreHorizontal className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48 border border-white/[0.1] bg-zinc-950 p-1.5 text-zinc-100 shadow-2xl">
+                {onUpload ? (
+                    <DropdownMenuItem disabled={isUploading} onClick={onUpload} className="type-button gap-2 px-2.5 py-2 text-zinc-200">
+                        <Upload className="h-4 w-4" />
+                        {isUploading ? text.uploading : text.upload}
+                    </DropdownMenuItem>
+                ) : null}
+                {hasCandidateAction ? (
+                    <DropdownMenuItem onClick={() => void onCandidates?.()} className="type-button gap-2 px-2.5 py-2 text-zinc-200">
+                        <Library className="h-4 w-4" />
+                        {slot.resource_binding ? text.replaceResource : text.viewCandidates}
+                    </DropdownMenuItem>
+                ) : null}
+                {hasIntegrationAction ? (
+                    <DropdownMenuItem onClick={() => onRequestIntegration?.(slot)} className="type-button gap-2 px-2.5 py-2 text-zinc-200">
+                        <CheckCircle2 className="h-4 w-4" />
+                        {status === 'integrated' ? text.verifyIntegration : text.requestIntegration}
+                    </DropdownMenuItem>
+                ) : null}
+                {onReintegrate ? (
+                    <DropdownMenuItem disabled={isReintegrating} onClick={onReintegrate} className="type-button gap-2 px-2.5 py-2 text-zinc-200">
+                        <CheckCircle2 className="h-4 w-4" />
+                        {isReintegrating ? text.uploading : text.reintegrateLibrary}
+                    </DropdownMenuItem>
+                ) : null}
+                {onRemoveIntegration || onUnbind ? <DropdownMenuSeparator className="bg-white/[0.08]" /> : null}
+                {onRemoveIntegration ? (
+                    <DropdownMenuItem onClick={onRemoveIntegration} className="type-button gap-2 px-2.5 py-2 text-amber-200 focus:text-amber-100">
+                        <CircleAlert className="h-4 w-4" />
+                        {text.removeIntegration}
+                    </DropdownMenuItem>
+                ) : null}
+                {onUnbind ? (
+                    <DropdownMenuItem variant="destructive" onClick={onUnbind} className="type-button gap-2 px-2.5 py-2">
+                        <Unlink className="h-4 w-4" />
+                        {text.unbind}
+                    </DropdownMenuItem>
+                ) : null}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
+function InfoLine({ label, value, code = false }: { label: string; value: string; code?: boolean }) {
+    return (
+        <div className="grid grid-cols-[48px_minmax(0,1fr)] gap-2">
+            <span className="type-caption-2 text-zinc-600">{label}</span>
+            <span title={value} className={`${code ? 'type-code-sm' : 'type-caption-2'} truncate text-zinc-300`}>{value}</span>
+        </div>
+    );
+}
+
 function StatusBadge({ status, text }: { status: string; text: AssetsPanelText }) {
     const isGood = status === 'integrated';
+    const isMissing = status === 'missing';
     const label = status === 'integrated'
         ? text.integrated
+        : status === 'missing'
+            ? text.missing
         : status === 'uploaded'
             ? text.uploaded
             : text.placeholder;
     return (
         <span className={`type-caption-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 ${
-            isGood ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+            isGood ? 'bg-emerald-500/10 text-emerald-300' : isMissing ? 'bg-red-500/10 text-red-200' : 'bg-amber-500/10 text-amber-300'
         }`}>
             {isGood ? <CheckCircle2 className="h-3 w-3" /> : <CircleAlert className="h-3 w-3" />}
             {label}
@@ -447,13 +619,8 @@ function StatusBadge({ status, text }: { status: string; text: AssetsPanelText }
     );
 }
 
-function MetaLine({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="grid grid-cols-[64px_1fr] gap-2">
-            <span className="text-zinc-600">{label}</span>
-            <span className="min-w-0 break-words text-zinc-400">{value}</span>
-        </div>
-    );
+function shortIdentifier(value: string): string {
+    return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
 function iconForType(type: string | undefined) {
@@ -469,10 +636,4 @@ function formatMode(mode: string | undefined, text: AssetsPanelText): string {
     if (mode === 'mcp') return text.mcp;
     if (mode === 'manual') return text.manual;
     return text.filesystem;
-}
-
-function formatSpecs(specs: Record<string, unknown>): string {
-    return Object.entries(specs)
-        .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : String(value)}`)
-        .join(' · ');
 }

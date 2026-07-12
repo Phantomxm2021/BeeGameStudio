@@ -25,6 +25,7 @@ import {
 import { LandingView } from './components/Demiurge/LandingView';
 import { DashboardView } from './components/Demiurge/DashboardView';
 import type { Language } from './components/Demiurge/AgentsConfig';
+import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
 
 function App() {
   const {
@@ -41,8 +42,15 @@ function App() {
   const { showError, showSuccess } = useToastContext();
 
   const [lang, setLang] = useState<Language>('zh');
+  const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const loadedHistoryProjectRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
+
+  useEffect(() => {
+    const syncResourceRoute = () => setIsResourceRoute(isResourceLibraryRoute());
+    window.addEventListener('popstate', syncResourceRoute);
+    return () => window.removeEventListener('popstate', syncResourceRoute);
+  }, []);
 
   // Sync dark mode class to root element
   useEffect(() => {
@@ -133,7 +141,7 @@ function App() {
   return (
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
-      {activeProjectId && activeProject ? (
+      {activeProjectId && activeProject && !isResourceRoute ? (
         <DashboardView
           projectId={activeProjectId}
           projectName={activeProject.name || 'Untitled Project'}

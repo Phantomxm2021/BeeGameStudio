@@ -148,9 +148,12 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     const response = await fetchImpl(`${baseUrl}/storage/v1/object/move`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ bucketId: storageBucket, sourceKey: source, destinationKey: destination }) })
     if (!response.ok) throw new Error(`Resource storage move failed (${response.status})`)
   }
-  const deleteObject = async (path: string) => {
+  const deleteObject = async (path: string, allowMissing = false) => {
     const response = await fetchImpl(`${baseUrl}/storage/v1/object/${storageBucket}/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers })
-    if (!response.ok) throw new Error(`Resource storage deletion failed (${response.status})`)
+    if (response.ok) return true
+    const failure = await readSafeStorageFailure(response)
+    if (allowMissing && failure.objectMissing) return false
+    throw new Error(`Resource storage deletion failed (${response.status})${failure.detail}`)
   }
   type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string }
   type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
@@ -176,7 +179,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     deleteResourceElement: async (packId: string, elementId: string) => {
       const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
       if (!current) return false
-      await deleteObject(storagePath(packId, current.path))
+      await deleteObject(storagePath(packId, current.path), true)
       return (await deleteRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`)).length > 0
     },
     updateResourceFolder: async (packId: string, folderId: string, body: Record<string, unknown>) => {
@@ -207,8 +210,19 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       const folder = folders.find((item) => item.id === folderId)
       if (!folder) return false
       const elements = await getRows<ElementRow>('beegame_resource_elements', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
-      if (folders.some((item) => item.parent_id === folderId) || elements.some((item) => item.path === folder.path || item.path.startsWith(`${folder.path}/`))) throw new Error('Folder is not empty')
-      return (await deleteRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(folderId)}&pack_id=eq.${encodeURIComponent(packId)}`)).length > 0
+      const folderPrefix = `${folder.path}/`
+      const containedElements = elements.filter((item) => item.path === folder.path || item.path.startsWith(folderPrefix))
+      for (const element of containedElements) {
+        await deleteObject(storagePath(packId, element.path), true)
+      }
+      for (const element of containedElements) {
+        await deleteRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(element.id)}&pack_id=eq.${encodeURIComponent(packId)}`)
+      }
+      const descendants = folders.filter((item) => item.path === folder.path || item.path.startsWith(folderPrefix)).sort((left, right) => right.path.length - left.path.length)
+      for (const descendant of descendants) {
+        await deleteRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(descendant.id)}&pack_id=eq.${encodeURIComponent(packId)}`)
+      }
+      return true
     },
   }
 }
@@ -250,7 +264,7 @@ function trimPath(value: string): string {
 export function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
   const editable: Record<string, string> = {
     name: 'name', path: 'path', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
-    dependencies: 'dependencies', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
+    usageTags: 'usage_tags', dependencies: 'dependencies', dependencyBindings: 'dependency_bindings', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
   }
   const row: Record<string, unknown> = {}
   for (const [key, column] of Object.entries(editable)) {
@@ -464,7 +478,9 @@ export function toResourceElement(row: Record<string, unknown>): ResourceElement
     category: String(row.category) as ResourceElement['category'], kind: String(row.kind),
     ...(row.preview && typeof row.preview === 'object' ? { preview: row.preview as ResourceElement['preview'] } : {}),
     specs: row.specs && typeof row.specs === 'object' ? row.specs as ResourceElement['specs'] : {},
+    ...(Array.isArray(row.usage_tags) && row.usage_tags.length ? { usageTags: row.usage_tags.map(String) as ResourceElement['usageTags'] } : {}),
     dependencies: Array.isArray(row.dependencies) ? row.dependencies.map(String) : [],
+    ...(Array.isArray(row.dependency_bindings) && row.dependency_bindings.length ? { dependencyBindings: row.dependency_bindings as ResourceElement['dependencyBindings'] } : {}),
     status: row.status as ResourceElement['status'],
     ...(typeof row.style_override === 'string' ? { styleOverride: row.style_override } : {}),
     ...(typeof row.dimension_override === 'string' ? { dimensionOverride: row.dimension_override as ResourceElement['dimensionOverride'] } : {}),

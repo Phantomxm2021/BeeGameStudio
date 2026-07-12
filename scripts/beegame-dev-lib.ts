@@ -6,6 +6,10 @@ export const DEFAULT_BEEGAME_BILLING_PORT = 62175
 export const DEFAULT_BEEGAME_SKILLS_PORT = 62176
 export const DEFAULT_BEEGAME_RESOURCE_PORT = 62177
 
+// This value is intentionally limited to the loopback-only `beegame:dev`
+// process group. Production must provide a distinct service credential.
+const LOCAL_RESOURCE_SELECTION_TOKEN = 'beegame-local-resource-selection'
+
 export type BeeGameDevPorts = {
   runtime: number
   frontend: number
@@ -108,13 +112,19 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'resources',
-        command: [bunExecutable, 'packages/beegame-resource-server/src/index.ts'],
+        // The dashboard reads candidates from this service. Keep it watching
+        // source changes so frontend refreshes cannot talk to stale selection
+        // rules during local development.
+        command: [bunExecutable, '--watch', 'packages/beegame-resource-server/src/index.ts'],
         cwd: input.cwd,
         env: buildResourceEnv(input.env, ports),
       },
       {
         name: 'runtime',
-        command: [bunExecutable, 'scripts/dashboard-server-dev.ts'],
+        // Keep the workflow runtime in sync with the frontend during local
+        // product work. Without watch, UI changes can target stale API and
+        // authorization code until a manual stack restart.
+        command: [bunExecutable, '--watch', 'scripts/dashboard-server-dev.ts'],
         cwd: input.cwd,
         env: buildRuntimeEnv({
           baseEnv: input.env,
@@ -175,6 +185,8 @@ function buildResourceEnv(
     ...baseEnv,
     BEEGAME_RESOURCE_HOST: '127.0.0.1',
     BEEGAME_RESOURCE_PORT: String(ports.resources),
+    BEEGAME_RESOURCE_SERVICE_TOKEN:
+      baseEnv.BEEGAME_RESOURCE_SERVICE_TOKEN || LOCAL_RESOURCE_SELECTION_TOKEN,
   })
 }
 
@@ -185,11 +197,16 @@ function buildRuntimeEnv(input: {
 }): Record<string, string> {
   return compactEnv({
     ...omitFrontendAndRuntimeForbiddenEnv(input.baseEnv),
+    NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
     BEEGAME_BILLING_MODE: 'remote',
     BEEGAME_BILLING_API_BASE_URL: `http://127.0.0.1:${input.ports.billing}`,
     BEEGAME_SKILLS_API_BASE_URL: `http://127.0.0.1:${input.ports.skills}`,
+    BEEGAME_RESOURCE_SERVER_URL:
+      input.baseEnv.BEEGAME_RESOURCE_SERVER_URL || `http://127.0.0.1:${input.ports.resources}`,
+    BEEGAME_RESOURCE_SERVICE_TOKEN:
+      input.baseEnv.BEEGAME_RESOURCE_SERVICE_TOKEN || LOCAL_RESOURCE_SELECTION_TOKEN,
   })
 }
 
@@ -253,6 +270,7 @@ const FRONTEND_AND_RUNTIME_FORBIDDEN_ENV = new Set([
   'SUPABASE_SERVICE_ROLE_KEY',
   'BEEGAME_STRIPE_SECRET_KEY',
   'BEEGAME_STRIPE_WEBHOOK_SECRET',
+  'BEEGAME_RESOURCE_SERVICE_TOKEN',
 ])
 
 function omitFrontendAndRuntimeForbiddenEnv(

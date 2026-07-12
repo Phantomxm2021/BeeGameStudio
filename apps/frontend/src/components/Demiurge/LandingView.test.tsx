@@ -590,16 +590,16 @@ describe('LandingView bootstrap submission', () => {
         expect(getCreditBalance).not.toHaveBeenCalled();
     });
 
-    it('requires a configured model before showing the intake credit quote', async () => {
-        listModelConfigs.mockResolvedValueOnce([]);
+    it('does not require administrator model-config access before showing the intake credit quote', async () => {
+        listModelConfigs.mockRejectedValueOnce(new Error('Forbidden'));
 
         renderLanding();
 
         submitIdea('LLM generated idea');
 
-        expect(await screen.findByText('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。')).toBeInTheDocument();
-        expect(screen.queryByRole('dialog', { name: '确认生成方案' })).not.toBeInTheDocument();
-        expect(getCreditQuote).not.toHaveBeenCalled();
+        expect(await screen.findByRole('dialog', { name: '确认生成方案' })).toBeInTheDocument();
+        expect(listModelConfigs).not.toHaveBeenCalled();
+        expect(getCreditQuote).toHaveBeenCalledWith('idea_intake');
         expect(runIdeaIntake).not.toHaveBeenCalled();
     });
 
@@ -1658,9 +1658,11 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+        mockLoadCurrentUser.mockClear();
         fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
 
         expect(await screen.findByRole('button', { name: '确认构建' })).toBeInTheDocument();
+        expect(mockLoadCurrentUser).toHaveBeenCalledTimes(1);
         fireEvent.click(screen.getByRole('button', { name: '确认构建' }));
 
         await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));

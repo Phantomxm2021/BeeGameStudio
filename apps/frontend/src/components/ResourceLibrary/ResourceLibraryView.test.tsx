@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { ResourceLibraryView } from './ResourceLibraryView'
+import { buildSafePublishFix, ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
 import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 
@@ -29,18 +29,23 @@ describe('ResourceLibraryView workspace', () => {
     expect(await screen.findByRole('button', { name: '显示元素信息' })).toBeInTheDocument()
   })
 
-  test('uses a separate typed confirmation dialog for destructive Pack deletion', async () => {
+  test('does not expose a destructive Pack deletion action', async () => {
     const user = userEvent.setup()
-    const deletePack = vi.fn(async () => undefined)
-    render(<ResourceLibraryView apiClient={{ ...api, deletePack }} />)
+    render(<ResourceLibraryView apiClient={api} />)
     await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
-    await user.click(screen.getByRole('button', { name: '删除 Pack' }))
-    const dialog = screen.getByRole('dialog', { name: '删除 Pack' })
-    expect(within(dialog).getByRole('button', { name: '删除 Pack' })).toBeDisabled()
-    await user.type(within(dialog).getByLabelText('输入 Pack 名称以确认'), pack.name)
-    await user.click(within(dialog).getByRole('button', { name: '删除 Pack' }))
-    await waitFor(() => expect(deletePack).toHaveBeenCalledWith(pack.id))
-    expect(screen.queryByRole('button', { name: '返回资源包' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除 Pack' })).not.toBeInTheDocument()
+  })
+
+  test('offers re-publishing for archived Packs', async () => {
+    const user = userEvent.setup()
+    const archivedPack = { ...pack, status: 'archived' as const, deprecatedAt: '2026-07-12T00:00:00.000Z' }
+    const publishPack = vi.fn(async () => ({ ...pack, status: 'published' as const }))
+    render(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [archivedPack], getPack: async () => archivedPack, publishPack }} />)
+    await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+    const rePublish = screen.getByRole('button', { name: '重新发布' })
+    expect(rePublish).toBeEnabled()
+    await user.click(rePublish)
+    await waitFor(() => expect(publishPack).toHaveBeenCalledWith(pack.id))
   })
 
   test('separates read-only element information from editable configuration', async () => {
@@ -85,5 +90,27 @@ describe('ResourceLibraryView workspace', () => {
     expect(within(dialog).getByText('Element knight.png references a missing dependency')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '定位' }))
     expect(await screen.findByRole('button', { name: '显示元素信息' })).toBeInTheDocument()
+  })
+
+  test('only applies publish fixes that are structurally unambiguous', () => {
+    const model = {
+      ...element,
+      id: 'model-1',
+      name: 'world.fbx',
+      category: 'environment',
+      kind: 'model',
+      usageTags: [],
+      specs: { externalReferences: JSON.stringify(['Textures/stone.png']) },
+      dependencies: [],
+      dependencyBindings: [],
+    }
+    const texture = { ...element, id: 'texture-1', name: 'stone.png', path: 'textures/stone.png', category: 'textures', kind: 'image' }
+
+    expect(buildSafePublishFix(model, [model, texture])).toEqual({
+      usageTags: ['environment'],
+      dependencyBindings: [{ referencePath: 'Textures/stone.png', dependencyElementId: 'texture-1' }],
+      dependencies: ['texture-1'],
+    })
+    expect(buildSafePublishFix({ ...model, category: 'models' }, [model])).toBeUndefined()
   })
 })

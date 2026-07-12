@@ -87,4 +87,20 @@ describe('resolveApprovedOutboundTarget', () => {
     expect(target?.url.hostname).toBe('api.example.test')
     await expect(lookupAddress(target!)).resolves.toEqual({ address: '93.184.216.34', family: 4 })
   })
+
+  test('permits the development proxy range only for an explicitly allowlisted hostname', async () => {
+    const target = await resolveApprovedOutboundTarget('https://provider.example.test/v1', {
+      resolve4: async () => ['198.18.0.212'],
+      resolve6: async () => [],
+      allowedHosts: ['provider.example.test'],
+      allowTrustedDevelopmentProxy: true,
+    })
+    expect(target?.addresses).toEqual(['198.18.0.212'])
+
+    await expect(resolveApprovedOutboundTarget('https://provider.example.test/v1', {
+      resolve4: async () => ['198.18.0.212'],
+      resolve6: async () => [],
+      allowTrustedDevelopmentProxy: true,
+    })).resolves.toBeNull()
+  })
 })

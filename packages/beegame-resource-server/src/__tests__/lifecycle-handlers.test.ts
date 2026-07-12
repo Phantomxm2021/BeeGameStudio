@@ -1,9 +1,70 @@
 import { describe, expect, test } from 'bun:test'
-import { buildElementUploadRow, createSupabaseResourceLifecycleHandlers, createSupabaseResourceStorageInspector, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
+import { buildElementUploadRow, createSupabaseResourceAuthoringHandlers, createSupabaseResourceLifecycleHandlers, createSupabaseResourceStorageInspector, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
 
 const packRow = { id: 'pack-1', name: 'Pack', style: 'Stylized', game_types: [], dimension: 'agnostic', primary_category: 'world-scene', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'cover/new.png' }
 
 describe('Supabase resource lifecycle handlers', () => {
+  test('recursively deletes a folder, its descendants, and their Storage-backed elements', async () => {
+    const storageDeletes: string[] = []
+    const metadataDeletes: string[] = []
+    const handlers = createSupabaseResourceAuthoringHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if ((!init?.method || init.method === 'GET') && url.includes('beegame_resource_folders')) {
+          return Response.json([
+            { id: 'folder-root', pack_id: 'pack-1', name: 'models', path: 'models' },
+            { id: 'folder-child', pack_id: 'pack-1', name: 'characters', parent_id: 'folder-root', path: 'models/characters' },
+            { id: 'folder-other', pack_id: 'pack-1', name: 'audio', path: 'audio' },
+          ])
+        }
+        if ((!init?.method || init.method === 'GET') && url.includes('beegame_resource_elements')) {
+          return Response.json([
+            { id: 'element-root', pack_id: 'pack-1', name: 'tree.glb', path: 'models/tree.glb' },
+            { id: 'element-child', pack_id: 'pack-1', name: 'hero.glb', path: 'models/characters/hero.glb' },
+            { id: 'element-other', pack_id: 'pack-1', name: 'theme.ogg', path: 'audio/theme.ogg' },
+          ])
+        }
+        if (init?.method === 'DELETE' && url.includes('/storage/v1/object/')) {
+          storageDeletes.push(url)
+          return new Response(null, { status: 200 })
+        }
+        if (init?.method === 'DELETE' && url.includes('/rest/v1/')) {
+          metadataDeletes.push(url)
+          return Response.json([{ id: 'deleted' }])
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.deleteResourceFolder('pack-1', 'folder-root')).resolves.toBe(true)
+    expect(storageDeletes).toEqual(expect.arrayContaining([
+      expect.stringContaining('/pack-1/models/tree.glb'),
+      expect.stringContaining('/pack-1/models/characters/hero.glb'),
+    ]))
+    expect(storageDeletes).toHaveLength(2)
+    expect(metadataDeletes.filter(url => url.includes('beegame_resource_elements'))).toHaveLength(2)
+    expect(metadataDeletes.filter(url => url.includes('beegame_resource_folders'))).toHaveLength(2)
+    expect(metadataDeletes.some(url => url.includes('folder-child'))).toBe(true)
+    expect(metadataDeletes.some(url => url.includes('folder-root'))).toBe(true)
+  })
+
+  test('treats missing objects as successful recursive folder cleanup', async () => {
+    const handlers = createSupabaseResourceAuthoringHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if ((!init?.method || init.method === 'GET') && url.includes('beegame_resource_folders')) return Response.json([{ id: 'folder-root', pack_id: 'pack-1', name: 'models', path: 'models' }])
+        if ((!init?.method || init.method === 'GET') && url.includes('beegame_resource_elements')) return Response.json([{ id: 'element-root', pack_id: 'pack-1', name: 'tree.glb', path: 'models/tree.glb' }])
+        if (init?.method === 'DELETE' && url.includes('/storage/v1/object/')) return Response.json({ statusCode: '404', error: 'Not Found', message: 'Object not found' }, { status: 400 })
+        if (init?.method === 'DELETE' && url.includes('/rest/v1/')) return Response.json([{ id: 'deleted' }])
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.deleteResourceFolder('pack-1', 'folder-root')).resolves.toBe(true)
+  })
+
   test('reports missing and orphaned Storage objects without mutating either side', async () => {
     const inspector = createSupabaseResourceStorageInspector({
       baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
@@ -336,11 +397,11 @@ describe('Supabase resource lifecycle handlers', () => {
     expect(toResourceElement({
       id: 'element-1', pack_id: 'pack-1', name: 'hero.glb', path: 'models/hero.glb',
       category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready',
-      style_override: 'stylized', dimension_override: '3D',
-    })).toEqual(expect.objectContaining({ packId: 'pack-1', styleOverride: 'stylized', dimensionOverride: '3D' }))
+      style_override: 'stylized', dimension_override: '3D', usage_tags: ['character'],
+    })).toEqual(expect.objectContaining({ packId: 'pack-1', styleOverride: 'stylized', dimensionOverride: '3D', usageTags: ['character'] }))
   })
 
   test('preserves null to clear an element style override', () => {
-    expect(toElementRow({ styleOverride: null })).toEqual({ style_override: null })
+    expect(toElementRow({ styleOverride: null, usageTags: ['character'] })).toEqual({ style_override: null, usage_tags: ['character'] })
   })
 })

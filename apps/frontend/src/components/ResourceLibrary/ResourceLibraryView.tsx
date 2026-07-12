@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, File, Search, X } from 'lucide-react';
+import { ChevronLeft, File, Info, Search, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   ResourceLibraryApiError,
@@ -12,7 +12,6 @@ import {
 } from '../../services/resourceLibraryApi';
 import { CreateResourcePackDialog } from './CreateResourcePackDialog';
 import { EditResourcePackDialog } from './EditResourcePackDialog';
-import { DeleteResourcePackDialog } from './DeleteResourcePackDialog';
 import { RenameResourceDialog } from './RenameResourceDialog';
 import { isSupportedModelPreview, ResourcePreview } from './ResourcePreview';
 import { ResourcePackExplorer } from './ResourcePackExplorer';
@@ -32,7 +31,7 @@ import {
 
 type ResourceLibraryApi = Pick<
   typeof resourceLibraryApi,
-  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'updatePack' | 'deletePack' | 'uploadPackCover' | 'addElement'
+  'listPacks' | 'getPack' | 'listElements' | 'getElement' | 'updatePack' | 'uploadPackCover' | 'addElement'
   | 'createPack' | 'listFolders' | 'createFolder' | 'updateFolder' | 'deleteFolder'
   | 'updateElement' | 'getElementResourceUrl'
   | 'deleteElement' | 'publishPack' | 'archivePack' | 'getPublishReadiness'
@@ -104,23 +103,61 @@ const resourceFormOptions = [
   ['ui', 'UI'], ['vfx', '特效'], ['audio', '音频'], ['font', '字体'], ['video', '视频'], ['document', '文档'], ['file', '其他文件'],
 ] as const;
 
-function legacyCategoryToUseDomain(category: string): string {
-  const legacyDefaults: Record<string, string> = {
-    characters: 'character', environment: 'environment', scenes: 'scene',
-    tilemaps: 'level-map', tiles: 'tile', sprites: 'character', models: 'environment',
-    materials: 'environment', textures: 'environment', ui: 'ui', vfx: 'effect',
-    audio: 'sound-effect', fonts: 'ui', animation: 'character',
-  };
-  return legacyDefaults[category] || 'environment';
+function normaliseUsageTags(value: readonly string[] | undefined): string[] {
+  return value ? [...new Set(value)] : [];
 }
 
-function normaliseUsageTags(value: unknown, category: string): string[] {
-  const aliases: Record<string, string> = {
-    characters: 'character', scenes: 'scene', vfx: 'effect', audio: 'sound-effect',
-    textures: 'environment', fonts: 'ui', animation: 'character',
+const deterministicUsageTagsByCategory: Readonly<Record<string, readonly string[]>> = {
+  characters: ['character'],
+  environment: ['environment'],
+  scenes: ['scene'],
+  tilemaps: ['tile'],
+  tiles: ['tile'],
+  ui: ['ui'],
+  vfx: ['effect'],
+};
+
+function canonicalResourcePath(value: string): string {
+  return value.split('\\').join('/').split('/').filter(Boolean).join('/').toLocaleLowerCase();
+}
+
+function resourceFileName(value: string): string {
+  const path = canonicalResourcePath(value);
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+/**
+ * Applies only metadata that follows directly from the Pack taxonomy or an
+ * unambiguous exact file identity. Ambiguous assets deliberately remain in the
+ * publish report for a curator to configure.
+ */
+export function buildSafePublishFix(element: ResourceElement, allElements: readonly ResourceElement[]): Partial<ResourceElement> | undefined {
+  const inferredUsageTags = !element.usageTags?.length ? deterministicUsageTagsByCategory[element.category] : undefined;
+  const references = parseExternalReferences(element.specs.externalReferences, element.specs.textureReferences, element.specs.materialReferences);
+  const dependencyBindings = [...(element.dependencyBindings || [])];
+  let bindingsChanged = false;
+  for (const reference of references) {
+    if (dependencyBindings.some(binding => binding.referencePath === reference)) continue;
+    const canonicalReference = canonicalResourcePath(reference);
+    const referencedFileName = resourceFileName(reference);
+    const candidates = allElements.filter(candidate => {
+      if (candidate.id === element.id || candidate.status !== 'ready') return false;
+      const canonicalCandidatePath = canonicalResourcePath(candidate.path);
+      return canonicalCandidatePath === canonicalReference || (resourceFileName(candidate.name) === referencedFileName && referencedFileName.length > 0);
+    });
+    if (candidates.length === 1) {
+      dependencyBindings.push({ referencePath: reference, dependencyElementId: candidates[0].id });
+      bindingsChanged = true;
+    }
+  }
+  if (!inferredUsageTags && !bindingsChanged) return undefined;
+  return {
+    ...(inferredUsageTags ? { usageTags: inferredUsageTags } : {}),
+    ...(bindingsChanged ? {
+      dependencyBindings,
+      dependencies: [...new Set([...element.dependencies, ...dependencyBindings.map(binding => binding.dependencyElementId)])],
+    } : {}),
   };
-  const stored = decodeUsageTags(value).map(tag => aliases[tag] || tag);
-  return stored.length ? [...new Set(stored)] : [legacyCategoryToUseDomain(category)];
 }
 
 const primaryCategoryLabels: Record<'en' | 'zh', Record<ResourcePackPrimaryCategory, string>> = {
@@ -165,7 +202,6 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [elementUpload, setElementUpload] = useState<ElementUploadStatus | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [publishReadiness, setPublishReadiness] = useState<ResourcePublishReadiness | null>(null);
   const [archiveImpact, setArchiveImpact] = useState<BeeGameResourcePackImpactPayload | null>(null);
 
@@ -353,9 +389,16 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     return (
       <>
       {editDialogOpen ? <EditResourcePackDialog open pack={selectedPack} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} /> : null}
-      {deleteDialogOpen ? <DeleteResourcePackDialog open pack={selectedPack} onClose={() => setDeleteDialogOpen(false)} onDelete={async () => { await apiClient.deletePack(selectedPack.id); closeResourcePackRoute(); packSessionRef.current += 1; categoryRequestRef.current += 1; setPacks((current) => current.filter((item) => item.id !== selectedPack.id)); setSelectedPack(null); setSelectedElement(null); setLoadedElementCategories([]); setFolders([]); setDeleteDialogOpen(false); setLoading(false); }} /> : null}
       {archiveImpact ? <ArchivePackDialog pack={selectedPack} impact={archiveImpact} onClose={() => setArchiveImpact(null)} onArchive={async () => { const archived = await apiClient.archivePack(selectedPack.id); setSelectedPack(archived); setPacks((current) => current.map((item) => item.id === archived.id ? archived : item)); setArchiveImpact(null); }} /> : null}
-      {publishReadiness ? <PublishReadinessDialog report={publishReadiness} onClose={() => setPublishReadiness(null)} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(null); }} /> : null}
+      {publishReadiness ? <PublishReadinessDialog report={publishReadiness} autoFixableCount={elements.filter(element => Boolean(buildSafePublishFix(element, elements))).length} onClose={() => setPublishReadiness(null)} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(null); }} onAutoFix={async () => {
+        const fixes = elements.map(element => ({ element, fix: buildSafePublishFix(element, elements) })).filter((entry): entry is { element: ResourceElement; fix: Partial<ResourceElement> } => Boolean(entry.fix));
+        if (fixes.length) {
+          const updated = await Promise.all(fixes.map(({ element, fix }) => apiClient.updateElement(selectedPack.id, element.id, fix)));
+          setElements(current => current.map(element => updated.find(item => item.id === element.id) || element));
+          setSelectedElement(current => current ? updated.find(item => item.id === current.id) || current : null);
+        }
+        return apiClient.getPublishReadiness(selectedPack.id);
+      }} /> : null}
       <PackBrowser
         apiClient={apiClient}
         pack={selectedPack}
@@ -376,8 +419,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
           setLoading(false);
         }}
         onElement={setSelectedElement}
+        onClearElement={() => setSelectedElement(null)}
         onEditPack={() => setEditDialogOpen(true)}
-        onDeletePack={() => setDeleteDialogOpen(true)}
         onArchivePack={async () => { try { setArchiveImpact(await beeGameApi.getResourcePackImpact(selectedPack.id)); } catch (cause) { setError(cause instanceof Error ? cause.message : '无法读取引用项目'); } }}
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
@@ -467,9 +510,14 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
-function PublishReadinessDialog({ report, onClose, onSelectElement }: { report: ResourcePublishReadiness; onClose: () => void; onSelectElement: (elementId: string) => void }) {
-  const IssueList = ({ issues, tone }: { issues: readonly { code: string; message: string; elementId?: string }[]; tone: 'blocking' | 'warning' }) => <ul className="space-y-2">{issues.map((issue, index) => <li key={`${issue.code}-${issue.elementId || index}`} className={`flex items-start gap-2 rounded-lg border px-3 py-2 type-caption-2 ${tone === 'blocking' ? 'border-red-300/20 bg-red-400/10 text-red-100' : 'border-amber-200/15 bg-amber-300/10 text-amber-100'}`}><span className="mt-0.5">{tone === 'blocking' ? '×' : '!'}</span><span className="min-w-0 flex-1">{issue.message}</span>{issue.elementId ? <button type="button" onClick={() => onSelectElement(issue.elementId!)} className="shrink-0 text-zinc-50 underline underline-offset-2">定位</button> : null}</li>)}</ul>
-  return <div role="dialog" aria-modal="true" aria-label="发布检查" className="fixed inset-0 z-[220] grid place-items-center bg-black/60 p-5 backdrop-blur-sm"><section className="w-full max-w-md rounded-2xl border border-white/12 bg-[#17181d] p-5 shadow-2xl"><div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4"><div><p className="type-caption-1 text-[#c6a367]">资源库</p><h2 className="type-headline mt-1 text-zinc-50">发布检查</h2><p className="type-caption-2 mt-1 text-zinc-500">发布前需先处理所有阻塞项。</p></div><button type="button" aria-label="关闭发布检查" onClick={onClose} className="glass-icon-button h-8 w-8">×</button></div><div className="max-h-[52vh] space-y-4 overflow-y-auto py-4">{report.blocking.length ? <section><h3 className="type-caption-1 mb-2 text-red-200">阻塞项 · {report.blocking.length}</h3><IssueList issues={report.blocking} tone="blocking" /></section> : null}{report.warnings.length ? <section><h3 className="type-caption-1 mb-2 text-amber-100">警告 · {report.warnings.length}</h3><IssueList issues={report.warnings} tone="warning" /></section> : null}</div><button type="button" onClick={onClose} className="secondary-pill type-button w-full px-4 py-2">返回继续修复</button></section></div>
+function PublishReadinessDialog({ report, autoFixableCount, onClose, onSelectElement, onAutoFix }: { report: ResourcePublishReadiness; autoFixableCount: number; onClose: () => void; onSelectElement: (elementId: string) => void; onAutoFix: () => Promise<ResourcePublishReadiness> }) {
+  const [activeReport, setActiveReport] = useState(report);
+  const [isFixing, setIsFixing] = useState(false);
+  useEffect(() => setActiveReport(report), [report]);
+  const IssueList = ({ issues, tone }: { issues: readonly { code: string; message: string; elementId?: string }[]; tone: 'blocking' | 'warning' }) => <ul className="space-y-2">{issues.map((issue, index) => <li key={`${issue.code}-${issue.elementId || index}`} className={`flex items-start gap-2 rounded-lg border px-3 py-2 type-caption-2 ${tone === 'blocking' ? 'border-red-300/20 bg-red-400/10 text-red-100' : 'border-amber-200/15 bg-amber-300/10 text-amber-100'}`}><span className="mt-0.5">{tone === 'blocking' ? '×' : '!'}</span><span className="min-w-0 flex-1">{issue.message}</span>{issue.elementId ? <button type="button" onClick={() => onSelectElement(issue.elementId!)} className="shrink-0 text-zinc-50 underline underline-offset-2">定位</button> : null}</li>)}</ul>;
+  const canAutoFix = autoFixableCount > 0;
+  const autoFix = async () => { setIsFixing(true); try { setActiveReport(await onAutoFix()); } finally { setIsFixing(false); } };
+  return <div role="dialog" aria-modal="true" aria-label="发布检查" className="fixed inset-0 z-[220] grid place-items-center bg-black/60 p-5 backdrop-blur-sm"><section className="w-full max-w-md rounded-2xl border border-white/12 bg-[#17181d] p-5 shadow-2xl"><div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4"><div><p className="type-caption-1 text-[#c6a367]">资源库</p><h2 className="type-headline mt-1 text-zinc-50">发布检查</h2><p className="type-caption-2 mt-1 text-zinc-500">发布前需先处理所有阻塞项。</p></div><button type="button" aria-label="关闭发布检查" onClick={onClose} className="glass-icon-button h-8 w-8">×</button></div>{canAutoFix ? <div className="mt-4 rounded-xl border border-sky-200/15 bg-sky-300/[0.06] p-3"><p className="type-caption-2 text-zinc-300">可自动修复 {autoFixableCount} 个明确项：补齐可由资源组确定的用途，并关联唯一精确匹配的外部文件。其余项目保留供人工确认。</p><button type="button" disabled={isFixing} onClick={() => void autoFix()} className="primary-pill type-button mt-3 w-full px-4 py-2 disabled:opacity-50">{isFixing ? '正在一键修复…' : '一键修复可推断项'}</button></div> : null}<div className="max-h-[52vh] space-y-4 overflow-y-auto py-4">{activeReport.blocking.length ? <section><h3 className="type-caption-1 mb-2 text-red-200">阻塞项 · {activeReport.blocking.length}</h3><IssueList issues={activeReport.blocking} tone="blocking" /></section> : <p className="type-caption-2 rounded-lg border border-emerald-200/15 bg-emerald-300/10 px-3 py-2 text-emerald-100">所有阻塞项均已处理，可再次发布。</p>}{activeReport.warnings.length ? <section><h3 className="type-caption-1 mb-2 text-amber-100">警告 · {activeReport.warnings.length}</h3><IssueList issues={activeReport.warnings} tone="warning" /></section> : null}</div><button type="button" onClick={onClose} className="secondary-pill type-button w-full px-4 py-2">返回继续修复</button></section></div>
 }
 
 function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boolean; onOpen: () => void }) {
@@ -488,7 +536,7 @@ function PackCard({ pack, isZh, onOpen }: { pack: ResourcePackSummary; isZh: boo
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-black/10" />
       <div className="absolute right-4 top-4 flex items-center gap-2">
         <span className="type-caption-2 rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-zinc-100 backdrop-blur-sm">{pack.elementCount} 个元素</span>
-        <span className="type-caption-2 rounded-full border border-emerald-200/20 bg-emerald-300/15 px-2.5 py-1 text-emerald-100 backdrop-blur-sm">● {pack.status === 'published' ? '已发布' : '草稿'}</span>
+        <span className={`type-caption-2 rounded-full border px-2.5 py-1 backdrop-blur-sm ${pack.status === 'published' ? 'border-emerald-200/20 bg-emerald-300/15 text-emerald-100' : pack.status === 'archived' ? 'border-amber-200/20 bg-amber-300/15 text-amber-100' : 'border-white/15 bg-black/35 text-zinc-100'}`}>● {pack.status === 'published' ? '已发布' : pack.status === 'archived' ? '已归档' : '草稿'}</span>
       </div>
       <div className="relative flex h-full flex-col justify-end p-5">
         <h2 className="type-headline truncate text-zinc-50">{pack.name}</h2>
@@ -509,8 +557,8 @@ function PackBrowser({
   error,
   onBack,
   onElement,
+  onClearElement,
   onEditPack,
-  onDeletePack,
   onArchivePack,
   onAddFiles,
   onDropFiles,
@@ -533,8 +581,8 @@ function PackBrowser({
   error: string;
   onBack: () => void;
   onElement: (element: ResourceElement) => void;
+  onClearElement: () => void;
   onEditPack: () => void;
-  onDeletePack: () => void;
   onArchivePack: () => Promise<void>;
   onAddFiles: (files: File[], destination: UploadDestination) => void;
   onDropFiles: (files: File[], destination: UploadDestination) => void;
@@ -562,6 +610,9 @@ function PackBrowser({
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const selectedElements = useMemo(() => elements.filter(element => selectedElementIds.includes(element.id)), [elements, selectedElementIds]);
   const [moveError, setMoveError] = useState('');
+  useEffect(() => {
+    setSelectedElementIds(current => current.filter(id => elements.some(element => element.id === id)));
+  }, [elements]);
   useLayoutEffect(() => {
     const host = explorerHostRef.current;
     if (!host) return;
@@ -623,7 +674,14 @@ function PackBrowser({
     fileInputRef.current?.click();
   };
   const renameFolder = (folder: ResourceFolder) => setRenameTarget({ type: 'folder', mode: 'rename', name: folder.name, folder });
-  const deleteFolder = async (folder: ResourceFolder) => { if (window.confirm(`删除文件夹“${folder.name}”？文件夹必须为空。`)) { await apiClient.deleteFolder(pack.id, folder.id); await onRefreshWorkspace(); } };
+  const deleteFolder = async (folder: ResourceFolder) => {
+    const message = isZh
+      ? `删除文件夹“${folder.name}”及其中所有文件和子文件夹？此操作不可恢复。`
+      : `Delete “${folder.name}” and every file and subfolder inside it? This cannot be undone.`;
+    if (!window.confirm(message)) return;
+    await apiClient.deleteFolder(pack.id, folder.id);
+    await onRefreshWorkspace();
+  };
   const renameElement = (element: ResourceElement) => setRenameTarget({ type: 'file', mode: 'rename', name: element.name, element });
   const deleteElement = async (element: ResourceElement) => { if (window.confirm(`删除文件“${element.name}”？`)) { await apiClient.deleteElement(pack.id, element.id); await onRefreshWorkspace(); } };
   const moveElements = async (items: ResourceElement[], folder: ResourceFolder) => {
@@ -659,15 +717,14 @@ function PackBrowser({
         <div className="flex shrink-0 items-center gap-2.5">
           <div className="flex overflow-hidden rounded-full border border-[#474850] bg-transparent">
           <button type="button" className="h-[33px] border-0 px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05]" onClick={onEditPack}>编辑 Pack</button>
-          <button type="button" disabled={pack.status === 'published' || pack.status === 'archived'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>发布</button>
+          <button type="button" disabled={pack.status === 'published'} className="h-[33px] border-l border-[#474850] px-[13px] text-[11px] font-medium text-[#e1e1e5] transition-colors hover:bg-white/[0.05] disabled:text-zinc-600" onClick={() => void onPublish()}>{pack.status === 'archived' ? '重新发布' : '发布'}</button>
           </div>
           {pack.status !== 'archived' ? <button type="button" onClick={() => void onArchivePack()} className="h-[33px] rounded-full border border-amber-300/35 px-[13px] text-[11px] font-medium text-amber-100 transition-colors hover:bg-amber-300/10">归档 Pack</button> : <span className="type-caption-2 text-amber-200">已归档</span>}
-          <button type="button" onClick={onDeletePack} className="h-[33px] rounded-full border border-red-300/35 px-[13px] text-[11px] font-medium text-red-200 transition-colors hover:bg-red-400/10">删除 Pack</button>
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2c2d33] bg-[#15161b]">
-          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => setSelectedElementIds(items.map(item => item.id))} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => { setSelectedElementIds(items.map(item => item.id)); if (items.length !== 1) onClearElement(); }} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'environment'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
           <input ref={fileInputRef} aria-label="选择要添加的文件" type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
         </aside>
         <main className="relative min-h-0 min-w-0 overflow-hidden bg-[#090a0c]" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDropFiles(Array.from(event.dataTransfer.files), uploadDestination); }}>
@@ -677,16 +734,19 @@ function PackBrowser({
             </div>
           ) : null}
           <div className="relative grid h-full min-h-0 place-items-center overflow-hidden bg-[radial-gradient(circle_at_48%_44%,#444852,#1b1d23_37%,#101115_70%)]">
-            {selectedElements.length > 1 ? <BatchElementInspector elements={selectedElements} onApply={async (input) => {
+            {selectedElements.length > 1 ? <BatchElementInspector pack={pack} elements={selectedElements} onApply={async (input) => {
               const results = await Promise.allSettled(selectedElements.map(element => onUpdateElement(element.id, {
                 ...(input.kind ? { kind: input.kind } : {}),
-                ...((input.addUsageTags?.length || input.removeUsageTags?.length) ? { specs: { ...element.specs, usageTags: JSON.stringify([...new Set(normaliseUsageTags(element.specs.usageTags, element.category).filter(tag => !input.removeUsageTags?.includes(tag)).concat(input.addUsageTags || []))]) } } : {}),
+                ...(input.status ? { status: input.status } : {}),
+                ...(input.dimensionOverride ? { dimensionOverride: input.dimensionOverride } : {}),
+                ...(input.styleOverride !== undefined ? { styleOverride: input.styleOverride } : {}),
+                ...((input.addUsageTags?.length || input.removeUsageTags?.length) ? { usageTags: [...new Set(normaliseUsageTags(element.usageTags).filter(tag => !input.removeUsageTags?.includes(tag)).concat(input.addUsageTags || []))] } : {}),
               })));
               const failed = results.filter(result => result.status === 'rejected').length;
               if (failed) setMoveError(`有 ${failed} 个元素未能保存批量设置。`);
               else await onRefreshWorkspace();
             }} /> : null}
-            {selectedElement ? (
+            {selectedElements.length > 1 ? null : selectedElement ? (
               resourceUrl ? <Preview element={selectedElement} pack={pack} url={resourceUrl} elements={elements} materialTextureBindings={materialTextureBindings} textureUrls={boundTextureUrls} inspectorOpen={inspectorOpen} onOpenInspector={() => setInspectorOpen(true)} onCloseInspector={() => setInspectorOpen(false)} onMetrics={saveMetrics} onSave={onUpdateElement} /> : resourceError ? <div role="alert" className="grid place-items-center gap-3 text-center type-footnote text-red-200"><span>{resourceError}</span><button type="button" aria-label="重试加载预览" onClick={() => setResourceAttempt(current => current + 1)} className="secondary-pill type-button px-3 py-1.5">重试</button></div> : <div className="type-footnote text-zinc-600">正在加载预览…</div>
             ) : (
               loading ? <div className="type-footnote text-zinc-600">正在加载…</div> : <EmptyPreviewState />
@@ -720,28 +780,43 @@ function ArchivePackDialog({ pack, impact, onClose, onArchive }: { pack: Resourc
   return <div role="dialog" aria-modal="true" aria-label="归档 Pack" className="fixed inset-0 z-[270] grid place-items-center bg-black/65 p-5 backdrop-blur-sm"><div className="glass-panel w-full max-w-md rounded-3xl p-6 text-zinc-100"><div className="type-title-3">归档 {pack.name}</div><p className="type-footnote mt-3 text-zinc-400">归档不会删除资源或已复制到项目的文件。已有项目会继续锁定当前版本。</p>{impact.references.length ? <div className="mt-4 max-h-44 overflow-y-auto rounded-xl border border-amber-300/20 bg-amber-300/5 p-3"><p className="type-footnote text-amber-100">{impact.projectCount} 个项目正在引用此 Pack</p><div className="mt-2 space-y-1">{impact.references.map(reference => <p key={`${reference.projectId}:${reference.slotId}`} className="type-caption-2 text-zinc-300">{reference.projectName} · {reference.slotId} · v{reference.packVersion}</p>)}</div></div> : <p className="type-footnote mt-4 text-zinc-500">没有项目引用此 Pack。</p>}{error ? <p role="alert" className="type-footnote mt-4 text-red-300">{error}</p> : null}<div className="mt-6 flex justify-end gap-2"><button type="button" disabled={archiving} onClick={onClose} className="secondary-pill type-button px-4 py-2">取消</button><button type="button" disabled={archiving} onClick={() => { setArchiving(true); void onArchive().catch(cause => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setArchiving(false)); }} className="type-button rounded-full border border-amber-300/40 bg-amber-300/10 px-4 py-2 text-amber-100 disabled:opacity-60">{archiving ? '归档中…' : '确认归档'}</button></div></div></div>
 }
 
-function BatchElementInspector({ elements, onApply }: { elements: ResourceElement[]; onApply: (input: { kind?: string; addUsageTags?: string[]; removeUsageTags?: string[] }) => Promise<void> }) {
+function BatchElementInspector({ pack, elements, onApply }: { pack: ResourcePackSummary; elements: ResourceElement[]; onApply: (input: { kind?: string; status?: string; dimensionOverride?: ResourceElement['dimensionOverride']; styleOverride?: string | null; addUsageTags?: string[]; removeUsageTags?: string[] }) => Promise<void> }) {
   const commonKind = elements.every(element => element.kind === elements[0]?.kind) ? elements[0]?.kind || '' : '';
+  const commonStatus = elements.every(element => element.status === elements[0]?.status) ? elements[0]?.status || '' : '';
+  const commonDimension = elements.every(element => (element.dimensionOverride || 'agnostic') === (elements[0]?.dimensionOverride || 'agnostic')) ? elements[0]?.dimensionOverride || 'agnostic' : '';
+  const commonStyle = elements.every(element => (element.styleOverride || '') === (elements[0]?.styleOverride || '')) ? elements[0]?.styleOverride || '' : '';
   const commonUsageTags = useMemo(() => {
-    const first = normaliseUsageTags(elements[0]?.specs.usageTags, elements[0]?.category || '');
-    return first.filter(tag => elements.every(element => normaliseUsageTags(element.specs.usageTags, element.category).includes(tag)));
+    const first = normaliseUsageTags(elements[0]?.usageTags);
+    return first.filter(tag => elements.every(element => normaliseUsageTags(element.usageTags).includes(tag)));
   }, [elements]);
   const [kind, setKind] = useState(commonKind);
+  const [status, setStatus] = useState(commonStatus);
+  const [dimensionOverride, setDimensionOverride] = useState<ResourceElement['dimensionOverride'] | ''>(commonDimension);
+  const [styleMode, setStyleMode] = useState<'keep' | 'inherit' | 'replace'>('keep');
+  const [styleOverride, setStyleOverride] = useState<string[]>(() => decodeStyleOverride(commonStyle));
   const [usageTags, setUsageTags] = useState<string[]>(commonUsageTags);
   const [initialUsageTags, setInitialUsageTags] = useState<string[]>(commonUsageTags);
   const [usageMenuOpen, setUsageMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setKind(commonKind); setUsageTags(commonUsageTags); setInitialUsageTags(commonUsageTags); setUsageMenuOpen(false); }, [commonKind, commonUsageTags]);
+  useEffect(() => { setKind(commonKind); setStatus(commonStatus); setDimensionOverride(commonDimension); setStyleMode('keep'); setStyleOverride(decodeStyleOverride(commonStyle)); setUsageTags(commonUsageTags); setInitialUsageTags(commonUsageTags); setUsageMenuOpen(false); }, [commonDimension, commonKind, commonStatus, commonStyle, commonUsageTags]);
   const addedUsageTags = usageTags.filter(tag => !initialUsageTags.includes(tag));
   const removedUsageTags = initialUsageTags.filter(tag => !usageTags.includes(tag));
-  const apply = async () => { if (!kind && !addedUsageTags.length && !removedUsageTags.length) return; setSaving(true); try { await onApply({ ...(kind ? { kind } : {}), ...(addedUsageTags.length ? { addUsageTags: addedUsageTags } : {}), ...(removedUsageTags.length ? { removeUsageTags: removedUsageTags } : {}) }); } finally { setSaving(false); } };
-  return <aside className="absolute right-3 top-3 z-20 w-72 rounded-xl border border-sky-300/20 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur-xl">
-    <div className="type-footnote text-zinc-100">已选择 {elements.length} 个元素</div>
-    <p className="type-caption-2 mt-1 text-zinc-500">显示所有元素的共同值；混合值不会被静默覆盖。</p>
-    <label className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">资源形态</span><select value={kind} onChange={event => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">混合值（不修改）</option>{resourceFormOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+  const styles = packStyleOptions(pack.style, styleOverride);
+  const changed = Boolean(kind || status || dimensionOverride || styleMode !== 'keep' || addedUsageTags.length || removedUsageTags.length);
+  const apply = async () => { if (!changed) return; setSaving(true); try { await onApply({ ...(kind ? { kind } : {}), ...(status ? { status } : {}), ...(dimensionOverride ? { dimensionOverride } : {}), ...(styleMode === 'inherit' ? { styleOverride: null } : styleMode === 'replace' ? { styleOverride: encodeStyleOverride(styleOverride) } : {}), ...(addedUsageTags.length ? { addUsageTags: addedUsageTags } : {}), ...(removedUsageTags.length ? { removeUsageTags: removedUsageTags } : {}) }); } finally { setSaving(false); } };
+  return <aside aria-label="批量编辑元素" className="absolute z-20 w-[min(420px,calc(100%-32px))] rounded-2xl border border-white/10 bg-[#15161b]/95 p-4 shadow-2xl backdrop-blur-xl">
+    <div className="flex items-start justify-between gap-4"><div><div className="type-footnote font-medium text-zinc-100">批量编辑 {elements.length} 个元素</div><p className="type-caption-2 mt-1 text-zinc-500">仅会应用你在此面板中明确修改的字段；混合值保持不变。</p></div><span className="type-caption-2 rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-zinc-400">{elements.length}</span></div>
+    <div className="mt-4 grid grid-cols-2 gap-3"><label className="grid gap-1"><span className="type-caption-2 text-zinc-500">资源形态</span><select value={kind} onChange={event => setKind(event.target.value)} className="glass-control rounded-lg px-2 py-1.5 type-caption-2"><option value="">混合值（不修改）</option>{resourceFormOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="grid gap-1"><span className="type-caption-2 text-zinc-500">生命周期状态</span><select value={status} onChange={event => setStatus(event.target.value)} className="glass-control rounded-lg px-2 py-1.5 type-caption-2"><option value="">混合值（不修改）</option><option value="ready">可用</option><option value="hidden">隐藏</option><option value="archived">已归档</option></select></label></div>
+    <label className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={event => setDimensionOverride(event.target.value as ResourceElement['dimensionOverride'] | '')} className="glass-control rounded-lg px-2 py-1.5 type-caption-2"><option value="">混合值（不修改）</option><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select></label>
+    <div className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><select value={styleMode} onChange={event => setStyleMode(event.target.value as typeof styleMode)} className="glass-control rounded-lg px-2 py-1.5 type-caption-2"><option value="keep">保持现有值</option><option value="inherit">全部继承 Pack 风格</option><option value="replace">覆盖为下列风格</option></select>{styleMode === 'replace' ? <StyleOverrideMultiSelect values={styleOverride} options={styles} onChange={setStyleOverride} /> : null}</div>
     <div className="mt-3 grid gap-1"><span className="type-caption-2 text-zinc-500">游戏用途（共同项）</span><UsageTagMultiSelect values={usageTags} open={usageMenuOpen} onOpenChange={setUsageMenuOpen} onChange={setUsageTags} /></div>
-    <button type="button" disabled={saving || (!kind && !addedUsageTags.length && !removedUsageTags.length)} onClick={() => void apply()} className="primary-pill type-button mt-3 w-full px-3 py-2 disabled:opacity-50">{saving ? '应用中…' : '应用到所选元素'}</button>
+    <button type="button" disabled={saving || !changed} onClick={() => void apply()} className="primary-pill type-button mt-4 w-full px-3 py-2 disabled:opacity-50">{saving ? '应用中…' : '应用到所选元素'}</button>
   </aside>
+}
+
+function StyleOverrideMultiSelect({ values, options, onChange }: { values: string[]; options: readonly string[]; onChange: (values: string[]) => void }) {
+  const toggle = (value: string) => onChange(values.includes(value) ? values.filter(item => item !== value) : [...values, value]);
+  return <div className="mt-1.5 flex flex-wrap gap-1.5">{options.map(option => <button key={option} type="button" aria-pressed={values.includes(option)} onClick={() => toggle(option)} className={`rounded-full border px-2.5 py-1 type-caption-2 transition-colors ${values.includes(option) ? 'border-orange-200/50 bg-orange-300/15 text-orange-100' : 'border-white/12 text-zinc-400 hover:border-white/25 hover:text-zinc-200'}`}>{option}</button>)}</div>;
 }
 
 function UsageTagMultiSelect({ values, open, onOpenChange, onChange }: { values: string[]; open: boolean; onOpenChange: (open: boolean) => void; onChange: (values: string[]) => void }) {
@@ -766,11 +841,6 @@ function UsageTagMultiSelect({ values, open, onOpenChange, onChange }: { values:
   return <div ref={rootRef} className="relative"><button type="button" aria-label="游戏用途" aria-expanded={open} aria-haspopup="listbox" onClick={() => onOpenChange(!open)} className="glass-control flex min-h-8 w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left type-caption-2"><span className={`truncate ${selectedLabels.length ? 'text-zinc-200' : 'text-zinc-500'}`}>{selectedLabels.length ? selectedLabels.join(' · ') : '请选择用途'}</span><span className="text-zinc-500">⌄</span></button>{open ? <div role="listbox" aria-multiselectable="true" className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/15 bg-zinc-950 p-1.5 shadow-xl">{useDomainOptions.map(([value, label]) => <button key={value} type="button" role="option" aria-selected={values.includes(value)} onClick={() => toggle(value)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left type-caption-2 text-zinc-300 hover:bg-white/10"><span className={`grid h-3.5 w-3.5 place-items-center rounded border ${values.includes(value) ? 'border-sky-200/60 bg-sky-300/20 text-sky-100' : 'border-white/20'}`}>{values.includes(value) ? '✓' : null}</span>{label}</button>)}</div> : null}</div>;
 }
 
-function decodeUsageTags(value: unknown): string[] {
-  if (typeof value !== 'string') return [];
-  try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : []; } catch { return []; }
-}
-
 function Preview({ element, pack, url, elements, materialTextureBindings, textureUrls, inspectorOpen, onOpenInspector, onCloseInspector, onMetrics, onSave }: {
   element: ResourceElement;
   pack: ResourcePackSummary;
@@ -787,7 +857,7 @@ function Preview({ element, pack, url, elements, materialTextureBindings, textur
   return (
     <div className="relative h-full w-full min-h-0 bg-[radial-gradient(circle_at_50%_45%,rgba(161,161,170,.65),rgba(24,24,27,.95)_65%)]">
       <FileInfoOverlay element={element} />
-      {!inspectorOpen ? <button type="button" aria-label="显示元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 h-8 rounded-full border border-white/15 bg-black/35 px-3 text-[11px] font-medium text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55">Info</button> : null}
+      {!inspectorOpen ? <button type="button" aria-label="显示元素信息" title="元素信息" onClick={onOpenInspector} className="absolute right-4 top-4 z-10 grid h-8 w-8 place-items-center rounded-full border border-white/15 bg-black/35 text-zinc-200 backdrop-blur-xl transition-colors hover:bg-black/55"><Info className="h-4 w-4" /></button> : null}
       <div className="h-full min-h-0 w-full"><ResourcePreview element={element} url={url} onMetrics={onMetrics} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} onPreviewError={(error) => { console.error('Resource preview failed', { elementId: element.id, name: element.name, error }); if (element.specs.previewStatus !== 'failed') void onSave(element.id, { specs: { ...element.specs, previewStatus: 'failed', previewError: error.message || 'Preview loading failed' } }); }} /></div>
       {inspectorOpen ? <ResourceInspectorOverlay element={element} pack={pack} elements={elements} onSave={onSave} onClose={onCloseInspector} /> : null}
     </div>
@@ -830,7 +900,7 @@ function ResourceInspectorOverlay({
   onClose: () => void;
 }) {
   const [kind, setKind] = useState(element.kind);
-  const [usageTags, setUsageTags] = useState<string[]>(() => normaliseUsageTags(element.specs.usageTags, element.category));
+  const [usageTags, setUsageTags] = useState<string[]>(() => normaliseUsageTags(element.usageTags));
   const [usageMenuOpen, setUsageMenuOpen] = useState(false);
   const [styleOverride, setStyleOverride] = useState<string[]>(() => decodeStyleOverride(element.styleOverride));
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
@@ -839,8 +909,9 @@ function ResourceInspectorOverlay({
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'config'>('info');
   const [materialBindings, setMaterialBindings] = useState<MaterialTextureBindings>(() => decodeMaterialTextureBindings(element.specs.materialTextureBindings));
-  useEffect(() => { setKind(element.kind); setUsageTags(normaliseUsageTags(element.specs.usageTags, element.category)); setUsageMenuOpen(false); setStyleOverride(decodeStyleOverride(element.styleOverride)); setStyleMenuOpen(false); setCustomStyle(''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); }, [element]);
-  const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : [])])]; await onSave(element.id, { kind, styleOverride: encodeStyleOverride(styleOverride), dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, usageTags: JSON.stringify(usageTags), materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies }); } finally { setSaving(false); } };
+  const [dependencyBindings, setDependencyBindings] = useState(() => element.dependencyBindings ? [...element.dependencyBindings] : []);
+  useEffect(() => { setKind(element.kind); setUsageTags(normaliseUsageTags(element.usageTags)); setUsageMenuOpen(false); setStyleOverride(decodeStyleOverride(element.styleOverride)); setStyleMenuOpen(false); setCustomStyle(''); setDimensionOverride(element.dimensionOverride || 'agnostic'); setMaterialBindings(decodeMaterialTextureBindings(element.specs.materialTextureBindings)); setDependencyBindings(element.dependencyBindings ? [...element.dependencyBindings] : []); }, [element]);
+  const save = async () => { setSaving(true); try { const dependencies = [...new Set([...element.dependencies, ...Object.values(materialBindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : []), ...dependencyBindings.map(binding => binding.dependencyElementId)])]; await onSave(element.id, { kind, usageTags, styleOverride: encodeStyleOverride(styleOverride), dimensionOverride: dimensionOverride as ResourceElement['dimensionOverride'], specs: { ...element.specs, materialTextureBindings: encodeMaterialTextureBindings(materialBindings) }, dependencies, dependencyBindings }); } finally { setSaving(false); } };
   const styleOptions = packStyleOptions(pack.style, styleOverride);
   return (
     <aside
@@ -873,16 +944,36 @@ function ResourceInspectorOverlay({
         <div className="grid gap-1"><span className="type-caption-2 text-zinc-500">风格覆盖</span><div className="relative"><button type="button" aria-expanded={styleMenuOpen} aria-haspopup="menu" onClick={() => setStyleMenuOpen(open => !open)} className="glass-control flex min-h-8 w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left type-caption-2"><span className="truncate">{styleOverride.length ? styleOverride.join(' · ') : `继承 Pack：${pack.style}`}</span><span className="text-zinc-500">⌄</span></button>{styleMenuOpen ? <div role="menu" className="absolute z-20 mt-1 w-full rounded-lg border border-white/15 bg-zinc-950 p-1.5 shadow-xl">{styleOptions.map(option => <button key={option} type="button" role="menuitemcheckbox" aria-checked={styleOverride.includes(option)} onClick={() => setStyleOverride(current => current.includes(option) ? current.filter(value => value !== option) : [...current, option])} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left type-caption-2 text-zinc-300 hover:bg-white/10"><span className={`grid h-3.5 w-3.5 place-items-center rounded border ${styleOverride.includes(option) ? 'border-orange-200/60 bg-orange-300/20 text-orange-100' : 'border-white/20'}`}>{styleOverride.includes(option) ? '✓' : null}</span>{option}</button>)}</div> : null}</div><div className="flex gap-1.5"><input aria-label="添加自定义覆盖风格" value={customStyle} onChange={(event) => setCustomStyle(event.target.value)} className="glass-control min-w-0 flex-1 rounded-lg px-2 py-1 type-caption-2" placeholder="添加自定义风格" /><button type="button" onClick={() => { const value = customStyle.trim(); if (value) setStyleOverride(current => current.includes(value) ? current : [...current, value]); setCustomStyle(''); }} className="secondary-pill px-2 type-caption-2">添加</button></div><span className="type-caption-2 text-zinc-600">未选择时继承 Pack 风格。</span></div>
         <label className="grid gap-1"><span className="type-caption-2 text-zinc-500">维度覆盖</span><select value={dimensionOverride} onChange={(event) => setDimensionOverride(event.target.value as '2D' | '3D' | 'agnostic')} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="agnostic">继承 Pack</option><option value="2D">2D</option><option value="3D">3D</option></select><span className="type-caption-2 text-zinc-600">当前：<span>{dimensionOverride === 'agnostic' ? pack.dimension : dimensionOverride}</span></span></label>
         {isModelElement(element) ? <ModelMaterialBindings specs={element.specs} elements={elements} bindings={materialBindings} onBindingChange={setMaterialBindings} /> : null}
+        <ExternalDependencyBindings specs={element.specs} elements={elements} bindings={dependencyBindings} onChange={setDependencyBindings} />
         <button type="button" disabled={saving} onClick={() => void save()} className="primary-pill type-button w-full px-3 py-2 disabled:opacity-50">{saving ? '保存中…' : '保存配置'}</button>
       </div>}
     </aside>
   );
 }
 
+function ExternalDependencyBindings({ specs, elements, bindings, onChange }: { specs: ResourceElement['specs']; elements: ResourceElement[]; bindings: readonly NonNullable<ResourceElement['dependencyBindings']>[number][]; onChange: (bindings: Array<NonNullable<ResourceElement['dependencyBindings']>[number]>) => void }) {
+  const references = parseExternalReferences(specs.externalReferences, specs.textureReferences, specs.materialReferences);
+  if (!references.length) return null;
+  return <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.025] p-2.5"><div className="type-caption-2 font-medium text-zinc-300">外部文件依赖</div><p className="type-caption-2 text-zinc-600">按模型记录的相对路径映射 Pack 文件；项目接入时会保留该目录关系。</p>{references.map(reference => { const binding = bindings.find(item => item.referencePath === reference); return <label key={reference} className="grid gap-1"><span className="type-caption-2 truncate text-zinc-500" title={reference}>{reference}</span><select value={binding?.dependencyElementId || ''} onChange={(event) => onChange(event.target.value ? [...bindings.filter(item => item.referencePath !== reference), { referencePath: reference, dependencyElementId: event.target.value }] : bindings.filter(item => item.referencePath !== reference))} className="glass-control rounded-lg px-2 py-1 type-caption-2"><option value="">未关联（发布会阻止）</option>{elements.filter(candidate => candidate.status === 'ready').map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>})}</div>
+}
+
+function parseExternalReferences(...values: unknown[]): string[] {
+  const references: string[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) references.push(...parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())));
+      else references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean));
+    } catch { references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean)); }
+  }
+  return [...new Set(references)];
+}
+
 function InspectorInfoTab({ element, pack, elements }: { element: ResourceElement; pack: ResourcePackSummary; elements: ResourceElement[] }) {
   const bindings = decodeMaterialTextureBindings(element.specs.materialTextureBindings);
   const bindingValues = Object.entries(bindings).map(([slot, binding]) => `${slot} → ${elements.find(candidate => candidate.id === binding.baseColor)?.name || binding.baseColor}`);
-  const usageLabels = normaliseUsageTags(element.specs.usageTags, element.category).map(tag => useDomainOptions.find(([value]) => value === tag)?.[1] || tag);
+  const usageLabels = normaliseUsageTags(element.usageTags).map(tag => useDomainOptions.find(([value]) => value === tag)?.[1] || tag);
   return <div role="tabpanel" className="space-y-2 border-t border-white/10 pt-3"><Property label="继承 Pack" value={pack.name} /><Property label="路径" value={element.path} /><Property label="状态" value={element.status} /><Property label="资源组" value={categoryLabels[element.category] || element.category} /><MetadataList label="游戏用途" values={usageLabels} empty="未设置用途" />{isModelElement(element) ? <ModelAssetMetadata specs={element.specs} bindings={bindingValues} /> : null}<MetadataList label="规格" values={Object.entries(element.specs).filter(([key]) => key !== 'materialTextureBindings' && key !== 'materialTextureCandidates' && key !== 'usageTags').map(([key, value]) => `${key}: ${value}`)} empty="未记录规格" /></div>
 }
 

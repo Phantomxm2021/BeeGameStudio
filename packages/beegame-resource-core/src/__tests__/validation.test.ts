@@ -76,4 +76,15 @@ describe('resource pack validation', () => {
     }
     expect(validateResourceElement(element)).toEqual(element)
   })
+
+  test('accepts only formal element usage capabilities', () => {
+    const element = {
+      id: 'element-1', packId: 'pack-1', name: 'Tree', path: 'models/tree.glb',
+      category: 'models' as const, kind: 'model', specs: {}, usageTags: ['vegetation', 'environment'] as const, dependencies: [], status: 'ready' as const,
+    }
+    expect(validateResourceElement(element)).toEqual(element)
+    expect(() => validateResourceElement({ ...element, usageTags: ['made-up-purpose'] })).toThrow(
+      'Element usageTags must contain supported values',
+    )
+  })
 })

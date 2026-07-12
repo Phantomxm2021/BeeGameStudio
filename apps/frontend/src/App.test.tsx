@@ -107,6 +107,12 @@ describe('App view routing', () => {
     expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
   });
 
+  it('restores the resource library route instead of redirecting it to the project dashboard', () => {
+    window.history.pushState({}, '', '/?resourceLibrary=1');
+    render(<App />);
+    expect(screen.getByTestId('landing-view')).toBeInTheDocument();
+  });
+
   it('does not load protected dashboard data when no user is signed in', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'access-token',

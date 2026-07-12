@@ -65,7 +65,9 @@ export type ResourceElement = {
   kind: string
   preview?: { kind: string; path: string }
   specs: Record<string, string | number | boolean | null>
+  usageTags?: readonly string[]
   dependencies: readonly string[]
+  dependencyBindings?: readonly { referencePath: string; dependencyElementId: string; kind?: string }[]
   status: string
   styleOverride?: string | null
   dimensionOverride?: '2D' | '3D' | 'agnostic'

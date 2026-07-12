@@ -8,7 +8,7 @@ const pack: ResourcePack = {
 }
 const ready: ResourceElement = {
   id: 'tree', packId: 'forest', name: 'Tree', path: 'models/tree.glb', category: 'models', kind: 'model',
-  specs: { size: 1024, mimeType: 'model/gltf-binary' }, dependencies: [], status: 'ready',
+  specs: { size: 1024, mimeType: 'model/gltf-binary' }, usageTags: ['environment'], dependencies: [], status: 'ready',
 }
 
 describe('resource pack publish readiness', () => {
@@ -37,5 +37,28 @@ describe('resource pack publish readiness', () => {
     expect(report.warnings.map((issue) => issue.code)).toEqual(expect.arrayContaining([
       'license_evidence_missing', 'model_inspection_incomplete', 'preview_failed', 'duplicate_content', 'file_size_large',
     ]))
+  })
+
+  test('blocks publication when a ready element has no explicit semantic capability', () => {
+    const report = evaluateResourcePackPublishReadiness(pack, [{ ...ready, usageTags: [] }])
+    expect(report.canPublish).toBe(false)
+    expect(report.blocking).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'usage_tags_missing', elementId: ready.id }),
+    ]))
+  })
+
+  test('requires each detected external reference to be mapped to a ready dependency', () => {
+    const dependent = {
+      ...ready,
+      specs: { ...ready.specs, externalReferences: JSON.stringify(['materials/paint.bin']) },
+      dependencies: ['paint'],
+    }
+    const report = evaluateResourcePackPublishReadiness(pack, [dependent, { ...ready, id: 'paint', path: 'materials/paint.bin' }])
+    expect(report.blocking).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'external_dependency_unmapped', elementId: ready.id }),
+    ]))
+
+    const resolved = evaluateResourcePackPublishReadiness(pack, [{ ...dependent, dependencyBindings: [{ referencePath: 'materials/paint.bin', dependencyElementId: 'paint' }] }, { ...ready, id: 'paint', path: 'materials/paint.bin' }])
+    expect(resolved.blocking.map(issue => issue.code)).not.toContain('external_dependency_unmapped')
   })
 })

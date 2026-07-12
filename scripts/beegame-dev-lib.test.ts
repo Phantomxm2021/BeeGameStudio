@@ -34,6 +34,12 @@ describe('BeeGame local dev launcher helpers', () => {
       'runtime',
       'frontend',
     ])
+    expect(plan.processes.find(process => process.name === 'resources')?.command).toEqual([
+      'bun', '--watch', 'packages/beegame-resource-server/src/index.ts',
+    ])
+    expect(plan.processes.find(process => process.name === 'runtime')?.command).toEqual([
+      'bun', '--watch', 'scripts/dashboard-server-dev.ts',
+    ])
   })
 
   test('injects service urls and keeps service-role secrets out of runtime and frontend', () => {
@@ -62,9 +68,12 @@ describe('BeeGame local dev launcher helpers', () => {
     const resources = plan.processes.find(process => process.name === 'resources')
 
     expect(runtime?.env).toMatchObject({
+      NODE_ENV: 'development',
       BEEGAME_BILLING_MODE: 'remote',
       BEEGAME_BILLING_API_BASE_URL: 'http://127.0.0.1:41175',
       BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:41176',
+      BEEGAME_RESOURCE_SERVER_URL: 'http://127.0.0.1:41177',
+      BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
     })
@@ -92,7 +101,9 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(resources?.env).toMatchObject({
       BEEGAME_RESOURCE_HOST: '127.0.0.1',
       BEEGAME_RESOURCE_PORT: '41177',
+      BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
     })
+    expect(frontend?.env.BEEGAME_RESOURCE_SERVICE_TOKEN).toBeUndefined()
   })
 
   test('supports cli port and path overrides', () => {

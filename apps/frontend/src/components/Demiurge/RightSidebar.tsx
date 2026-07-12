@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
-import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type ReviewBindingPayload } from '../../services/api';
+import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type BeeGameAutoResourceBindingPayload, type ReviewBindingPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
 import type { BeeGameCreditTaskType } from '../../services/creditsApi';
@@ -29,6 +29,29 @@ const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachment
     }
     return uniqueAttachments;
 };
+
+function formatAssetLibrarySyncFeedback(result: BeeGameAutoResourceBindingPayload, lang: Language): { message: string; tone: 'success' | 'warning' | 'error' } {
+    const copied = result.results.filter(item => item.status === 'copied').length;
+    const failed = result.results.filter(item => item.status === 'failed').length;
+    const repaired = result.repaired_slot_ids?.length ?? 0;
+    const unmatched = result.unmatched_slot_ids.length;
+    const isZh = lang === 'zh' || lang === 'zh-TW';
+    if (failed) {
+        return { tone: 'error', message: isZh ? `${failed} 个资源未能同步；请查看对应资源槽。` : `${failed} asset slot(s) could not be synchronized; check the affected slots.` };
+    }
+    if (copied || repaired) {
+        const summary = isZh
+            ? `已同步 ${copied} 个资源${repaired ? `，并修复 ${repaired} 个缺失的资源库文件` : ''}。`
+            : `Synchronized ${copied} asset(s)${repaired ? ` and repaired ${repaired} missing library asset(s)` : ''}.`;
+        return { tone: unmatched ? 'warning' : 'success', message: unmatched ? `${summary} ${isZh ? `${unmatched} 个槽位未找到兼容候选。` : `${unmatched} slot(s) have no compatible candidate.`}` : summary };
+    }
+    return {
+        tone: unmatched ? 'warning' : 'success',
+        message: isZh
+            ? (unmatched ? `${unmatched} 个槽位未找到兼容候选。` : '没有需要同步的资源。')
+            : (unmatched ? `${unmatched} slot(s) have no compatible candidate.` : 'No assets need synchronization.'),
+    };
+}
 
 interface RightSidebarProps {
     projectId: string;
@@ -115,6 +138,7 @@ export function RightSidebar({
     const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
     const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
     const [isAutoBindingResources, setIsAutoBindingResources] = useState(false);
+    const [assetOperationFeedback, setAssetOperationFeedback] = useState<{ message: string; tone: 'success' | 'warning' | 'error' } | null>(null);
     const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -135,6 +159,7 @@ export function RightSidebar({
         setAssetIntegrationMessages({});
         setUploadingAssetSlotId(null);
         setIsAssetsLoading(false);
+        setAssetOperationFeedback(null);
     }, [projectId]);
 
     // Derived Data
@@ -270,6 +295,9 @@ export function RightSidebar({
         try {
             const result = await api.autoBindProjectResources(projectId);
             setAssetManifest(result.manifest);
+            setAssetOperationFeedback(formatAssetLibrarySyncFeedback(result, lang));
+        } catch (error) {
+            setAssetOperationFeedback({ message: error instanceof Error ? error.message : String(error), tone: 'error' });
         } finally {
             setIsAutoBindingResources(false);
         }
@@ -278,6 +306,11 @@ export function RightSidebar({
     const handleUnbindLibraryResource = async (slotId: string) => {
         if (!canUploadAssets) return;
         const result = await api.unbindProjectResource(projectId, slotId);
+        setAssetManifest(result.manifest);
+    };
+    const handleRemoveLibraryIntegration = async (slotId: string) => {
+        if (!canUploadAssets) return;
+        const result = await api.removeProjectResourceIntegration(projectId, slotId);
         setAssetManifest(result.manifest);
     };
     const handleResourceCandidates = async (slot: BeeGameAssetSlotPayload) => api.getProjectResourceCandidates(projectId, slot.id);
@@ -290,6 +323,11 @@ export function RightSidebar({
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
         if (!canSendMessage || !canIntegrateAssets) return;
         onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang), 'asset_integration');
+    };
+
+    const handleRequestSelectionPreparation = (slots: BeeGameAssetSlotPayload[]) => {
+        if (!canSendMessage || !canIntegrateAssets) return;
+        onSendMessage(buildAssetSelectionPreparationMessage(slots, assetManifest?.project_target, lang), 'asset_integration');
     };
 
     // Auto-resize search input
@@ -510,14 +548,17 @@ export function RightSidebar({
                                 isUploadingSlotId={uploadingAssetSlotId}
                                 isReintegratingSlotId={reintegratingAssetSlotId}
                                 isAutoBinding={isAutoBindingResources}
+                                autoBindFeedback={assetOperationFeedback}
                                 onUpload={canUploadAssets ? handleUploadAsset : undefined}
                                 onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
+                                onRemoveIntegration={canUploadAssets ? handleRemoveLibraryIntegration : undefined}
                                 onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
                                 onUnbind={canUploadAssets ? handleUnbindLibraryResource : undefined}
                                 onCandidates={canUploadAssets ? handleResourceCandidates : undefined}
                                 onBindCandidate={canUploadAssets ? handleBindResourceCandidate : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
+                                onRequestSelectionPreparation={canSendMessage && canIntegrateAssets ? handleRequestSelectionPreparation : undefined}
                                 lang={lang}
                             />
                         )}
@@ -621,4 +662,30 @@ function buildAssetIntegrationMessage(slot: BeeGameAssetSlotPayload, lang: Langu
         slot.target?.integration_notes ? `Integration notes: ${slot.target.integration_notes}.` : '',
         'Update project references, run the relevant checks or preview for this project, and record the real integration status in assets/asset-manifest.json.',
     ].filter(Boolean).join(' ');
+}
+
+function buildAssetSelectionPreparationMessage(
+    slots: BeeGameAssetSlotPayload[],
+    projectTarget: BeeGameAssetManifestPayload['project_target'],
+    lang: Language,
+): string {
+    const slotLines = slots.map(slot => {
+        const formats = slot.resource_requirement?.accepted_formats?.join(', ') || slot.accepted_formats?.join(', ') || '';
+        if (lang === 'zh' || lang === 'zh-TW') {
+            return `- ${slot.id}${slot.purpose ? `：${slot.purpose}` : ''}${formats ? `；允许格式：${formats}` : ''}`;
+        }
+        return `- ${slot.id}${slot.purpose ? `: ${slot.purpose}` : ''}${formats ? `; accepted formats: ${formats}` : ''}`;
+    });
+    if (lang === 'zh' || lang === 'zh-TW') {
+        return [
+            '请升级 assets/asset-manifest.json 中以下资源槽，使其可以安全匹配资源库。',
+            ...slotLines,
+            `保留原有项目语义与目标路径，但改用顶层 version、project_target、slots 结构。先根据当前项目真实的运行时/构建适配器，在 project_target.asset_format_capabilities 中声明允许的格式${projectTarget?.asset_format_capabilities?.length ? `（当前：${projectTarget.asset_format_capabilities.join(', ')}）` : ''}；不得从 Pack 或文件名推断。每个可自动选择的 slot 必须提供 resource_requirement，并使用资源库用途词表中的精确 tags：character、npc、creature、weapon-equipment、prop、vehicle、building、environment、terrain、vegetation、scene、level-map、tile、ui、icon、effect、combat、interaction、narrative、music、sound-effect、ambient-audio、voice；accepted_formats 必须是该运行时能力的兼容子集。不要根据文件名猜测资源，也不要选择、复制或声称已集成任何资源；不确定时保留 placeholder/missing。`,
+        ].join('\n');
+    }
+    return [
+        'Upgrade the following asset slots in assets/asset-manifest.json so they can safely match the resource library.',
+        ...slotLines,
+        `Preserve each project meaning and target path, but use top-level version, project_target, and slots. First declare the formats the actual runtime/build adapter supports in project_target.asset_format_capabilities${projectTarget?.asset_format_capabilities?.length ? ` (currently: ${projectTarget.asset_format_capabilities.join(', ')})` : ''}; never infer them from a Pack or filename. Every auto-selectable slot must have resource_requirement with exact tags from the resource-library usage vocabulary: character, npc, creature, weapon-equipment, prop, vehicle, building, environment, terrain, vegetation, scene, level-map, tile, ui, icon, effect, combat, interaction, narrative, music, sound-effect, ambient-audio, voice; accepted_formats must be a compatible subset of runtime capabilities. Do not infer assets from filenames, select/copy assets, or claim integration; keep uncertain slots placeholder/missing.`,
+    ].join('\n');
 }

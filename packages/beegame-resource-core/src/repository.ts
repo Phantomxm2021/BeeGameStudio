@@ -83,8 +83,15 @@ export function createInMemoryResourceRepository(input: {
     async deleteFolder(packId, folderId) {
       const folder = folders.find(item => item.id === folderId && item.packId === packId)
       if (!folder) return false
-      if (folders.some(item => item.packId === packId && item.parentId === folderId) || elements.some(item => item.packId === packId && (item.path === folder.path || item.path.startsWith(`${folder.path}/`)))) throw new Error('Folder is not empty')
-      folders.splice(folders.indexOf(folder), 1)
+      const folderPrefix = `${folder.path}/`
+      for (let cursor = elements.length - 1; cursor >= 0; cursor -= 1) {
+        const element = elements[cursor]
+        if (element.packId === packId && (element.path === folder.path || element.path.startsWith(folderPrefix))) elements.splice(cursor, 1)
+      }
+      for (let cursor = folders.length - 1; cursor >= 0; cursor -= 1) {
+        const candidate = folders[cursor]
+        if (candidate.packId === packId && (candidate.path === folder.path || candidate.path.startsWith(folderPrefix))) folders.splice(cursor, 1)
+      }
       return true
     },
     async updateElement(packId, elementId, input) {
@@ -104,7 +111,8 @@ export function createInMemoryResourceRepository(input: {
       const pack = packs.find(item => item.id === packId)
       if (!pack) throw new Error('Resource Pack not found')
       assertResourcePackPublishable(pack, elements.filter((element) => element.packId === packId))
-      const published = { ...pack, status: 'published' as const }
+      const { deprecatedAt: _deprecatedAt, ...activePack } = pack
+      const published = { ...activePack, status: 'published' as const }
       packs[packs.indexOf(pack)] = published
       return published
     },

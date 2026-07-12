@@ -18,7 +18,6 @@ import { deriveDashboardStatus, getWaitingApprovalState } from '../../utils/wait
 import { deriveGlobalWorkflowProgress } from '../../utils/workflowProgress';
 import { toChatDisplayMessages, toProjectRuntimeDisplayModel, toReviewDisplayModels } from '../../viewModels/displayModels';
 import { isBeeGameAdapterEnabled, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
-import { listModelConfigs, type ModelConfig } from '../../services/modelConfigApi';
 import {
     getCreditBalance,
     getCreditSummary,
@@ -50,11 +49,6 @@ const fallbackPhaseLabel = (phaseName: string): string => {
         .filter(Boolean)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
-};
-
-const getModelDisplayName = (config?: ModelConfig): string => {
-    if (!config) return '';
-    return config.models.balanced || config.models.strong || config.models.fast || config.name || '';
 };
 
 const upsertDeploymentHistory = (
@@ -93,7 +87,6 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, initialPrompt }: DashboardViewProps) {
     const [initialGateStateReady, setInitialGateStateReady] = useState(false);
-    const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
     const [creditQuote, setCreditQuote] = useState<BeeGameCreditQuote | null>(null);
     const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
     const [creditSummary, setCreditSummary] = useState<BeeGameCreditSummary | null>(null);
@@ -230,25 +223,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         void refreshCredits();
         void refreshDeploymentHistory();
     }, [projectId, refreshCredits, refreshDeploymentHistory]);
-
-    useEffect(() => {
-        if (!isBeeGameMode) return;
-        let cancelled = false;
-        const loadModelConfigList = async () => {
-            try {
-                const configs = await listModelConfigs();
-                if (!cancelled) setModelConfigs(configs);
-            } catch (error) {
-                console.error('Failed to load model configs:', error);
-            }
-        };
-        loadModelConfigList();
-        const interval = setInterval(loadModelConfigList, 10000);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
-    }, [isBeeGameMode]);
 
     // Local derived state mapped from backend
     const isOffline = wsState === 'failed' || wsState === 'disconnected';
@@ -519,18 +493,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         return Math.max(storedTotal, runtimeTotal, savedTotal);
     }, [projectId, projectStatus?.context?.token_budget?.total_tokens, savedRuntimeSnapshot?.usage?.total_tokens, tokenUsage]);
 
-    const currentModelName = useMemo(() => {
-        const currentConfigId = String(projectStatus?.model_config_id || '').trim();
-        const sessionConfig = currentConfigId
-            ? modelConfigs.find((config) => config.id === currentConfigId)
-            : undefined;
-        return getModelDisplayName(
-            sessionConfig ||
-            modelConfigs.find((config) => config.isDefault) ||
-            modelConfigs[0],
-        ) || savedRuntimeSnapshot?.model_name || '';
-    }, [modelConfigs, projectStatus?.model_config_id, savedRuntimeSnapshot?.model_name]);
-
     useEffect(() => {
         if (!isBeeGameMode) return;
         const previousStatus = previousBeeGameStatusRef.current;
@@ -609,7 +571,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 tokens={displayedTokenTotal}
                 credits={creditSummary}
                 accountCreditBalance={creditBalance}
-                modelName={currentModelName}
                 isSyncing={isSyncing}
                 isInteractionLocked={isProjectInteractionLocked}
                 buildReport={projectStatus?.build_report || null}

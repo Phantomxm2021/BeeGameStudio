@@ -5,6 +5,7 @@ import type {
   BeeGameResourceCandidatePayload,
   BeeGameResourcePackImpactPayload,
   BeeGameResourceIntegrationPayload,
+  BeeGameResourceIntegrationRemovalPayload,
   BeeGameAutoResourceBindingPayload,
   BeeGameResourceUnbindingPayload,
   BeeGameDeploymentPayload,
@@ -75,11 +76,6 @@ type BeeGamePendingPermissionPayload = {
 
 type ProjectRuntimeStateWithPermissions = ProjectBaselineStatusPayload & {
   pending_permissions?: BeeGamePendingPermissionPayload[];
-};
-
-type ModelConfig = {
-  id: string;
-  isDefault?: boolean;
 };
 
 type ProjectSessionBinding = {
@@ -453,8 +449,10 @@ export const beeGameAdapter = {
     if (binding) {
       await deleteBeeGameSession(binding.sessionId, true, binding.workspacePath);
     }
-    saveProjects(readProjects().filter(project => project.id !== projectId));
     await deleteProjectMetadata(projectId);
+    // Keep the local record until the remote operation has completed (or was
+    // already absent). A failed delete must remain retryable after refresh.
+    saveProjects(readProjects().filter(project => project.id !== projectId));
     deleteBinding(projectId);
     return { ok: true };
   },
@@ -772,6 +770,12 @@ export const beeGameAdapter = {
     );
   },
 
+  async removeProjectResourceIntegration(projectId: string, slotId: string): Promise<BeeGameResourceIntegrationRemovalPayload> {
+    return deleteJson<BeeGameResourceIntegrationRemovalPayload>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-integration`,
+    );
+  },
+
   async getArtifactReviewStatus(artifactId: string): Promise<{
     artifact_id: string;
     verdicts: Array<{ reviewer_id: string; verdict: string }>;
@@ -846,6 +850,7 @@ async function deleteProjectMetadata(projectId: string): Promise<void> {
   try {
     await deleteJson(`/api/projects/${encodeURIComponent(projectId)}`);
   } catch (error) {
+    if (isDeleteAlreadyGoneError(error)) return;
     if (hasCloudSession()) throw error;
     // Local storage remains the dev/offline fallback when the dashboard API is down.
   }
@@ -904,7 +909,7 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
   };
   saveBinding(binding);
   return {
-    session: await syncBeeGameSessionModel(response.session),
+    session: response.session,
     binding,
     recoveredEvents: [],
     ...(response.previousSessionId ? { previousSessionId: response.previousSessionId } : {}),
@@ -1079,27 +1084,13 @@ async function startBeeGameSession(
     language?: BeeGameLanguage;
   },
 ): Promise<BeeGameSession> {
-  const modelConfigId = await getDefaultModelConfigId();
-  if (!modelConfigId) {
-    throw new Error('平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。');
-  }
   return postJson('/api/beegame-sessions', {
-    modelConfigId,
     ...(options.workspacePath ? { workspacePath: options.workspacePath } : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(options.projectName ? { projectName: options.projectName } : {}),
     ...(options.transcriptSessionId ? { transcriptSessionId: options.transcriptSessionId } : {}),
     ...(options.language ? { language: options.language } : {}),
   });
-}
-
-async function getDefaultModelConfigId(): Promise<string> {
-  try {
-    const configs = await getJson<ModelConfig[]>('/api/model-configs');
-    return configs.find(config => config.isDefault)?.id || configs[0]?.id || '';
-  } catch {
-    return '';
-  }
 }
 
 function fetchProjectPackage(binding: ProjectSessionBinding): Promise<Response> {
@@ -1139,23 +1130,6 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
     if (text) return `Request failed with status ${response.status}: ${text.slice(0, 180)}`;
   }
   return `Request failed with status ${response.status}`;
-}
-
-async function updateBeeGameSessionModel(
-  sessionId: string,
-  modelConfigId: string,
-): Promise<BeeGameSession> {
-  return patchJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/model`, {
-    modelConfigId,
-  });
-}
-
-async function syncBeeGameSessionModel(session: BeeGameSession): Promise<BeeGameSession> {
-  const modelConfigId = await getDefaultModelConfigId();
-  if (!modelConfigId || session.modelConfigId === modelConfigId) {
-    return session;
-  }
-  return updateBeeGameSessionModel(session.id, modelConfigId);
 }
 
 async function sendBeeGameInput(
@@ -2104,7 +2078,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
       brief.confirmedGdd
         ? '用户已确认 GDD。请先将其保存为 docs/GDD.md，再直接依据它实现；不要重新生成游戏方案或要求用户选择方向。'
         : '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
-      '同时创建平台无关的 assets/asset-manifest.json，声明项目资源合同：2D/3D/动画/材质/VFX/音频/字体/数据/本地化等资源位、用途、推荐规格、placeholder 状态、目标位置，以及 integration_mode。每个可由资源库自动填充的 slot 必须写 resource_requirement（category、dimension、accepted_formats、styles、game_types、purpose）；无法确定时保持 placeholder/missing，禁止用不兼容资源静默替代。React/Web 等普通文件项目使用 filesystem；Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp 和对应 mcp_server。',
+      '同时创建平台无关的 assets/asset-manifest.json，覆盖 2D/3D/动画/材质/VFX/音频/字体/数据/本地化等资源位。该文件必须使用顶层 version、project_target、slots 数组；不要使用 assets/categories/replacement 等旧式嵌套结构。每个 slots 项必须有稳定 id、purpose、target.path、status、placeholder、integration_provider，并且每个可由资源库自动填充的 slot 都必须有 resource_requirement（category、dimension、accepted_formats、styles、game_types、tags、purpose）。resource_requirement 的 category 只能使用 sprites、tilemaps、models、materials、animation、ui、vfx、fonts、audio、textures、scenes；dimension 只能使用 2D/3D/agnostic。tags 必须使用资源库用途词表中的精确值：character、npc、creature、weapon-equipment、prop、vehicle、building、environment、terrain、vegetation、scene、level-map、tile、ui、icon、effect、combat、interaction、narrative、music、sound-effect、ambient-audio、voice；它们用于约束角色、道具、环境等主题。category 表示资源媒介，不要把角色、武器、森林等主题写成 category。无法确定时保持 placeholder/missing，禁止用不兼容资源静默替代。React/Web 等普通文件项目使用 filesystem；Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp 和对应 mcp_server。资源库完成复制后，读取 asset-manifest.json 中每个已复制 slot 的 uploaded_files 路径，把资源真实引用到项目中，并仅在实际验证后将 slot 标为 integrated。',
       '这些文档必须区分“本次交付已实现”和“后续路线图”。不要把 roadmap 写成已交付能力。',
       'docs 里的 acceptance/checklist 只能作为验收标准，不要预先打勾或写成已通过；只有最终验证报告可以基于真实证据记录 pass/fail/untested。',
       '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder 或 asset slot，并说明替换规则。',
@@ -2142,7 +2116,7 @@ function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
     brief.confirmedGdd
       ? 'The user confirmed a GDD. Save it as docs/GDD.md first, then implement directly from it. Do not regenerate a game plan or ask the user to choose a direction.'
       : 'First create project documents under docs/: GDD, technical design, art direction, UI/UX, audio direction, placeholder/asset slots, tuning, and acceptance notes.',
-    'Also create a platform-neutral assets/asset-manifest.json that declares the project asset contracts: 2D/3D assets, animation, materials, VFX, audio, fonts, text data, localization, purpose, recommended specs, placeholder state, target location, and integration_mode. Every slot eligible for automatic library selection must include resource_requirement (category, dimension, accepted_formats, styles, game_types, purpose). Keep uncertain slots as placeholder/missing; never silently substitute an incompatible resource. Use filesystem for React/Web or normal file projects; use mcp with the matching mcp_server only for Unity/Godot/Unreal/Blender-style projects that need editor context.',
+    'Also create a platform-neutral assets/asset-manifest.json. It must use top-level version, project_target, and a slots array; do not use legacy nested assets/categories/replacement structures. Every slot needs a stable id, purpose, target.path, status, placeholder, and integration_provider. Every slot eligible for automatic library selection must include resource_requirement. resource_requirement may only use category (sprites, tilemaps, models, materials, animation, ui, vfx, fonts, audio, textures, scenes), dimension (2D/3D/agnostic), accepted_formats, styles, game_types, tags, and purpose. tags must use exact values from the library usage vocabulary: character, npc, creature, weapon-equipment, prop, vehicle, building, environment, terrain, vegetation, scene, level-map, tile, ui, icon, effect, combat, interaction, narrative, music, sound-effect, ambient-audio, voice. They constrain subjects such as characters, props, and environment; category describes the resource medium, never its subject matter. Keep uncertain slots as placeholder/missing; never silently substitute an incompatible resource. Use filesystem for normal file projects; use mcp with the matching mcp_server only when editor context is required. After the resource library copies a selected asset, read each copied slot\'s uploaded_files path from asset-manifest.json, reference that file in the project, and only mark the slot integrated after real verification.',
     'Those docs must separate what is implemented in this delivery from roadmap/future work. Do not present roadmap items as delivered features.',
     'Acceptance criteria or checklists in docs are requirements only. Do not pre-check them or mark them as passed there; only a final verification report may record pass/fail/untested based on real evidence.',
     'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder assets or asset slots that are easy to replace and document the replacement rules.',
@@ -2630,15 +2604,6 @@ async function postForm<T>(path: string, body: FormData): Promise<T> {
   const response = await authenticatedFetch(path, {
     method: 'POST',
     body,
-  });
-  return readResponse<T>(response);
-}
-
-async function patchJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await authenticatedFetch(path, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
   });
   return readResponse<T>(response);
 }

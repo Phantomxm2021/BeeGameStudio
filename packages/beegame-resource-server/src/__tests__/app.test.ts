@@ -11,7 +11,7 @@ const repository = createInMemoryResourceRepository({
   elements: [{
     id: 'element-1', packId: 'pack-1', name: 'Character Idle', path: 'characters/idle.png',
     category: 'characters', kind: 'sprite-sheet', preview: { kind: 'image', path: 'previews/idle.png' },
-    specs: { width: 256, height: 256 }, dependencies: [], status: 'ready',
+    specs: { width: 256, height: 256 }, usageTags: ['character'], dependencies: [], status: 'ready',
   }],
 })
 
@@ -70,6 +70,30 @@ describe('resource service app', () => {
       expect.objectContaining({ action: 'folder.created', packId: 'pack-1' }),
       expect.objectContaining({ action: 'element.uploaded', packId: 'pack-1', elementId: 'uploaded-1' }),
     ]))
+  })
+
+  test('deletes a non-empty folder recursively through the browser route', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [{ id: 'folder-pack', name: 'Folders', style: 'Stylized', gameTypes: ['adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
+      elements: [
+        { id: 'folder-element', packId: 'folder-pack', name: 'tree.glb', path: 'models/tree.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' },
+      ],
+    })
+    await localRepository.createFolder('folder-pack', { id: 'models', name: 'models' })
+    await localRepository.createFolder('folder-pack', { id: 'nested', name: 'nested', parentId: 'models' })
+    const events: Array<{ action: string; metadata?: Record<string, unknown> }> = []
+    const app = createBeeGameResourceServerApp({
+      repository: localRepository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      recordAuditEvent: async event => { events.push(event) },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/folder-pack/folders/models', { method: 'DELETE' }))
+
+    expect(response.status).toBe(204)
+    await expect(localRepository.listFolders('folder-pack')).resolves.toEqual([])
+    await expect(localRepository.listElements('folder-pack')).resolves.toEqual([])
+    expect(events).toContainEqual(expect.objectContaining({ action: 'folder.deleted', metadata: { folderId: 'models' } }))
   })
 
   test('rejects a non-admin user', async () => {
@@ -134,6 +158,23 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/archive-pack/archive', { method: 'POST' }))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ pack: expect.objectContaining({ id: 'archive-pack', status: 'archived', deprecatedAt: expect.any(String) }) })
+  })
+
+  test('re-publishes an archived Pack and clears its archive marker', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository: createInMemoryResourceRepository({
+        packs: [{ id: 'archived-pack', name: 'Archived', style: 'Stylized', gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'archived', deprecatedAt: '2026-07-12T00:00:00.000Z' }],
+        elements: [{ id: 'archived-element', packId: 'archived-pack', name: 'character.png', path: 'characters/character.png', category: 'characters', kind: 'image', specs: {}, usageTags: ['character'], dependencies: [], status: 'ready' }],
+      }),
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/archived-pack/publish', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as { pack: Record<string, unknown> }
+    expect(body.pack).toEqual(expect.objectContaining({ id: 'archived-pack', status: 'published' }))
+    expect(body.pack).not.toHaveProperty('deprecatedAt')
   })
 
   test('returns 404 when a lifecycle update or deletion reports no Pack', async () => {
@@ -240,6 +281,23 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements?category=characters'))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ elements: [expect.objectContaining({ id: 'element-1' })] })
+  })
+
+  test('rejects unsupported element usage capabilities before a lifecycle mutation', async () => {
+    let mutated = false
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      updateResourceElement: async () => { mutated = true; return { id: 'element-1' } },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/element-1', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ usageTags: ['unclassified-free-text'] }),
+    }))
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: { code: 'invalid_request', message: 'Element usageTags must contain supported values' } })
+    expect(mutated).toBe(false)
   })
 
   test('returns a publish readiness report before changing Pack state', async () => {

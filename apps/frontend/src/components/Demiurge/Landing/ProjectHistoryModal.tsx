@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Clock, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
@@ -38,6 +38,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+    const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
     const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameCreditSummary>>({});
     const t = useCommonText(lang);
     const text = useBeeGameText(lang);
@@ -50,9 +51,21 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
 
     const handleDelete = async (event: React.MouseEvent, id: string) => {
         event.stopPropagation();
+        if (deletingProjectId) return;
         if (confirmingDeleteId === id) {
-            await deleteProject(id);
+            // Remove the destructive control before the request starts. This
+            // prevents duplicate requests and makes the in-card loader the
+            // single, stable indicator of the pending deletion.
+            setDeletingProjectId(id);
             closeMenu();
+            try {
+                await deleteProject(id);
+            } catch {
+                // The store retains the project for a failed remote delete.
+                // Restore its actions so the user can retry.
+            } finally {
+                setDeletingProjectId(current => current === id ? null : current);
+            }
             return;
         }
         setConfirmingDeleteId(id);
@@ -164,32 +177,39 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             </button>
                         </div>
 
-                        <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-premium">
-                            {isProjectListLoading ? (
-                                <ProjectHistoryListSkeleton />
-                            ) : projects.length === 0 ? (
-                                <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-8 text-center text-zinc-400">
-                                    <Clock className="h-8 w-8 stroke-1" />
-                                    <span className="type-callout text-zinc-200">{text.noProjectsForAccount}</span>
-                                    <span className="type-footnote max-w-sm text-zinc-500">{text.localProjectsNeedMigration}</span>
-                                </div>
-                            ) : (
-                                projects.map((project) => {
+                        <div className="scroll-fade scroll-fade-8 relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
+                                {isProjectListLoading ? (
+                                    <ProjectHistoryListSkeleton />
+                                ) : projects.length === 0 ? (
+                                    <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-8 text-center text-zinc-400">
+                                        <Clock className="h-8 w-8 stroke-1" />
+                                        <span className="type-callout text-zinc-200">{text.noProjectsForAccount}</span>
+                                        <span className="type-footnote max-w-sm text-zinc-500">{text.localProjectsNeedMigration}</span>
+                                    </div>
+                                ) : (
+                                    projects.map((project) => {
                                     const displayName = getProjectDisplayName(project, text.untitledProject);
                                     const creditSummary = creditSummaries[project.id];
+                                    const isDeleting = deletingProjectId === project.id;
                                     return (
-                                    <div key={project.id} className="relative">
+                                    <div key={project.id} className="relative" aria-busy={isDeleting || undefined}>
                                         <div
                                             role="button"
                                             tabIndex={0}
-                                            onClick={() => onSelectProject(project.id)}
+                                            onClick={() => {
+                                                if (!isDeleting) onSelectProject(project.id);
+                                            }}
                                             onKeyDown={(event) => {
+                                                if (isDeleting) return;
                                                 if (event.key === 'Enter' || event.key === ' ') {
                                                     event.preventDefault();
                                                     onSelectProject(project.id);
                                                 }
                                             }}
-                                            className="flex w-full cursor-pointer items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all hover:translate-x-1 hover:border-white/20 hover:bg-white/[0.075] focus-visible:ring-2 focus-visible:ring-white/35"
+                                            className={`flex w-full items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-white/35 ${isDeleting
+                                                ? 'cursor-wait opacity-70'
+                                                : 'cursor-pointer hover:translate-x-1 hover:border-white/20 hover:bg-white/[0.075]'
+                                                }`}
                                         >
                                             <div className="min-w-0 pr-4">
                                                 <span className="type-callout block truncate text-white">
@@ -214,19 +234,29 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                                                     )}
                                                 </span>
                                             </div>
-                                            <button
-                                                type="button"
-                                                aria-label={`${text.moreActionsFor} ${displayName}`}
-                                                onClick={(event) => toggleMenu(event, project.id)}
-                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-                                            >
-                                                <MoreHorizontal className="h-4 w-4" />
-                                            </button>
+                                            {isDeleting ? (
+                                                <span
+                                                    role="status"
+                                                    aria-label={text.deletingProject}
+                                                    className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-300"
+                                                >
+                                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    aria-label={`${text.moreActionsFor} ${displayName}`}
+                                                    onClick={(event) => toggleMenu(event, project.id)}
+                                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                                                >
+                                                    <MoreHorizontal className="h-4 w-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                     );
-                                })
-                            )}
+                                    })
+                                )}
                         </div>
                     </div>
                     {activeProject && menuPosition

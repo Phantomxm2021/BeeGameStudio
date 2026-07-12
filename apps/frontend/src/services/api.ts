@@ -243,6 +243,7 @@ export interface BeeGameAssetSlotPayload {
     capabilities?: string[];
   };
   status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed';
+  integration_error?: string;
   uploaded_files?: string[];
   resource_requirement?: {
     category?: string;
@@ -250,12 +251,14 @@ export interface BeeGameAssetSlotPayload {
     accepted_formats?: string[];
     styles?: string[];
     game_types?: string[];
+    tags?: string[];
     purpose?: string;
   };
   resource_binding?: {
     pack_id: string;
     pack_version: string;
     element_id: string;
+    element_path?: string;
     source_url: string;
     selected_at: string;
     selection_reason: string[];
@@ -270,6 +273,7 @@ export interface BeeGameAssetManifestPayload {
     engine?: string;
     integration_mode?: BeeGameAssetIntegrationMode;
     mcp_server?: string;
+    asset_format_capabilities?: string[];
   };
   slots: BeeGameAssetSlotPayload[];
 }
@@ -311,17 +315,24 @@ export interface BeeGameResourceIntegrationPayload {
   path?: string;
 }
 
+export interface BeeGameResourceIntegrationRemovalPayload {
+  manifest: BeeGameAssetManifestPayload;
+  slot: BeeGameAssetSlotPayload;
+  removed_paths: string[];
+}
+
 export interface BeeGameAutoResourceBindingPayload {
   manifest: BeeGameAssetManifestPayload;
   results: Array<{
     slotId: string;
-    status: 'integrated' | 'bound' | 'failed';
+    status: 'copied' | 'bound' | 'failed';
     packId: string;
     elementId: string;
     path?: string;
     error?: string;
   }>;
   unmatched_slot_ids: string[];
+  repaired_slot_ids?: string[];
 }
 
 export interface BeeGameResourceUnbindingPayload {
@@ -1186,6 +1197,11 @@ export const api = {
   unbindProjectResource: (projectId: string, slotId: string) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.unbindProjectResource(projectId, slotId);
     throw new Error('Project resource unbinding is only available for BeeGame projects');
+  },
+
+  removeProjectResourceIntegration: (projectId: string, slotId: string) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.removeProjectResourceIntegration(projectId, slotId);
+    throw new Error('Project resource integration removal is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

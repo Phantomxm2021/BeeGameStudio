@@ -6,7 +6,7 @@ describe('resource selection route', () => {
   test('returns signed published resource selections for valid requirements', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [{ id: 'fantasy', name: 'Fantasy', style: 'Fantasy', gameTypes: ['RPG'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }],
-      elements: [{ id: 'oak', packId: 'fantasy', name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }],
+      elements: [{ id: 'oak', packId: 'fantasy', name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, usageTags: ['vegetation'], dependencies: [], status: 'ready' }],
     })
     const app = createBeeGameResourceServerApp({
       repository,
@@ -16,7 +16,7 @@ describe('resource selection route', () => {
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-selections', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requirements: [{ slotId: 'environment.tree', category: 'models', dimension: '3D', acceptedFormats: ['glb'], styles: ['Fantasy'] }] }),
+      body: JSON.stringify({ requirements: [{ slotId: 'environment.tree', category: 'models', dimension: '3D', acceptedFormats: ['glb'], styles: ['Fantasy'], tags: ['vegetation'] }] }),
     }))
 
     expect(response.status).toBe(200)
@@ -35,6 +35,22 @@ describe('resource selection route', () => {
     }))
 
     expect((await response.json()).selections).toEqual([])
+  })
+
+  test('rejects unrecognized project usage tags instead of silently yielding no match', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository: createInMemoryResourceRepository({ packs: [], elements: [] }),
+      currentUser: { id: 'admin', role: 'owner' },
+      getElementResourceUrl: async () => 'https://storage.example/unused',
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-selections', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requirements: [{ slotId: 'slot', tags: ['unclassified-free-text'] }] }),
+    }))
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: { code: 'invalid_selection_request', message: 'Resource requirement 1 tags contain unsupported values' } })
   })
 
   test('permits the dedicated workflow service token only for resource selection', async () => {

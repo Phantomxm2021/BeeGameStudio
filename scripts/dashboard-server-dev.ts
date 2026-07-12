@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { resolve } from 'node:path'
 import { getMacroDefines } from './defines.ts'
+import { loadEnvFile } from './beegame-migration-cli.ts'
 
 type MacroGlobals = {
   VERSION: string
@@ -19,16 +20,31 @@ const macroValues = Object.fromEntries(
   ]),
 ) as MacroGlobals
 
+// This executable is the local dashboard runtime.  It can be launched either
+// through `beegame-dev` or directly, so load the local configuration here as
+// well instead of depending on a parent launcher to do it.
+loadEnvFile('.env.local')
+
 Object.assign(globalThis, { MACRO: macroValues })
-process.env.NODE_ENV = process.env.NODE_ENV || 'production'
+// Keep an explicitly supplied production mode intact, but never silently run
+// a local development server as production.  Several security policies need
+// this distinction to allow narrowly scoped development-only integrations.
+process.env.NODE_ENV = process.env.NODE_ENV || 'development'
 process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS =
   process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS || '1'
 
 const { createAgentWorkflowApp } = await import(
   '../packages/agent-workflow-server/src/app.ts'
 )
+const { createResourceSelectionClient } = await import(
+  '../packages/agent-workflow-server/src/beegame/resource-selection-client.ts'
+)
+const { resolveResourceSelectionRuntimeConfig } = await import(
+  '../packages/agent-workflow-server/src/beegame/resource-selection-config.ts'
+)
 
 const port = Number.parseInt(process.env.AGENT_WORKFLOW_PORT || '62174', 10)
+const resourceSelectionConfig = resolveResourceSelectionRuntimeConfig()
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,
@@ -37,6 +53,9 @@ const server = Bun.serve({
     defaultWorkspacePath: process.env.AGENT_WORKFLOW_WORKSPACE_PATH
       ? resolve(process.env.AGENT_WORKFLOW_WORKSPACE_PATH)
       : resolve(import.meta.dir, '..', 'Projects'),
+    ...(resourceSelectionConfig
+      ? { resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig) }
+      : {}),
   }).fetch,
 })
 

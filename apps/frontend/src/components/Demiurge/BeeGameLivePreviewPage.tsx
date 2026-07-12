@@ -40,7 +40,6 @@ interface BeeGameLivePreviewPageProps {
         consumedCredits: number;
         reservedCredits: number;
     } | null;
-    modelName: string;
     isSyncing: boolean;
     isInteractionLocked?: boolean;
     buildReport?: BuildReportPayload | null;
@@ -127,7 +126,6 @@ export function BeeGameLivePreviewPage({
     tokens,
     credits,
     accountCreditBalance,
-    modelName,
     isSyncing,
     isInteractionLocked = false,
     buildReport,
@@ -345,7 +343,6 @@ export function BeeGameLivePreviewPage({
                                 </>
                             ) : null}
                             <ProjectHintRow label={labels.phase} value={phaseLabel} />
-                            <ProjectHintRow label={labels.model} value={modelName || labels.unavailable} />
                         </div>
                     ) : null}
                 </div>

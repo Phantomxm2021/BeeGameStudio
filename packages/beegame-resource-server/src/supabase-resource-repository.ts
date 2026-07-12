@@ -29,9 +29,11 @@ type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath'>
   deprecated_at?: string | null
 }
 
-type ElementRow = Omit<ResourceElement, 'packId' | 'preview' | 'styleOverride' | 'dimensionOverride'> & {
+type ElementRow = Omit<ResourceElement, 'packId' | 'preview' | 'usageTags' | 'dependencyBindings' | 'styleOverride' | 'dimensionOverride'> & {
   pack_id: string
   preview?: ResourceElement['preview'] | null
+  usage_tags?: string[] | null
+  dependency_bindings?: ResourceElement['dependencyBindings'] | null
   style_override?: string | null
   dimension_override?: ResourceElement['dimensionOverride'] | null
 }
@@ -120,7 +122,9 @@ export function createSupabaseResourceRepository(
     kind: row.kind,
     ...(row.preview ? { preview: row.preview } : {}),
     specs: row.specs,
+    ...(row.usage_tags?.length ? { usageTags: row.usage_tags as ResourceElement['usageTags'] } : {}),
     dependencies: row.dependencies,
+    ...(row.dependency_bindings?.length ? { dependencyBindings: row.dependency_bindings } : {}),
     status: row.status,
     ...(row.style_override ? { styleOverride: row.style_override } : {}),
     ...(row.dimension_override ? { dimensionOverride: row.dimension_override } : {}),
@@ -195,14 +199,20 @@ export function createSupabaseResourceRepository(
     async deleteFolder(packId, folderId) {
       const folder = (await request<FolderRow>('beegame_resource_folders', { id: `eq.${folderId}`, pack_id: `eq.${packId}` }))[0]
       if (!folder) return false
-      const children = await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}`, parent_id: `eq.${folderId}` })
+      const folderPrefix = `${folder.path}/`
+      const folders = await request<FolderRow>('beegame_resource_folders', { pack_id: `eq.${packId}` })
       const elements = await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}` })
-      if (children.length > 0 || elements.some(item => item.path === folder.path || item.path.startsWith(`${folder.path}/`))) throw new Error('Folder is not empty')
-      await mutate<FolderRow>('beegame_resource_folders', { method: 'DELETE' }, { id: `eq.${folderId}`, pack_id: `eq.${packId}` })
+      for (const element of elements.filter(item => item.path === folder.path || item.path.startsWith(folderPrefix))) {
+        await mutate<ElementRow>('beegame_resource_elements', { method: 'DELETE' }, { id: `eq.${element.id}`, pack_id: `eq.${packId}` })
+      }
+      const descendants = folders.filter(item => item.path === folder.path || item.path.startsWith(folderPrefix)).sort((left, right) => right.path.length - left.path.length)
+      for (const descendant of descendants) {
+        await mutate<FolderRow>('beegame_resource_folders', { method: 'DELETE' }, { id: `eq.${descendant.id}`, pack_id: `eq.${packId}` })
+      }
       return true
     },
     async updateElement(packId, elementId, input) {
-      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ name: input.name, path: input.path, category: input.category, kind: input.kind, preview: input.preview, specs: input.specs, dependencies: input.dependencies, status: input.status, style_override: input.styleOverride, dimension_override: input.dimensionOverride }) }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
+      const rows = await mutate<ElementRow>('beegame_resource_elements', { method: 'PATCH', body: JSON.stringify({ name: input.name, path: input.path, category: input.category, kind: input.kind, preview: input.preview, specs: input.specs, usage_tags: input.usageTags, dependencies: input.dependencies, dependency_bindings: input.dependencyBindings, status: input.status, style_override: input.styleOverride, dimension_override: input.dimensionOverride }) }, { id: `eq.${elementId}`, pack_id: `eq.${packId}` })
       return rows[0] ? toElement(rows[0]) : undefined
     },
     async deleteElement(packId, elementId) {
@@ -217,7 +227,7 @@ export function createSupabaseResourceRepository(
         primaryCategory: pack.primary_category, categories: pack.categories, license: pack.license, version: pack.version,
         status: pack.status, ...(pack.cover_path ? { coverPath: pack.cover_path } : {}),
       }, (await request<ElementRow>('beegame_resource_elements', { pack_id: `eq.${packId}` })).map(toElement))
-      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published' }) }, { id: `eq.${packId}` })
+      const rows = await mutate<PackRow>('beegame_resource_packs', { method: 'PATCH', body: JSON.stringify({ status: 'published', deprecated_at: null }) }, { id: `eq.${packId}` })
       return await toPack(rows[0])
     },
     async archivePack(packId) {

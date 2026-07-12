@@ -359,6 +359,7 @@ export class BeeGameSessionManager {
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
     private readonly onTurnCompleted?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
+    private readonly onTurnStarting?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -718,6 +719,11 @@ export class BeeGameSessionManager {
     }
     if (display?.authToken) record.authToken = display.authToken
     if (display?.language) record.language = display.language
+
+    const metadata = this.metadata(sessionId)
+    if (metadata && this.onTurnStarting) {
+      await this.onTurnStarting(metadata)
+    }
 
     const preparedPrompt = await prepareBeeGamePromptInput({
       text,
@@ -2055,6 +2061,10 @@ function withSessionLanguageContract(
   return `${instruction}\n\n${prompt}`
 }
 
+function withAssetIntegrationContract(prompt: string): string {
+  return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities is the explicit format capability contract of the selected runtime adapter. Set it from the project adapter/build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with that runtime contract. If the adapter capability or the format is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the target adapter/loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
+}
+
 async function prepareBeeGamePromptInput(input: {
   text: string
   language?: BeeGameSessionLanguage
@@ -2069,7 +2079,9 @@ async function prepareBeeGamePromptInput(input: {
   const documentContext = materializedFiles.length > 0
     ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
     : ''
-  const promptText = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
+  const promptText = withAssetIntegrationContract(
+    withSessionLanguageContract(`${input.text}${documentContext}`, input.language),
+  )
   if (images.length === 0) {
     return {
       prompt: promptText,

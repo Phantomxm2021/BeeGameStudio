@@ -43,7 +43,6 @@ import {
     type SupabaseOAuthProvider,
 } from '../../services/supabaseAuthApi';
 import { getInvitationPublicSettings } from '../../services/invitationApi';
-import { listModelConfigs } from '../../services/modelConfigApi';
 import type { ChatAttachmentPayload } from '../../services/api';
 import type { AttachmentBuildAnalysis } from '../../services/attachmentBuild';
 
@@ -865,11 +864,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         clearPendingIntakeFlowState();
         writePendingIdeaDraftState(idea);
         try {
-            const modelConfigs = await listModelConfigs();
-            if (modelConfigs.length === 0) {
-                setIntakeError(intakeText.errors.missingPlatformModel);
-                return;
-            }
+            // Model credentials are platform-managed configuration. A normal
+            // signed-in creator must not need the administrator-only model
+            // configuration permission merely to quote and start an Idea.
+            // The workflow runtime remains the authoritative place to reject
+            // a genuinely missing default model when it executes the turn.
             const quote = await getCreditQuote('idea_intake');
             if (!quote.canStart) {
                 setIntakeError(intakeText.errors.insufficientCredits(
@@ -1308,6 +1307,18 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setIntakeError('');
         setIsPreparing(true);
         try {
+            // This path can be reached from a persisted Brief after a refresh.
+            // Revalidate the session before requesting a quote, just as the
+            // initial Idea path does. Do not reuse ensureGenerationAccess here:
+            // its pending-idea recovery flow would discard this confirmed Brief.
+            await loadCurrentUser();
+            if (!useSystemStore.getState().currentUser) {
+                setLoginError('');
+                setLoginNotice('');
+                setAuthMode('login');
+                setIsLoginPromptOpen(true);
+                return;
+            }
             const quote = await getCreditQuote('full_build');
             if (!quote.canStart) {
                 setIntakeError(intakeText.errors.insufficientCredits(

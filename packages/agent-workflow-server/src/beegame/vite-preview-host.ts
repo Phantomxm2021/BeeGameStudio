@@ -14,10 +14,15 @@ type ViteModule = {
     base: string
     plugins: Array<{
       name: string
-      transformIndexHtml: {
+      transformIndexHtml?: {
         order: 'post'
         handler: (html: string) => string
       }
+      configureServer?: (server: {
+        middlewares: {
+          use: (handler: (request: { url?: string }, response: unknown, next: () => void) => void) => void
+        }
+      }) => void
     }>
     server: {
       host: string
@@ -34,10 +39,55 @@ type HostOptions = {
   base: string
 }
 
+type VitePreviewHostPlugin = {
+  name: string
+  transformIndexHtml: {
+    order: 'post'
+    handler: (html: string) => string
+  }
+  configureServer(server: {
+    middlewares: {
+      use: (handler: (request: { url?: string }, response: unknown, next: () => void) => void) => void
+    }
+  }): void
+}
+
 export function stripViteClientScript(html: string, base: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
   const marker = `<script type="module" src="${normalizedBase}@vite/client"></script>`
   return html.split(marker).join('')
+}
+
+/**
+ * Generated projects sometimes use root-relative paths for public files. A
+ * managed preview runs below a session base, so normalise only file-like URLs
+ * before Vite's base middleware handles the request. API and client routes do
+ * not have a final extension and deliberately remain untouched.
+ */
+export function rewriteRootStaticAssetRequest(requestUrl: string, base: string): string {
+  if (!requestUrl.startsWith('/')) return requestUrl
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`
+  if (normalizedBase === '/' || requestUrl.startsWith(normalizedBase)) return requestUrl
+  const pathname = requestUrl.split(/[?#]/, 1)[0] || ''
+  const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1)
+  if (!lastSegment.includes('.')) return requestUrl
+  return `${normalizedBase.slice(0, -1)}${requestUrl}`
+}
+
+export function createManagedVitePreviewPlugin(base: string): VitePreviewHostPlugin {
+  return {
+    name: 'beegame-managed-preview-compatibility',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html: string) => stripViteClientScript(html, base),
+    },
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        request.url = rewriteRootStaticAssetRequest(request.url || '/', base)
+        next()
+      })
+    },
+  }
 }
 
 export function parseVitePreviewHostOptions(argv: string[]): HostOptions {
@@ -74,13 +124,7 @@ export async function startVitePreviewHost(
   const server = await vite.createServer({
     root: workspacePath,
     base: options.base,
-    plugins: [{
-      name: 'beegame-managed-preview-no-hmr-client',
-      transformIndexHtml: {
-        order: 'post',
-        handler: (html: string) => stripViteClientScript(html, options.base),
-      },
-    }],
+    plugins: [createManagedVitePreviewPlugin(options.base)],
     server: {
       host: options.host,
       port: options.port,

@@ -10,7 +10,9 @@ describe('AssetsPanel', () => {
             id: 'tree', resource_binding: { pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://signed.example/oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['category:models'], },
         }] }} isLoading={false} />);
 
-        expect(screen.getByText('fantasy-pack · oak-glb')).toBeInTheDocument();
+        expect(screen.getByText('oak-glb')).toBeInTheDocument();
+        expect(screen.getByText(/Source Pack · fantasy-pack/)).toBeInTheDocument();
+        expect(screen.getByText(/v1\.2\.0/)).toBeInTheDocument();
     });
 
     it('uses shadcn skeletons while asset data loads', () => {
@@ -67,8 +69,8 @@ describe('AssetsPanel', () => {
         expect(screen.getByText('Playable character model')).toBeInTheDocument();
         expect(screen.getAllByText('MCP integration').length).toBeGreaterThan(0);
         expect(screen.getByText('model_3d')).toBeInTheDocument();
-        expect(screen.getByText('glb, fbx')).toBeInTheDocument();
-        expect(screen.getByText(/poly_budget: 5k-15k tris/)).toBeInTheDocument();
+        expect(screen.getByText('glb · fbx')).toBeInTheDocument();
+        expect(screen.queryByText(/poly_budget: 5k-15k tris/)).not.toBeInTheDocument();
     });
 
     it('uploads a replacement file for a slot', async () => {
@@ -127,7 +129,8 @@ describe('AssetsPanel', () => {
         expect(screen.getByText('Pending integration')).toBeInTheDocument();
         expect(screen.getByText('Uploaded, but not confirmed in runtime yet.')).toBeInTheDocument();
 
-        await user.click(screen.getByRole('button', { name: 'Ask BeeGame to integrate' }));
+        await user.click(screen.getByRole('button', { name: 'More asset actions' }));
+        await user.click(await screen.findByRole('menuitem', { name: 'Ask BeeGame to integrate' }));
         expect(onRequestIntegration).toHaveBeenCalledWith(slot);
     });
 
@@ -168,5 +171,42 @@ describe('AssetsPanel', () => {
 
         await user.click(screen.getByRole('button', { name: 'Integrate all pending' }));
         expect(onRequestAllIntegration).toHaveBeenCalledWith(slots);
+    });
+
+    it('asks the Agent to prepare missing capability tags before automatic selection', async () => {
+        const user = userEvent.setup();
+        const onRequestSelectionPreparation = vi.fn();
+        const slot = {
+            id: 'legacy_character',
+            purpose: 'Playable character',
+            resource_requirement: { category: 'models' },
+        };
+
+        render(
+            <AssetsPanel
+                manifest={{ version: 1, slots: [slot] }}
+                isLoading={false}
+                onRequestSelectionPreparation={onRequestSelectionPreparation}
+            />,
+        );
+
+        expect(screen.getByText('This slot needs capability tags or a project runtime format contract before BeeGame can safely select a library asset.')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Auto-select library assets' })).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Prepare matching' }));
+        expect(onRequestSelectionPreparation).toHaveBeenCalledWith([slot]);
+    });
+
+    it('does not offer library recovery actions for a slot without a pinned library binding', () => {
+        render(
+            <AssetsPanel
+                manifest={{ version: 1, slots: [{ id: 'unbound_slot', status: 'missing' }] }}
+                isLoading={false}
+                onReintegrate={vi.fn()}
+                onUnbind={vi.fn()}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'More asset actions' })).not.toBeInTheDocument();
+        expect(screen.getByText('The project asset file is missing. Upload a replacement, choose a library candidate, or ask BeeGame to integrate it again.')).toBeInTheDocument();
     });
 });

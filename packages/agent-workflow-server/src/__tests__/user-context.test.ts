@@ -4,9 +4,15 @@ import {
   createEnvTokenUserResolver,
   createSupabaseUserResolver,
   getBearerToken,
+  hasBeeGamePermission,
 } from '../auth/user-context'
 
 describe('BeeGame user context', () => {
+  test('allows developers to delete their own project after route ownership validation', () => {
+    expect(hasBeeGamePermission({ id: 'developer-1', role: 'developer' }, 'project.delete')).toBe(true)
+    expect(hasBeeGamePermission({ id: 'viewer-1', role: 'viewer' }, 'project.delete')).toBe(false)
+  })
+
   test('extracts bearer tokens from authorization headers', () => {
     const request = new Request('https://beegame.test/api/current-user', {
       headers: { authorization: 'Bearer access-token' },

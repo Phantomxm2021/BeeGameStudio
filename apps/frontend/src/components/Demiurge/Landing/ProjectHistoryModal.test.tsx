@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitForElementToBeRemoved } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectHistoryModal } from './ProjectHistoryModal';
@@ -11,6 +11,7 @@ let projectList = [
   },
 ];
 let projectStoreLoading = false;
+let deleteProject = vi.fn();
 const { getCreditSummary } = vi.hoisted(() => ({
   getCreditSummary: vi.fn(),
 }));
@@ -19,7 +20,7 @@ vi.mock('../../../store/projectStore', () => ({
   useProjectStore: () => ({
     projects: projectList,
     isLoading: projectStoreLoading,
-    deleteProject: vi.fn(),
+    deleteProject,
   }),
 }));
 
@@ -43,6 +44,7 @@ describe('ProjectHistoryModal permissions', () => {
       },
     ];
     projectStoreLoading = false;
+    deleteProject = vi.fn();
     getCreditSummary.mockReset();
     getCreditSummary.mockResolvedValue({
       entriesCount: 3,
@@ -86,6 +88,36 @@ describe('ProjectHistoryModal permissions', () => {
     fireEvent.click(screen.getByLabelText('More actions Snake Game'));
 
     expect(screen.getByRole('button', { name: 'Delete Project' })).toBeInTheDocument();
+  });
+
+  it('hides the delete action and shows a loader while deletion is pending', async () => {
+    let resolveDelete: (() => void) | undefined;
+    deleteProject = vi.fn(() => new Promise<void>(resolve => {
+      resolveDelete = resolve;
+    }));
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }));
+
+    expect(deleteProject).toHaveBeenCalledWith('project-1');
+    expect(screen.queryByRole('button', { name: 'Confirm Delete' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('More actions Snake Game')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Deleting project' })).toBeInTheDocument();
+
+    resolveDelete?.();
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Deleting project' })).not.toBeInTheDocument();
+    });
   });
 
   it('shows settled and reserved credits for each project', async () => {
@@ -201,6 +233,20 @@ describe('ProjectHistoryModal permissions', () => {
 
     expect(screen.queryByText('No projects for this account yet')).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('uses the shadcn scroll-fade utility on the scrollable history list', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Snake Game').closest('.scroll-fade')).toHaveClass('scroll-fade', 'scroll-fade-8');
   });
 
   it('explains empty history for the current account', () => {

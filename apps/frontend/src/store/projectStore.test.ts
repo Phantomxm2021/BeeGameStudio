@@ -73,7 +73,7 @@ describe('projectStore pending review normalization', () => {
         useProjectStore.persist.clearStorage();
     });
 
-    it('does not persist an active project id while a cloud session is active', () => {
+    it('persists the last active project id while a cloud session is active for validated restoration', () => {
         localStorage.setItem('beegame_supabase_session', JSON.stringify({
             accessToken: 'cloud-token',
             expiresAt: Date.now() + 60_000,
@@ -83,7 +83,7 @@ describe('projectStore pending review normalization', () => {
         useProjectStore.setState({ activeProjectId: 'project_from_other_account' });
 
         expect(JSON.parse(storageData.get('project-storage') || '{}')).toEqual({
-            state: { activeProjectId: null },
+            state: { activeProjectId: 'project_from_other_account' },
             version: 0,
         });
     });

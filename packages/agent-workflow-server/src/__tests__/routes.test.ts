@@ -106,6 +106,33 @@ describe('agent workflow server routes', () => {
     ])
   })
 
+  test('resolves the default model server-side when a session is created', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Session default LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    const created = await createRes.json() as { id: string }
+
+    const sessionRes = await app.request('/api/beegame-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspacePath: join(testRoot, 'session-default') }),
+    })
+
+    expect(sessionRes.status).toBe(200)
+    expect(await sessionRes.json()).toEqual(expect.objectContaining({
+      modelConfigId: created.id,
+    }))
+  })
+
   test('returns the current user role and permissions', async () => {
     const anonymousApp = createAgentWorkflowApp()
     const anonymousRes = await anonymousApp.request('/api/current-user')
@@ -1763,8 +1790,8 @@ describe('agent workflow server routes', () => {
       '/api/projects/project_developer_allowed',
       { method: 'DELETE' },
     )
-    expect(developerDeleteRes.status).toBe(403)
-    expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
+    expect(developerDeleteRes.status).toBe(200)
+    expect(await developerDeleteRes.json()).toEqual({ deleted: true })
 
     const viewerDirectoriesRes = await viewerApp.request(
       '/api/filesystem/directories',

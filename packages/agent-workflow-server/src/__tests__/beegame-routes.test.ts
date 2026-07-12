@@ -1036,9 +1036,8 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/${session.id}`,
         { method: 'DELETE' },
       )
-      expect(developerDeleteRes.status).toBe(403)
-      expect(await developerDeleteRes.json()).toEqual({ error: 'Forbidden' })
-      expect((await developerApp.request(`/api/beegame-sessions/${session.id}`)).status).toBe(200)
+      expect(developerDeleteRes.status).toBe(200)
+      expect((await developerApp.request(`/api/beegame-sessions/${session.id}`)).status).toBe(404)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -4124,11 +4123,11 @@ describe('beegame session routes', () => {
       await mkdir(join(workspace, 'assets'), { recursive: true })
       await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
         version: 1,
-        project_target: { integration_mode: 'mcp' },
+        project_target: { integration_mode: 'mcp', asset_format_capabilities: ['glb'] },
         slots: [{
           id: 'slot-1',
           name: 'A deliberately unrelated label',
-          resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'] },
+            resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'], tags: ['environment'] },
         }],
       }))
       const projectId = 'project_auto_resource_binding'
@@ -4149,6 +4148,43 @@ describe('beegame session routes', () => {
       expect(manifest.slots[0].resource_binding).toEqual(expect.objectContaining({
         pack_id: 'library-pack', element_id: 'library-model',
       }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('leaves an untagged automatic resource slot unmatched instead of choosing a generic format match', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auto-resource-safety-'))
+    const workspace = join(projectsRoot, 'safe-auto-bound-project')
+    let selectionCalls = 0
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner().runner,
+      defaultWorkspacePath: projectsRoot,
+      resourceSelectionClient: {
+        select: async () => {
+          selectionCalls += 1
+          return []
+        },
+      },
+    })
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 1,
+        slots: [{ id: 'unclassified-model', resource_requirement: { category: 'models', accepted_formats: ['glb'] } }],
+      }))
+      const projectId = 'project_auto_resource_safety'
+      await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: projectId, name: 'Safe Auto Resource Binding', root_path: workspace, created_at: Date.now() }),
+      })
+
+      const response = await app.request(`/api/projects/${projectId}/assets/resource-bindings/auto`, { method: 'POST' })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(expect.objectContaining({ results: [], unmatched_slot_ids: ['unclassified-model'] }))
+      expect(selectionCalls).toBe(0)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -4205,7 +4241,7 @@ describe('beegame session routes', () => {
       await mkdir(join(workspace, 'assets'), { recursive: true })
       await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
         version: 1,
-        project_target: { integration_mode: 'mcp' },
+        project_target: { integration_mode: 'mcp', asset_format_capabilities: ['glb'] },
         slots: [{
           id: 'slot-1',
           resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'] },
@@ -7776,9 +7812,8 @@ describe('beegame session routes', () => {
         { method: 'DELETE', headers: { authorization: 'Bearer user-token' } },
       )
 
-      expect(deleteRes.status).toBe(403)
-      expect(await deleteRes.json()).toEqual({ error: 'Forbidden' })
-      await expect(stat(workspace)).resolves.toEqual(expect.anything())
+      expect(deleteRes.status).toBe(200)
+      await expect(stat(workspace)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       if (originalUrl === undefined) {
         delete process.env.BEEGAME_SUPABASE_URL

@@ -67,16 +67,6 @@ let mockedMessages: Array<{ id: string; sender: string; content: string; timesta
 let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
 let mockedIsSyncing = false;
 let mockedIsOpeningProject = false;
-let mockedModelConfigs = [
-    {
-        id: 'llm_default',
-        name: 'Default API',
-        provider: 'openai-compatible',
-        apiKeyPreview: 'sk-...',
-        models: { balanced: 'configured-sonnet-live' },
-        isDefault: true,
-    },
-];
 let mockedProjectStatus: ProjectBaselineStatusPayload = {
     project_id: 'proj_1',
     phase: 'DESIGN_IN_PROGRESS',
@@ -211,11 +201,6 @@ vi.mock('../../services/api', () => ({
     },
 }));
 
-vi.mock('../../services/modelConfigApi', () => ({
-    listModelConfigs: vi.fn(() => Promise.resolve(mockedModelConfigs)),
-    createModelConfig: vi.fn(() => Promise.resolve(mockedModelConfigs[0])),
-}));
-
 vi.mock('../../services/creditsApi', () => ({
     getCreditBalance: vi.fn(() => Promise.resolve({
         userId: 'user_1',
@@ -302,16 +287,6 @@ describe('DashboardView runtime loading', () => {
         mockedTokenUsage = {};
         mockedIsSyncing = false;
         mockedIsOpeningProject = false;
-        mockedModelConfigs = [
-            {
-                id: 'llm_default',
-                name: 'Default API',
-                provider: 'openai-compatible',
-                apiKeyPreview: 'sk-...',
-                models: { balanced: 'configured-sonnet-live' },
-                isDefault: true,
-            },
-        ];
         mockedProjectStatus = {
             project_id: 'proj_1',
             phase: 'DESIGN_IN_PROGRESS',
@@ -491,31 +466,6 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('Web')).toBeInTheDocument();
         expect(screen.getByText('消耗')).toBeInTheDocument();
         expect(screen.getByText('阶段')).toBeInTheDocument();
-        expect(screen.getByText('模型')).toBeInTheDocument();
-    });
-
-    it('shows the current configured model in the project hover hint instead of a hardcoded mock value', async () => {
-        mockedModelConfigs = [
-            {
-                id: 'llm_live',
-                name: 'Live Provider',
-                provider: 'openai-compatible',
-                apiKeyPreview: 'sk-...',
-                models: { fast: 'fast-model', balanced: 'current-balanced-model', strong: 'strong-model' },
-                isDefault: true,
-            },
-        ];
-        mockedProjectStatus = {
-            ...mockedProjectStatus,
-            model_config_id: 'llm_live',
-        } as ProjectBaselineStatusPayload;
-
-        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-
-        await userEvent.hover(await screen.findByTestId('beegame-project-info-trigger'));
-
-        expect(await screen.findByText('current-balanced-model')).toBeInTheDocument();
-        expect(screen.queryByText('Claude Sonnet 4')).not.toBeInTheDocument();
     });
 
     it('shows the sync state as an icon with text in the live preview header', async () => {

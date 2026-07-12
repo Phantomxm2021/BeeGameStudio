@@ -44,11 +44,19 @@ export function evaluateResourcePackPublishReadiness(
     if (typeof unresolvedTextures === 'string' && unresolvedTextures.trim()) {
       blocking.push({ code: 'unresolved_texture', message: `Element ${element.name} has unresolved texture references`, elementId: element.id })
     }
+    const externalReferences = externalReferencePaths(element.specs.externalReferences, element.specs.textureReferences, element.specs.materialReferences)
+    const boundReferences = new Set((element.dependencyBindings ?? []).map(binding => binding.referencePath))
+    if (externalReferences.some(reference => !boundReferences.has(reference))) {
+      blocking.push({ code: 'external_dependency_unmapped', message: `Element ${element.name} has external file references without dependency mappings`, elementId: element.id })
+    }
     if (element.status === 'ready' && (!Number.isFinite(Number(element.specs.size)) || Number(element.specs.size) <= 0)) {
       warnings.push({ code: 'size_missing', message: `Element ${element.name} has no recorded file size`, elementId: element.id })
     }
     if (element.status === 'ready' && (typeof element.specs.mimeType !== 'string' || !element.specs.mimeType.trim())) {
       warnings.push({ code: 'mime_type_missing', message: `Element ${element.name} has no recorded MIME type`, elementId: element.id })
+    }
+    if (element.status === 'ready' && !element.usageTags?.length) {
+      blocking.push({ code: 'usage_tags_missing', message: `Element ${element.name} has no declared usage tags`, elementId: element.id })
     }
     if (element.specs.previewStatus === 'failed') {
       warnings.push({ code: 'preview_failed', message: `Element ${element.name} preview generation failed`, elementId: element.id })
@@ -68,6 +76,15 @@ export function evaluateResourcePackPublishReadiness(
       if (!ids.has(dependencyId)) blocking.push({ code: 'dependency_missing', message: `Element ${element.name} references a missing dependency`, elementId: element.id })
       else if (!readyIds.has(dependencyId)) blocking.push({ code: 'dependency_not_ready', message: `Element ${element.name} references a dependency that is not ready`, elementId: element.id })
     }
+    for (const binding of element.dependencyBindings ?? []) {
+      if (!ids.has(binding.dependencyElementId)) {
+        blocking.push({ code: 'dependency_binding_missing', message: `Element ${element.name} maps an external reference to a missing dependency`, elementId: element.id })
+      } else if (!readyIds.has(binding.dependencyElementId)) {
+        blocking.push({ code: 'dependency_binding_not_ready', message: `Element ${element.name} maps an external reference to a dependency that is not ready`, elementId: element.id })
+      } else if (!element.dependencies.includes(binding.dependencyElementId)) {
+        blocking.push({ code: 'dependency_binding_unlisted', message: `Element ${element.name} has a dependency mapping that is not declared in its dependency list`, elementId: element.id })
+      }
+    }
   }
 
   const seenPaths = new Map<string, string>()
@@ -85,6 +102,21 @@ export function evaluateResourcePackPublishReadiness(
   }
 
   return { blocking, warnings, canPublish: blocking.length === 0 }
+}
+
+function externalReferencePaths(...values: unknown[]): string[] {
+  const references: string[] = []
+  for (const value of values) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) references.push(...parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())))
+      else references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean))
+    } catch {
+      references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean))
+    }
+  }
+  return [...new Set(references)]
 }
 
 export function assertResourcePackPublishable(pack: ResourcePack, elements: readonly ResourceElement[]): ResourcePublishReadiness {

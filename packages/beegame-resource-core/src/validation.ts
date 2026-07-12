@@ -2,6 +2,7 @@ import {
   RESOURCE_CATEGORIES,
   RESOURCE_DIMENSIONS,
   RESOURCE_PACK_PRIMARY_CATEGORIES,
+  RESOURCE_USAGE_TAGS,
   type ResourceElement,
   type ResourcePack,
 } from './types'
@@ -50,10 +51,26 @@ export function validateResourceElement(value: unknown): ResourceElement {
   if (!isRecord(value.specs) || !Array.isArray(value.dependencies)) {
     throw new ResourceValidationError('Element specs and dependencies are required')
   }
+  if (value.dependencyBindings !== undefined && (!Array.isArray(value.dependencyBindings) || value.dependencyBindings.some(binding => !isDependencyBinding(binding)))) {
+    throw new ResourceValidationError('Element dependencyBindings must contain valid external reference mappings')
+  }
+  if (value.usageTags !== undefined &&
+      (!Array.isArray(value.usageTags) || value.usageTags.some(item => !isAllowed(item, RESOURCE_USAGE_TAGS)))) {
+    throw new ResourceValidationError('Element usageTags must contain supported values')
+  }
   if (!isAllowed(value.status, ['queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'] as const)) {
     throw new ResourceValidationError('Element status is unsupported')
   }
   return value as ResourceElement
+}
+
+function isDependencyBinding(value: unknown): value is { referencePath: string; dependencyElementId: string; kind?: string } {
+  if (!isRecord(value)) return false
+  const referencePath = value.referencePath
+  const dependencyElementId = value.dependencyElementId
+  if (typeof referencePath !== 'string' || !referencePath.trim() || referencePath.startsWith('/') || referencePath.includes('\\')) return false
+  if (typeof dependencyElementId !== 'string' || !dependencyElementId.trim()) return false
+  return value.kind === undefined || typeof value.kind === 'string'
 }
 
 function requireString(value: unknown, label: string): asserts value is string {

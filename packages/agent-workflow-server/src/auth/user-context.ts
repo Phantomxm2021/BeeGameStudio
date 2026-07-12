@@ -373,6 +373,9 @@ const REVIEWER_PERMISSIONS = new Set<BeeGamePermission>([
 const DEVELOPER_PERMISSIONS = new Set<BeeGamePermission>([
   ...REVIEWER_PERMISSIONS,
   'project.create',
+  // Project and session deletion still require ownership checks at the route
+  // boundary. Developers need this capability to remove projects they create.
+  'project.delete',
   'agent.send_message',
   'agent.cancel',
   'agent.approve_tool',

@@ -281,6 +281,7 @@ export class BeeGameDeploymentManager {
       await rm(artifactPath, { recursive: true, force: true })
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
+      await injectDeploymentAssetPathCompatibility(artifactPath)
       const artifactHash = await hashDirectory(artifactPath)
       const published = this.publisher
         ? await this.publisher.publishStaticDirectory({
@@ -292,7 +293,7 @@ export class BeeGameDeploymentManager {
             outputDir,
             artifactHash,
             ...(input.authToken ? { authToken: input.authToken } : {}),
-            files: await createDeploymentFiles(outputDir),
+            files: await createDeploymentFiles(artifactPath),
           })
         : undefined
       const deployedAt = new Date().toISOString()
@@ -364,6 +365,7 @@ export class BeeGameDeploymentManager {
         targetPath = join(targetPath, 'index.html')
       }
     } catch {
+      if (isStaticFilePath(rest)) return undefined
       targetPath = join(siteRoot, 'index.html')
     }
     if (!isInsideOrEqual(targetPath, siteRoot)) return undefined
@@ -648,6 +650,70 @@ async function createDeploymentFiles(outputDir: string): Promise<BeeGameDeployme
   })
 }
 
+/**
+ * Web deployments may live under a storage or application prefix. This
+ * deployment-only adapter keeps historical projects that use root-relative
+ * media URLs inside the current artifact without changing project source.
+ */
+async function injectDeploymentAssetPathCompatibility(outputDir: string): Promise<void> {
+  const files = await listFiles(outputDir)
+  await Promise.all(files
+    .filter(file => extname(file).toLowerCase() === '.html')
+    .map(async file => {
+      const html = await readFile(file, 'utf8')
+      if (html.includes('data-beegame-deployment-asset-base')) return
+      const bridge = deploymentAssetPathCompatibilityBridge()
+      const headClose = html.indexOf('</head>')
+      const patched = headClose >= 0
+        ? `${html.slice(0, headClose)}${bridge}${html.slice(headClose)}`
+        : `${bridge}${html}`
+      await writeFile(file, patched, 'utf8')
+    }))
+}
+
+function deploymentAssetPathCompatibilityBridge(): string {
+  return `<script data-beegame-deployment-asset-base>
+(() => {
+  const supportedExtensions = new Set(['glb','gltf','fbx','obj','mtl','png','jpg','jpeg','webp','gif','svg','mp3','ogg','wav','m4a','mp4','webm','ttf','otf','woff','woff2','wasm','bin']);
+  const rewrite = (value) => {
+    if (typeof value !== 'string') return value;
+    let requested;
+    try { requested = new URL(value, window.location.href); } catch { return value; }
+    if (requested.origin !== window.location.origin) return value;
+    const base = new URL('.', window.location.href);
+    if (requested.pathname.startsWith(base.pathname)) return value;
+    const segment = requested.pathname.slice(requested.pathname.lastIndexOf('/') + 1);
+    const extension = segment.includes('.') ? segment.split('.').pop().toLowerCase() : '';
+    if (!supportedExtensions.has(extension)) return value;
+    return new URL(requested.pathname.slice(1) + requested.search + requested.hash, base).toString();
+  };
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    if (typeof input === 'string') return originalFetch(rewrite(input), init);
+    if (input instanceof Request) {
+      const url = rewrite(input.url);
+      return originalFetch(url === input.url ? input : new Request(url, input), init);
+    }
+    return originalFetch(input, init);
+  };
+  const originalOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    return originalOpen.call(this, method, rewrite(String(url)), ...rest);
+  };
+  for (const prototype of [HTMLImageElement.prototype, HTMLMediaElement.prototype]) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'src');
+    if (!descriptor || !descriptor.set || !descriptor.get) continue;
+    Object.defineProperty(prototype, 'src', {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get: descriptor.get,
+      set(value) { descriptor.set.call(this, rewrite(String(value))); },
+    });
+  }
+})();
+</script>`
+}
+
 async function listFiles(path: string): Promise<string[]> {
   const entries = await readdir(path, { withFileTypes: true })
   const files: string[] = []
@@ -687,6 +753,11 @@ function contentTypeForPath(path: string): string {
     default:
       return 'application/octet-stream'
   }
+}
+
+function isStaticFilePath(path: string): boolean {
+  const name = path.split('/').filter(Boolean).at(-1) || ''
+  return name.includes('.')
 }
 
 function isInsideOrEqual(candidate: string, root: string): boolean {

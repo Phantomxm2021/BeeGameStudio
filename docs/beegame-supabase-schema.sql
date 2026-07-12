@@ -315,6 +315,7 @@ create table if not exists public.beegame_resource_elements (
   preview jsonb,
   specs jsonb not null default '{}'::jsonb,
   dependencies jsonb not null default '[]'::jsonb,
+  dependency_bindings jsonb not null default '[]'::jsonb,
   status text not null default 'ready' check (status in ('ready', 'hidden', 'archived')),
   style_override text,
   dimension_override text check (dimension_override is null or dimension_override in ('2D', '3D', 'agnostic')),

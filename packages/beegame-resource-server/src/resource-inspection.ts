@@ -55,7 +55,9 @@ function inspectGltfText(text: string): Record<string, string | number | boolean
   }
   const result: Record<string, string | number | boolean> = { vertices, triangles, materialCount: materials.length, embeddedTextureCount: images.length }
   const externalTextures = images.map((image) => typeof image.uri === 'string' ? image.uri : '').filter(Boolean)
+  const externalBuffers = asRecords(document.buffers).map((buffer) => typeof buffer.uri === 'string' ? buffer.uri : '').filter(Boolean)
   if (externalTextures.length) result.textureReferences = externalTextures.join(' · ')
+  addExternalReferences(result, [...externalTextures, ...externalBuffers])
   return result
 }
 
@@ -80,6 +82,7 @@ function inspectObjText(text: string): Record<string, string | number | boolean>
   }
   const result: Record<string, string | number | boolean> = { vertices, triangles, materialCount: materials.size }
   if (materialLibraries.size) result.materialReferences = [...materialLibraries].join(' · ')
+  addExternalReferences(result, [...materialLibraries])
   return result
 }
 
@@ -109,7 +112,13 @@ function inspectFbx(bytes: Uint8Array): Record<string, string | number | boolean
     embeddedTextureCount,
   }
   if (texturePaths.size) result.textureReferences = [...texturePaths].join(' · ')
+  addExternalReferences(result, [...texturePaths])
   return result
+}
+
+function addExternalReferences(result: Record<string, string | number | boolean>, references: readonly string[]): void {
+  const unique = [...new Set(references.map(reference => reference.trim()).filter(Boolean))]
+  if (unique.length) result.externalReferences = JSON.stringify(unique)
 }
 
 function numberListAfter(text: string, label: string): number[] {

@@ -21,6 +21,22 @@ export const RESOURCE_CATEGORIES = [
 ] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
+/**
+ * Stable semantic capabilities shared by Pack elements and project asset
+ * contracts. These describe what an asset can be used for, independently of
+ * its file format or storage category.
+ */
+export const RESOURCE_USAGE_TAGS = [
+  'character', 'npc', 'creature',
+  'weapon-equipment', 'prop', 'vehicle',
+  'building', 'environment', 'terrain', 'vegetation',
+  'scene', 'level-map', 'tile',
+  'ui', 'icon', 'effect',
+  'combat', 'interaction', 'narrative',
+  'music', 'sound-effect', 'ambient-audio', 'voice',
+] as const
+export type ResourceUsageTag = (typeof RESOURCE_USAGE_TAGS)[number]
+
 export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
   '2d-art',
   '3d-assets',
@@ -72,6 +88,17 @@ export type ResourcePreview = {
   path: string
 }
 
+/**
+ * Maps an external relative URI recorded inside an asset to another Pack
+ * element. The reference is kept verbatim because loaders resolve it relative
+ * to the parent file at runtime.
+ */
+export type ResourceDependencyBinding = {
+  referencePath: string
+  dependencyElementId: string
+  kind?: string
+}
+
 export type ResourceElement = {
   id: string
   packId: string
@@ -81,7 +108,10 @@ export type ResourceElement = {
   kind: string
   preview?: ResourcePreview
   specs: Record<string, string | number | boolean>
+  /** Explicit semantic capabilities. Empty means the element is manual-only. */
+  usageTags?: readonly ResourceUsageTag[]
   dependencies: readonly string[]
+  dependencyBindings?: readonly ResourceDependencyBinding[]
   status: ResourceElementStatus
   styleOverride?: string
   dimensionOverride?: ResourceDimension
@@ -106,6 +136,16 @@ export type ResourceSelection = {
   elementPath: string
   score: number
   reasons: readonly string[]
+  dependencies?: readonly ResourceSelectionDependency[]
+}
+
+export type ResourceSelectionDependency = {
+  key: string
+  parentKey: string
+  elementId: string
+  elementPath: string
+  referencePath: string
+  kind?: string
 }
 
 export type ResourceSelectionManifest = {

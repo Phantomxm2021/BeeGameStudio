@@ -51,7 +51,7 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.buildCommand).toBe('npm run build -- --base=./')
     expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
     expect(await readFile(join(deployment.artifactPath || '', 'index.html'), 'utf8'))
-      .toBe('<h1>Playable</h1>')
+      .toContain('input instanceof Request')
   })
 
   test('does not append Vite base flags to non-Vite build scripts', async () => {
@@ -81,6 +81,22 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.status).toBe('succeeded')
     expect(deployment.buildCommand).toBe('npm run build')
     expect(commands).toEqual([['npm', 'run', 'build']])
+  })
+
+  test('returns 404 semantics for a missing static asset instead of SPA HTML', async () => {
+    const runner: BeeGameDeploymentRunner = async (_command, options) => {
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Playable</main>')
+      return { exitCode: 0, stdout: 'built', stderr: '' }
+    }
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'vite build' } }))
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner })
+    const deployment = await manager.deploy({ sessionId: 'beegame_static_404', workspacePath: workspace })
+
+    expect(await manager.readPublicFile(`/deployments/${deployment.id}/assets/missing.glb`)).toBeUndefined()
+    expect(await manager.readPublicFile(`/deployments/${deployment.id}/game-route`)).toEqual(
+      expect.objectContaining({ contentType: 'text/html; charset=utf-8' }),
+    )
   })
 
   test('publishes static output through a configured remote publisher', async () => {
@@ -131,7 +147,7 @@ describe('BeeGameDeploymentManager', () => {
     expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
     expect(publishedFiles).toEqual([
       { path: 'assets/game.js', content: 'console.log("play")' },
-      { path: 'index.html', content: '<main>Remote game</main>' },
+      { path: 'index.html', content: expect.stringContaining('data-beegame-deployment-asset-base') },
     ])
   })
 
@@ -206,7 +222,7 @@ describe('BeeGameDeploymentManager', () => {
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/html; charset=utf-8',
-        body: '<main>Storage game</main>',
+        body: expect.stringContaining('data-beegame-deployment-asset-base'),
       }),
     ])
   })

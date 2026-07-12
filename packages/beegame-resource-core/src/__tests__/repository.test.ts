@@ -27,6 +27,7 @@ const element: ResourceElement = {
   kind: 'sprite-sheet',
   preview: { kind: 'image', path: 'previews/idle.png' },
   specs: { width: 256, height: 256, frames: 4 },
+  usageTags: ['character'],
   dependencies: [],
   status: 'ready',
 }
@@ -64,5 +65,38 @@ describe('in-memory resource repository', () => {
     const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
 
     await expect(repository.deletePack('missing')).resolves.toBe(false)
+  })
+
+  test('reactivates an archived Pack by publishing it and clears its archive marker', async () => {
+    const archivedAt = '2026-07-12T00:00:00.000Z'
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack, status: 'archived', deprecatedAt: archivedAt }],
+      elements: [element],
+    })
+
+    const published = await repository.publishPack(pack.id)
+
+    expect(published).toEqual({ ...pack, status: 'published' })
+    const stored = await repository.getPack(pack.id)
+    expect(stored).toEqual(expect.objectContaining({ ...pack, status: 'published' }))
+    expect(stored).not.toHaveProperty('deprecatedAt')
+  })
+
+  test('recursively deletes a folder with nested folders and elements', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [pack],
+      elements: [
+        element,
+        { ...element, id: 'element-2', name: 'Tree', path: 'characters/forest/tree.png' },
+        { ...element, id: 'element-3', name: 'UI', path: 'ui/button.png', category: 'ui' },
+      ],
+    })
+    await repository.createFolder('pack-1', { id: 'characters', name: 'characters' })
+    await repository.createFolder('pack-1', { id: 'forest', name: 'forest', parentId: 'characters' })
+    await repository.createFolder('pack-1', { id: 'ui', name: 'ui' })
+
+    await expect(repository.deleteFolder('pack-1', 'characters')).resolves.toBe(true)
+    await expect(repository.listElements('pack-1')).resolves.toEqual([expect.objectContaining({ id: 'element-3' })])
+    await expect(repository.listFolders('pack-1')).resolves.toEqual([expect.objectContaining({ id: 'ui' })])
   })
 })

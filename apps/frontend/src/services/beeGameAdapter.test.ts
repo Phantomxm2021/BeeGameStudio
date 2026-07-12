@@ -550,6 +550,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(startBody.workspacePath).toBe('/tmp/beegame-projects/llm-project');
     expect(result.project.root_path).toBe('/tmp/beegame-projects/llm-project');
     expect(result.project.name).toBe('LLM Project');
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
   });
 
   it('uses the configured workspace root for new projects without replacing it with a project path', async () => {
@@ -1483,23 +1484,9 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toBe('继续任务');
   });
 
-  it('syncs an existing session to the current default model before continuing', async () => {
+  it('keeps an existing session bound to its configured model before continuing', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([
-          {
-            id: 'llm_new',
-            name: 'New Model',
-            provider: 'openai-compatible',
-            apiKeyPreview: 'sk-...',
-            models: { balanced: 'new-balanced-model' },
-            isDefault: true,
-            createdAt: '2026-06-21T00:00:00.000Z',
-            updatedAt: '2026-06-21T00:00:00.000Z',
-          },
-        ]);
-      }
       if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
         return jsonResponse(projectEnsureResponse(
           path.split('/')[3],
@@ -1508,25 +1495,11 @@ describe('beeGameAdapter prompt rules', () => {
           { modelConfigId: 'llm_old' },
         ));
       }
-      if (
-        path === '/api/beegame-sessions/beegame_model_old/model' &&
-        init?.method === 'PATCH'
-      ) {
-        return jsonResponse({
-          id: 'beegame_model_old',
-          cwd: '/tmp/beegame-projects/model-sync-game',
-          modelConfigId: 'llm_new',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
       if (path === '/api/beegame-sessions/beegame_model_old/input' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_model_old',
           cwd: '/tmp/beegame-projects/model-sync-game',
-          modelConfigId: 'llm_new',
+          modelConfigId: 'llm_old',
           status: 'running',
           turnStatus: 'running',
           createdAt: '2026-06-21T00:00:00.000Z',
@@ -1549,24 +1522,11 @@ describe('beeGameAdapter prompt rules', () => {
 
     await beeGameAdapter.continueTask({ project_id: project.id });
 
-    const patchCall = fetchMock.mock.calls.find(([path, init]) => (
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
+    expect(fetchMock.mock.calls.some(([path, init]) => (
       String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
       init?.method === 'PATCH'
-    ));
-    expect(patchCall).toBeTruthy();
-    expect(JSON.parse(String(patchCall?.[1]?.body || '{}'))).toEqual({
-      modelConfigId: 'llm_new',
-    });
-    const inputCallIndex = fetchMock.mock.calls.findIndex(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_model_old/input' &&
-      init?.method === 'POST'
-    ));
-    const patchCallIndex = fetchMock.mock.calls.findIndex(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
-      init?.method === 'PATCH'
-    ));
-    expect(patchCallIndex).toBeGreaterThan(-1);
-    expect(inputCallIndex).toBeGreaterThan(patchCallIndex);
+    ))).toBe(false);
   });
 
   it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
@@ -1646,7 +1606,11 @@ describe('beeGameAdapter prompt rules', () => {
     expect(body.text).toContain('placeholder/asset slots');
     expect(body.text).toContain('assets/asset-manifest.json');
     expect(body.text).toContain('2D/3D/动画/材质/VFX/音频/字体/数据/本地化');
-    expect(body.text).toContain('resource_requirement（category、dimension、accepted_formats、styles、game_types、purpose）');
+    expect(body.text).toContain('resource_requirement（category、dimension、accepted_formats、styles、game_types、tags、purpose）');
+    expect(body.text).toContain('顶层 version、project_target、slots 数组');
+    expect(body.text).toContain('不要使用 assets/categories/replacement 等旧式嵌套结构');
+    expect(body.text).toContain('sprites、tilemaps、models、materials、animation、ui、vfx、fonts、audio、textures、scenes');
+    expect(body.text).toContain('category 表示资源媒介');
     expect(body.text).toContain('React/Web 等普通文件项目使用 filesystem');
     expect(body.text).toContain('Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp');
     expect(body.text).toContain('必须区分“本次交付已实现”和“后续路线图”');

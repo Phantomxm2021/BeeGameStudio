@@ -12,6 +12,8 @@ export type OutboundTargetPolicyOptions = {
   resolve6?: Resolver
   allowHttp?: boolean
   allowedHosts?: Iterable<string>
+  /** Development-only support for an explicitly allowlisted proxy hostname. */
+  allowTrustedDevelopmentProxy?: boolean
 }
 
 export type ApprovedOutboundTarget = {
@@ -46,7 +48,14 @@ export async function resolveApprovedOutboundTarget(
         ...await resolveAddresses(options.resolve6 ?? resolve6FromDns, hostname),
       ]
 
-  if (!addresses.length || addresses.some(address => isIP(address) === 0 || isBlockedAddress(address))) {
+  const allowTrustedDevelopmentProxy =
+    options.allowTrustedDevelopmentProxy === true &&
+    isExplicitlyAllowedHostname(url, options.allowedHosts) &&
+    isIP(hostname) === 0
+  if (!addresses.length || addresses.some(address =>
+    isIP(address) === 0 ||
+    (isBlockedAddress(address) && !(allowTrustedDevelopmentProxy && isTrustedDevelopmentProxyAddress(address))),
+  )) {
     return null
   }
 
@@ -83,6 +92,15 @@ function isAllowedHostAndPort(url: URL, allowedHosts: Iterable<string> | undefin
   return port === '443' || port === '80' || entries.includes(`${hostname}:${port}`)
 }
 
+function isExplicitlyAllowedHostname(url: URL, allowedHosts: Iterable<string> | undefined): boolean {
+  const hostname = normalizeHostname(url.hostname)
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+  const entries = allowedHosts
+    ? [...allowedHosts].map(entry => entry.trim().toLowerCase()).filter(Boolean)
+    : []
+  return entries.includes(hostname) || entries.includes(`${hostname}:${port}`)
+}
+
 function normalizeHostname(hostname: string): string {
   return hostname.replaceAll('[', '').replaceAll(']', '').toLowerCase()
 }
@@ -111,6 +129,12 @@ function createPinnedLookup(hostname: string, addresses: string[]) {
 function isBlockedAddress(address: string): boolean {
   const family = isIP(address)
   return family === 4 ? isBlockedIpv4(address) : family === 6 && isBlockedIpv6(address)
+}
+
+function isTrustedDevelopmentProxyAddress(address: string): boolean {
+  if (isIP(address) !== 4) return false
+  const [first, second] = address.split('.').map(Number)
+  return first === 198 && (second === 18 || second === 19)
 }
 
 function isBlockedIpv4(address: string): boolean {

@@ -52,10 +52,6 @@ export function ResourcePackExplorer({
   }, [tree])
   const [contextNode, setContextNode] = useState<ExplorerNode | undefined>()
   const selectionAnchorIdRef = useRef<string | undefined>(undefined)
-  const activateFile = (node: { data: ExplorerNode }) => {
-    if (node.data.kind === 'file' && node.data.element) onElement(node.data.element)
-  }
-
   const selectedIds = new Set(selectedElementIds)
   const selectedElements = selectedElementIds.flatMap(id => nodesById.get(`file:${id}`)?.element ?? [])
   const renderRow = (props: RowRendererProps<ExplorerNode>): ReactElement => (
@@ -71,8 +67,11 @@ export function ResourcePackExplorer({
           ? (selectedIds.has(element.id) ? selectedElementIds.filter(id => id !== element.id) : [...selectedElementIds, element.id])
           : [element.id]
       if (!event.shiftKey) selectionAnchorIdRef.current = node.id
-      onSelectionChange?.(next.flatMap(id => nodesById.get(`file:${id}`)?.element ?? []))
-      onElement(element)
+      const nextElements = next.flatMap(id => nodesById.get(`file:${id}`)?.element ?? [])
+      onSelectionChange?.(nextElements)
+      // A preview can only represent one file. Do not choose an arbitrary
+      // active file while the user is editing a multi-selection.
+      if (nextElements.length === 1) onElement(nextElements[0])
     }} />
   )
 
@@ -94,7 +93,6 @@ export function ResourcePackExplorer({
       height={height}
       indent={INDENT}
       initialOpenState={{ root: true }}
-      onActivate={activateFile}
       openByDefault={false}
       overscanCount={12}
       renderRow={renderRow}
@@ -123,10 +121,10 @@ function ExplorerRow({ attrs, children, innerRef, node, onFileClick }: RowRender
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Enter' || node.data.kind !== 'file') return
+    if ((event.key !== 'Enter' && event.key !== ' ') || node.data.kind !== 'file' || !node.data.element) return
     event.preventDefault()
     event.stopPropagation()
-    node.handleClick(event as unknown as MouseEvent<HTMLDivElement>)
+    onFileClick(node.data.element, event as unknown as MouseEvent<HTMLDivElement>, node)
   }
 
   const rowAttributes = node.data.kind === 'file'

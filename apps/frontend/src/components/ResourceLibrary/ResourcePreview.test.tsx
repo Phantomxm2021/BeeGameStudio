@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, enableVertexColors, normalizeModelPreviewError, persistModelMetrics } from './ModelPreview'
+import { applyMissingTextureFallback, applyPreviewMaterialMode, applyTextureTransform, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, enableVertexColors, modelAnimations, normalizeModelPreviewError, persistModelMetrics, restartAnimationAction, snapshotTextureTransform } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -46,6 +46,71 @@ describe('renderPreview', () => {
       materialSlots: ['Painted metal'],
       textureReferences: ['albedo.png'],
     })
+  })
+
+  test('preserves animation clips attached by loaders such as FBX', () => {
+    const clip = new THREE.AnimationClip('Walk', 1, [])
+    const object = new THREE.Group() as THREE.Group & { animations: THREE.AnimationClip[] }
+    object.animations = [clip]
+
+    expect(modelAnimations(object)).toEqual([clip])
+  })
+
+  test('restarts an action when switching from looping to a paused one-shot preview', () => {
+    const object = new THREE.Group()
+    const mixer = new THREE.AnimationMixer(object)
+    const clip = new THREE.AnimationClip('Walk', 1, [])
+    const action = mixer.clipAction(clip).setLoop(THREE.LoopRepeat, Infinity).play()
+    mixer.update(0.8)
+
+    restartAnimationAction(action, mixer, false, false)
+
+    expect(action.loop).toBe(THREE.LoopOnce)
+    expect(action.repetitions).toBe(1)
+    expect(action.time).toBe(0)
+    expect(action.enabled).toBe(true)
+    expect(action.paused).toBe(true)
+  })
+
+  test('preserves source texture UV channel and atlas transform when rebinding an image', () => {
+    const source = new THREE.Texture()
+    source.channel = 1
+    source.flipY = false
+    source.wrapS = THREE.RepeatWrapping
+    source.wrapT = THREE.MirroredRepeatWrapping
+    source.offset.set(0.25, 0.5)
+    source.repeat.set(0.5, 0.25)
+    source.center.set(0.5, 0.5)
+    source.rotation = Math.PI / 2
+    const rebound = new THREE.Texture()
+
+    applyTextureTransform(rebound, snapshotTextureTransform(source))
+
+    expect(rebound.channel).toBe(1)
+    expect(rebound.flipY).toBe(false)
+    expect(rebound.wrapS).toBe(THREE.RepeatWrapping)
+    expect(rebound.wrapT).toBe(THREE.MirroredRepeatWrapping)
+    expect(rebound.offset.toArray()).toEqual([0.25, 0.5])
+    expect(rebound.repeat.toArray()).toEqual([0.5, 0.25])
+    expect(rebound.rotation).toBe(Math.PI / 2)
+  })
+
+  test('uses a neutral self-illuminated material for albedo inspection and restores lit values', () => {
+    const map = new THREE.Texture()
+    const material = new THREE.MeshStandardMaterial({ color: 0x886644, emissive: 0x112233, emissiveIntensity: 0.4, map })
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), material)
+    const states = new Map()
+
+    applyPreviewMaterialMode(mesh, 'albedo', states)
+    expect(material.color.getHex()).toBe(0x000000)
+    expect(material.emissive.getHex()).toBe(0xffffff)
+    expect(material.emissiveMap).toBe(map)
+    expect(material.toneMapped).toBe(false)
+
+    applyPreviewMaterialMode(mesh, 'lit', states)
+    expect(material.color.getHex()).toBe(0x886644)
+    expect(material.emissive.getHex()).toBe(0x112233)
+    expect(material.emissiveIntensity).toBe(0.4)
   })
 
   test('replaces unresolved FBX texture materials with a visible neutral material', () => {
