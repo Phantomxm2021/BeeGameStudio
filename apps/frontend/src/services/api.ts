@@ -138,6 +138,7 @@ export interface ProjectBaselineStatusPayload {
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
   delivery_review?: DeliveryReviewPayload | null;
+  delivery_history?: DeliveryReviewHistoryPayload[];
   delivery_status?: string;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
@@ -148,7 +149,25 @@ export interface DeliveryReviewPayload {
   summary?: string;
   findings?: Array<{ requirement?: string; status?: string; detail?: string }>;
   evidence_event_ids?: string[];
+  contract?: Record<string, unknown> | null;
   updated_at?: string;
+}
+
+export interface DeliveryReviewHistoryPayload {
+  status?: string;
+  summary?: string;
+  attempt?: number;
+  contract?: Record<string, unknown> | null;
+  updated_at?: string;
+}
+
+export interface DeliveryReportPayload {
+  project_id: string;
+  session_id?: string;
+  status: string;
+  summary: string;
+  review: DeliveryReviewPayload | null;
+  history: DeliveryReviewHistoryPayload[];
 }
 
 export interface OperatorVisibilityPayload {
@@ -772,6 +791,7 @@ export const normalizeProjectBaselineStatusPayload = (
       execution_evidence: undefined,
       build_report: null,
       delivery_review: null,
+      delivery_history: [],
       delivery_status: 'implementation',
       document_bundle: null,
     };
@@ -820,6 +840,9 @@ export const normalizeProjectBaselineStatusPayload = (
     context: normalizeContextVisibilityPayload(normalizedPayload.context),
     build_report: normalizeBuildReportPayload(normalizedPayload.build_report) ?? null,
     delivery_review: normalizedPayload.delivery_review ?? null,
+    delivery_history: Array.isArray(normalizedPayload.delivery_history)
+      ? normalizedPayload.delivery_history
+      : [],
     delivery_status: String(normalizedPayload.delivery_status ?? 'implementation'),
     document_bundle: normalizeDocumentBundleStatusPayload(normalizedPayload.document_bundle) ?? null,
   };
@@ -980,6 +1003,9 @@ export const api = {
       ((await apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/review-status`)) as { review_status?: ReviewStatusPayload })
         ?.review_status ?? null
     ),
+
+  getProjectDeliveryReport: (projectId: string): Promise<DeliveryReportPayload> =>
+    apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/delivery-report`),
 
   /**
    * 删除项目

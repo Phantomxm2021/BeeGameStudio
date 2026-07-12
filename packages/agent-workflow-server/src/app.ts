@@ -27,6 +27,7 @@ import {
   parseAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
 } from './beegame/attachment-build'
+import { createDeliveryGateFailure } from './beegame/delivery-contract'
 import {
   BeeGamePreviewManager,
   type BeeGamePreviewSnapshot,
@@ -1210,6 +1211,53 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/delivery-report', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) {
+        return c.json({
+          project_id: project.id,
+          status: 'unreviewed',
+          summary: 'No delivery review has been recorded.',
+          review: null,
+          history: [],
+        })
+      }
+      const events = await getProjectRuntimeEvents({
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
+        beeGameSessions,
+      })
+      const review = deriveDeliveryReview(events)
+      const history = deriveDeliveryReviewHistory(events)
+      return c.json({
+        project_id: project.id,
+        session_id: sessionRef.sessionId,
+        status: typeof review?.status === 'string' ? review.status : 'unreviewed',
+        summary: typeof review?.summary === 'string' ? review.summary : 'No delivery review has been recorded.',
+        review,
+        history,
+        metric_trends: deriveDeliveryMetricTrends(history),
+        environments: deriveDeliveryEnvironments(history),
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.delivery-report', err)
+    }
+  })
+
   app.post('/api/projects/:id/permissions/:toolUseID', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.approve_tool')
@@ -1431,6 +1479,13 @@ export function createAgentWorkflowApp(
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
       })
+      const deliveryGate = await getDeliveryGateFailure({
+        sessionId: ensured.session.id,
+        workspacePath: ensured.binding.workspacePath,
+        dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
+        beeGameSessions,
+      })
+      if (deliveryGate) return c.json({ error: deliveryGate }, 409)
       const deployment = await beeGameDeployments.deploy({
         sessionId: ensured.session.id,
         userId: user.id,
@@ -3582,6 +3637,7 @@ async function getBeeGameProjectRuntimeState(input: {
     context: deriveBeeGameContextVisibility(events, snapshot),
     delivery_status: deliveryReview?.status ?? 'implementation',
     delivery_review: deliveryReview,
+    delivery_history: deriveDeliveryReviewHistory(events),
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
@@ -3692,6 +3748,7 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     next_action: 'Ready for next request',
     context: null,
     delivery_review: null,
+    delivery_history: [],
     delivery_status: 'implementation',
     build_report: null,
     review_status: null,
@@ -3713,8 +3770,81 @@ function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
     summary: typeof payload.summary === 'string' ? payload.summary : event.text,
     findings: Array.isArray(payload.findings) ? payload.findings : [],
     evidence_event_ids: Array.isArray(payload.evidenceEventIds) ? payload.evidenceEventIds : [],
+    contract: isObject(payload.contract) ? payload.contract : null,
+    attempt: typeof payload.attempt === 'number' ? payload.attempt : 0,
     updated_at: normalizeBeeGameCreatedAt(event.createdAt),
   }
+}
+
+function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
+  return events
+    .filter(item => item.type === 'delivery.review.completed')
+    .slice(-20)
+    .map(event => {
+      const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
+      return {
+        status: typeof payload.status === 'string' ? payload.status : 'untested',
+        summary: typeof payload.summary === 'string' ? payload.summary : event.text,
+        attempt: typeof payload.attempt === 'number' ? payload.attempt : 0,
+        contract: isObject(payload.contract) ? payload.contract : null,
+        updated_at: normalizeBeeGameCreatedAt(event.createdAt),
+      }
+    })
+}
+
+function deriveDeliveryMetricTrends(history: JsonObject[]): JsonObject[] {
+  const snapshots = history.map(item => extractDeliveryMetrics(item.contract))
+  const latest = snapshots.at(-1) ?? {}
+  const previous = snapshots.at(-2) ?? {}
+  return Object.keys(latest).sort((left, right) => left.localeCompare(right)).map(metric => ({
+    metric,
+    current: latest[metric],
+    previous: typeof previous[metric] === 'number' ? previous[metric] : null,
+    delta: typeof previous[metric] === 'number' ? latest[metric] - previous[metric] : null,
+  }))
+}
+
+function deriveDeliveryEnvironments(history: JsonObject[]): JsonObject[] {
+  const environments = new Map<string, JsonObject>()
+  for (const item of history) {
+    const contract = isObject(item.contract) ? item.contract : {}
+    const requirements = Array.isArray(contract.requirements) ? contract.requirements : []
+    for (const requirement of requirements) {
+      if (!isObject(requirement) || !Array.isArray(requirement.evidence)) continue
+      for (const evidence of requirement.evidence) {
+        if (!isObject(evidence) || !isObject(evidence.environment)) continue
+        const environment = evidence.environment as JsonObject
+        environments.set(JSON.stringify(environment), environment)
+      }
+    }
+  }
+  return [...environments.values()]
+}
+
+function extractDeliveryMetrics(contractValue: unknown): Record<string, number> {
+  if (!isObject(contractValue) || !Array.isArray(contractValue.requirements)) return {}
+  const metrics: Record<string, number> = {}
+  for (const requirement of contractValue.requirements) {
+    if (!isObject(requirement) || !Array.isArray(requirement.evidence)) continue
+    for (const evidence of requirement.evidence) {
+      if (!isObject(evidence) || !isObject(evidence.metrics)) continue
+      for (const [metric, value] of Object.entries(evidence.metrics)) {
+        if (typeof value === 'number' && Number.isFinite(value)) metrics[metric] = value
+      }
+    }
+  }
+  return metrics
+}
+
+async function getDeliveryGateFailure(input: {
+  sessionId: string
+  workspacePath: string
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+}) {
+  const events = await getProjectRuntimeEvents(input)
+  const review = deriveDeliveryReview(events)
+  return createDeliveryGateFailure(review)
 }
 
 async function resolveBeeGameProjectSessionReference(input: {
@@ -4759,6 +4889,13 @@ function registerBeeGameSessionRoutes(
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
+        const deliveryGate = await getDeliveryGateFailure({
+          sessionId: c.req.param('id'),
+          workspacePath,
+          dashboardDataRoot: getDashboardDataRoot(defaultWorkspacePath),
+          beeGameSessions,
+        })
+        if (deliveryGate) return c.json({ error: deliveryGate }, 409)
         const deployment = await beeGameDeployments.deploy({
           sessionId: c.req.param('id'),
           userId: currentUser.id,

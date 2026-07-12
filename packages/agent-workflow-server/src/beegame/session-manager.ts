@@ -25,6 +25,16 @@ import {
   type BeeGameCreditTaskType,
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
+import { auditAssetContract } from './asset-contract-audit'
+import {
+  buildDeliveryRepairPrompt,
+  createDeliveryContract,
+  parseDeliveryReview,
+  type DeliveryContract,
+  type DeliveryEvidence,
+  type DeliveryRequirement,
+  type ParsedDeliveryReview,
+} from './delivery-contract'
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameImageAttachment = {
@@ -44,6 +54,7 @@ export type BeeGameFileAttachment = {
 export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_DELIVERY_REPAIR_ATTEMPTS = 2
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -113,6 +124,8 @@ export type BeeGameEventType =
   | 'turn.failed'
   | 'delivery.review.started'
   | 'delivery.review.completed'
+  | 'delivery.contract.updated'
+  | 'delivery.repair.started'
   | 'session.stopped'
   | 'session.failed'
 
@@ -264,6 +277,8 @@ type SessionRecord = {
   nextTurnIndex: number
   currentTurnId: string | null
   currentTurnKind?: string
+  deliveryRepairAttempts: number
+  latestDeliveryContract?: DeliveryContract
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
 }
@@ -438,6 +453,8 @@ export class BeeGameSessionManager {
         : 1,
       currentTurnId: null,
       currentTurnKind: undefined,
+      deliveryRepairAttempts: 0,
+      latestDeliveryContract: recoverLatestDeliveryContract(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
@@ -913,7 +930,7 @@ export class BeeGameSessionManager {
             )
           } else {
             if (record.currentTurnKind === 'delivery_review') {
-              this.completeDeliveryReview(record, eventCountBeforeTurn)
+              record.latestDeliveryContract = this.completeDeliveryReview(record, eventCountBeforeTurn)
             }
             this.appendRuntimeObservation(record, 'turn_completed')
             this.append(record, 'turn.completed', 'Turn ended')
@@ -978,6 +995,32 @@ export class BeeGameSessionManager {
             })
           })
         })
+      } else if (completedTurnKind === 'delivery_review' && record.session.status === 'running') {
+        const contract = record.latestDeliveryContract
+        if (contract && contract.status !== 'passed' && record.deliveryRepairAttempts < MAX_DELIVERY_REPAIR_ATTEMPTS) {
+          queueMicrotask(() => {
+            void this.startDeliveryRepair(record, contract).catch(error => {
+              this.append(record, 'delivery.repair.started', 'Delivery repair could not start', {
+                type: 'delivery.repair.started',
+                status: 'blocked',
+                summary: toErrorMessage(error),
+                attempt: record.deliveryRepairAttempts,
+              })
+            })
+          })
+        }
+      } else if (completedTurnKind === 'delivery_repair' && record.session.status === 'running') {
+        queueMicrotask(() => {
+          void this.startDeliveryReview(record).catch(error => {
+            this.append(record, 'delivery.review.completed', 'Delivery review could not restart', {
+              type: 'delivery.review.completed',
+              status: 'blocked',
+              summary: toErrorMessage(error),
+              findings: [],
+              evidenceEventIds: [],
+            })
+          })
+        })
       }
     }
   }
@@ -1000,34 +1043,98 @@ export class BeeGameSessionManager {
     )
   }
 
-  private completeDeliveryReview(record: SessionRecord, eventStartIndex: number): void {
+  private async startDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
+    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
+    record.deliveryRepairAttempts += 1
+    this.append(record, 'delivery.repair.started', 'Delivery repair started', {
+      type: 'delivery.repair.started',
+      status: 'running',
+      attempt: record.deliveryRepairAttempts,
+      contract,
+    })
+    await this.sendWithDisplay(
+      record.session.id,
+      buildDeliveryRepairPrompt(contract, record.deliveryRepairAttempts),
+      {
+        displayText: `Fixing delivery gaps (attempt ${record.deliveryRepairAttempts}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
+        displayKind: 'delivery_repair',
+        taskType: 'agent_turn',
+        thinkingMode: 'enabled',
+      },
+    )
+  }
+
+  private completeDeliveryReview(record: SessionRecord, eventStartIndex: number): DeliveryContract {
     const reviewEvents = record.events.slice(eventStartIndex)
     const result = [...reviewEvents].reverse().find(event => event.type === 'result')
-    const executableEvidence = reviewEvents.filter(event =>
-      event.type === 'tool.completed' &&
-      !isReadOnlyTool(getDashboardPayloadString(event.payload, 'toolName'))
-    )
     const failedEvidence = reviewEvents.filter(event =>
       event.type === 'tool.failed' ||
       (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
     )
-    const parsed = parseDeliveryReview(result?.text)
-    const status = !parsed
-      ? 'untested'
-      : failedEvidence.length > 0 && parsed.status === 'passed'
-        ? 'failed'
-        : parsed.status === 'passed' && (parsed.findings.length === 0 || parsed.findings.some(finding => finding.status !== 'passed'))
-          ? 'untested'
-        : executableEvidence.length === 0 && parsed.status === 'passed'
-          ? 'untested'
-          : parsed.status
-    this.append(record, 'delivery.review.completed', parsed?.summary || 'Delivery review did not return a valid structured result', {
-      type: 'delivery.review.completed',
-      status,
-      summary: parsed?.summary || 'Structured review result was unavailable.',
-      findings: parsed?.findings || [],
-      evidenceEventIds: executableEvidence.map(event => String(event.id)),
+    const parsed = parseDeliveryReview(result?.text) ?? invalidDeliveryReview()
+    const verifiedEvidenceIds = getVerifiedDeliveryEvidenceIds(reviewEvents)
+    const assetAuditEvidenceId = `asset-contract-audit:${record.currentTurnId ?? record.session.id}`
+    const assetAudit = auditAssetContract(record.session.cwd)
+    if (assetAudit.present) {
+      verifiedEvidenceIds.add(assetAuditEvidenceId)
+      const assetRequirement: DeliveryRequirement = {
+        id: 'project-asset-contract-integrity',
+        title: 'Project asset contract integrity',
+        scope: 'mvp',
+        status: assetAudit.valid ? 'accepted' : 'failed',
+        evidenceRequired: ['asset'],
+        evidence: [{
+          kind: 'asset',
+          eventId: assetAuditEvidenceId,
+          source: assetAudit.manifestPath,
+          detail: assetAudit.valid
+            ? `Validated ${assetAudit.slots.length} asset slots.`
+            : assetAudit.issues.join(' '),
+        }],
+        ...(!assetAudit.valid ? { detail: assetAudit.issues.join(' ') } : {}),
+      }
+      const existingAssetRequirement = parsed.requirements.findIndex(item => item.id === assetRequirement.id)
+      if (existingAssetRequirement >= 0) parsed.requirements[existingAssetRequirement] = assetRequirement
+      else parsed.requirements.push(assetRequirement)
+      if (!assetAudit.valid) {
+        parsed.status = 'failed'
+        parsed.findings.push({
+          requirementId: 'project-asset-contract-integrity',
+          requirement: 'Project asset contract integrity',
+          status: 'failed',
+          detail: assetAudit.issues.join(' '),
+          evidence: [{
+            kind: 'asset',
+            eventId: assetAuditEvidenceId,
+            source: assetAudit.manifestPath,
+            detail: assetAudit.issues.join(' '),
+          }],
+        })
+      }
+    }
+    const verifiedCapabilities = getVerifiedDeliveryCapabilities(reviewEvents)
+    const verifiedReview = retainVerifiedDeliveryEvidence(parsed, verifiedEvidenceIds)
+    if (failedEvidence.length > 0) {
+      verifiedReview.status = 'failed'
+      verifiedReview.summary = `${verifiedReview.summary} Validation tools failed or were denied.`
+    }
+    const contract = createDeliveryContract(verifiedReview, verifiedCapabilities)
+    this.append(record, 'delivery.contract.updated', contract.summary, {
+      type: 'delivery.contract.updated',
+      contract,
+      attempt: record.deliveryRepairAttempts,
     })
+    this.append(record, 'delivery.review.completed', contract.summary, {
+      type: 'delivery.review.completed',
+      status: contract.status,
+      summary: contract.summary,
+      findings: verifiedReview.findings,
+      evidenceEventIds: [...verifiedEvidenceIds],
+      contract,
+      attempt: record.deliveryRepairAttempts,
+    })
+    if (contract.status === 'passed') record.deliveryRepairAttempts = 0
+    return contract
   }
 
   private async resolveRuntimeOutboundTargets(
@@ -2144,49 +2251,88 @@ function withAssetIntegrationContract(prompt: string): string {
   return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities is the explicit format capability contract of the selected runtime adapter. Set it from the project adapter/build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with that runtime contract. If the adapter capability or the format is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the target adapter/loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
 }
 
-type ParsedDeliveryReview = {
-  status: 'passed' | 'failed' | 'untested' | 'blocked'
-  summary: string
-  findings: Array<{
-    requirement: string
-    status: 'passed' | 'failed' | 'untested' | 'blocked'
-    detail: string
-  }>
+function withDeliveryContract(prompt: string): string {
+  return `${prompt}\n\nEvidence-backed delivery contract:\n- Create docs/delivery-contract.json before implementation. Use stable requirement ids, explicit mvp/roadmap scope, required evidence kinds, required capabilities, and structured player paths with actions and observable assertions.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Requirement status may advance only through planned -> implemented -> statically_verified -> runtime_verified -> accepted. Build/typecheck alone cannot accept player-facing behavior.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- Final delivery output is generated from recorded evidence. If validation fails, fix the project and rerun the affected path; do not rewrite the contract to make the failure disappear.`
 }
 
 function deliveryReviewPrompt(): string {
   return [
     'Perform a read-only delivery review of the current game project.',
-    'Treat the project GDD, technical design, UI/UX design, and acceptance checklist as the source of truth.',
+    'Treat docs/delivery-contract.json, the project GDD, technical design, UI/UX design, and acceptance checklist as the source of truth. If the structured delivery contract is missing or inconsistent, report untested or failed.',
     'Compare those documents with the actual implementation. Run safe project-native build, test, preview, or player-path checks when available.',
     'Do not edit files, install dependencies, change configuration, or claim success from build/typecheck alone.',
-    'A passed result requires executable evidence for the core player path. If that evidence is unavailable, return untested rather than passed.',
+    'Use available validation skills when their declared capability matches the project. Record required capabilities explicitly; do not infer them from project names or natural-language keywords.',
+    'A passed MVP requirement needs its declared evidence kinds and runtime evidence for player-facing behavior. Evidence eventId must reference the real tool-use ID that produced it; unsupported evidence is discarded.',
+    'Inspect assets/asset-manifest.json structurally when present: declared slots, copied files, target compatibility, code/runtime reference evidence, and runtime load evidence are separate states.',
+    'If executable player-path evidence is unavailable, return untested rather than passed. Roadmap requirements never block the MVP.',
     'Your final response must be one JSON object only, with this shape:',
-    '{"status":"passed|failed|untested|blocked","summary":"...","findings":[{"requirement":"...","status":"passed|failed|untested|blocked","detail":"..."}]}',
+    '{"status":"passed|failed|untested|blocked","summary":"...","requiredCapabilities":["skill:<invoked-skill-slug>"],"requirements":[{"id":"stable-id-from-project-contract","title":"...","scope":"mvp|roadmap","status":"planned|implemented|statically_verified|runtime_verified|accepted|failed|blocked","evidenceRequired":["implementation|build|test|runtime|asset|skill|document"],"evidence":[{"kind":"runtime","eventId":"real-tool-use-id","source":"...","detail":"..."}],"detail":"..."}],"findings":[{"requirementId":"...","requirement":"...","status":"passed|failed|untested|blocked","detail":"...","evidence":[]}]}',
   ].join('\n')
 }
 
-function parseDeliveryReview(text: string | undefined): ParsedDeliveryReview | undefined {
-  if (!text?.trim()) return undefined
-  try {
-    const value = JSON.parse(text.trim()) as Record<string, unknown>
-    if (!isDeliveryReviewStatus(value.status) || typeof value.summary !== 'string' || !Array.isArray(value.findings)) {
-      return undefined
-    }
-    const findings = value.findings.flatMap(item => {
-      if (!isObject(item) || typeof item.requirement !== 'string' || !isDeliveryReviewStatus(item.status) || typeof item.detail !== 'string') {
-        return []
-      }
-      return [{ requirement: item.requirement, status: item.status, detail: item.detail }]
-    })
-    return { status: value.status, summary: value.summary, findings }
-  } catch {
-    return undefined
+function invalidDeliveryReview(): ParsedDeliveryReview {
+  return {
+    status: 'untested',
+    summary: 'Delivery review did not return a valid structured contract.',
+    requirements: [],
+    requiredCapabilities: [],
+    findings: [],
   }
 }
 
-function isDeliveryReviewStatus(value: unknown): value is ParsedDeliveryReview['status'] {
-  return value === 'passed' || value === 'failed' || value === 'untested' || value === 'blocked'
+function getVerifiedDeliveryEvidenceIds(events: BeeGameEvent[]): Set<string> {
+  const ids = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'tool.completed') continue
+    ids.add(String(event.id))
+    const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
+    if (toolUseID) ids.add(toolUseID)
+  }
+  return ids
+}
+
+function getVerifiedDeliveryCapabilities(events: BeeGameEvent[]): string[] {
+  const capabilities = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'tool.completed') continue
+    const toolName = getDashboardPayloadString(event.payload, 'toolName')
+    capabilities.add(`tool:${toolName}`)
+    if (toolName !== 'Skill') continue
+    const input = getDashboardPayloadRecord(event.payload, 'input')
+    const skill = ['skill', 'slug', 'name']
+      .map(key => getStringField(input, key))
+      .find(Boolean)
+    if (skill) capabilities.add(`skill:${skill}`)
+  }
+  return [...capabilities].sort((left, right) => left.localeCompare(right))
+}
+
+function retainVerifiedDeliveryEvidence(
+  review: ParsedDeliveryReview,
+  verifiedEvidenceIds: Set<string>,
+): ParsedDeliveryReview {
+  const retain = (evidence: DeliveryEvidence[]) => evidence.filter(item => (
+    Boolean(item.eventId) && verifiedEvidenceIds.has(item.eventId ?? '')
+  ))
+  return {
+    ...review,
+    requirements: review.requirements.map(requirement => ({
+      ...requirement,
+      evidence: retain(requirement.evidence),
+    })),
+    findings: review.findings.map(finding => ({
+      ...finding,
+      evidence: retain(finding.evidence),
+    })),
+  }
+}
+
+function recoverLatestDeliveryContract(events: BeeGameEvent[]): DeliveryContract | undefined {
+  const event = [...events].reverse().find(item => item.type === 'delivery.contract.updated')
+  const contract = event && isObject(event.payload) ? event.payload.contract : undefined
+  if (!isObject(contract) || contract.version !== 1 || !Array.isArray(contract.requirements)) return undefined
+  if (!['passed', 'failed', 'untested', 'blocked'].includes(String(contract.status))) return undefined
+  return contract as DeliveryContract
 }
 
 async function prepareBeeGamePromptInput(input: {
@@ -2203,9 +2349,9 @@ async function prepareBeeGamePromptInput(input: {
   const documentContext = materializedFiles.length > 0
     ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
     : ''
-  const promptText = withAssetIntegrationContract(
+  const promptText = withDeliveryContract(withAssetIntegrationContract(
     withSessionLanguageContract(`${input.text}${documentContext}`, input.language),
-  )
+  ))
   if (images.length === 0) {
     return {
       prompt: promptText,

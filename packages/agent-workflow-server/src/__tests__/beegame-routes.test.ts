@@ -817,7 +817,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('runs a read-only delivery review after a confirmed build and records a non-passing result when mutation is attempted', async () => {
+  test('blocks a failed delivery review, repairs findings, and re-reviews before acceptance', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-review-'))
     let submitCount = 0
     const manager = new BeeGameSessionManager({
@@ -831,12 +831,63 @@ describe('beegame session routes', () => {
               input.onMessage({ type: 'result', result: 'Build finished' })
               return
             }
-            const decision = await input.requestPermission({
-              toolUseID: 'review-write', toolName: 'Write', message: 'Change implementation?',
-              input: { file_path: 'src/main.ts', content: 'changed' },
-            })
-            expect(decision.behavior).toBe('deny')
-            input.onMessage({ type: 'result', result: JSON.stringify({ status: 'passed', summary: 'Looks good', findings: [] }) })
+            if (submitCount === 2) {
+              const decision = await input.requestPermission({
+                toolUseID: 'review-write', toolName: 'Write', message: 'Change implementation?',
+                input: { file_path: 'src/main.ts', content: 'changed' },
+              })
+              expect(decision.behavior).toBe('deny')
+              input.onMessage({ type: 'result', result: JSON.stringify({
+                status: 'failed',
+                summary: 'Core path failed.',
+                requiredCapabilities: ['skill:beegame-game-acceptance'],
+                requirements: [{
+                  id: 'core-path', title: 'Core player path', scope: 'mvp', status: 'failed',
+                  evidenceRequired: ['runtime', 'skill'], evidence: [], detail: 'No executable evidence.',
+                }],
+                findings: [{
+                  requirementId: 'core-path', requirement: 'Core player path', status: 'failed',
+                  detail: 'No executable evidence.', evidence: [],
+                }],
+              }) })
+              return
+            }
+            if (submitCount === 3) {
+              input.onMessage({ type: 'assistant', message: { content: [{
+                type: 'tool_use', id: 'repair-write', name: 'Write', input: { file_path: 'src/main.ts', content: 'fixed' },
+              }] } })
+              input.onMessage({ type: 'user', message: { content: [{
+                type: 'tool_result', tool_use_id: 'repair-write', content: 'fixed',
+              }] } })
+              input.onMessage({ type: 'result', result: 'Repair complete' })
+              return
+            }
+            input.onMessage({ type: 'assistant', message: { content: [
+              { type: 'tool_use', id: 'skill-acceptance', name: 'Skill', input: { skill: 'beegame-game-acceptance' } },
+              { type: 'tool_use', id: 'runtime-path', name: 'Bash', input: { command: 'project-native-player-path-check' } },
+            ] } })
+            input.onMessage({ type: 'user', message: { content: [
+              { type: 'tool_result', tool_use_id: 'skill-acceptance', content: 'loaded' },
+              { type: 'tool_result', tool_use_id: 'runtime-path', content: 'assertions passed' },
+            ] } })
+            input.onMessage({ type: 'result', result: JSON.stringify({
+              status: 'passed',
+              summary: 'Core path passed.',
+              requiredCapabilities: ['skill:beegame-game-acceptance'],
+              requirements: [{
+                id: 'core-path', title: 'Core player path', scope: 'mvp', status: 'runtime_verified',
+                evidenceRequired: ['runtime', 'skill'],
+                evidence: [
+                  { kind: 'runtime', eventId: 'runtime-path', detail: 'Player path assertions passed.' },
+                  { kind: 'skill', eventId: 'skill-acceptance', detail: 'Acceptance capability used.' },
+                ],
+              }],
+              findings: [{
+                requirementId: 'core-path', requirement: 'Core player path', status: 'passed',
+                detail: 'Executable assertions passed.',
+                evidence: [{ kind: 'runtime', eventId: 'runtime-path', detail: 'Player path assertions passed.' }],
+              }],
+            }) })
           },
           stop() {},
         }
@@ -845,10 +896,12 @@ describe('beegame session routes', () => {
     try {
       const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
       await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
-      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.review.completed'))
-      const review = manager.events(session.id).find(event => event.type === 'delivery.review.completed')
-      expect(review?.payload).toEqual(expect.objectContaining({ status: 'failed' }))
-      expect(submitCount).toBe(2)
+      await waitFor(() => manager.events(session.id).filter(event => event.type === 'delivery.review.completed').length === 2)
+      const reviews = manager.events(session.id).filter(event => event.type === 'delivery.review.completed')
+      expect(reviews[0]?.payload).toEqual(expect.objectContaining({ status: 'failed' }))
+      expect(reviews[1]?.payload).toEqual(expect.objectContaining({ status: 'passed' }))
+      expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(true)
+      expect(submitCount).toBe(4)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
