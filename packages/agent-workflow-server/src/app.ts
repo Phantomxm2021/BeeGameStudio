@@ -4356,6 +4356,33 @@ function registerBeeGameSessionRoutes(
     }
     return resolvedWorkspace
   }
+  const recoverSessionFromWorkspace = async (
+    request: Request,
+    sessionId: string,
+    workspaceHint: string,
+  ) => {
+    const user = options.getCurrentUser(request)
+    const workspacePath = await getSessionWorkspacePath(request, sessionId, workspaceHint)
+    const modelConfigId = await resolveDefaultModelConfigId(
+      request,
+      user,
+      undefined,
+      options.modelConfigExists,
+      options.listModelConfigs,
+    )
+    if (modelConfigId) await options.assertPermittedModelConfigRuntime(modelConfigId)
+    const session = beeGameSessions.start({
+      workspacePath,
+      transcriptSessionId: sessionId,
+      ...(modelConfigId ? { modelConfigId } : {}),
+      userId: user.id,
+      ...(getBearerToken(request) ? { authToken: getBearerToken(request) } : {}),
+      userDataRoot: options.getUserDataRoot(request),
+    })
+    await beeGameSessions.resumePendingDeliveryPipeline(session.id)
+    await options.persistSessionMetadata(request, beeGameSessions.metadata(session.id))
+    return session
+  }
 
   app.get(basePath, c => {
     const forbidden = check(c.req.raw, 'project.read')
@@ -4447,18 +4474,17 @@ function registerBeeGameSessionRoutes(
       )
       if (sessionForbidden.error === 'Session not found' && legacyWorkspacePath) {
         try {
-          const workspacePath = await getSessionWorkspacePath(
-            c.req.raw,
-            c.req.param('id'),
-            legacyWorkspacePath,
-          )
-          return await readTranscriptFromWorkspace(
-            c.req.param('id'),
-            workspacePath,
-            defaultWorkspacePath,
-            getDashboardDataRoot(defaultWorkspacePath),
-            Number.parseInt(c.req.query('after') || '0', 10),
-          )
+          const after = Number.parseInt(c.req.query('after') || '0', 10)
+          try {
+            const session = await recoverSessionFromWorkspace(c.req.raw, c.req.param('id'), legacyWorkspacePath)
+            return c.json(beeGameSessions.events(session.id, after))
+          } catch {
+            const workspacePath = await getSessionWorkspacePath(c.req.raw, c.req.param('id'), legacyWorkspacePath)
+            return await readTranscriptFromWorkspace(
+              c.req.param('id'), workspacePath, defaultWorkspacePath,
+              getDashboardDataRoot(defaultWorkspacePath), after,
+            )
+          }
         } catch {
           // Preserve the deliberately opaque 404 response for an invalid
           // session/workspace combination.
@@ -4479,13 +4505,16 @@ function registerBeeGameSessionRoutes(
         },
       )
       if (toErrorMessage(err) === 'Session not found' && workspacePath) {
-        return readTranscriptFromWorkspace(
-          c.req.param('id'),
-          workspacePath,
-          defaultWorkspacePath,
-          getDashboardDataRoot(defaultWorkspacePath),
-          Number.parseInt(c.req.query('after') || '0', 10),
-        )
+        const after = Number.parseInt(c.req.query('after') || '0', 10)
+        try {
+          const session = await recoverSessionFromWorkspace(c.req.raw, c.req.param('id'), workspacePath)
+          return c.json(beeGameSessions.events(session.id, after))
+        } catch {
+          return readTranscriptFromWorkspace(
+            c.req.param('id'), workspacePath, defaultWorkspacePath,
+            getDashboardDataRoot(defaultWorkspacePath), after,
+          )
+        }
       }
       return publicSessionRouteError(
         c,
