@@ -3901,11 +3901,23 @@ function getPendingBeeGamePermissionEvents(events: BeeGameEvent[]): BeeGameEvent
       .map(event => getBeeGamePayloadString(event, 'toolUseID'))
       .filter(Boolean),
   )
+  const closedTurns = new Set(
+    events
+      .filter(event => (
+        event.type === 'turn.completed' ||
+        event.type === 'turn.empty' ||
+        event.type === 'turn.failed' ||
+        event.type === 'session.stopped' ||
+        event.type === 'session.failed'
+      ))
+      .map(event => event.turnId)
+      .filter((turnId): turnId is string => Boolean(turnId)),
+  )
   return events
     .filter(event => event.type === 'permission.requested')
     .filter(event => {
       const toolUseID = getBeeGamePayloadString(event, 'toolUseID')
-      return toolUseID && !resolved.has(toolUseID)
+      return toolUseID && !resolved.has(toolUseID) && (!event.turnId || !closedTurns.has(event.turnId))
     })
 }
 

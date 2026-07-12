@@ -307,6 +307,7 @@ type SessionRecord = {
   pendingCreditOperation: PendingCreditOperation | null
   deliveryPipelineResumeFailures: number
   deliveryPipelineResumeTimer?: ReturnType<typeof setTimeout>
+  deliveryPipelineResumeInFlight: boolean
 }
 
 type RuntimeObservationFeature = {
@@ -488,6 +489,7 @@ export class BeeGameSessionManager {
         recoveredTranscript?.events ?? [],
       ),
       deliveryPipelineResumeFailures: 0,
+      deliveryPipelineResumeInFlight: false,
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
@@ -518,10 +520,12 @@ export class BeeGameSessionManager {
   async resumePendingDeliveryPipeline(sessionId: string): Promise<boolean> {
     const record = this.sessions.get(sessionId)
     if (!record || record.session.status !== 'running' || record.session.turnStatus !== 'idle') return false
+    if (record.deliveryPipelineResumeInFlight) return false
     if (record.deliveryPipelineResumeFailures > 3) return false
     const transition = getLatestDeliveryPipelineTransition(record.events)
     if (!transition) return false
     const contract = recoverLatestDeliveryContract(record.events)
+    record.deliveryPipelineResumeInFlight = true
     try {
       if (transition.type === 'delivery.validation.started' || (
         transition.type === 'delivery.validation.completed' &&
@@ -572,6 +576,8 @@ export class BeeGameSessionManager {
         })
       }
       return false
+    } finally {
+      record.deliveryPipelineResumeInFlight = false
     }
   }
 

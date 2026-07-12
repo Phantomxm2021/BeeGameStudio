@@ -1025,8 +1025,11 @@ describe('beegame session routes', () => {
     }, workspace)
     try {
       const session = manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
-      expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(true)
-      expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(false)
+      const concurrentResults = await Promise.all([
+        manager.resumePendingDeliveryPipeline(session.id),
+        manager.resumePendingDeliveryPipeline(session.id),
+      ])
+      expect(concurrentResults.filter(Boolean)).toHaveLength(1)
       expect(manager.events(session.id).filter(event => event.type === 'delivery.repair.started')).toHaveLength(1)
       expect(submits).toBe(1)
       manager.stop(session.id)
