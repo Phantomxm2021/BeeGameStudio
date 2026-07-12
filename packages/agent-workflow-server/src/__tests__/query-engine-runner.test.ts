@@ -22,7 +22,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       source: 'policySettings' as const,
       whenToUse: 'validate runtime',
       getSystemPrompt: () => 'validate',
-      permissionMode: 'plan' as const,
     }
 
     const merged = mergeManagedAgentDefinitions({
@@ -36,7 +35,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(merged.allowedAgentTypes).toEqual(['project-helper', 'beegame-runtime-validator'])
     expect((merged.activeAgents as Array<Record<string, unknown>>)[1]).toMatchObject({
       source: 'policySettings',
-      permissionMode: 'plan',
     })
   })
 

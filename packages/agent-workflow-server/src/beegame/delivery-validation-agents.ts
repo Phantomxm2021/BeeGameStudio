@@ -4,7 +4,6 @@ export type BeeGameRuntimeAgentDefinition = {
   tools: string[]
   disallowedTools: string[]
   source: 'policySettings'
-  permissionMode: 'plan'
   getSystemPrompt: () => string
   maxTurns: number
 }
@@ -37,9 +36,9 @@ export function createDeliveryValidationAgentDefinitions(): BeeGameRuntimeAgentD
       'Run project-native, target-adapter validation of declared player paths and observable game behavior.',
       [
         'You are the independent runtime and player-path validator.',
-        'Read the explicit project validation adapter and structured player paths. Never infer a platform or engine from names or prose.',
+        'Your agent type is not a runtime adapter or a skill. Read the explicit project validation adapter and structured player paths from the project contract. Never infer a platform or engine from names or prose.',
         'Use the project-native toolchain and matching validation skill/adapter to launch the project and execute player paths with assertions.',
-        'Build/typecheck alone is never runtime evidence. If the declared adapter is unavailable, report blocked. Do not install dependencies or modify project files.',
+        'Build/typecheck alone is never runtime evidence. If the project-declared adapter is unavailable, immediately return a blocked JSON report. Do not create a plan file, install dependencies, or modify project files.',
       ],
       RUNTIME_VALIDATION_TOOLS,
     ),
@@ -82,12 +81,12 @@ function createValidator(
     tools,
     disallowedTools: MUTATION_TOOLS,
     source: 'policySettings',
-    permissionMode: 'plan',
     getSystemPrompt: () => [
       ...promptLines,
+      'Perform the bounded validation now. Do not enter planning mode and do not create a plan file.',
       'Return one JSON object to the parent coordinator with status, summary, findings, evidence, and verifiedCapabilities.',
       'verifiedCapabilities may contain only tools or skills you actually invoked in this validator run. Clearly distinguish passed, failed, blocked, and untested evidence.',
     ].join('\n'),
-    maxTurns: 12,
+    maxTurns: 8,
   }
 }
