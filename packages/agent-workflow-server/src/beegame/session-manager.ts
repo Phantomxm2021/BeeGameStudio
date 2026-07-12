@@ -1964,6 +1964,7 @@ export class BeeGameSessionManager {
         ? `Subagent did not produce a final report before timeout. Last read error: ${lastError}`
         : 'Subagent did not produce a final report before timeout.',
     })
+    this.resumeDelayedDeliveryValidationIfReady(record)
   }
 
   private refreshCompletedSubagentOutputs(record: SessionRecord): void {
@@ -2036,8 +2037,26 @@ export class BeeGameSessionManager {
       : []
     if (pending.length === 0) return
     const validationStartIndex = record.events.findLastIndex(event => event.type === 'delivery.validation.started')
-    const completed = getCompletedDeliveryValidators(record.events.slice(Math.max(0, validationStartIndex)))
-    if (pending.some(agentType => !completed.has(agentType))) return
+    const validationEvents = record.events.slice(Math.max(0, validationStartIndex))
+    const completed = getCompletedDeliveryValidators(validationEvents)
+    const failed = getFailedDeliveryValidators(validationEvents)
+    if (pending.some(agentType => !completed.has(agentType) && !failed.has(agentType))) return
+    if (pending.some(agentType => failed.has(agentType))) {
+      const contract = record.latestDeliveryContract
+      if (!contract || contract.status === 'passed') return
+      if (record.deliveryRepairAttempts >= MAX_DELIVERY_REPAIR_ATTEMPTS) {
+        this.append(record, 'delivery.repair.exhausted', 'Delivery repair attempts exhausted', {
+          type: 'delivery.repair.exhausted', status: 'needs_user',
+          attempt: record.deliveryRepairAttempts, contract,
+        })
+        return
+      }
+      this.appendDeliveryRepairQueued(record, contract)
+      void this.startDeliveryRepair(record, contract).catch(error => {
+        this.appendDeliveryRepairResumeFailure(record, error)
+      })
+      return
+    }
     void this.startDeliveryValidation(record).catch(error => {
       this.appendDeliveryValidationFailure(record, 'Delayed delivery validation could not restart', error)
     })
@@ -2588,6 +2607,21 @@ function getPendingDeliveryValidators(events: BeeGameEvent[]): Set<string> {
     }
   }
   return pending
+}
+
+function getFailedDeliveryValidators(events: BeeGameEvent[]): Set<string> {
+  const failed = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'tool.failed') continue
+    const toolName = getDashboardPayloadString(event.payload, 'toolName')
+    if (toolName !== 'Task' && toolName !== 'Agent') continue
+    const input = getDashboardPayloadRecord(event.payload, 'input')
+    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
+    if (agentType && DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) {
+      failed.add(agentType)
+    }
+  }
+  return failed
 }
 
 function getUnresolvedPendingDeliveryValidators(
