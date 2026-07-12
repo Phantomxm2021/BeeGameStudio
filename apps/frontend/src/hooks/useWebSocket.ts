@@ -238,8 +238,9 @@ export const useWebSocket = ({
 
   // Ref to tracking connect function
   const connectRef = useRef<(() => void) | null>(null);
-  const adapterPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const adapterPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const adapterLastEventIdRef = useRef(0);
+  const adapterIdlePollsRef = useRef(0);
 
   // Keep track of the latest callbacks to avoid re-connecting WebSocket when they change
   const callbacksRef = useRef({ onMessage, onError, onClose, onOpen, showToastError });
@@ -477,7 +478,7 @@ export const useWebSocket = ({
     if (isBeeGameAdapterEnabled()) {
       console.log('[WebSocket] BeeGame adapter disconnect');
       if (adapterPollTimerRef.current) {
-        clearInterval(adapterPollTimerRef.current);
+        clearTimeout(adapterPollTimerRef.current);
         adapterPollTimerRef.current = null;
       }
       setState('disconnected');
@@ -510,21 +511,44 @@ export const useWebSocket = ({
     if (isBeeGameAdapterEnabled()) {
       let cancelled = false;
       adapterLastEventIdRef.current = 0;
+      adapterIdlePollsRef.current = 0;
       setState('connected');
       callbacksRef.current.onOpen?.();
 
+      const schedulePoll = (delayMs: number) => {
+        if (cancelled) return;
+        adapterPollTimerRef.current = setTimeout(() => {
+          adapterPollTimerRef.current = null;
+          void poll();
+        }, delayMs);
+      };
+
       const poll = async () => {
+        if (cancelled) return;
+        if (document.hidden) {
+          schedulePoll(5000);
+          return;
+        }
         try {
           const result = await beeGameAdapter.pollMessages(projectId, adapterLastEventIdRef.current);
           adapterLastEventIdRef.current = result.lastEventId;
           for (const message of result.messages) {
             callbacksRef.current.onMessage(message);
           }
+          if (result.messages.length > 0) {
+            adapterIdlePollsRef.current = 0;
+          } else {
+            adapterIdlePollsRef.current += 1;
+          }
+          const nextDelay = result.messages.length > 0
+            ? 800
+            : Math.min(5000, 1000 + adapterIdlePollsRef.current * 500);
+          schedulePoll(nextDelay);
         } catch (error) {
           if (cancelled) return;
           console.warn('[WebSocket] BeeGame adapter poll failed:', error);
           if (adapterPollTimerRef.current) {
-            clearInterval(adapterPollTimerRef.current);
+            clearTimeout(adapterPollTimerRef.current);
             adapterPollTimerRef.current = null;
           }
           setState('failed');
@@ -534,14 +558,11 @@ export const useWebSocket = ({
       };
 
       void poll();
-      adapterPollTimerRef.current = setInterval(() => {
-        void poll();
-      }, 1000);
 
       return () => {
         cancelled = true;
         if (adapterPollTimerRef.current) {
-          clearInterval(adapterPollTimerRef.current);
+          clearTimeout(adapterPollTimerRef.current);
           adapterPollTimerRef.current = null;
         }
         callbacksRef.current.onClose?.();
