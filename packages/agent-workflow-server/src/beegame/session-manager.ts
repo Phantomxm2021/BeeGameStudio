@@ -27,6 +27,7 @@ import {
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { auditAssetContract } from './asset-contract-audit'
 import { auditProjectDeliveryContract } from './project-delivery-contract-audit'
+import { ensureProjectDeliveryContractSkeleton } from './project-delivery-contract'
 import {
   createDeliveryValidationAgentDefinitions,
   deliveryValidationCoordinatorPrompt,
@@ -2494,7 +2495,7 @@ function withAssetIntegrationContract(prompt: string): string {
 }
 
 function withDeliveryContract(prompt: string): string {
-  return `${prompt}\n\nEvidence-backed delivery contract:\n- Create docs/delivery-contract.json before implementation. Use stable requirement ids, explicit mvp/roadmap scope, required evidence kinds, required capabilities, and structured player paths with actions and observable assertions.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Treat the current project directory as the complete implementation boundary. Never inspect parent or sibling directories to discover adapters, skills, templates, or host implementation details.\n- Adapter identity comes from the explicit project target selected in the build brief. Skill availability comes only from the runtime Skill tool catalog; if a capability is unavailable, record it as required and continue valid project implementation so independent validation can report the blocker.\n- Requirement status may advance only through planned -> implemented -> statically_verified -> runtime_verified -> accepted. Build/typecheck alone cannot accept player-facing behavior.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- Final delivery output is generated from recorded evidence. If validation fails, fix the project and rerun the affected path; do not rewrite the contract to make the failure disappear.`
+  return `${prompt}\n\nEvidence-backed delivery contract:\n- The system has created docs/delivery-contract.json. Populate only its declarative requirements, required capabilities, and structured player paths. Use stable ids, explicit mvp/roadmap scope, required evidence kinds, and observable actions/assertions.\n- Never add status, evidence, verifiedCapabilities, acceptedAt, or validatedAt. Those outcomes are owned by the independent validation pipeline and persisted outside the project-authored declaration.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Treat the current project directory as the complete implementation boundary. Never inspect parent or sibling directories to discover adapters, skills, templates, or host implementation details.\n- Adapter identity comes from the explicit project target selected in the build brief. Skill availability comes only from the runtime Skill tool catalog; if a capability is unavailable, record it as required and continue valid project implementation so independent validation can report the blocker.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- If validation fails, fix the implementation and rerun the affected path; do not weaken the declaration to make the failure disappear.`
 }
 
 function deliveryValidationResponseSchema(): string {
@@ -2665,6 +2666,7 @@ async function prepareBeeGamePromptInput(input: {
   workspace: string
   attachments?: BeeGameAttachment[]
 }): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
+  await ensureProjectDeliveryContractSkeleton(input.workspace)
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
   const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
   const materializedFiles = files.length > 0

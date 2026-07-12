@@ -53,6 +53,28 @@ describe('project delivery contract audit', () => {
     })
   })
 
+  test('rejects project-authored validation outcomes', async () => {
+    workspace = await createWorkspace({
+      version: 1,
+      status: 'passed',
+      acceptedAt: '2026-01-01T00:00:00.000Z',
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp', evidenceRequired: ['runtime'],
+        status: 'accepted', evidence: [{ kind: 'runtime', detail: 'Claimed by builder.' }],
+      }],
+      playerPaths: [{
+        id: 'main', requirementIds: ['core-loop'], phases: {
+          entry: [{}], core_action: [{}], state_change: [{}], completion: [{}], recovery: [{}],
+        },
+      }],
+    })
+
+    const audit = auditProjectDeliveryContract(workspace)
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain('Delivery contract must not declare validator-owned outcome fields: status, acceptedAt.')
+    expect(audit.issues).toContain('Requirement 0 must not declare validator-owned outcome fields: status, evidence.')
+  })
+
   async function createWorkspace(contract: Record<string, unknown>): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'beegame-delivery-doc-'))
     await mkdir(join(root, 'docs'), { recursive: true })

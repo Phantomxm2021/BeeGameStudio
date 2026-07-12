@@ -48,6 +48,7 @@ export function auditProjectDeliveryContract(workspacePath: string): ProjectDeli
     const value = JSON.parse(readFileSync(path, 'utf8')) as unknown
     if (!isRecord(value) || value.version !== 1) return invalid(path, ['Delivery contract version must be 1.'])
     const issues: string[] = []
+    rejectValidationOutcomes(value, 'Delivery contract', issues)
     const requirements = parseRequirements(value.requirements, issues)
     const playerPathIds = parsePlayerPaths(value.playerPaths, requirements, issues)
     const requiredCapabilities = stringArray(value.requiredCapabilities)
@@ -79,6 +80,7 @@ function parseRequirements(value: unknown, issues: string[]): ProjectDeliveryCon
       issues.push(`Requirement ${index} must be an object.`)
       continue
     }
+    rejectValidationOutcomes(item, `Requirement ${index}`, issues)
     const id = normalizedString(item.id)
     const title = normalizedString(item.title)
     const scope = item.scope
@@ -97,6 +99,21 @@ function parseRequirements(value: unknown, issues: string[]): ProjectDeliveryCon
     requirements.push({ id, title, scope, evidenceRequired })
   }
   return requirements
+}
+
+const VALIDATION_OUTCOME_FIELDS = [
+  'status',
+  'evidence',
+  'verifiedCapabilities',
+  'acceptedAt',
+  'validatedAt',
+] as const
+
+function rejectValidationOutcomes(value: Record<string, unknown>, label: string, issues: string[]): void {
+  const fields = VALIDATION_OUTCOME_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(value, field))
+  if (fields.length > 0) {
+    issues.push(`${label} must not declare validator-owned outcome fields: ${fields.join(', ')}.`)
+  }
 }
 
 function parsePlayerPaths(
