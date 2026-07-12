@@ -2517,6 +2517,27 @@ describe('beeGameAdapter prompt rules', () => {
     expect(JSON.stringify(polled.messages)).not.toContain('private reasoning');
   });
 
+  it('drops runtime output that arrives after its turn has ended', async () => {
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
+      projectId: 'project_late_thinking',
+      sessionId: 'beegame_late_thinking',
+      workspacePath: '/tmp/beegame-projects/late-thinking',
+    }]));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/beegame-sessions/beegame_late_thinking/events?after=0') {
+        return jsonResponse([
+          { id: 40, sessionId: 'beegame_late_thinking', turnId: 'turn-closed', type: 'turn.failed', text: 'Interrupted', createdAt: '2026-06-21T00:00:00.000Z' },
+          thinkingEvent(41, 'beegame_late_thinking', 'turn-closed', 'started'),
+          thinkingEvent(42, 'beegame_late_thinking', 'turn-closed', 'streaming'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    }));
+
+    const polled = await beeGameAdapter.pollMessages('project_late_thinking', 0);
+    expect(polled.messages.some(message => message.task_kind === 'assistant_thinking')).toBe(false);
+  });
+
   it('keeps assistant and tool messages in BeeGame event order', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

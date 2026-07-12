@@ -1514,6 +1514,12 @@ function normalizeBeeGameEvents(
   options: { includeUserMessages: boolean; includePartialsWhenFinalExists: boolean },
 ): BeeGameEvent[] {
   const visible: BeeGameEvent[] = [];
+  const terminalEventByTurn = new Map<string, number>();
+  for (const event of events) {
+    if (!event.turnId || !isTurnTerminalEvent(event)) continue;
+    const existing = terminalEventByTurn.get(event.turnId);
+    if (existing === undefined || event.id < existing) terminalEventByTurn.set(event.turnId, event.id);
+  }
   const seenUserTexts = new Set<string>();
   const turnsWithFinal = new Set(
     events
@@ -1535,6 +1541,7 @@ function normalizeBeeGameEvents(
     }
   };
   for (const event of events) {
+    if (isLateRuntimeEvent(event, terminalEventByTurn)) continue;
     if (event.type !== 'assistant.partial') {
       flushPartial();
     }
@@ -1596,6 +1603,30 @@ function normalizeBeeGameEvents(
   flushPartial();
   flushThinking();
   return visible;
+}
+
+function isTurnTerminalEvent(event: BeeGameEvent): boolean {
+  return event.type === 'turn.completed' ||
+    event.type === 'turn.empty' ||
+    event.type === 'turn.failed' ||
+    event.type === 'session.stopped' ||
+    event.type === 'session.failed';
+}
+
+function isLateRuntimeEvent(event: BeeGameEvent, terminalEventByTurn: Map<string, number>): boolean {
+  if (!event.turnId) return false;
+  const terminalId = terminalEventByTurn.get(event.turnId);
+  if (terminalId === undefined || event.id <= terminalId) return false;
+  return event.type === 'assistant.partial' ||
+    event.type === 'assistant.thinking' ||
+    event.type === 'assistant.message' ||
+    event.type === 'tool.started' ||
+    event.type === 'tool.progress' ||
+    event.type === 'tool.completed' ||
+    event.type === 'tool.failed' ||
+    event.type === 'permission.requested' ||
+    event.type === 'permission.resolved' ||
+    event.type === 'result';
 }
 
 function normalizeLiveEvents(_projectId: string, events: BeeGameEvent[]): BeeGameEvent[] {

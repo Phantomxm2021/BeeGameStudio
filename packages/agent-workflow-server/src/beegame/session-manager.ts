@@ -1435,7 +1435,11 @@ export class BeeGameSessionManager {
         }
         // Timed-out runtimes can flush synthetic messages after their turn closed.
         // Preserve raw diagnostics without leaking them into chat or a later turn.
-        if (!submittedTurnId || record.currentTurnId !== submittedTurnId) return
+        if (
+          !submittedTurnId ||
+          record.currentTurnId !== submittedTurnId ||
+          hasTurnEnded(record.events, submittedTurnId)
+        ) return
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
