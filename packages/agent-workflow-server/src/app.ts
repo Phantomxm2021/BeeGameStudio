@@ -1280,17 +1280,24 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
-      const resolved = beeGameSessions.resolvePermission(
-        sessionRef.sessionId,
-        c.req.param('toolUseID'),
-        {
-          behavior: decision,
-          remember: body.remember === true,
-          ...(typeof body.message === 'string'
-            ? { message: body.message }
-            : {}),
-        },
-      )
+      let resolved: { resolved: boolean; stale?: boolean }
+      try {
+        resolved = beeGameSessions.resolvePermission(
+          sessionRef.sessionId,
+          c.req.param('toolUseID'),
+          {
+            behavior: decision,
+            remember: body.remember === true,
+            ...(typeof body.message === 'string'
+              ? { message: body.message }
+              : {}),
+          },
+        )
+      } catch (error) {
+        const message = toErrorMessage(error)
+        if (message !== 'Permission request not found' && message !== 'Session not found') throw error
+        resolved = { resolved: false, stale: true }
+      }
       await appendAuditEventBestEffort('agent_permission.resolved', () =>
         dashboardRepository.appendAuditEvent(c.req.raw, user, {
           actorId: user.id,

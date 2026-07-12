@@ -4274,6 +4274,16 @@ describe('beegame session routes', () => {
       )
       expect(resolveRes.status).toBe(200)
       await waitFor(() => fake.runtimes[0]?.permissionResults[0] === 'allow')
+      const staleResolveRes = await app.request(
+        `/api/projects/${projectId}/permissions/tool_1`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'allow' }),
+        },
+      )
+      expect(staleResolveRes.status).toBe(200)
+      expect(await staleResolveRes.json()).toEqual({ resolved: false, stale: true })
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
