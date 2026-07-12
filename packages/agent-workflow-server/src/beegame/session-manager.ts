@@ -26,6 +26,7 @@ import {
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { auditAssetContract } from './asset-contract-audit'
+import { auditProjectDeliveryContract } from './project-delivery-contract-audit'
 import {
   buildDeliveryRepairPrompt,
   createDeliveryContract,
@@ -1073,6 +1074,52 @@ export class BeeGameSessionManager {
     )
     const parsed = parseDeliveryReview(result?.text) ?? invalidDeliveryReview()
     const verifiedEvidenceIds = getVerifiedDeliveryEvidenceIds(reviewEvents)
+    const documentAuditEvidenceId = `delivery-contract-audit:${record.currentTurnId ?? record.session.id}`
+    const documentAudit = auditProjectDeliveryContract(record.session.cwd)
+    verifiedEvidenceIds.add(documentAuditEvidenceId)
+    const reviewedRequirementIds = new Set(parsed.requirements.map(item => item.id))
+    const missingReviewedRequirements = documentAudit.requirements
+      .filter(item => item.scope === 'mvp' && !reviewedRequirementIds.has(item.id))
+      .map(item => item.id)
+    const documentIssues = [
+      ...documentAudit.issues,
+      ...(missingReviewedRequirements.length > 0
+        ? [`Delivery review omitted MVP requirement ids: ${missingReviewedRequirements.join(', ')}`]
+        : []),
+    ]
+    parsed.requiredCapabilities = [...new Set([
+      ...parsed.requiredCapabilities,
+      ...documentAudit.requiredCapabilities,
+    ])]
+    const documentRequirement: DeliveryRequirement = {
+      id: 'project-delivery-contract-integrity',
+      title: 'Project delivery contract integrity',
+      scope: 'mvp',
+      status: documentIssues.length === 0 ? 'accepted' : 'failed',
+      evidenceRequired: ['document'],
+      evidence: [{
+        kind: 'document',
+        eventId: documentAuditEvidenceId,
+        source: documentAudit.path,
+        detail: documentIssues.length === 0
+          ? `Validated ${documentAudit.requirements.length} requirements and ${documentAudit.playerPathIds.length} player paths.`
+          : documentIssues.join(' '),
+      }],
+      ...(documentIssues.length > 0 ? { detail: documentIssues.join(' ') } : {}),
+    }
+    const existingDocumentRequirement = parsed.requirements.findIndex(item => item.id === documentRequirement.id)
+    if (existingDocumentRequirement >= 0) parsed.requirements[existingDocumentRequirement] = documentRequirement
+    else parsed.requirements.push(documentRequirement)
+    if (documentIssues.length > 0) {
+      parsed.status = 'failed'
+      parsed.findings.push({
+        requirementId: documentRequirement.id,
+        requirement: documentRequirement.title,
+        status: 'failed',
+        detail: documentIssues.join(' '),
+        evidence: documentRequirement.evidence,
+      })
+    }
     const assetAuditEvidenceId = `asset-contract-audit:${record.currentTurnId ?? record.session.id}`
     const assetAudit = auditAssetContract(record.session.cwd)
     if (assetAudit.present) {

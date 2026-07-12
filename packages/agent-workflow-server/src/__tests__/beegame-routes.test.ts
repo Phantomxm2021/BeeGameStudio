@@ -819,6 +819,21 @@ describe('beegame session routes', () => {
 
   test('blocks a failed delivery review, repairs findings, and re-reviews before acceptance', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-review-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: ['skill:beegame-game-acceptance'],
+      requirements: [{
+        id: 'core-path', title: 'Core player path', scope: 'mvp', evidenceRequired: ['runtime', 'skill'],
+      }],
+      playerPaths: [{
+        id: 'main-path',
+        requirementIds: ['core-path'],
+        phases: {
+          entry: [{}], core_action: [{}], state_change: [{}], completion: [{}], recovery: [{}],
+        },
+      }],
+    }))
     let submitCount = 0
     const manager = new BeeGameSessionManager({
       async start() {
