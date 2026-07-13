@@ -44,6 +44,7 @@ interface BeeGameLivePreviewPageProps {
     isInteractionLocked?: boolean;
     buildReport?: BuildReportPayload | null;
     deliveryReview?: DeliveryReviewPayload | null;
+    projectTarget?: string;
     deployments?: BeeGameDeploymentPayload[];
     previewRefreshNonce?: number;
     onStartPreview?: () => void | Promise<void>;
@@ -131,6 +132,7 @@ export function BeeGameLivePreviewPage({
     isInteractionLocked = false,
     buildReport,
     deliveryReview,
+    projectTarget,
     deployments = [],
     previewRefreshNonce = 0,
     onStartPreview,
@@ -352,7 +354,9 @@ export function BeeGameLivePreviewPage({
                             data-testid="beegame-project-hint"
                             className="absolute left-5 top-12 z-50 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
                         >
-                            <ProjectHintRow label={labels.platform || 'Platform'} value="Web" />
+                            {projectTarget ? (
+                                <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} />
+                            ) : null}
                             <ProjectHintRow label={labels.tokens} value={tokens.toLocaleString()} />
                             {credits ? (
                                 <>
@@ -360,7 +364,7 @@ export function BeeGameLivePreviewPage({
                                     <ProjectHintRow label={labels.reserved} value={credits.outstandingReservedCredits.toLocaleString()} />
                                 </>
                             ) : null}
-                            <ProjectHintRow label={labels.phase} value={phaseLabel} />
+                            <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
                             {deliveryReview ? (
                                 <ProjectHintRow
                                     label={labels.deliveryReview}

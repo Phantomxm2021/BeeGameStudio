@@ -140,6 +140,16 @@ export interface ProjectBaselineStatusPayload {
   delivery_review?: DeliveryReviewPayload | null;
   delivery_history?: DeliveryReviewHistoryPayload[];
   delivery_status?: string;
+  deployment_gate?: {
+    can_deploy: boolean;
+    failure?: {
+      code?: string;
+      message?: string;
+      status?: string;
+      summary?: string;
+    };
+  };
+  project_target?: BeeGameAssetManifestPayload['project_target'] | null;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
 }
@@ -793,6 +803,8 @@ export const normalizeProjectBaselineStatusPayload = (
       delivery_review: null,
       delivery_history: [],
       delivery_status: 'implementation',
+      deployment_gate: { can_deploy: false },
+      project_target: null,
       document_bundle: null,
     };
   }
@@ -844,6 +856,12 @@ export const normalizeProjectBaselineStatusPayload = (
       ? normalizedPayload.delivery_history
       : [],
     delivery_status: String(normalizedPayload.delivery_status ?? 'implementation'),
+    deployment_gate: normalizedPayload.deployment_gate && typeof normalizedPayload.deployment_gate === 'object'
+      ? normalizedPayload.deployment_gate as ProjectBaselineStatusPayload['deployment_gate']
+      : { can_deploy: false },
+    project_target: normalizedPayload.project_target && typeof normalizedPayload.project_target === 'object'
+      ? normalizedPayload.project_target as ProjectBaselineStatusPayload['project_target']
+      : null,
     document_bundle: normalizeDocumentBundleStatusPayload(normalizedPayload.document_bundle) ?? null,
   };
 };

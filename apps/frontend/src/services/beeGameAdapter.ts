@@ -238,7 +238,6 @@ export type BeeGameBuildBrief = {
 const PROJECTS_KEY = 'beegame-adapter-projects';
 const BINDINGS_KEY = 'beegame-adapter-bindings';
 const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
-const SUBAGENTS_ENABLED_KEY = 'beegame-adapter-subagents-enabled';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
@@ -284,15 +283,6 @@ export async function resetBeeGameWorkspaceRoot(): Promise<BeeGameWorkspaceSetti
   }
   localStorage.removeItem(WORKSPACE_ROOT_KEY);
   return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true };
-}
-
-export function getBeeGameSubagentsEnabled(): boolean {
-  return localStorage.getItem(SUBAGENTS_ENABLED_KEY) !== '0';
-}
-
-export function setBeeGameSubagentsEnabled(enabled: boolean): boolean {
-  localStorage.setItem(SUBAGENTS_ENABLED_KEY, enabled ? '1' : '0');
-  return enabled;
 }
 
 export const beeGameAdapter = {
@@ -1873,113 +1863,19 @@ function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption
 }
 
 function buildIdeaIntakePrompt(idea: string): string {
-  return [
-    'The user submitted this game idea:',
-    idea,
-    '',
-    getResponseLanguageInstruction(idea),
-    '',
-    'Before implementing or modifying files, first help the user choose a direction.',
-    'Return 2-3 concise options that clarify gameplay, scope, tech approach, and visual style.',
-    'Ask the user to pick one option or describe changes. Do not write code, create files, or run implementation commands until the user chooses.',
-  ].join('\n');
+  return JSON.stringify({ kind: 'game_idea', idea }, null, 2);
 }
 
 function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
-  const settings = brief.settings;
-  const languageSource = [
-    brief.idea,
-    brief.option.title,
-    brief.option.pitch,
-    brief.option.gameplay,
-    settings.notes ?? '',
-    brief.confirmedGdd ?? '',
-  ].join('\n');
-  const language = normalizeBeeGameLanguage(brief.language, languageSource);
-  if (language === 'zh' || language === 'zh-TW') {
-    return [
-      '请使用中文与用户沟通。除代码、命令、文件路径、包名、API 名称和错误原文外，所有面向用户的说明、提问、总结和文档正文默认使用中文。',
-      '',
-      '我要做一个完整游戏项目。请像在终端里协作一样，自主规划、实现、运行检查、修复问题，并在需要我决策时提问。',
-      '当前游戏方向和构建设置已经由用户确认。不要重新进入需求头脑风暴、视觉 companion、方案审批或“是否要继续”的确认流程；除非缺少真正阻塞实现的信息，否则请直接开始写项目文档并实现。',
-      '',
-      `原始想法：${brief.idea}`,
-      brief.confirmedGdd ? `用户确认的 GDD（本次实现的事实来源）：\n${brief.confirmedGdd}` : '',
-      `已选择的游戏方向：${brief.option.title}`,
-      `方向简介：${brief.option.pitch}`,
-      `玩法：${brief.option.gameplay}`,
-      `核心机制：${brief.option.coreMechanic}`,
-      `第一分钟体验：${brief.option.playerFirstMinute}`,
-      `第一版目标：${brief.option.firstBuild}`,
-      `主要风险：${brief.option.risk}`,
-      `目标平台：${settings.platform}`,
-      `开发引擎/技术栈：${settings.engine || 'React'}`,
-      `视觉风格：${settings.visualStyle}`,
-      `表现形式：${settings.dimension}`,
-      `游戏类型：${settings.genre}`,
-      `输入方式：${settings.inputs.join(', ')}`,
-      `范围：${settings.scope}`,
-      settings.notes ? `补充说明：${settings.notes}` : '',
-      '',
-      brief.confirmedGdd
-        ? '用户已确认 GDD。请先将其保存为 docs/GDD.md，再直接依据它实现；不要重新生成游戏方案或要求用户选择方向。'
-        : '请先在 docs/ 下写清项目资源：GDD、技术方案、美术方向、UI/UX、音频方向、placeholder/asset slots、调参与验收说明。',
-      '同时创建平台无关的 assets/asset-manifest.json，覆盖 2D/3D/动画/材质/VFX/音频/字体/数据/本地化等资源位。该文件必须使用顶层 version、project_target、slots 数组；不要使用 assets/categories/replacement 等旧式嵌套结构。每个 slots 项必须有稳定 id、purpose、target.path、status、placeholder、integration_provider，并且每个可由资源库自动填充的 slot 都必须有 resource_requirement（category、dimension、accepted_formats、styles、game_types、tags、purpose）。resource_requirement 的 category 只能使用 sprites、tilemaps、models、materials、animation、ui、vfx、fonts、audio、textures、scenes；dimension 只能使用 2D/3D/agnostic。tags 必须使用资源库用途词表中的精确值：character、npc、creature、weapon-equipment、prop、vehicle、building、environment、terrain、vegetation、scene、level-map、tile、ui、icon、effect、combat、interaction、narrative、music、sound-effect、ambient-audio、voice；它们用于约束角色、道具、环境等主题。category 表示资源媒介，不要把角色、武器、森林等主题写成 category。无法确定时保持 placeholder/missing，禁止用不兼容资源静默替代。React/Web 等普通文件项目使用 filesystem；Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp 和对应 mcp_server。资源库完成复制后，读取 asset-manifest.json 中每个已复制 slot 的 uploaded_files 路径，把资源真实引用到项目中，并仅在实际验证后将 slot 标为 integrated。',
-      '这些文档必须区分“本次交付已实现”和“后续路线图”。不要把 roadmap 写成已交付能力。',
-      'docs 里的 acceptance/checklist 只能作为验收标准，不要预先打勾或写成已通过；只有最终验证报告可以基于真实证据记录 pass/fail/untested。',
-      '然后基于这些文档实现游戏。没有正式美术和音频资源时，请创建清晰命名、方便替换的 placeholder 或 asset slot，并说明替换规则。',
-      '实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式；不要强行使用某个固定平台、包管理器、测试框架或浏览器。',
-      '不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成。发现问题就继续修复。',
-      '请验证真实玩家路径：启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复。',
-      '如果创建可执行的玩家路径验证、自动化检查或测试脚本，测试脚本必须包含断言，失败时必须以非零状态退出；不能只打印 true/false、success 或截图日志就当作通过。',
-      '交付前必须做文档与代码一致性检查：文档里声明的规则、资源、常量、文件路径、输入方式、UI/UX 行为和已实现功能必须能在代码或资源中找到证据；不一致时请修正文档或实现。',
-      '修 bug、继续任务或调整已有项目时，必须补最小复现、回归测试或对应玩家路径验证，并重新运行相关检查。',
-      '交付前请使用可用的游戏验收指导或自检清单。最终总结必须分为：已实现、已验证证据、未验证/已知缺口。只能声明你实际验证过的内容，必须列出验证方式、命令或操作证据、发现并修复的问题，以及仍然遗留的问题。',
-    ].filter(Boolean).join('\n');
-  }
-  return [
-    'I want to build a complete game project. Work like an interactive terminal session: plan, implement, run checks, fix issues, and ask me when a decision is needed.',
-    'The game direction and build settings have already been confirmed by the user. Do not re-enter ideation, brainstorming, visual companion, plan approval, or "should I continue" confirmation flows. Unless genuinely blocking implementation information is missing, start writing the project docs and implementation directly.',
-    '',
-    `Original idea: ${brief.idea}`,
-    brief.confirmedGdd ? `User-confirmed GDD (the source of truth for this build):\n${brief.confirmedGdd}` : '',
-    `Selected game direction: ${brief.option.title}`,
-    `Direction pitch: ${brief.option.pitch}`,
-    `Gameplay: ${brief.option.gameplay}`,
-    `Core mechanic: ${brief.option.coreMechanic}`,
-    `Player first minute: ${brief.option.playerFirstMinute}`,
-    `First build target: ${brief.option.firstBuild}`,
-    `Main risk: ${brief.option.risk}`,
-    `Target platform: ${settings.platform}`,
-    `Engine / technology stack: ${settings.engine || 'React'}`,
-    `Visual style: ${settings.visualStyle}`,
-    `Dimension: ${settings.dimension}`,
-    `Genre: ${settings.genre}`,
-    `Inputs: ${settings.inputs.join(', ')}`,
-    `Scope: ${settings.scope}`,
-    settings.notes ? `Notes: ${settings.notes}` : '',
-    '',
-    brief.confirmedGdd
-      ? 'The user confirmed a GDD. Save it as docs/GDD.md first, then implement directly from it. Do not regenerate a game plan or ask the user to choose a direction.'
-      : 'First create project documents under docs/: GDD, technical design, art direction, UI/UX, audio direction, placeholder/asset slots, tuning, and acceptance notes.',
-    'Also create a platform-neutral assets/asset-manifest.json. It must use top-level version, project_target, and a slots array; do not use legacy nested assets/categories/replacement structures. Every slot needs a stable id, purpose, target.path, status, placeholder, and integration_provider. Every slot eligible for automatic library selection must include resource_requirement. resource_requirement may only use category (sprites, tilemaps, models, materials, animation, ui, vfx, fonts, audio, textures, scenes), dimension (2D/3D/agnostic), accepted_formats, styles, game_types, tags, and purpose. tags must use exact values from the library usage vocabulary: character, npc, creature, weapon-equipment, prop, vehicle, building, environment, terrain, vegetation, scene, level-map, tile, ui, icon, effect, combat, interaction, narrative, music, sound-effect, ambient-audio, voice. They constrain subjects such as characters, props, and environment; category describes the resource medium, never its subject matter. Keep uncertain slots as placeholder/missing; never silently substitute an incompatible resource. Use filesystem for normal file projects; use mcp with the matching mcp_server only when editor context is required. After the resource library copies a selected asset, read each copied slot\'s uploaded_files path from asset-manifest.json, reference that file in the project, and only mark the slot integrated after real verification.',
-    'Those docs must separate what is implemented in this delivery from roadmap/future work. Do not present roadmap items as delivered features.',
-    'Acceptance criteria or checklists in docs are requirements only. Do not pre-check them or mark them as passed there; only a final verification report may record pass/fail/untested based on real evidence.',
-    'Then implement the game from those documents. When production art or audio is unavailable, create clearly named placeholder assets or asset slots that are easy to replace and document the replacement rules.',
-    'After implementation, choose checks and validation that fit this project, its target platform, and its own tooling. Do not force a specific platform, package manager, test framework, or browser.',
-    'Do not use typecheck, lint, build success, empty tests, or model self-review alone as proof that the game is complete. If you find problems, keep fixing them.',
-    'Validate the real player path: start or enter the experience, understand the objective, perform the core action, receive feedback, reach win/fail/progression, and restart, continue, or recover.',
-    'If you create executable player-path checks, automated validation, or test scripts, they must contain assertions and fail with a non-zero exit status when expectations are not met. Do not count log-only scripts, true/false prints, success messages, or screenshots alone as evidence.',
-    'Before delivery, perform a docs-to-code consistency review: rules, assets, constants, file paths, inputs, UI/UX behavior, and implemented features claimed in docs must have evidence in code or resources. If they do not match, fix the docs or the implementation.',
-    'When fixing bugs, continuing a task, or changing an existing project, add a minimal reproduction, regression test, or matching player-path validation and rerun the relevant checks.',
-    'Before delivery, use available game acceptance guidance or your own checklist. In the final summary, use exactly these sections: Implemented, Verified with evidence, Not verified / Known gaps. Only claim what you actually verified and include validation method, command or action evidence, issues found and fixed, and any remaining gaps.',
-  ].filter(Boolean).join('\n');
-}
-
-function getResponseLanguageInstruction(text: string): string {
-  return containsCjk(text)
-    ? 'Response language: reply to the user in Simplified Chinese. Keep code, file paths, package names, commands, and API identifiers unchanged.'
-    : 'Response language: reply in the same language as the user. Keep code, file paths, package names, commands, and API identifiers unchanged.';
+  return JSON.stringify({
+    kind: 'confirmed_build_brief',
+    idea: brief.idea,
+    selected_option: brief.option,
+    settings: brief.settings,
+    confirmed_gdd: brief.confirmedGdd ?? null,
+    build_source: brief.buildSource ?? null,
+    analysis_id: brief.analysisId ?? null,
+  }, null, 2);
 }
 
 function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' {

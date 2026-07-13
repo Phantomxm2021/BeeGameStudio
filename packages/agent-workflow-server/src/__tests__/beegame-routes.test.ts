@@ -819,6 +819,67 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('keeps idea intake and confirmed-build policy server-owned and stage-specific', async () => {
+    const ideaWorkspace = await mkdtemp(join(tmpdir(), 'beegame-idea-policy-'))
+    const buildWorkspace = await mkdtemp(join(tmpdir(), 'beegame-build-policy-'))
+    const submittedPrompts: string[] = []
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submittedPrompts.push(typeof input.prompt === 'string'
+              ? input.prompt
+              : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
+            input.onMessage({ type: 'result', result: 'done' })
+          },
+          stop() {},
+        }
+      },
+    }, ideaWorkspace)
+    const buildManager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submittedPrompts.push(typeof input.prompt === 'string'
+              ? input.prompt
+              : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
+            input.onMessage({ type: 'result', result: 'done' })
+          },
+          stop() {},
+        }
+      },
+    }, buildWorkspace)
+    try {
+      const ideaSession = manager.start({ workspacePath: ideaWorkspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(ideaSession.id, JSON.stringify({ kind: 'game_idea', idea: 'new game' }), {
+        displayKind: 'initial_idea',
+      })
+      await waitFor(() => submittedPrompts.length === 1)
+      await waitFor(() => manager.get(ideaSession.id)?.turnStatus === 'idle')
+      expect(submittedPrompts[0]).toContain('Idea intake contract:')
+      expect(submittedPrompts[0]).not.toContain('Evidence-backed delivery contract:')
+      await expect(stat(join(ideaWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
+
+      const buildSession = buildManager.start({ workspacePath: buildWorkspace, userId: DEFAULT_LOCAL_USER_ID })
+      await buildManager.sendWithDisplay(buildSession.id, JSON.stringify({
+        kind: 'confirmed_build_brief',
+        confirmed_gdd: '# Approved game',
+      }), { displayKind: 'confirmed_brief', taskType: 'idea_intake' })
+      await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
+      expect(buildManager.events(buildSession.id).filter(event => event.type === 'turn.failed')).toEqual([])
+      expect(submittedPrompts.length).toBeGreaterThanOrEqual(2)
+      expect(submittedPrompts[1]).toContain('Confirmed brief contract:')
+      expect(submittedPrompts[1]).toContain('Evidence-backed delivery contract:')
+      expect(submittedPrompts[1]).toContain('Resource integration contract')
+      expect(await stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).toBeDefined()
+    } finally {
+      manager.stop(manager.list()[0]?.id ?? '')
+      buildManager.stop(buildManager.list()[0]?.id ?? '')
+      await rm(ideaWorkspace, { recursive: true, force: true })
+      await rm(buildWorkspace, { recursive: true, force: true })
+    }
+  })
+
   test('claims a logical turn before async setup so concurrent starts cannot duplicate it', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-turn-claim-'))
     let submits = 0
@@ -4800,6 +4861,12 @@ describe('beegame session routes', () => {
 
   test('returns project runtime state from backend-owned BeeGame session state', async () => {
     const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: { kind: 'native', engine: 'custom-engine', integration_mode: 'filesystem' },
+      slots: [],
+    }))
     const fake = createFakeRunner(undefined, 'dangerous_bash_permission')
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
@@ -4845,6 +4912,11 @@ describe('beegame session routes', () => {
         blocked: true,
         approval_required: true,
         active_agents: ['beegame'],
+        deployment_gate: expect.objectContaining({ can_deploy: false }),
+        project_target: expect.objectContaining({
+          kind: 'native',
+          engine: 'custom-engine',
+        }),
       }))
       expect(state.context).toEqual(expect.objectContaining({
         token_budget: expect.objectContaining({

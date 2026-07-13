@@ -164,12 +164,10 @@ vi.mock('../../services/beeGameAdapter', () => ({
         workspacePath: '/tmp/beegame-projects',
         isDefault: true,
     }),
-    getBeeGameSubagentsEnabled: vi.fn().mockReturnValue(true),
     resetBeeGameWorkspaceRoot: vi.fn().mockResolvedValue({
         workspacePath: '/tmp/beegame-projects',
         isDefault: true,
     }),
-    setBeeGameSubagentsEnabled: vi.fn((enabled: boolean) => enabled),
     setBeeGameWorkspaceRoot: vi.fn().mockReturnValue({
         workspacePath: '/tmp/beegame-projects',
         isDefault: false,

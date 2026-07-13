@@ -833,6 +833,7 @@
       "credits": "Credits",
       "reserved": "Reserved",
       "phase": "Phase",
+      "executionStatus": "Agent status",
       "deliveryReview": "Delivery review",
       "deliveryReview_validating": "Validating",
       "deliveryReview_passed": "Verified",

@@ -72,6 +72,8 @@ let mockedProjectStatus: ProjectBaselineStatusPayload = {
     phase: 'DESIGN_IN_PROGRESS',
     blocked: true,
     approval_required: true,
+    deployment_gate: { can_deploy: true },
+    project_target: { kind: 'web', engine: 'Web' },
     baseline: {
         artifact_id: 'art_1',
     },
@@ -243,9 +245,7 @@ vi.mock('../../services/supabaseAuthApi', () => ({
 vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameAdapterEnabled: vi.fn(() => true),
     getBeeGameWorkspaceSettings: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
-    getBeeGameSubagentsEnabled: vi.fn(() => true),
     resetBeeGameWorkspaceRoot: vi.fn(() => Promise.resolve({ workspacePath: '/tmp/Projects', isDefault: true })),
-    setBeeGameSubagentsEnabled: vi.fn(),
     setBeeGameWorkspaceRoot: vi.fn((workspacePath: string) => ({ workspacePath, isDefault: false })),
 }));
 
@@ -292,6 +292,8 @@ describe('DashboardView runtime loading', () => {
             phase: 'DESIGN_IN_PROGRESS',
             blocked: true,
             approval_required: true,
+            deployment_gate: { can_deploy: true },
+            project_target: { kind: 'web', engine: 'Web' },
             baseline: {
                 artifact_id: 'art_1',
             },
@@ -465,7 +467,7 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('平台')).toBeInTheDocument();
         expect(screen.getByText('Web')).toBeInTheDocument();
         expect(screen.getByText('消耗')).toBeInTheDocument();
-        expect(screen.getByText('阶段')).toBeInTheDocument();
+        expect(screen.getByText('Agent 状态')).toBeInTheDocument();
     });
 
     it('shows the sync state as an icon with text in the live preview header', async () => {
@@ -488,6 +490,24 @@ describe('DashboardView runtime loading', () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         expect(await screen.findByTestId('beegame-delivery-review-status')).toHaveTextContent('需要修复');
+    });
+
+    it('mirrors the server deployment gate and project target without frontend policy guesses', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            deployment_gate: {
+                can_deploy: false,
+                failure: { code: 'delivery_review_required', message: 'Independent validation is required.' },
+            },
+            project_target: { kind: 'native', engine: 'custom-engine' },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        expect(screen.getByRole('button', { name: '发布游戏' })).toBeDisabled();
+        await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+        expect(screen.getByText('custom-engine')).toBeInTheDocument();
+        expect(screen.queryByText('Web')).not.toBeInTheDocument();
     });
 
     it('locks project-changing interactions while project sync is active', async () => {

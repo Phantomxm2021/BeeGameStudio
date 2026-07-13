@@ -673,9 +673,15 @@ describe('beeGameAdapter prompt rules', () => {
       String(path) === '/api/beegame-sessions/beegame_gdd/input' && init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toContain('Save it as docs/GDD.md first');
-    expect(body.text).toContain('# Rules');
-    expect(body.text).toContain('Do not regenerate a game plan');
+    const brief = JSON.parse(String(body.text || '{}')) as Record<string, unknown>;
+    expect(brief).toMatchObject({
+      kind: 'confirmed_build_brief',
+      confirmed_gdd: '# Rules\n- Solve the puzzle to win.',
+      build_source: 'gdd',
+      analysis_id: 'analysis_direct_build',
+    });
+    expect(body.text).not.toContain('Save it as docs/GDD.md first');
+    expect(body.text).not.toContain('Do not regenerate a game plan');
   });
 
   it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
@@ -1580,7 +1586,7 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
-  it('starts a BeeGame session from a confirmed brief and rejects host source paths in the prompt', async () => {
+  it('starts a BeeGame session with structured confirmed product input only', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -1636,79 +1642,21 @@ describe('beeGameAdapter prompt rules', () => {
       displayKind?: string;
     };
 
-    expect(body.text).toContain('我要做一个完整游戏项目。');
     expect(body).toMatchObject({
       displayText: 'LLM generated idea',
       displayKind: 'confirmed_brief',
     });
-    expect(body.text).toContain('请像在终端里协作一样');
-    expect(body.text).toContain('当前游戏方向和构建设置已经由用户确认');
-    expect(body.text).toContain('不要重新进入需求头脑风暴、视觉 companion、方案审批或“是否要继续”的确认流程');
-    expect(body.text).toContain('请直接开始写项目文档并实现');
-    expect(body.text).not.toContain('Confirmed BeeGame build brief');
-    expect(body.text).not.toContain('Completion contract');
-    expect(body.text).not.toContain('Workspace rule:');
-    expect(body.text).not.toContain('Branding rule:');
-    expect(body.text).toContain('平台：Web');
-    expect(body.text).toContain('输入方式：Keyboard/mouse, Touch');
-    expect(body.text).toContain('请先在 docs/ 下写清项目资源');
-    expect(body.text).toContain('美术方向');
-    expect(body.text).toContain('UI/UX');
-    expect(body.text).toContain('placeholder/asset slots');
-    expect(body.text).toContain('assets/asset-manifest.json');
-    expect(body.text).toContain('2D/3D/动画/材质/VFX/音频/字体/数据/本地化');
-    expect(body.text).toContain('resource_requirement（category、dimension、accepted_formats、styles、game_types、tags、purpose）');
-    expect(body.text).toContain('顶层 version、project_target、slots 数组');
-    expect(body.text).toContain('不要使用 assets/categories/replacement 等旧式嵌套结构');
-    expect(body.text).toContain('sprites、tilemaps、models、materials、animation、ui、vfx、fonts、audio、textures、scenes');
-    expect(body.text).toContain('category 表示资源媒介');
-    expect(body.text).toContain('React/Web 等普通文件项目使用 filesystem');
-    expect(body.text).toContain('Unity/Godot/Unreal/Blender 等需要编辑器上下文的项目可声明 mcp');
-    expect(body.text).toContain('必须区分“本次交付已实现”和“后续路线图”');
-    expect(body.text).toContain('不要把 roadmap 写成已交付能力');
-    expect(body.text).toContain('docs 里的 acceptance/checklist 只能作为验收标准');
-    expect(body.text).toContain('不要预先打勾或写成已通过');
-    expect(body.text).toContain('方便替换的 placeholder 或 asset slot');
-    expect(body.text).toContain('不要强行使用某个固定平台、包管理器、测试框架或浏览器');
-    expect(body.text).toContain('不能只用类型检查、lint、构建命令、空测试或模型自评证明游戏完成');
-    expect(body.text).toContain('启动/进入体验、理解目标、执行核心操作、看到反馈、达到胜负/进度变化，并能重开、继续或恢复');
-    expect(body.text).toContain('可执行的玩家路径验证');
-    expect(body.text).toContain('测试脚本必须包含断言');
-    expect(body.text).toContain('不能只打印 true/false、success 或截图日志就当作通过');
-    expect(body.text).toContain('交付前必须做文档与代码一致性检查');
-    expect(body.text).toContain('修 bug、继续任务或调整已有项目时，必须补最小复现、回归测试或对应玩家路径验证');
-    expect(body.text).toContain('交付前请使用可用的游戏验收指导或自检清单');
-    expect(body.text).toContain('最终总结必须分为：已实现、已验证证据、未验证/已知缺口');
-    expect(body.text).not.toContain('Implemented');
-    expect(body.text).not.toContain('Verified with evidence');
-    expect(body.text).not.toContain('Not verified / Known gaps');
-    expect(body.text).not.toContain('Create useful project documents under ./docs/');
-    expect(body.text).not.toContain('Use docs as project resources, not as chat-only summaries.');
-    expect(body.text).not.toContain('Use chat only for a short progress note or summary after the files are written.');
-    expect(body.text).not.toContain('Core Loop');
-    expect(body.text).not.toContain('Fun Hook');
-    expect(body.text).not.toContain('Risk/Reward');
-    expect(body.text).not.toContain('First 3 Minutes');
-    expect(body.text).not.toContain('Playability Acceptance Checklist');
-    expect(body.text).not.toContain('machine-readable verifier');
-    expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
-    expect(body.text).not.toContain('Use the runtime agent planning and review flow during implementation.');
-    expect(body.text).not.toContain("Use BeeGame's own planning");
-    expect(body.text).not.toContain('Plan, implement, check, and fix the project using your own normal workflow.');
-    expect(body.text).not.toContain('invoke the beegame-game-acceptance skill');
-    expect(body.text).not.toContain('If the skill returns FAIL');
-    expect(body.text).not.toContain('If it returns BLOCKED');
-    expect(body.text).not.toContain('Do not treat a normal assistant turn ending');
-    expect(body.text).toContain('实现后请使用当前项目自己的工具链和目标平台选择合适的检查与验证方式');
-    expect(body.text).not.toContain('Do not force a specific package manager, browser tool, engine, framework, or test runner');
-    expect(body.text).not.toContain('Do not create, edit, or suggest using BeeGame dashboard or host application source paths.');
+    const brief = JSON.parse(body.text || '{}') as Record<string, any>;
+    expect(brief.kind).toBe('confirmed_build_brief');
+    expect(brief.idea).toBe('LLM generated idea');
+    expect(brief.settings).toEqual(expect.objectContaining({
+      platform: 'Web',
+      inputs: ['Keyboard/mouse', 'Touch'],
+    }));
+    expect(body.text).not.toContain('delivery contract');
+    expect(body.text).not.toContain('验收');
+    expect(body.text).not.toContain('subagents');
     expect(body.text).not.toContain('apps/frontend');
-    expect(body.text).not.toContain('apps/dashboard');
-    expect(body.text).not.toContain('/packages/');
-    expect(body.text).not.toContain('current working directory is already the project directory')
-    expect(body.text).not.toContain('Do not create another top-level folder')
-    expect(body.text).not.toContain('./sample-game');
-    expect(body.text).not.toContain('./games/sample');
   });
 
   it('restores the visible idea from transcript display metadata instead of the transport prompt', async () => {
@@ -1759,55 +1707,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(history.map(message => message.content).join('\n')).not.toContain('我要做一个完整游戏项目');
   });
 
-  it('does not encourage subagents when the BeeGame subagent setting is disabled', async () => {
-    localStorage.setItem('beegame-adapter-subagents-enabled', '0');
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_brief',
-          cwd: '/tmp/beegame-projects/sample-game',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_brief/input' && init?.method === 'POST') {
-        return jsonResponse({ ok: true });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: '做一个样例游戏',
-      title: '样例游戏',
-      option: makeLlmOption(),
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Pixel',
-        dimension: '2D',
-        genre: 'Arcade',
-        inputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-      },
-      root_path: '/tmp/beegame-projects',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_brief/input' &&
-      init?.method === 'POST'
-    ));
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
-    expect(body.text).not.toContain('Plan and implement directly in this session unless the user explicitly asks for subagents.');
-    expect(body.text).not.toContain('You may use available subagents when the task genuinely benefits from delegation');
-  });
-
-  it('keeps English build prompts explicit about executable evidence', async () => {
+  it('sends confirmed build input as structured product data without browser-owned agent policy', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -1853,15 +1753,13 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
 
-    expect(body.text).toContain('executable player-path checks');
-    expect(body.text).toContain('must contain assertions');
-    expect(body.text).toContain('fail with a non-zero exit status');
-    expect(body.text).toContain('Do not count log-only scripts');
-    expect(body.text).toContain('docs-to-code consistency review');
-    expect(body.text).toContain('minimal reproduction, regression test, or matching player-path validation');
-    expect(body.text).toContain('Implemented');
-    expect(body.text).toContain('Verified with evidence');
-    expect(body.text).toContain('Not verified / Known gaps');
+    const brief = JSON.parse(body.text || '{}') as Record<string, unknown>;
+    expect(brief.kind).toBe('confirmed_build_brief');
+    expect(brief.idea).toBe('Build a sample game');
+    expect(brief.settings).toEqual(expect.objectContaining({ platform: 'Web', dimension: '2D' }));
+    expect(body.text).not.toContain('executable player-path checks');
+    expect(body.text).not.toContain('delivery contract');
+    expect(body.text).not.toContain('Do not count log-only scripts');
   });
 
   it('keeps intake prompts free of package-name branding policy blocks', async () => {

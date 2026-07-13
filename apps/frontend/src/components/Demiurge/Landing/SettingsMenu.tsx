@@ -5,11 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { Switch } from '../../ui/switch';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
-import {
-    getBeeGameSubagentsEnabled,
-    getBeeGameWorkspaceSettings,
-    setBeeGameSubagentsEnabled,
-} from '../../../services/beeGameAdapter';
+import { getBeeGameWorkspaceSettings } from '../../../services/beeGameAdapter';
 import {
     createModelConfig,
     listModelConfigs,
@@ -217,7 +213,6 @@ export function SettingsMenu({
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
     const userSkillImportInputRef = useRef<HTMLInputElement | null>(null);
-    const [subagentsEnabled, setSubagentsEnabled] = useState(true);
     const [invitationRequired, setInvitationRequired] = useState(false);
     const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
     const [newInvitationCode, setNewInvitationCode] = useState('');
@@ -278,7 +273,6 @@ export function SettingsMenu({
                     }
                 });
         }
-        setSubagentsEnabled(getBeeGameSubagentsEnabled());
         if (effectiveCanManageSecrets) {
             void getWebToolsConfig()
                 .then((config) => {
@@ -491,7 +485,6 @@ export function SettingsMenu({
         setIsSavingRuntimeSettings(true);
         try {
             const saved = await saveRuntimeSettings(runtimeSettings);
-            setBeeGameSubagentsEnabled(subagentsEnabled);
             setRuntimeSettings(normalizeRuntimeSettings(saved));
             return true;
         } catch (error) {
@@ -1333,17 +1326,6 @@ export function SettingsMenu({
 
                                 {activeSection === 'platform' && activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
                                     <div className="divide-y divide-white/10">
-                                        <CapabilityToggleRow
-                                            item={{
-                                                key: 'subagents',
-                                                label: text.subagents,
-                                                description: capabilityCopy.subagents.description,
-                                                note: capabilityCopy.subagents.note,
-                                                scope: 'newSession',
-                                            }}
-                                            checked={subagentsEnabled}
-                                            onToggle={() => setSubagentsEnabled((value) => !value)}
-                                        />
                                         {getRuntimeCapabilityItems(capabilityCopy).map((item) => (
                                             <CapabilityToggleRow
                                                 key={item.key}
@@ -1799,10 +1781,6 @@ function discoveredMcpServerToInput(server: DiscoveredMcpServer | ActiveDiscover
 
 type RuntimeCapabilityCopy = {
     title: string;
-    subagents: {
-        description: string;
-        note: string;
-    };
     items: Record<keyof RuntimeSettingsConfig, {
         label: string;
         description: string;
@@ -1899,7 +1877,7 @@ type UserSkillsSettingsCopy = {
 };
 
 type RuntimeCapabilityItem = {
-    key: keyof RuntimeSettingsConfig | 'subagents';
+    key: keyof RuntimeSettingsConfig;
     label: string;
     description: string;
     note: string;

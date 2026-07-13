@@ -3640,6 +3640,9 @@ async function getBeeGameProjectRuntimeState(input: {
     beeGamePreviews: input.beeGamePreviews,
   })
   const deliveryReview = deriveDeliveryReview(events)
+  const deliveryGate = createDeliveryGateFailure(deliveryReview)
+  const assetManifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
+    .catch(() => ({ version: 1 as const, slots: [], project_target: undefined }))
   return {
     project_id: input.project.id,
     phase: runtime.phase,
@@ -3657,6 +3660,11 @@ async function getBeeGameProjectRuntimeState(input: {
     delivery_status: deliveryReview?.status ?? 'implementation',
     delivery_review: deliveryReview,
     delivery_history: deriveDeliveryReviewHistory(events),
+    deployment_gate: {
+      can_deploy: deliveryGate === null,
+      ...(deliveryGate ? { failure: deliveryGate } : {}),
+    },
+    project_target: assetManifest.project_target ?? null,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
@@ -3769,6 +3777,11 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     delivery_review: null,
     delivery_history: [],
     delivery_status: 'implementation',
+    deployment_gate: {
+      can_deploy: false,
+      failure: createDeliveryGateFailure(null),
+    },
+    project_target: null,
     build_report: null,
     review_status: null,
     model_config_id: null,

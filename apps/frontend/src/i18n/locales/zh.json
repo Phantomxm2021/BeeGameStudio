@@ -833,6 +833,7 @@
       "credits": "余额",
       "reserved": "预扣",
       "phase": "阶段",
+      "executionStatus": "Agent 状态",
       "deliveryReview": "交付验收",
       "deliveryReview_validating": "验证中",
       "deliveryReview_passed": "已通过",

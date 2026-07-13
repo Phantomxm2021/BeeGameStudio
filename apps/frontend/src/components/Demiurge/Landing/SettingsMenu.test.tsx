@@ -12,7 +12,6 @@ const {
     discoverActiveMcpServers,
     discoverMcpServers,
     getBeeGameWorkspaceSettings,
-    getBeeGameSubagentsEnabled,
     getWebToolsConfig,
     getRuntimeSettings,
     getInvitationPublicSettings,
@@ -22,7 +21,6 @@ const {
     saveRuntimeSettings,
     saveInvitationSettings,
     saveWebToolsConfig,
-    setBeeGameSubagentsEnabled,
     testMcpServer,
     createInvitation,
     deleteInvitation,
@@ -51,7 +49,6 @@ const {
     discoverActiveMcpServers: vi.fn(),
     discoverMcpServers: vi.fn(),
     getBeeGameWorkspaceSettings: vi.fn(),
-    getBeeGameSubagentsEnabled: vi.fn(),
     getInvitationPublicSettings: vi.fn(),
     getWebToolsConfig: vi.fn(),
     getRuntimeSettings: vi.fn(),
@@ -61,7 +58,6 @@ const {
     saveInvitationSettings: vi.fn(),
     saveRuntimeSettings: vi.fn(),
     saveWebToolsConfig: vi.fn(),
-    setBeeGameSubagentsEnabled: vi.fn(),
     testMcpServer: vi.fn(),
     updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
@@ -93,8 +89,6 @@ vi.mock('../../../services/modelConfigApi', () => ({
 
 vi.mock('../../../services/beeGameAdapter', () => ({
     getBeeGameWorkspaceSettings,
-    getBeeGameSubagentsEnabled,
-    setBeeGameSubagentsEnabled,
 }));
 
 vi.mock('../../../services/webToolsApi', () => ({
@@ -241,8 +235,6 @@ describe('SettingsMenu model settings', () => {
         showError.mockReset();
         showSuccess.mockReset();
         createModelConfig.mockReset();
-        getBeeGameSubagentsEnabled.mockReturnValue(true);
-        setBeeGameSubagentsEnabled.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
         getCreditAuditLedger.mockReset();
@@ -851,7 +843,7 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('能力');
 
         expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByRole('switch', { name: 'Subagents' })).toBeChecked();
+        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
         expect(screen.getByRole('switch', { name: '自动记忆' })).toBeChecked();
         expect(screen.getByRole('switch', { name: '自动整理' })).toBeChecked();
         expect(screen.getByRole('switch', { name: 'Skill Search' })).not.toBeChecked();
@@ -1046,7 +1038,6 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
         await openPlatformSettingsTab('能力');
 
-        await userEvent.click(screen.getByRole('switch', { name: 'Subagents' }));
         await userEvent.click(await screen.findByRole('switch', { name: 'Skill Search' }));
         await userEvent.click(screen.getByRole('switch', { name: 'Bash AST 解析' }));
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -1060,7 +1051,7 @@ describe('SettingsMenu model settings', () => {
             bashClassifierEnabled: false,
             mcpSkillsEnabled: false,
         }));
-        expect(setBeeGameSubagentsEnabled).toHaveBeenCalledWith(false);
+        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
     });
 
     it('keeps deployment workspace root read-only and saves web search settings from the footer', async () => {
@@ -1087,7 +1078,6 @@ describe('SettingsMenu model settings', () => {
             braveApiKey: 'bsa-dashboard-secret',
         }));
         expect(saveRuntimeSettings).not.toHaveBeenCalled();
-        expect(setBeeGameSubagentsEnabled).not.toHaveBeenCalled();
         expect(screen.queryByText('工作路径已保存')).not.toBeInTheDocument();
     });
 

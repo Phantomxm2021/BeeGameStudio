@@ -255,6 +255,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const canUploadAssets = hasPermission('assets.upload') && !isProjectInteractionLocked;
     const canIntegrateAssets = hasPermission('assets.integrate') && !isProjectInteractionLocked;
     const canExportProject = hasPermission('project.export');
+    const canDeployAcceptedProject = canManageDeployment && projectStatus?.deployment_gate?.can_deploy === true;
+    const projectTargetLabel = String(
+        projectStatus?.project_target?.engine || projectStatus?.project_target?.kind || '',
+    ).trim();
 
     // Auto-Send Initial Prompt
     useEffect(() => {
@@ -340,7 +344,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
 
     const handleDeployProject = async () => {
-        if (!canManageDeployment || isDeployingProject || isProjectInteractionLocked) return;
+        if (!canDeployAcceptedProject || isDeployingProject || isProjectInteractionLocked) return;
         setDeployingProject(true);
         try {
             const deployment = await api.deployProject(projectId);
@@ -575,12 +579,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
                 isInteractionLocked={isProjectInteractionLocked}
                 buildReport={projectStatus?.build_report || null}
                 deliveryReview={projectStatus?.delivery_review || null}
+                projectTarget={projectTargetLabel}
                 deployments={deploymentHistory}
                 previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}
                 onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
                 onStopPreview={canManagePreview ? handleStopPreview : undefined}
-                onDeployProject={canManageDeployment ? handleDeployProject : undefined}
+                onDeployProject={canDeployAcceptedProject ? handleDeployProject : undefined}
                 onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
                 onFixBuildErrors={(errorLog) => {
                     if (isProjectInteractionLocked) return Promise.resolve();
