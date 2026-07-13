@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensureProjectDeliveryContractSkeleton } from './project-delivery-contract'
+import {
+  ensureProjectDeliveryContractSkeleton,
+  formatProjectDeliveryContract,
+  PROJECT_DELIVERY_CONTRACT_PLAYER_PATH_PHASES,
+} from './project-delivery-contract'
 
 describe('project delivery contract skeleton', () => {
   let workspace = ''
@@ -28,5 +32,22 @@ describe('project delivery contract skeleton', () => {
     await writeFile(path, '{"version":1,"requirements":[{"id":"existing"}]}\n')
     await ensureProjectDeliveryContractSkeleton(workspace)
     expect(await readFile(path, 'utf8')).toContain('existing')
+  })
+
+  test('publishes one canonical player-path shape for prompts and diagnostics', () => {
+    const format = JSON.parse(formatProjectDeliveryContract()) as {
+      properties: {
+        playerPaths: { items: { properties: { phases: {
+          required: string[]
+          properties: Record<string, unknown>
+        } } } }
+      }
+    }
+    const phases = format.properties.playerPaths.items.properties.phases
+    expect(phases.required).toEqual(
+      [...PROJECT_DELIVERY_CONTRACT_PLAYER_PATH_PHASES],
+    )
+    expect(Object.keys(phases.properties)).toEqual([...PROJECT_DELIVERY_CONTRACT_PLAYER_PATH_PHASES])
+    expect(formatProjectDeliveryContract()).not.toContain('placeholder')
   })
 })

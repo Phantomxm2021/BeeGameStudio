@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { DeliveryEvidenceKind } from './delivery-contract'
+import { PROJECT_DELIVERY_CONTRACT_PLAYER_PATH_PHASES } from './project-delivery-contract'
 
 export type ProjectDeliveryContractRequirement = {
   id: string
@@ -27,14 +28,6 @@ const CAPABILITY_PREFIXES = ['skill:', 'adapter:'] as const
 const EVIDENCE_KINDS = new Set<DeliveryEvidenceKind>([
   'implementation', 'build', 'test', 'runtime', 'asset', 'skill', 'document',
 ])
-
-const PLAYER_PATH_PHASES = [
-  'entry',
-  'core_action',
-  'state_change',
-  'completion',
-  'recovery',
-] as const
 
 export function auditProjectDeliveryContract(workspacePath: string): ProjectDeliveryContractAudit {
   const path = resolve(workspacePath, 'docs', 'delivery-contract.json')
@@ -221,7 +214,7 @@ function parsePlayerPaths(
     }
     for (const requirementId of coveredRequirements) referencedRequirementIds.add(requirementId)
     const phases = isRecord(item.phases) ? item.phases : {}
-    for (const phase of PLAYER_PATH_PHASES) {
+    for (const phase of PROJECT_DELIVERY_CONTRACT_PLAYER_PATH_PHASES) {
       const entries = phases[phase]
       if (!Array.isArray(entries) || entries.length === 0 || entries.some(entry => !isPlayerPathStep(entry))) {
         issues.push(`Player path ${id} must declare structured ${phase} actions/assertions.`)

@@ -30,7 +30,10 @@ import {
   auditProjectDeliveryContract,
   type ProjectDeliveryContractAudit,
 } from './project-delivery-contract-audit'
-import { ensureProjectDeliveryContractSkeleton } from './project-delivery-contract'
+import {
+  ensureProjectDeliveryContractSkeleton,
+  formatProjectDeliveryContract,
+} from './project-delivery-contract'
 import {
   createDeliveryValidationAgentDefinitions,
   deliveryValidationDispatchPrompt,
@@ -72,6 +75,7 @@ export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_IDENTICAL_DELIVERY_FAILURES = 2
+const MAX_IDENTICAL_SPECIFICATION_GATE_FAILURES = 3
 const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 10 * 60 * 1000
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
@@ -313,6 +317,8 @@ type SessionRecord = {
   nextTurnIndex: number
   currentTurnId: string | null
   currentTurnKind?: string
+  specificationGateFailureFingerprint?: string
+  specificationGateFailureCount: number
   deliveryRepairAttempts: number
   latestDeliveryContract?: DeliveryContract
   lastSettledTotalTokens: number
@@ -464,6 +470,9 @@ export class BeeGameSessionManager {
           cwd,
         )
       : undefined
+    const recoveredSpecificationGate = recoverSpecificationGateFailure(
+      recoveredTranscript?.events ?? [],
+    )
 
     const record: SessionRecord = {
       session,
@@ -499,6 +508,8 @@ export class BeeGameSessionManager {
         : 1,
       currentTurnId: null,
       currentTurnKind: undefined,
+      specificationGateFailureFingerprint: recoveredSpecificationGate.fingerprint,
+      specificationGateFailureCount: recoveredSpecificationGate.count,
       deliveryRepairAttempts: recoverDeliveryRepairAttempts(recoveredTranscript?.events ?? []),
       latestDeliveryContract: recoverLatestDeliveryContract(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
@@ -1125,18 +1136,6 @@ export class BeeGameSessionManager {
               'Agent ended this turn without using tools. Send continue or retry to start implementation.',
             )
           } else {
-            if (
-              record.currentTurnKind === 'confirmed_brief' &&
-              record.events.slice(eventCountBeforeTurn).some(event => (
-                event.type === 'tool.failed' ||
-                (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
-              ))
-            ) {
-              this.append(record, 'system.status', 'Implementation gate failed before validation', {
-                type: 'delivery.implementation_gate.failed',
-                status: 'failed',
-              })
-            }
             if (isControlTurn) {
               record.latestDeliveryContract = this.completeDeliveryValidation(record, eventCountBeforeTurn)
               if (validationTimedOut) {
@@ -1216,9 +1215,11 @@ export class BeeGameSessionManager {
             })
           }
         }
-        void this.startDeliveryValidation(record).catch(error => {
-          this.appendDeliveryValidationFailure(record, 'Delivery validation could not start', error)
-        })
+        if (record.approvedDocumentSnapshotLocked) {
+          void this.startDeliveryValidation(record).catch(error => {
+            this.appendDeliveryValidationFailure(record, 'Delivery validation could not start', error)
+          })
+        }
       } else if (completedTurnKind === 'delivery_validation' && record.session.status === 'running') {
         const contract = record.latestDeliveryContract
         const waitingEvent = [...record.events].reverse().find(event => (
@@ -1469,22 +1470,6 @@ export class BeeGameSessionManager {
       documentAuditEvidenceId,
       runtimeAdapterEvent,
     )
-    const priorEvents = record.events.slice(0, eventStartIndex)
-    const failedGateIndex = priorEvents.findLastIndex(event => (
-      getDashboardPayloadString(event.payload, 'type') === 'delivery.implementation_gate.failed'
-    ))
-    const completedRepairIndex = priorEvents.findLastIndex(event => event.type === 'delivery.repair.completed')
-    const implementationGateFailed = failedGateIndex > completedRepairIndex
-    if (implementationGateFailed) {
-      parsed.status = 'failed'
-      parsed.findings.push({
-        requirementId: 'implementation-gate',
-        requirement: 'Implementation toolchain gate',
-        status: 'failed',
-        detail: 'The implementation turn contained failed or denied tool operations and cannot be accepted as a completed build.',
-        evidence: [],
-      })
-    }
     if (missingValidators.length > 0) {
       parsed.status = 'blocked'
       parsed.summary = `Independent delivery validation was incomplete: ${missingValidators.length} validator(s) did not complete.`
@@ -1773,18 +1758,36 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
-    const specificationGateMessage = await this.lockSpecificationBeforeImplementationTool(record, request)
-    if (specificationGateMessage) {
+    const specificationGateFailure = await this.lockSpecificationBeforeImplementationTool(record, request)
+    if (specificationGateFailure) {
+      const message = `${specificationGateFailure.message} Expected structure: ${formatProjectDeliveryContract()}`
+      const fingerprint = createHash('sha256')
+        .update(JSON.stringify(specificationGateFailure.issues))
+        .digest('hex')
+      record.specificationGateFailureCount = record.specificationGateFailureFingerprint === fingerprint
+        ? record.specificationGateFailureCount + 1
+        : 1
+      record.specificationGateFailureFingerprint = fingerprint
+      const blocked = record.specificationGateFailureCount >= MAX_IDENTICAL_SPECIFICATION_GATE_FAILURES
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
-        decision: 'deny', autoDenied: true, reason: specificationGateMessage, input: request.input,
+        decision: 'deny', autoDenied: true, reason: message, input: request.input,
       })
       this.append(record, 'system.status', 'Implementation blocked until the delivery contract is valid', {
         type: 'delivery.implementation_gate.failed',
-        status: 'failed',
+        status: blocked ? 'blocked' : 'failed',
         reason: 'invalid_delivery_contract',
+        issues: specificationGateFailure.issues,
+        expectedFormat: formatProjectDeliveryContract(),
+        fingerprint,
+        identicalFailureCount: record.specificationGateFailureCount,
+        terminal: blocked,
       })
-      return { behavior: 'deny', message: specificationGateMessage }
+      if (blocked) {
+        record.currentTurnKind = 'specification_blocked'
+        queueMicrotask(() => record.abortController?.abort())
+      }
+      return { behavior: 'deny', message }
     }
     const protectedDocument = getProtectedDeliveryDocument(record, request)
     if (protectedDocument) {
@@ -1912,7 +1915,7 @@ export class BeeGameSessionManager {
   private async lockSpecificationBeforeImplementationTool(
     record: SessionRecord,
     request: DashboardPermissionRequest,
-  ): Promise<string | undefined> {
+  ): Promise<{ message: string; issues: string[] } | undefined> {
     if (record.currentTurnKind !== 'confirmed_brief' || record.approvedDocumentSnapshotLocked) return undefined
     if (!isImplementationMutationTool(record.session.cwd, request)) return undefined
     const contractAudit = auditProjectDeliveryContract(record.session.cwd)
@@ -1920,20 +1923,27 @@ export class BeeGameSessionManager {
       const detail = contractAudit.issues.length > 0
         ? contractAudit.issues.join(' ')
         : 'The delivery contract is incomplete.'
-      return `Complete the evidence-backed delivery contract before implementation. ${detail}`
+      return {
+        message: `Complete the evidence-backed delivery contract before implementation. ${detail}`,
+        issues: contractAudit.issues.length > 0 ? contractAudit.issues : ['The delivery contract is incomplete.'],
+      }
     }
     const adapterId = resolveRequiredValidationAdapter(contractAudit.requiredCapabilities)
     if (adapterId) {
       try {
         this.deliveryValidationAdapters.require(adapterId)
       } catch (error) {
-        return `Configure the declared runtime validation adapter before implementation. ${toErrorMessage(error)}`
+        const issue = `Configure the declared runtime validation adapter before implementation. ${toErrorMessage(error)}`
+        return { message: issue, issues: [issue] }
       }
     }
     const snapshot = await captureApprovedDocumentSnapshot(record.session.cwd)
     if (Object.keys(snapshot).length === 0) {
-      return 'Create the approved project specification documents before implementation. Code and build mutations are blocked until the source-of-truth documents exist.'
+      const issue = 'Create the approved project specification documents before implementation. Code and build mutations are blocked until the source-of-truth documents exist.'
+      return { message: issue, issues: [issue] }
     }
+    record.specificationGateFailureFingerprint = undefined
+    record.specificationGateFailureCount = 0
     record.approvedDocumentSnapshot = snapshot
     record.approvedDocumentSnapshotLocked = true
     this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
@@ -2913,8 +2923,8 @@ function withDeliveryContract(prompt: string): string {
     '- Before implementation, read the approved GDD, technical design, UI/audio/art specifications, and acceptance documents in this project. Treat them as the source of truth.',
     '- Complete and validate docs/delivery-contract.json before the first code, asset, build, dependency, or shell mutation. Implementation is denied until the contract is valid.',
     '- Populate docs/delivery-contract.json only with declarative requirements, registered required capabilities, and structured player paths.',
-    '- Requirement shape: {"id":"stable-id","title":"...","scope":"mvp|roadmap","sourceRefs":[{"path":"project-relative-document-path","locator":"exact text present in the approved document"}],"evidenceRequired":["implementation|build|test|runtime|asset|skill|document"]}. sourceRefs are mandatory and every locator must exist verbatim in its source document.',
-    '- Player path phases must use exactly: {"entry":[{"action":{"...":"adapter action"},"assertions":[{"...":"observable assertion"}]}],"core_action":[...],"state_change":[...],"completion":[...],"recovery":[...]}. Every action and assertion object must be non-empty and use the explicitly selected adapter vocabulary; prose strings, placeholders, and phase objects containing actions/assertions arrays are invalid.',
+    `- The contract must conform to this server-owned structural schema: ${formatProjectDeliveryContract()}`,
+    '- sourceRefs are mandatory and every locator must exist verbatim in its source document. Every action and assertion object must be non-empty and use the explicitly selected adapter vocabulary; prose strings and validator-owned outcomes are invalid.',
     '- Before gameplay code, map every normative MVP statement to a requirement and every MVP gameplay requirement to at least one player path.',
     '- Never add validator-owned status/evidence fields, author docs/validation-report.md, or pre-check acceptance items.',
     '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
@@ -3350,6 +3360,21 @@ function recoverDeliveryRepairAttempts(events: BeeGameEvent[]): number {
   }
   const latestContract = recoverLatestDeliveryContract(events)
   return latestContract?.status === 'passed' ? 0 : latest
+}
+
+function recoverSpecificationGateFailure(
+  events: BeeGameEvent[],
+): { fingerprint?: string; count: number } {
+  const specificationLockedIndex = events.findLastIndex(event => event.type === 'delivery.specification.locked')
+  const gateEvents = events.slice(specificationLockedIndex + 1).filter(event => (
+    getDashboardPayloadString(event.payload, 'type') === 'delivery.implementation_gate.failed'
+  ))
+  const latest = gateEvents.at(-1)
+  const fingerprint = getDashboardPayloadString(latest?.payload, 'fingerprint')
+  const count = Number(isObject(latest?.payload) ? latest.payload.identicalFailureCount : 0)
+  return fingerprint && Number.isInteger(count) && count > 0
+    ? { fingerprint, count }
+    : { count: 0 }
 }
 
 function shouldStartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): boolean {

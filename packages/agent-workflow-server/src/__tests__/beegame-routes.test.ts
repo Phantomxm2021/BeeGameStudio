@@ -31,6 +31,7 @@ import type {
 } from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
 import { DeliveryValidationAdapterRegistry } from '../beegame/delivery-validation-adapter'
+import { formatProjectDeliveryContract } from '../beegame/project-delivery-contract'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -870,6 +871,7 @@ describe('beegame session routes', () => {
       expect(submittedPrompts.length).toBeGreaterThanOrEqual(2)
       expect(submittedPrompts[1]).toContain('Confirmed brief contract:')
       expect(submittedPrompts[1]).toContain('Evidence-backed delivery contract:')
+      expect(submittedPrompts[1]).toContain(formatProjectDeliveryContract())
       expect(submittedPrompts[1]).toContain('Resource integration contract')
       expect(await stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).toBeDefined()
     } finally {
@@ -1170,6 +1172,61 @@ describe('beegame session routes', () => {
       expect(manager.events(session.id).some(event => (
         event.type === 'system.status' && event.payload?.reason === 'invalid_delivery_contract'
       ))).toBe(true)
+      const gateEvents = manager.events(session.id).filter(event => (
+        event.type === 'system.status' && event.payload?.type === 'delivery.implementation_gate.failed'
+      ))
+      expect(gateEvents).toHaveLength(1)
+      expect(gateEvents[0]?.payload).toEqual(expect.objectContaining({
+        status: 'failed',
+        identicalFailureCount: 1,
+        terminal: false,
+        issues: expect.any(Array),
+        expectedFormat: expect.stringContaining('"phases"'),
+      }))
+      expect(manager.events(session.id).some(event => event.type === 'delivery.validation.started')).toBe(false)
+      manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('stops a confirmed brief after the same specification failure repeats', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-specification-loop-breaker-'))
+    let decisions: string[] = []
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            for (let index = 0; index < 3; index += 1) {
+              const decision = await input.requestPermission({
+                toolUseID: `repeated-invalid-contract-${index}`,
+                toolName: 'Write',
+                message: 'Write implementation?',
+                input: { file_path: 'src/main.ts', content: 'implementation' },
+              })
+              decisions.push(decision.behavior)
+            }
+            input.onMessage({ type: 'result', result: 'implementation attempted' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => decisions.length === 3)
+      expect(decisions).toEqual(['deny', 'deny', 'deny'])
+      const gateEvents = manager.events(session.id).filter(event => (
+        event.type === 'system.status' && event.payload?.type === 'delivery.implementation_gate.failed'
+      ))
+      expect(gateEvents).toHaveLength(3)
+      expect(gateEvents.at(-1)?.payload).toEqual(expect.objectContaining({
+        status: 'blocked',
+        identicalFailureCount: 3,
+        terminal: true,
+      }))
+      expect(manager.events(session.id).some(event => event.type === 'delivery.validation.started')).toBe(false)
       manager.stop(session.id)
     } finally {
       await rm(workspace, { recursive: true, force: true })
