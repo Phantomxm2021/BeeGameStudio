@@ -25,37 +25,13 @@ import {
   type BeeGameCreditTaskType,
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
-import { auditAssetContract } from './asset-contract-audit'
 import {
-  auditProjectDeliveryContract,
-  type ProjectDeliveryContractAudit,
-} from './project-delivery-contract-audit'
-import {
-  ensureProjectDeliveryContractSkeleton,
   formatProjectDeliveryContract,
 } from './project-delivery-contract'
 import {
   createDeliveryValidationAgentDefinitions,
-  deliveryValidationDispatchPrompt,
-  DELIVERY_VALIDATOR_AGENT_TYPES,
 } from './delivery-validation-agents'
-import {
-  buildDeliveryRepairPrompt,
-  createDeliveryContract,
-  parseDeliveryValidatorReport,
-  type DeliveryCheckStatus,
-  type DeliveryContract,
-  type DeliveryEvidence,
-  type DeliveryRequirement,
-  type ParsedDeliveryReview,
-} from './delivery-contract'
 import { createQueryEngineRunner } from './query-engine-runner'
-import {
-  DeliveryValidationAdapterRegistry,
-  readDeliveryValidationRequest,
-  resolveRequiredValidationAdapter,
-  type DeliveryValidationResult,
-} from './delivery-validation-adapter'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -74,9 +50,6 @@ export type BeeGameFileAttachment = {
 export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
-const MAX_IDENTICAL_DELIVERY_FAILURES = 2
-const MAX_IDENTICAL_SPECIFICATION_GATE_FAILURES = 3
-const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 10 * 60 * 1000
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -123,8 +96,6 @@ export type BeeGameTurnStatus = 'idle' | 'running'
 
 export type BeeGameSessionLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko'
 
-export type BeeGameChatThinkingMode = 'enabled' | 'disabled'
-
 export type BeeGameEventType =
   | 'session.started'
   | 'session.resumed'
@@ -139,23 +110,11 @@ export type BeeGameEventType =
   | 'tool.progress'
   | 'permission.requested'
   | 'permission.resolved'
-  | 'runtime.observation'
   | 'system.status'
   | 'result'
   | 'turn.completed'
   | 'turn.empty'
   | 'turn.failed'
-  | 'delivery.validation.started'
-  | 'delivery.validation.waiting'
-  | 'delivery.validation.completed'
-  | 'delivery.runtime_adapter.completed'
-  | 'delivery.specification.locked'
-  | 'delivery.contract.updated'
-  | 'delivery.repair.started'
-  | 'delivery.repair.completed'
-  | 'delivery.repair.queued'
-  | 'delivery.repair.exhausted'
-  | 'delivery.pipeline.blocked'
   | 'session.stopped'
   | 'session.failed'
 
@@ -247,7 +206,6 @@ export type BeeGameApprovedOutboundTargets = Partial<
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
-  thinkingMode?: BeeGameChatThinkingMode
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
@@ -305,10 +263,6 @@ type SessionRecord = {
   runner: BeeGameSessionRuntime | null
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
-  trustedSession: boolean
-  rememberedPermissions: Set<string>
-  rememberedPermissionTools: Set<string>
-  monitoredSubagentOutputFiles: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
   assistantPartialTextByTurn: Map<string, string>
   thinkingBlockIndexes: Set<number>
@@ -317,28 +271,12 @@ type SessionRecord = {
   nextTurnIndex: number
   currentTurnId: string | null
   currentTurnKind?: string
-  specificationGateFailureFingerprint?: string
-  specificationGateFailureCount: number
-  deliveryRepairAttempts: number
-  latestDeliveryContract?: DeliveryContract
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
   pendingCreditRetryInFlight: boolean
   pendingCreditRetryFailures: number
   pendingCreditRetryAfter: number
-  deliveryPipelineResumeFailures: number
-  deliveryPipelineResumeTimer?: ReturnType<typeof setTimeout>
-  deliveryPipelineResumeInFlight: boolean
-  approvedDocumentSnapshot: Record<string, string>
-  approvedDocumentSnapshotLocked: boolean
   resumeEventPending: boolean
-}
-
-type RuntimeObservationFeature = {
-  id: string
-  label: string
-  stage: string
-  status: 'available' | 'enabled' | 'disabled'
 }
 
 export type StartBeeGameSessionInput = {
@@ -408,8 +346,6 @@ const localCreditBackend: BeeGameSessionCreditBackend = {
   refundCreditReservation,
 }
 
-const MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS = 8
-
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -427,9 +363,6 @@ export class BeeGameSessionManager {
     private readonly allowExternalRuntimeEnv = false,
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
-    private readonly onTurnCompleted?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
-    private readonly onTurnStarting?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
-    private readonly deliveryValidationAdapters = new DeliveryValidationAdapterRegistry(),
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -470,10 +403,6 @@ export class BeeGameSessionManager {
           cwd,
         )
       : undefined
-    const recoveredSpecificationGate = recoverSpecificationGateFailure(
-      recoveredTranscript?.events ?? [],
-    )
-
     const record: SessionRecord = {
       session,
       runtime,
@@ -492,10 +421,6 @@ export class BeeGameSessionManager {
       runner: null,
       abortController: null,
       pendingPermissions: new Map(),
-      trustedSession: false,
-      rememberedPermissions: new Set(),
-      rememberedPermissionTools: new Set(),
-      monitoredSubagentOutputFiles: new Set(),
       toolUses: new Map(),
       assistantPartialTextByTurn: new Map(),
       thinkingBlockIndexes: new Set(),
@@ -508,10 +433,6 @@ export class BeeGameSessionManager {
         : 1,
       currentTurnId: null,
       currentTurnKind: undefined,
-      specificationGateFailureFingerprint: recoveredSpecificationGate.fingerprint,
-      specificationGateFailureCount: recoveredSpecificationGate.count,
-      deliveryRepairAttempts: recoverDeliveryRepairAttempts(recoveredTranscript?.events ?? []),
-      latestDeliveryContract: recoverLatestDeliveryContract(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
@@ -521,15 +442,10 @@ export class BeeGameSessionManager {
       pendingCreditRetryInFlight: false,
       pendingCreditRetryFailures: 0,
       pendingCreditRetryAfter: 0,
-      deliveryPipelineResumeFailures: 0,
-      deliveryPipelineResumeInFlight: false,
-      approvedDocumentSnapshot: recoverApprovedDocumentSnapshot(recoveredTranscript?.events ?? []),
-      approvedDocumentSnapshotLocked: hasApprovedDocumentSnapshot(recoveredTranscript?.events ?? []),
       resumeEventPending: Boolean(recoveredTranscript),
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
-    this.refreshCompletedSubagentOutputs(record)
     this.persistRuntimeSnapshot(record)
     if (!recoveredTranscript) {
       this.append(record, 'session.started', `Created BeeGame session in ${cwd}`, {
@@ -537,7 +453,6 @@ export class BeeGameSessionManager {
         ...(record.language ? { language: record.language } : {}),
       })
     }
-    if (!recoveredTranscript) this.appendRuntimeObservation(record, 'initialized')
 
     return cloneSession(record.session)
   }
@@ -553,79 +468,6 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
-  }
-
-  async resumePendingDeliveryPipeline(sessionId: string): Promise<boolean> {
-    const record = this.sessions.get(sessionId)
-    if (!record || record.session.status !== 'running' || record.session.turnStatus !== 'idle') return false
-    if (record.deliveryPipelineResumeInFlight) return false
-    if (record.deliveryPipelineResumeFailures > 3) return false
-    const transition = getLatestDeliveryPipelineTransition(record.events)
-    if (!transition) return false
-    const contract = recoverLatestDeliveryContract(record.events)
-    record.deliveryPipelineResumeInFlight = true
-    try {
-      if (transition.type === 'delivery.validation.started' || (
-        transition.type === 'delivery.validation.completed' &&
-        getDashboardPayloadBoolean(transition.payload, 'retryable')
-      )) {
-        await this.startDeliveryValidation(record)
-        return true
-      }
-      if (transition.type === 'delivery.repair.completed') {
-        await this.startDeliveryValidation(record)
-        return true
-      }
-      if (!contract || contract.status === 'passed') return false
-      if (transition.type === 'delivery.validation.completed') {
-        if (!shouldStartDeliveryRepair(record, contract)) return false
-        this.appendDeliveryRepairQueued(record, contract)
-        await this.startDeliveryRepair(record, contract)
-        return true
-      }
-      if (transition.type === 'delivery.repair.started') {
-        await this.restartDeliveryRepair(record, contract)
-        return true
-      }
-      if (transition.type !== 'delivery.repair.queued') return false
-      await this.startDeliveryRepair(record, contract)
-      return true
-    } catch (error) {
-      record.deliveryPipelineResumeFailures += 1
-      const retryDelayMs = Math.min(15_000, record.deliveryPipelineResumeFailures * 3_000)
-      this.append(record, 'system.status', 'Queued delivery repair could not resume', {
-        type: 'delivery.repair.resume_failed',
-        status: 'queued',
-        attempt: record.deliveryRepairAttempts + 1,
-        error: toErrorMessage(error),
-        retryCount: record.deliveryPipelineResumeFailures,
-        retryDelayMs,
-      })
-      if (record.deliveryPipelineResumeFailures > 3) {
-        this.append(record, 'delivery.pipeline.blocked', 'Delivery pipeline could not resume after repeated infrastructure failures', {
-          type: 'delivery.pipeline.blocked',
-          status: 'needs_user',
-          reason: 'pipeline_resume_unavailable',
-          error: toErrorMessage(error),
-          retryCount: record.deliveryPipelineResumeFailures,
-          ...(contract ? { contract } : {}),
-        })
-      } else if (!record.deliveryPipelineResumeTimer) {
-        record.deliveryPipelineResumeTimer = setTimeout(() => {
-          record.deliveryPipelineResumeTimer = undefined
-          void this.resumePendingDeliveryPipeline(record.session.id)
-        }, retryDelayMs)
-      } else if (record.deliveryPipelineResumeFailures > 3) {
-        this.append(record, 'system.status', 'Delivery pipeline requires user attention', {
-          type: 'delivery.pipeline.resume_exhausted',
-          status: 'needs_user',
-          error: toErrorMessage(error),
-        })
-      }
-      return false
-    } finally {
-      record.deliveryPipelineResumeInFlight = false
-    }
   }
 
   updateAuthToken(sessionId: string, authToken?: string): void {
@@ -777,25 +619,6 @@ export class BeeGameSessionManager {
     }
   }
 
-  updateModel(sessionId: string, modelConfigId: string): BeeGameSession {
-    const record = this.sessions.get(sessionId)
-    if (!record) throw new Error('Session not found')
-    if (record.session.turnStatus !== 'idle') {
-      throw new Error('Session is already processing a prompt')
-    }
-    const runtime = mapModelConfigToRuntime(modelConfigId)
-    if (!runtime && !this.allowExternalRuntimeEnv) {
-      throw new Error('Model config not found')
-    }
-
-    record.runtime = runtime
-    record.session.modelConfigId = modelConfigId
-    record.session.updatedAt = new Date()
-    this.persistRuntimeSnapshot(record)
-    this.appendRuntimeObservation(record, 'model_updated')
-    return cloneSession(record.session)
-  }
-
   runtimeSnapshot(
     sessionId: string,
     workspacePath?: string,
@@ -840,9 +663,8 @@ export class BeeGameSessionManager {
   events(sessionId: string, after = 0): BeeGameEvent[] {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
-    this.refreshCompletedSubagentOutputs(record)
     return record.events
-      .filter(event => event.id > after)
+      .filter(event => event.id > after && !isThinkingProtocolControlEvent(event))
       .map(event => ({ ...event }))
   }
 
@@ -856,15 +678,16 @@ export class BeeGameSessionManager {
   }> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
-    this.refreshCompletedSubagentOutputs(record)
-    return record.events.map(event => ({
-      id: event.id,
-      type: event.type,
-      text: event.text,
-      ...(event.turnId ? { turnId: event.turnId } : {}),
-      ...(event.payload ? { payload: event.payload } : {}),
-      createdAt: event.createdAt,
-    }))
+    return record.events
+      .filter(event => !isThinkingProtocolControlEvent(event))
+      .map(event => ({
+        id: event.id,
+        type: event.type,
+        text: event.text,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        ...(event.payload ? { payload: event.payload } : {}),
+        createdAt: event.createdAt,
+      }))
   }
 
   async send(sessionId: string, text: string): Promise<BeeGameSession> {
@@ -883,7 +706,6 @@ export class BeeGameSessionManager {
       supersedesMessageId?: string
       language?: BeeGameSessionLanguage
       attachments?: BeeGameAttachment[]
-      thinkingMode?: BeeGameChatThinkingMode
       onTurnAccepted?: () => void
     },
   ): Promise<BeeGameSession> {
@@ -909,26 +731,6 @@ export class BeeGameSessionManager {
         type: 'session.resumed',
         ...(record.language ? { language: record.language } : {}),
       })
-    }
-
-    if (display?.displayKind === 'confirmed_brief' && !record.approvedDocumentSnapshotLocked) {
-      const audit = auditProjectDeliveryContract(record.session.cwd)
-      if (audit.valid && this.hasConfiguredValidationAdapter(audit)) {
-        const documents = await captureApprovedDocumentSnapshot(record.session.cwd)
-        if (Object.keys(documents).length > 0) {
-          record.approvedDocumentSnapshot = documents
-          record.approvedDocumentSnapshotLocked = true
-          this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
-            type: 'delivery.specification.locked',
-            documents,
-          })
-        }
-      }
-    }
-
-    const metadata = this.metadata(sessionId)
-    if (metadata && this.onTurnStarting) {
-      await this.onTurnStarting(metadata)
     }
 
     const preparedPrompt = await prepareBeeGamePromptInput({
@@ -965,7 +767,6 @@ export class BeeGameSessionManager {
     void this.runDirectTurn(
       record,
       preparedPrompt.prompt,
-      display?.thinkingMode,
       creditReservation,
       creditPolicy,
       preparedPrompt.attachmentDirectory,
@@ -986,8 +787,6 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status === 'running') {
-      if (record.deliveryPipelineResumeTimer) clearTimeout(record.deliveryPipelineResumeTimer)
-      record.deliveryPipelineResumeTimer = undefined
       record.abortController?.abort()
       record.runner?.stop()
       this.resolveAllPendingPermissions(record, {
@@ -1011,8 +810,6 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
 
     if (record.session.status === 'running') {
-      if (record.deliveryPipelineResumeTimer) clearTimeout(record.deliveryPipelineResumeTimer)
-      record.deliveryPipelineResumeTimer = undefined
       record.abortController?.abort()
       record.runner?.stop()
       this.resolveAllPendingPermissions(record, {
@@ -1084,7 +881,6 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: BeeGamePromptInput,
-    thinkingMode: BeeGameChatThinkingMode | undefined,
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
     attachmentDirectory?: string,
@@ -1109,47 +905,16 @@ export class BeeGameSessionManager {
         cwd: record.session.cwd,
         env,
         approvedOutboundTargets,
+        // These are ordinary Claude Code sub-agents. BeeGame exposes them to
+        // the native runtime but never dispatches or interprets them.
         agentDefinitions: createDeliveryValidationAgentDefinitions(),
       })
       record.runner = runner
       try {
-        const eventCountBeforeTurn = record.events.length
-        const toolUseCountBeforeTurn = record.toolUses.size
-        const validationTimedOut = record.currentTurnKind === 'delivery_validation'
-          ? await this.submitDeliveryValidationWithTimeout(record, runner, prompt, thinkingMode, signal)
-          : await this.submitToRunner(record, runner, prompt, thinkingMode, signal).then(() => false)
-        const hadToolUse = record.toolUses.size > toolUseCountBeforeTurn
-        const hadRuntimeActivity = hadToolUse || record.events
-          .slice(eventCountBeforeTurn)
-          .some(event => (
-            event.type.startsWith('tool.') ||
-            event.type.startsWith('permission.')
-          ))
+        await this.submitToRunner(record, runner, prompt, signal)
         if (!signal.aborted && record.session.status === 'running') {
-          const isControlTurn = record.currentTurnKind === 'delivery_validation'
-          if (!hadRuntimeActivity && !isControlTurn) {
-            this.closeOpenThinkingLifecycle(record, 'turn_empty')
-            this.appendRuntimeObservation(record, 'empty_turn')
-            this.append(
-              record,
-              'turn.empty',
-              'Agent ended this turn without using tools. Send continue or retry to start implementation.',
-            )
-          } else {
-            if (isControlTurn) {
-              record.latestDeliveryContract = this.completeDeliveryValidation(record, eventCountBeforeTurn)
-              if (validationTimedOut) {
-                this.append(record, 'system.status', 'Independent delivery validation timed out', {
-                  type: 'delivery.validation.timeout',
-                  status: 'blocked',
-                  timeoutMs: getDeliveryValidationTimeoutMs(),
-                })
-              }
-            }
-            this.closeOpenThinkingLifecycle(record, 'turn_completed')
-            this.appendRuntimeObservation(record, 'turn_completed')
-            this.append(record, 'turn.completed', 'Turn ended')
-          }
+          this.closeOpenThinkingLifecycle(record, 'turn_completed')
+          this.append(record, 'turn.completed', 'Turn ended')
         }
         if (creditReservation) {
           shouldRefundReservation = !await this.settleTurnCredits(
@@ -1159,7 +924,9 @@ export class BeeGameSessionManager {
           )
         }
       } finally {
-        if (signal.aborted && record.runner === runner) record.runner = null
+        if (signal.aborted && record.runner === runner) {
+          record.runner = null
+        }
       }
     } catch (err) {
       record.runner?.stop()
@@ -1188,439 +955,11 @@ export class BeeGameSessionManager {
       if (attachmentDirectory) {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
-      const completedTurnKind = record.currentTurnKind
-      const completedTurnId = record.currentTurnId
       record.currentTurnId = null
       record.currentTurnKind = undefined
       record.abortController = null
       record.session.updatedAt = new Date()
-      const metadata = this.metadata(record.session.id)
-      if (metadata && this.onTurnCompleted) {
-        void Promise.resolve(this.onTurnCompleted(metadata)).catch(error => {
-          console.warn('BeeGame post-turn integration failed:', toErrorMessage(error))
-        })
-      }
-      if (completedTurnKind === 'confirmed_brief' && record.session.status === 'running') {
-        if (!record.approvedDocumentSnapshotLocked) {
-          const audit = auditProjectDeliveryContract(record.session.cwd)
-          const snapshot = audit.valid && this.hasConfiguredValidationAdapter(audit)
-            ? await captureApprovedDocumentSnapshot(record.session.cwd)
-            : {}
-          if (audit.valid && this.hasConfiguredValidationAdapter(audit) && Object.keys(snapshot).length > 0) {
-            record.approvedDocumentSnapshot = snapshot
-            record.approvedDocumentSnapshotLocked = true
-            this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
-              type: 'delivery.specification.locked',
-              documents: snapshot,
-            })
-          }
-        }
-        if (record.approvedDocumentSnapshotLocked) {
-          void this.startDeliveryValidation(record).catch(error => {
-            this.appendDeliveryValidationFailure(record, 'Delivery validation could not start', error)
-          })
-        }
-      } else if (completedTurnKind === 'delivery_validation' && record.session.status === 'running') {
-        const contract = record.latestDeliveryContract
-        const waitingEvent = [...record.events].reverse().find(event => (
-          event.turnId === completedTurnId && event.type === 'delivery.validation.waiting'
-        ))
-        if (waitingEvent) return
-        const validationEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
-        const validationTimedOut = [...record.events].reverse().some(event => (
-          event.turnId === validationEvent?.turnId &&
-          event.type === 'system.status' &&
-          getDashboardPayloadString(event.payload, 'type') === 'delivery.validation.timeout'
-        ))
-        const unresolvedPendingValidators = getUnresolvedPendingDeliveryValidators(record.events, validationEvent)
-        if (!validationTimedOut && unresolvedPendingValidators.length > 0) {
-          // Async validator completion restarts validation after all reports arrive.
-        } else if (contract && shouldStartDeliveryRepair(record, contract)) {
-          this.appendDeliveryRepairQueued(record, contract)
-          void this.startDeliveryRepair(record, contract).catch(error => {
-            this.appendDeliveryRepairResumeFailure(record, error)
-          })
-        } else if (contract && contract.status !== 'passed') {
-          this.appendDeliveryPipelineBlocked(record, contract)
-        }
-      } else if (completedTurnKind === 'delivery_repair' && record.session.status === 'running') {
-        this.append(record, 'delivery.repair.completed', 'Delivery repair turn completed', {
-          type: 'delivery.repair.completed',
-          status: 'completed',
-          attempt: record.deliveryRepairAttempts,
-          contract: record.latestDeliveryContract,
-        })
-        void this.startDeliveryValidation(record).catch(error => {
-          this.appendDeliveryValidationFailure(record, 'Delivery validation could not restart', error)
-        })
-      }
     }
-  }
-
-  private async submitDeliveryValidationWithTimeout(
-    record: SessionRecord,
-    runner: BeeGameSessionRuntime,
-    prompt: BeeGamePromptInput,
-    thinkingMode: BeeGameChatThinkingMode | undefined,
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    const timeoutMs = getDeliveryValidationTimeoutMs()
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<'timeout'>(resolveTimeout => {
-      timeout = setTimeout(() => resolveTimeout('timeout'), timeoutMs)
-    })
-    try {
-      const outcome = await Promise.race([
-        this.submitToRunner(record, runner, prompt, thinkingMode, signal).then(() => 'completed' as const),
-        timedOut,
-      ])
-      if (outcome === 'completed') return false
-      runner.stop()
-      if (record.runner === runner) record.runner = null
-      return true
-    } finally {
-      if (timeout) clearTimeout(timeout)
-    }
-  }
-
-  private async startDeliveryValidation(record: SessionRecord): Promise<void> {
-    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    if (!record.approvedDocumentSnapshotLocked) {
-      const audit = auditProjectDeliveryContract(record.session.cwd)
-      const snapshot = audit.valid && this.hasConfiguredValidationAdapter(audit)
-        ? await captureApprovedDocumentSnapshot(record.session.cwd)
-        : {}
-      if (audit.valid && this.hasConfiguredValidationAdapter(audit) && Object.keys(snapshot).length > 0) {
-        record.approvedDocumentSnapshot = snapshot
-        record.approvedDocumentSnapshotLocked = true
-        this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
-          type: 'delivery.specification.locked',
-          documents: snapshot,
-          migrated: true,
-        })
-      }
-    }
-    await this.runConfiguredDeliveryValidationAdapter(record)
-    await this.sendWithDisplay(
-      record.session.id,
-      deliveryValidationDispatchPrompt(),
-      {
-        displayText: 'Running independent delivery validators',
-        displayKind: 'delivery_validation',
-        taskType: 'agent_turn',
-        thinkingMode: 'enabled',
-        onTurnAccepted: () => {
-          record.deliveryPipelineResumeFailures = 0
-          this.append(record, 'delivery.validation.started', 'Independent delivery validation started', {
-            type: 'delivery.validation.started',
-            status: 'validating',
-            attempt: record.deliveryRepairAttempts,
-            validatorTypes: [...DELIVERY_VALIDATOR_AGENT_TYPES],
-          })
-        },
-      },
-    )
-  }
-
-  private async runConfiguredDeliveryValidationAdapter(record: SessionRecord): Promise<void> {
-    const audit = auditProjectDeliveryContract(record.session.cwd)
-    if (!audit.valid) return
-    const adapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
-    if (!adapterId) return
-    try {
-      const request = await readDeliveryValidationRequest(record.session.cwd, adapterId)
-      const result = await this.deliveryValidationAdapters.require(adapterId).validate(request)
-      this.append(record, 'delivery.runtime_adapter.completed', `Runtime adapter ${adapterId} completed`, {
-        type: 'delivery.runtime_adapter.completed',
-        status: result.passed ? 'passed' : 'failed',
-        adapterId,
-        capability: `adapter:${adapterId}`,
-        result,
-      })
-    } catch (error) {
-      this.append(record, 'delivery.runtime_adapter.completed', `Runtime adapter ${adapterId} is unavailable`, {
-        type: 'delivery.runtime_adapter.completed',
-        status: 'blocked',
-        adapterId,
-        capability: `adapter:${adapterId}`,
-        error: toErrorMessage(error),
-      })
-    }
-  }
-
-  private hasConfiguredValidationAdapter(audit: ProjectDeliveryContractAudit): boolean {
-    const adapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
-    if (!adapterId) return true
-    try {
-      this.deliveryValidationAdapters.require(adapterId)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  private async startDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
-    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    const attempt = record.deliveryRepairAttempts + 1
-    await this.sendWithDisplay(
-      record.session.id,
-      buildDeliveryRepairPrompt(contract, attempt),
-      {
-        displayText: `Fixing delivery gaps (attempt ${attempt})`,
-        displayKind: 'delivery_repair',
-        taskType: 'agent_turn',
-        thinkingMode: 'enabled',
-        onTurnAccepted: () => {
-          record.deliveryPipelineResumeFailures = 0
-          record.deliveryRepairAttempts = attempt
-          this.append(record, 'delivery.repair.started', 'Delivery repair started', {
-            type: 'delivery.repair.started', status: 'running', attempt, contract,
-          })
-        },
-      },
-    )
-  }
-
-  private async restartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
-    if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
-    const attempt = Math.max(1, record.deliveryRepairAttempts)
-    await this.sendWithDisplay(
-      record.session.id,
-      buildDeliveryRepairPrompt(contract, attempt),
-      {
-        displayText: `Resuming delivery repair (attempt ${attempt})`,
-        displayKind: 'delivery_repair',
-        taskType: 'agent_turn',
-        thinkingMode: 'enabled',
-        onTurnAccepted: () => {
-          record.deliveryPipelineResumeFailures = 0
-          this.append(record, 'delivery.repair.started', 'Delivery repair resumed', {
-            type: 'delivery.repair.started', status: 'running', attempt, resumed: true, contract,
-          })
-        },
-      },
-    )
-  }
-
-  private appendDeliveryRepairQueued(record: SessionRecord, contract: DeliveryContract): void {
-    this.append(record, 'delivery.repair.queued', 'Delivery repair queued', {
-      type: 'delivery.repair.queued',
-      status: 'queued',
-      attempt: record.deliveryRepairAttempts + 1,
-      contract,
-    })
-  }
-
-  private appendDeliveryPipelineBlocked(record: SessionRecord, contract: DeliveryContract): void {
-    const noProgress = hasRepeatedDeliveryFailure(record, contract)
-    this.append(record, 'delivery.pipeline.blocked', noProgress
-      ? 'Delivery repair made no progress'
-      : 'Delivery validation is blocked', {
-      type: 'delivery.pipeline.blocked',
-      status: 'needs_user',
-      reason: noProgress ? 'no_progress' : 'validation_blocked',
-      attempt: record.deliveryRepairAttempts,
-      contract,
-    })
-  }
-
-  private appendDeliveryRepairResumeFailure(record: SessionRecord, error: unknown): void {
-    this.append(record, 'system.status', 'Queued delivery repair could not start', {
-      type: 'delivery.repair.resume_failed',
-      status: 'queued',
-      attempt: record.deliveryRepairAttempts + 1,
-      error: toErrorMessage(error),
-    })
-  }
-
-  private completeDeliveryValidation(record: SessionRecord, eventStartIndex: number): DeliveryContract {
-    const reviewEvents = record.events.slice(eventStartIndex)
-    const completedValidators = getCompletedDeliveryValidators(reviewEvents)
-    const pendingValidators = getPendingDeliveryValidators(reviewEvents)
-    const missingValidators = DELIVERY_VALIDATOR_AGENT_TYPES.filter(type => (
-      !completedValidators.has(type) && !pendingValidators.has(type)
-    ))
-    const verifiedEvidenceIds = getValidatorEvidenceIds(completedValidators)
-    const previousValidationIndex = record.events
-      .slice(0, eventStartIndex)
-      .findLastIndex(event => event.type === 'delivery.validation.completed')
-    const runtimeAdapterEvent = record.events
-      .slice(previousValidationIndex + 1, eventStartIndex)
-      .findLast(event => event.type === 'delivery.runtime_adapter.completed')
-    if (runtimeAdapterEvent) verifiedEvidenceIds.add(String(runtimeAdapterEvent.id))
-    const documentAudit = auditProjectDeliveryContract(record.session.cwd)
-    if (!record.approvedDocumentSnapshotLocked || Object.keys(record.approvedDocumentSnapshot).length === 0) {
-      documentAudit.valid = false
-      documentAudit.issues.push('No approved project source documents existed when implementation began.')
-    }
-    const changedApprovedDocuments = getApprovedDocumentChanges(
-      record.session.cwd,
-      record.approvedDocumentSnapshot,
-    )
-    if (changedApprovedDocuments.length > 0) {
-      documentAudit.valid = false
-      documentAudit.issues.push(
-        `Approved project documents changed after implementation began: ${changedApprovedDocuments.join(', ')}`,
-      )
-    }
-    const documentAuditEvidenceId = `delivery-contract-audit:${record.currentTurnId ?? record.session.id}`
-    const parsed = buildReviewFromValidatorReports(
-      documentAudit,
-      completedValidators,
-      documentAuditEvidenceId,
-      runtimeAdapterEvent,
-    )
-    if (missingValidators.length > 0) {
-      parsed.status = 'blocked'
-      parsed.summary = `Independent delivery validation was incomplete: ${missingValidators.length} validator(s) did not complete.`
-      parsed.findings.push({
-        requirementId: 'independent-validation-protocol',
-        requirement: 'Independent validation protocol',
-        status: 'blocked',
-        detail: 'One or more required validators did not return evidence.',
-        evidence: [],
-      })
-    }
-    verifiedEvidenceIds.add(documentAuditEvidenceId)
-    const documentIssues = [...documentAudit.issues]
-    parsed.requiredCapabilities = [...new Set([
-      ...parsed.requiredCapabilities,
-      ...documentAudit.requiredCapabilities,
-    ])]
-    const documentRequirement: DeliveryRequirement = {
-      id: 'project-delivery-contract-integrity',
-      title: 'Project delivery contract integrity',
-      scope: 'mvp',
-      status: documentIssues.length === 0 ? 'accepted' : 'failed',
-      evidenceRequired: ['document'],
-      evidence: [{
-        kind: 'document',
-        eventId: documentAuditEvidenceId,
-        source: 'docs/delivery-contract.json',
-        detail: documentIssues.length === 0
-          ? `Validated ${documentAudit.requirements.length} requirements and ${documentAudit.playerPathIds.length} player paths.`
-          : documentIssues.join(' '),
-      }],
-      ...(documentIssues.length > 0 ? { detail: documentIssues.join(' ') } : {}),
-    }
-    const existingDocumentRequirement = parsed.requirements.findIndex(item => item.id === documentRequirement.id)
-    if (existingDocumentRequirement >= 0) parsed.requirements[existingDocumentRequirement] = documentRequirement
-    else parsed.requirements.push(documentRequirement)
-    if (documentIssues.length > 0) {
-      parsed.status = 'failed'
-      parsed.findings.push({
-        requirementId: documentRequirement.id,
-        requirement: documentRequirement.title,
-        status: 'failed',
-        detail: documentIssues.join(' '),
-        evidence: documentRequirement.evidence,
-      })
-    }
-    const assetAuditEvidenceId = `asset-contract-audit:${record.currentTurnId ?? record.session.id}`
-    const assetAudit = auditAssetContract(record.session.cwd)
-    if (assetAudit.present) {
-      verifiedEvidenceIds.add(assetAuditEvidenceId)
-      const assetRequirement: DeliveryRequirement = {
-        id: 'project-asset-contract-integrity',
-        title: 'Project asset contract integrity',
-        scope: 'mvp',
-        status: assetAudit.valid ? 'accepted' : 'failed',
-        evidenceRequired: ['asset'],
-        evidence: [{
-          kind: 'asset',
-          eventId: assetAuditEvidenceId,
-          source: 'assets/asset-manifest.json',
-          detail: assetAudit.valid
-            ? `Validated ${assetAudit.slots.length} asset slots.`
-            : assetAudit.issues.join(' '),
-        }],
-        ...(!assetAudit.valid ? { detail: assetAudit.issues.join(' ') } : {}),
-      }
-      const existingAssetRequirement = parsed.requirements.findIndex(item => item.id === assetRequirement.id)
-      if (existingAssetRequirement >= 0) parsed.requirements[existingAssetRequirement] = assetRequirement
-      else parsed.requirements.push(assetRequirement)
-      if (!assetAudit.valid) {
-        parsed.status = 'failed'
-        parsed.findings.push({
-          requirementId: 'project-asset-contract-integrity',
-          requirement: 'Project asset contract integrity',
-          status: 'failed',
-          detail: assetAudit.issues.join(' '),
-          evidence: [{
-            kind: 'asset',
-            eventId: assetAuditEvidenceId,
-            source: 'assets/asset-manifest.json',
-            detail: assetAudit.issues.join(' '),
-          }],
-        })
-      }
-    }
-    const verifiedCapabilities = getVerifiedDeliveryCapabilities(reviewEvents, completedValidators)
-    const runtimeAdapterCapability = getDashboardPayloadString(runtimeAdapterEvent?.payload, 'capability')
-    if (runtimeAdapterCapability) verifiedCapabilities.push(runtimeAdapterCapability)
-    const verifiedReview = retainVerifiedDeliveryEvidence(parsed, verifiedEvidenceIds, record.session.cwd)
-    let contract = createDeliveryContract(verifiedReview, verifiedCapabilities)
-    if (pendingValidators.size > 0) {
-      this.append(record, 'delivery.validation.waiting', 'Waiting for independent validation sub-agents', {
-        type: 'delivery.validation.waiting',
-        status: 'waiting',
-        pendingValidatorTypes: [...pendingValidators],
-        completedValidatorTypes: [...completedValidators.keys()],
-        attempt: record.deliveryRepairAttempts,
-      })
-      return contract
-    }
-    try {
-      writeDeliveryValidationReport(record.session.cwd, contract, verifiedReview.findings)
-    } catch (error) {
-      contract = {
-        ...contract,
-        status: 'blocked',
-        summary: `${contract.summary} The host could not persist the evidence-backed validation report: ${toErrorMessage(error)}`,
-      }
-      verifiedReview.findings.push({
-        requirementId: 'validation-report-persistence',
-        requirement: 'Evidence-backed validation report persistence',
-        status: 'blocked',
-        detail: toErrorMessage(error),
-        evidence: [],
-      })
-    }
-    this.append(record, 'delivery.contract.updated', contract.summary, {
-      type: 'delivery.contract.updated',
-      contract,
-      attempt: record.deliveryRepairAttempts,
-      projectRevision: getProjectMutationRevision(record.events),
-    })
-    this.append(record, 'delivery.validation.completed', contract.summary, {
-      type: 'delivery.validation.completed',
-      status: contract.status,
-      summary: contract.summary,
-      findings: verifiedReview.findings,
-      evidenceEventIds: [...verifiedEvidenceIds],
-      validators: [...completedValidators].map(([agentType, event]) => ({
-        agentType,
-        toolUseID: getDashboardPayloadString(event.payload, 'toolUseID'),
-        status: 'completed',
-        evidenceEventId: String(event.id),
-      })),
-      pendingValidatorTypes: [...pendingValidators],
-      contract,
-      attempt: record.deliveryRepairAttempts,
-    })
-    if (contract.status === 'passed') record.deliveryRepairAttempts = 0
-    return contract
-  }
-
-  private appendDeliveryValidationFailure(record: SessionRecord, text: string, error: unknown): void {
-    this.append(record, 'delivery.validation.completed', text, {
-      type: 'delivery.validation.completed',
-      status: 'blocked',
-      summary: toErrorMessage(error),
-      findings: [],
-      evidenceEventIds: [],
-      retryable: true,
-    })
   }
 
   private async resolveRuntimeOutboundTargets(
@@ -1646,14 +985,12 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
-    thinkingMode: BeeGameChatThinkingMode | undefined,
     signal: AbortSignal,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
     await runner.submit({
       prompt,
-      thinkingMode: thinkingMode ?? 'disabled',
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
@@ -1682,13 +1019,12 @@ export class BeeGameSessionManager {
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          const appended = this.append(
+          this.append(
             record,
             toolEvent.type,
             toolEvent.text,
             toolEvent.payload,
           )
-          this.maybeStartSubagentOutputMonitor(record, appended)
         }
       },
       requestPermission: request => this.requestPermission(record, request),
@@ -1733,11 +1069,6 @@ export class BeeGameSessionManager {
     if (!pending) throw new Error('Permission request not found')
 
     record.pendingPermissions.delete(toolUseID)
-    if (decision.behavior === 'allow' && decision.remember) {
-      record.trustedSession = true
-      record.rememberedPermissions.add(permissionSignature(pending))
-      record.rememberedPermissionTools.add(pending.toolName)
-    }
     pending.resolve(decision)
     this.append(
       record,
@@ -1758,71 +1089,20 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
-    const specificationGateFailure = await this.lockSpecificationBeforeImplementationTool(record, request)
-    if (specificationGateFailure) {
-      const message = `${specificationGateFailure.message} Expected structure: ${formatProjectDeliveryContract()}`
-      const fingerprint = createHash('sha256')
-        .update(JSON.stringify(specificationGateFailure.issues))
-        .digest('hex')
-      record.specificationGateFailureCount = record.specificationGateFailureFingerprint === fingerprint
-        ? record.specificationGateFailureCount + 1
-        : 1
-      record.specificationGateFailureFingerprint = fingerprint
-      const blocked = record.specificationGateFailureCount >= MAX_IDENTICAL_SPECIFICATION_GATE_FAILURES
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
-        decision: 'deny', autoDenied: true, reason: message, input: request.input,
-      })
-      this.append(record, 'system.status', 'Implementation blocked until the delivery contract is valid', {
-        type: 'delivery.implementation_gate.failed',
-        status: blocked ? 'blocked' : 'failed',
-        reason: 'invalid_delivery_contract',
-        issues: specificationGateFailure.issues,
-        expectedFormat: formatProjectDeliveryContract(),
-        fingerprint,
-        identicalFailureCount: record.specificationGateFailureCount,
-        terminal: blocked,
-      })
-      if (blocked) {
-        record.currentTurnKind = 'specification_blocked'
-        queueMicrotask(() => record.abortController?.abort())
-      }
-      return { behavior: 'deny', message }
-    }
-    const protectedDocument = getProtectedDeliveryDocument(record, request)
-    if (protectedDocument) {
-      const message = protectedDocument === 'docs/validation-report.md'
-        ? 'Validation reports are generated from independent evidence and cannot be authored by the project Agent.'
-        : Object.prototype.hasOwnProperty.call(record.approvedDocumentSnapshot, protectedDocument)
-          ? 'Approved source documents are locked after implementation begins.'
-          : 'Files cited by independent validation as acceptance evidence are read-only during delivery repair.'
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
-        decision: 'deny', autoDenied: true, reason: message, input: request.input,
-      })
-      return { behavior: 'deny', message }
-    }
-    if (record.currentTurnKind === 'delivery_validation' && isFileMutationTool(request.toolName)) {
-      const message = 'Delivery review is read-only and cannot modify project files.'
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
-        decision: 'deny', autoDenied: true, reason: message, input: request.input,
-      })
-      return { behavior: 'deny', message }
-    }
     if (isUserQuestionTool(request.toolName)) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+      const message = 'This headless BeeGame session cannot collect structured AskUserQuestion answers. Ask the user in the assistant response instead.'
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
         type: 'permission.resolved',
         toolUseID: request.toolUseID,
         toolName: request.toolName,
-        decision: 'allow',
-        autoApproved: true,
-        reason: 'User clarification tools do not require dashboard permission approval.',
+        decision: 'deny',
+        autoDenied: true,
+        reason: message,
         input: request.input,
       })
       return Promise.resolve({
-        behavior: 'allow',
-        message: 'Allowed so BeeGame can ask the user for clarification.',
+        behavior: 'deny',
+        message,
       })
     }
     const sessionWorkspaceRoot = record.session.cwd
@@ -1846,19 +1126,6 @@ export class BeeGameSessionManager {
         message: workspaceViolation,
       })
     }
-    if (request.toolName === 'Bash' && hasReachedBashPermissionRequestLimit(record)) {
-      const message = `BeeGame stopped this turn after too many Bash permission requests requiring user resolution (${MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS}). The agent should summarize the current result instead of requesting more permissions.`
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        autoDenied: true,
-        reason: message,
-        input: request.input,
-      })
-      throw new Error(message)
-    }
     const policyDecision = getBeeGamePermissionPolicyDecision(
       record,
       sessionWorkspaceRoot,
@@ -1879,27 +1146,6 @@ export class BeeGameSessionManager {
         message: policyDecision.message,
       })
     }
-    const signature = permissionSignature(request)
-    if (
-      policyDecision.behavior === 'auto_allow' ||
-      (record.trustedSession && request.toolName !== 'Bash') ||
-      record.rememberedPermissions.has(signature) ||
-      (request.toolName !== 'Bash' &&
-        record.rememberedPermissionTools.has(request.toolName))
-    ) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        remember: true,
-        autoApproved: true,
-      })
-      return Promise.resolve({
-        behavior: 'allow',
-        message: 'Auto-approved by dashboard for a matching prior permission.',
-      })
-    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, { ...request, resolve })
       this.append(record, 'permission.requested', request.message, {
@@ -1909,103 +1155,6 @@ export class BeeGameSessionManager {
         message: request.message,
         input: request.input,
       })
-    })
-  }
-
-  private async lockSpecificationBeforeImplementationTool(
-    record: SessionRecord,
-    request: DashboardPermissionRequest,
-  ): Promise<{ message: string; issues: string[] } | undefined> {
-    if (record.currentTurnKind !== 'confirmed_brief' || record.approvedDocumentSnapshotLocked) return undefined
-    if (!isImplementationMutationTool(record.session.cwd, request)) return undefined
-    const contractAudit = auditProjectDeliveryContract(record.session.cwd)
-    if (!contractAudit.valid) {
-      const detail = contractAudit.issues.length > 0
-        ? contractAudit.issues.join(' ')
-        : 'The delivery contract is incomplete.'
-      return {
-        message: `Complete the evidence-backed delivery contract before implementation. ${detail}`,
-        issues: contractAudit.issues.length > 0 ? contractAudit.issues : ['The delivery contract is incomplete.'],
-      }
-    }
-    const adapterId = resolveRequiredValidationAdapter(contractAudit.requiredCapabilities)
-    if (adapterId) {
-      try {
-        this.deliveryValidationAdapters.require(adapterId)
-      } catch (error) {
-        const issue = `Configure the declared runtime validation adapter before implementation. ${toErrorMessage(error)}`
-        return { message: issue, issues: [issue] }
-      }
-    }
-    const snapshot = await captureApprovedDocumentSnapshot(record.session.cwd)
-    if (Object.keys(snapshot).length === 0) {
-      const issue = 'Create the approved project specification documents before implementation. Code and build mutations are blocked until the source-of-truth documents exist.'
-      return { message: issue, issues: [issue] }
-    }
-    record.specificationGateFailureFingerprint = undefined
-    record.specificationGateFailureCount = 0
-    record.approvedDocumentSnapshot = snapshot
-    record.approvedDocumentSnapshotLocked = true
-    this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
-      type: 'delivery.specification.locked',
-      documents: snapshot,
-    })
-    return undefined
-  }
-
-  private appendRuntimeObservation(
-    record: SessionRecord,
-    status: 'initialized' | 'turn_completed' | 'empty_turn' | 'model_updated',
-  ): void {
-    const runtimeSettings = readSessionRuntimeSettings(record.userDataRoot)
-    const features: RuntimeObservationFeature[] = [
-      {
-        id: 'CONTEXT_COLLAPSE',
-        label: 'Context collapse',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      {
-        id: 'HISTORY_SNIP',
-        label: 'History snip',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      {
-        id: 'TOKEN_BUDGET',
-        label: 'Token budget',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      {
-        id: 'PROMPT_CACHE_BREAK_DETECTION',
-        label: 'Prompt cache diagnostics',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      {
-        id: 'SHOT_STATS',
-        label: 'Shot stats',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      {
-        id: 'MONITOR_TOOL',
-        label: 'Monitor tool',
-        stage: 'phase_1',
-        status: 'available',
-      },
-      ...runtimeSettingsFeatures(runtimeSettings),
-    ]
-    this.append(record, 'runtime.observation', 'BeeGame runtime observability updated', {
-      type: 'runtime.observation',
-      status,
-      features,
-      counters: {
-        eventCount: record.events.length,
-        toolUseCount: record.toolUses.size,
-        turnIndex: Math.max(0, record.nextTurnIndex - 1),
-      },
     })
   }
 
@@ -2035,17 +1184,13 @@ export class BeeGameSessionManager {
     text: string,
     payload?: DashboardSDKMessage,
   ): BeeGameEvent {
-    const sanitizedText = sanitizeBeeGameText(text)
-    const sanitizedPayload = payload
-      ? (sanitizeBeeGameVisibleValue(payload) as DashboardSDKMessage)
-      : undefined
     const event: BeeGameEvent = {
       id: record.nextEventId,
       sessionId: record.session.id,
       ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
       type,
-      text: sanitizedText,
-      ...(sanitizedPayload ? { payload: sanitizedPayload } : {}),
+      text,
+      ...(payload ? { payload } : {}),
       createdAt: new Date(),
     }
     record.events.push(event)
@@ -2230,173 +1375,6 @@ export class BeeGameSessionManager {
     }
   }
 
-  private maybeStartSubagentOutputMonitor(
-    record: SessionRecord,
-    event: BeeGameEvent,
-  ): void {
-    if (event.type !== 'tool.completed') return
-    const payload = event.payload
-    const toolName = getDashboardPayloadString(payload, 'toolName')
-    if (!isSubagentTool(toolName)) return
-    const output = getDashboardPayloadString(payload, 'output')
-    const launch = parseAsyncSubagentLaunch(output)
-    if (!launch || record.monitoredSubagentOutputFiles.has(launch.outputFile)) {
-      return
-    }
-
-    record.monitoredSubagentOutputFiles.add(launch.outputFile)
-    const toolUseID = getDashboardPayloadString(payload, 'toolUseID')
-    const input = getDashboardPayloadRecord(payload, 'input')
-    this.append(record, 'tool.progress', 'Subagent running', {
-      type: 'tool.progress',
-      toolUseID,
-      toolName,
-      input,
-      agentId: launch.agentId,
-      status: 'running',
-      output: 'Subagent is running in the background.',
-    })
-    void this.monitorSubagentOutput(record, {
-      toolUseID,
-      toolName,
-      input,
-      agentId: launch.agentId,
-      outputFile: launch.outputFile,
-    })
-  }
-
-  private async monitorSubagentOutput(
-    record: SessionRecord,
-    subagent: {
-      toolUseID: string
-      toolName: string
-      input: Record<string, unknown>
-      agentId: string
-      outputFile: string
-    },
-  ): Promise<void> {
-    const startedAt = Date.now()
-    const timeoutMs = getSubagentMonitorTimeoutMs()
-    let lastError = ''
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        const raw = await readFile(subagent.outputFile, 'utf8')
-        const result = extractCompletedSubagentMessage(raw)
-        if (result) {
-          this.appendCompletedSubagentOutput(record, subagent, result)
-          return
-        }
-      } catch (err) {
-        lastError = toErrorMessage(err)
-      }
-      await sleep(getSubagentMonitorPollMs())
-    }
-    this.append(record, 'tool.failed', 'Subagent output unavailable', {
-      type: 'tool.failed',
-      toolUseID: subagent.toolUseID,
-      toolName: subagent.toolName,
-      input: subagent.input,
-      agentId: subagent.agentId,
-      output: lastError
-        ? `Subagent did not produce a final report before timeout. Last read error: ${lastError}`
-        : 'Subagent did not produce a final report before timeout.',
-    })
-    this.resumeDelayedDeliveryValidationIfReady(record)
-  }
-
-  private refreshCompletedSubagentOutputs(record: SessionRecord): void {
-    for (const event of record.events) {
-      if (event.type !== 'tool.completed') continue
-      const payload = event.payload
-      const toolName = getDashboardPayloadString(payload, 'toolName')
-      if (!isSubagentTool(toolName)) continue
-      const output = getDashboardPayloadString(payload, 'output')
-      const launch = parseAsyncSubagentLaunch(output)
-      if (!launch) continue
-      if (hasCompletedSubagentOutput(record, launch.agentId)) continue
-      let raw = ''
-      try {
-        raw = readFileSync(launch.outputFile, 'utf8')
-      } catch {
-        this.maybeStartSubagentOutputMonitor(record, event)
-        continue
-      }
-      const result = extractCompletedSubagentMessage(raw)
-      if (!result) {
-        this.maybeStartSubagentOutputMonitor(record, event)
-        continue
-      }
-      record.monitoredSubagentOutputFiles.add(launch.outputFile)
-      this.appendCompletedSubagentOutput(record, {
-        toolUseID: getDashboardPayloadString(payload, 'toolUseID'),
-        toolName,
-        input: getDashboardPayloadRecord(payload, 'input'),
-        agentId: launch.agentId,
-        outputFile: launch.outputFile,
-      }, result)
-    }
-  }
-
-  private appendCompletedSubagentOutput(
-    record: SessionRecord,
-    subagent: {
-      toolUseID: string
-      toolName: string
-      input: Record<string, unknown>
-      agentId: string
-      outputFile?: string
-    },
-    result: string,
-  ): void {
-    if (hasCompletedSubagentOutput(record, subagent.agentId)) return
-    this.append(record, 'tool.completed', 'Subagent completed', {
-      type: 'tool.completed',
-      toolUseID: subagent.toolUseID,
-      toolName: subagent.toolName,
-      input: subagent.input,
-      agentId: subagent.agentId,
-      output: result,
-    })
-    this.append(record, 'assistant.message', result, {
-      type: 'assistant',
-      parent_tool_use_id: subagent.toolUseID,
-      subagent_id: subagent.agentId,
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: result }],
-      },
-    })
-    this.resumeDelayedDeliveryValidationIfReady(record)
-  }
-
-  private resumeDelayedDeliveryValidationIfReady(record: SessionRecord): void {
-    if (record.session.status !== 'running' || record.session.turnStatus !== 'idle') return
-    const waitingEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.waiting')
-    if (!waitingEvent) return
-    const laterTerminal = record.events.some(event => (
-      event.id > waitingEvent.id && event.type === 'delivery.validation.completed'
-    ))
-    if (laterTerminal) return
-    const pending = Array.isArray(waitingEvent.payload?.pendingValidatorTypes)
-      ? waitingEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
-      : []
-    if (pending.length === 0) return
-    const validationStartIndex = record.events.findLastIndex(event => event.type === 'delivery.validation.started')
-    const validationEvents = record.events.slice(Math.max(0, validationStartIndex))
-    const completed = getCompletedDeliveryValidators(validationEvents)
-    const failed = getFailedDeliveryValidators(validationEvents)
-    if (pending.some(agentType => !completed.has(agentType) && !failed.has(agentType))) return
-    const contract = this.completeDeliveryValidation(record, Math.max(0, validationStartIndex))
-    record.latestDeliveryContract = contract
-    if (shouldStartDeliveryRepair(record, contract)) {
-      this.appendDeliveryRepairQueued(record, contract)
-      void this.startDeliveryRepair(record, contract).catch(error => {
-        this.appendDeliveryRepairResumeFailure(record, error)
-      })
-    } else if (pending.some(agentType => failed.has(agentType)) || contract.status === 'blocked') {
-      this.appendDeliveryPipelineBlocked(record, contract)
-    }
-  }
 }
 
 function resolveExistingPath(path: string): string {
@@ -2406,74 +1384,6 @@ function resolveExistingPath(path: string): string {
   } catch {
     return resolved
   }
-}
-
-function isSubagentTool(toolName: string): boolean {
-  return toolName === 'Agent' || toolName === 'Task'
-}
-
-function hasCompletedSubagentOutput(
-  record: SessionRecord,
-  agentId: string,
-): boolean {
-  return record.events.some(event => {
-    if (event.type !== 'tool.completed') return false
-    if (event.text !== 'Subagent completed') return false
-    return getDashboardPayloadString(event.payload, 'agentId') === agentId
-  })
-}
-
-function parseAsyncSubagentLaunch(
-  output: string,
-): { agentId: string; outputFile: string } | null {
-  if (!output.includes('Async agent launched successfully.')) return null
-  const agentIdMatch = output.match(/\bagentId:\s*([^\s(]+)/)
-  const outputFileMatch = output.match(/\boutput_file:\s*(\S+)/)
-  const agentId = agentIdMatch?.[1]?.trim()
-  const outputFile = outputFileMatch?.[1]?.trim()
-  if (!agentId || !outputFile || !isAbsolute(outputFile)) return null
-  return { agentId, outputFile }
-}
-
-function extractCompletedSubagentMessage(raw: string): string {
-  const lines = raw
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-  for (const line of [...lines].reverse()) {
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown>
-      if (entry.type !== 'assistant') continue
-      const message = isObject(entry.message) ? entry.message : undefined
-      if (!message || message.stop_reason !== 'end_turn') continue
-      const text = extractVisibleTextFromContent(message.content)
-      if (text.trim()) return text.trim()
-    } catch {
-      continue
-    }
-  }
-  return ''
-}
-
-function getSubagentMonitorTimeoutMs(): number {
-  const raw = Number(process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS)
-  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000
-}
-
-function getDeliveryValidationTimeoutMs(): number {
-  const raw = Number(process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS)
-  return Number.isFinite(raw) && raw > 0
-    ? raw
-    : DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS
-}
-
-function getSubagentMonitorPollMs(): number {
-  const raw = Number(process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS)
-  return Number.isFinite(raw) && raw > 0 ? raw : 1000
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function deleteSessionArtifactRoots(
@@ -2551,7 +1461,7 @@ export async function readSessionTranscriptFromDisk(
       payload?: DashboardSDKMessage
       createdAt: string
     })
-  return appendCompletedSubagentOutputsFromDisk(transcriptPath, sessionId, events)
+  return events
 }
 
 async function resolveReadableTranscriptPath(
@@ -2620,124 +1530,6 @@ function parseTranscriptEvents(raw: string): BeeGameEvent[] {
         createdAt: new Date(parsed.createdAt),
       }
     })
-}
-
-function appendCompletedSubagentOutputsFromDisk(
-  transcriptPath: string,
-  fallbackSessionId: string,
-  events: Array<{
-    id: number
-    sessionId?: string
-    turnId?: string
-    type: BeeGameEventType
-    text: string
-    payload?: DashboardSDKMessage
-    createdAt: string
-  }>,
-): Array<{
-  id: number
-  sessionId?: string
-  turnId?: string
-  type: BeeGameEventType
-  text: string
-  payload?: DashboardSDKMessage
-  createdAt: string
-}> {
-  let nextEventId = events.reduce((max, event) => Math.max(max, event.id), 0) + 1
-  for (const event of [...events]) {
-    if (event.type !== 'tool.completed') continue
-    const payload = event.payload
-    const toolName = getDashboardPayloadString(payload, 'toolName')
-    if (!isSubagentTool(toolName)) continue
-    const launch = parseAsyncSubagentLaunch(
-      getDashboardPayloadString(payload, 'output'),
-    )
-    if (!launch || hasCompletedSubagentOutputInEvents(events, launch.agentId)) {
-      continue
-    }
-    let raw = ''
-    try {
-      raw = readFileSync(launch.outputFile, 'utf8')
-    } catch {
-      continue
-    }
-    const result = extractCompletedSubagentMessage(raw)
-    if (!result) continue
-
-    const sessionId = event.sessionId || fallbackSessionId
-    const toolUseID = getDashboardPayloadString(payload, 'toolUseID')
-    const input = getDashboardPayloadRecord(payload, 'input')
-    const completedEvent: BeeGameEvent = {
-      id: nextEventId,
-      sessionId,
-      ...(event.turnId ? { turnId: event.turnId } : {}),
-      type: 'tool.completed',
-      text: 'Subagent completed',
-      payload: {
-        type: 'tool.completed',
-        toolUseID,
-        toolName,
-        input,
-        agentId: launch.agentId,
-        output: result,
-      },
-      createdAt: new Date(),
-    }
-    nextEventId += 1
-    const messageEvent: BeeGameEvent = {
-      id: nextEventId,
-      sessionId,
-      ...(event.turnId ? { turnId: event.turnId } : {}),
-      type: 'assistant.message',
-      text: result,
-      payload: {
-        type: 'assistant',
-        parent_tool_use_id: toolUseID,
-        subagent_id: launch.agentId,
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: result }],
-        },
-      },
-      createdAt: new Date(),
-    }
-    nextEventId += 1
-    appendTranscriptEvent(transcriptPath, completedEvent)
-    appendTranscriptEvent(transcriptPath, messageEvent)
-    events.push(toDiskTranscriptEvent(completedEvent), toDiskTranscriptEvent(messageEvent))
-  }
-  return events
-}
-
-function hasCompletedSubagentOutputInEvents(
-  events: Array<{ type: BeeGameEventType; text: string; payload?: DashboardSDKMessage }>,
-  agentId: string,
-): boolean {
-  return events.some(event =>
-    event.type === 'tool.completed' &&
-    event.text === 'Subagent completed' &&
-    getDashboardPayloadString(event.payload, 'agentId') === agentId,
-  )
-}
-
-function toDiskTranscriptEvent(event: BeeGameEvent): {
-  id: number
-  sessionId: string
-  turnId?: string
-  type: BeeGameEventType
-  text: string
-  payload?: DashboardSDKMessage
-  createdAt: string
-} {
-  return {
-    id: event.id,
-    sessionId: event.sessionId,
-    ...(event.turnId ? { turnId: event.turnId } : {}),
-    type: event.type,
-    text: event.text,
-    ...(event.payload ? { payload: event.payload } : {}),
-    createdAt: event.createdAt.toISOString(),
-  }
 }
 
 function getNextTranscriptEventId(events: BeeGameEvent[]): number {
@@ -2889,7 +1681,7 @@ function withSessionLanguageContract(
 }
 
 function withAssetIntegrationContract(prompt: string): string {
-  return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities is the explicit format capability contract of the selected runtime adapter. Set it from the project adapter/build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with that runtime contract. If the adapter capability or the format is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the target adapter/loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
+  return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities must come from the project build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with the project target. If compatibility is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
 }
 
 function withInitialIdeaContract(prompt: string): string {
@@ -2924,585 +1716,17 @@ function withDeliveryContract(prompt: string): string {
     '- Complete and validate docs/delivery-contract.json before the first code, asset, build, dependency, or shell mutation. Implementation is denied until the contract is valid.',
     '- Populate docs/delivery-contract.json only with declarative requirements, registered required capabilities, and structured player paths.',
     `- The contract must conform to this server-owned structural schema: ${formatProjectDeliveryContract()}`,
-    '- sourceRefs are mandatory and every locator must exist verbatim in its source document. Every action and assertion object must be non-empty and use the explicitly selected adapter vocabulary; prose strings and validator-owned outcomes are invalid.',
+    '- sourceRefs are mandatory and every locator must exist verbatim in its source document. Every action and assertion object must be non-empty and describe a project-native operation or observation; prose strings and validator-owned outcomes are invalid.',
     '- Before gameplay code, map every normative MVP statement to a requirement and every MVP gameplay requirement to at least one player path.',
-    '- Never add validator-owned status/evidence fields, author docs/validation-report.md, or pre-check acceptance items.',
+    '- Never add validator-owned status/evidence fields or pre-check acceptance items.',
     '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
-    '- requiredCapabilities may contain only registered skill:<id> or adapter:<id> values. Framework, language, rendering, input, and state-management names are implementation details, not validation capabilities.',
+    '- requiredCapabilities may contain only applicable registered skill:<id> values. Framework, language, rendering, input, and state-management names are implementation details, not validation capabilities.',
     '- Invoke applicable skills from the runtime Skill catalog. Missing required capability must be declared, never simulated.',
+    '- Before claiming completion, invoke the beegame-acceptance-validator through Claude Code\'s native Agent tool in the same task. Treat its observed evidence as authoritative.',
+    '- If validation fails, fix the project and invoke the validator again. Stop only after it passes or it reports a material blocker that requires the user or an unavailable external capability.',
+    '- Write docs/validation-report.md from the final validator result without inventing evidence, and keep unchecked acceptance items unchecked unless the validator actually observed them.',
     '- Fix validation failures without weakening sourceRefs, requirements, evidence requirements, or player paths.',
   ].join('\n')
-}
-
-function buildReviewFromValidatorReports(
-  audit: ProjectDeliveryContractAudit,
-  validators: Map<string, BeeGameEvent>,
-  documentAuditEvidenceId: string,
-  runtimeAdapterEvent?: BeeGameEvent,
-): ParsedDeliveryReview {
-  const reports = new Map<string, ReturnType<typeof parseDeliveryValidatorReport>>()
-  const findings: ParsedDeliveryReview['findings'] = []
-  let blocked = false
-  let failed = !audit.valid
-  const requiredAdapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
-  const runtimeAdapterResult = parseRuntimeAdapterResult(runtimeAdapterEvent)
-  const runtimeAdapterStatus = getDashboardPayloadString(runtimeAdapterEvent?.payload, 'status')
-  if (requiredAdapterId && !runtimeAdapterEvent) {
-    blocked = true
-    findings.push({
-      requirementId: 'runtime-validation-adapter',
-      requirement: 'Executable runtime validation adapter',
-      status: 'blocked',
-      detail: `The required runtime adapter did not run: ${requiredAdapterId}`,
-      evidence: [],
-    })
-  } else if (requiredAdapterId && runtimeAdapterStatus === 'blocked') {
-    blocked = true
-    findings.push({
-      requirementId: 'runtime-validation-adapter',
-      requirement: 'Executable runtime validation adapter',
-      status: 'blocked',
-      detail: getDashboardPayloadString(runtimeAdapterEvent?.payload, 'error') || `Runtime adapter is unavailable: ${requiredAdapterId}`,
-      evidence: [],
-    })
-  } else if (requiredAdapterId && runtimeAdapterStatus === 'failed') {
-    failed = true
-    findings.push({
-      requirementId: 'runtime-validation-adapter',
-      requirement: 'Executable runtime validation adapter',
-      status: 'failed',
-      detail: `The runtime adapter reported failed player-path assertions: ${requiredAdapterId}`,
-      evidence: [],
-    })
-  } else if (requiredAdapterId && !runtimeAdapterResult) {
-    blocked = true
-    findings.push({
-      requirementId: 'runtime-validation-adapter',
-      requirement: 'Executable runtime validation adapter',
-      status: 'blocked',
-      detail: `The runtime adapter returned an invalid result: ${requiredAdapterId}`,
-      evidence: [],
-    })
-  }
-
-  for (const validatorId of DELIVERY_VALIDATOR_AGENT_TYPES) {
-    const event = validators.get(validatorId)
-    if (!event) continue
-    const report = parseDeliveryValidatorReport(
-      getDashboardPayloadString(event.payload, 'output'),
-      validatorId,
-    )
-    reports.set(validatorId, report)
-    if (!report) {
-      blocked = true
-      findings.push({
-        requirementId: 'independent-validation-protocol',
-        requirement: 'Independent validation protocol',
-        status: 'blocked',
-        detail: `${validatorId} did not return its required structured report.`,
-        evidence: [],
-      })
-      continue
-    }
-    if (report.status === 'blocked') blocked = true
-    if (report.status === 'failed') failed = true
-    const eventId = getDashboardPayloadString(event.payload, 'toolUseID') || String(event.id)
-    for (const finding of report.findings) {
-      findings.push({
-        ...finding,
-        evidence: finding.evidence.map(evidence => ({ ...evidence, eventId })),
-      })
-    }
-  }
-
-  const contractReport = reports.get('beegame-contract-validator')
-  const runtimeRequirementIds = new Set(audit.playerPathRequirementIds)
-  const requirements: DeliveryRequirement[] = audit.requirements.map(declaration => {
-    const evidenceRequired = [...new Set([
-      ...declaration.evidenceRequired,
-      'document' as const,
-      'implementation' as const,
-      ...(runtimeRequirementIds.has(declaration.id) ? ['runtime' as const] : []),
-    ])]
-    const evidence: DeliveryEvidence[] = declaration.sourceRefs.map(sourceRef => ({
-      kind: 'document',
-      eventId: documentAuditEvidenceId,
-      source: `${sourceRef.path}#${sourceRef.locator}`,
-      detail: `Requirement is traced to ${sourceRef.path} at ${sourceRef.locator}.`,
-    }))
-    const validatorStatuses: DeliveryCheckStatus[] = []
-    for (const [validatorId, report] of reports) {
-      const requirement = report?.requirements.find(item => item.id === declaration.id)
-      if (!requirement) continue
-      validatorStatuses.push(requirement.status)
-      const event = validators.get(validatorId)
-      const eventId = event
-        ? getDashboardPayloadString(event.payload, 'toolUseID') || String(event.id)
-        : undefined
-      const acceptedEvidence = requirement.evidence.filter(item => (
-        item.kind !== 'runtime' || (
-          !requiredAdapterId &&
-          Boolean(item.source && audit.playerPathIds.includes(item.source))
-        )
-      ))
-      if (acceptedEvidence.length !== requirement.evidence.length) {
-        failed = true
-        findings.push({
-          requirementId: declaration.id,
-          requirement: declaration.title,
-          status: 'failed',
-          detail: 'Runtime evidence must identify an exact declared player path id; static files and build output cannot satisfy it.',
-          evidence: [],
-        })
-      }
-      evidence.push(...acceptedEvidence.map(item => ({ ...item, ...(eventId ? { eventId } : {}) })))
-    }
-    if (requiredAdapterId) {
-      const relatedPathIds = Object.entries(audit.playerPathRequirements)
-        .filter(([, requirementIds]) => requirementIds.includes(declaration.id))
-        .map(([pathId]) => pathId)
-      const adapterEventId = runtimeAdapterEvent ? String(runtimeAdapterEvent.id) : undefined
-      const adapterEvidence = (runtimeAdapterResult?.evidence ?? []).filter(item => (
-        item.kind === 'runtime' && Boolean(item.source && relatedPathIds.includes(item.source))
-      ))
-      evidence.push(...adapterEvidence.map(item => ({
-        ...item,
-        ...(adapterEventId ? { eventId: adapterEventId } : {}),
-      })))
-      if (runtimeAdapterStatus === 'blocked' || !runtimeAdapterEvent) validatorStatuses.push('blocked')
-      if ((runtimeAdapterResult?.failures ?? []).some(item => relatedPathIds.includes(item.pathId))) {
-        validatorStatuses.push('failed')
-      }
-    }
-    const contractRequirement = contractReport?.requirements.find(item => item.id === declaration.id)
-    if (declaration.scope === 'mvp' && !contractRequirement) {
-      failed = true
-      findings.push({
-        requirementId: declaration.id,
-        requirement: declaration.title,
-        status: 'failed',
-        detail: 'The contract validator did not prove this documented MVP requirement is implemented.',
-        evidence: [],
-      })
-    }
-    const missingEvidence = evidenceRequired.filter(kind => !evidence.some(item => item.kind === kind))
-    const requirementBlocked = validatorStatuses.includes('blocked')
-    const requirementFailed = validatorStatuses.includes('failed') || missingEvidence.length > 0
-    if (requirementBlocked) blocked = true
-    if (requirementFailed) failed = true
-    return {
-      id: declaration.id,
-      title: declaration.title,
-      scope: declaration.scope,
-      status: declaration.scope === 'roadmap'
-        ? 'planned'
-        : requirementBlocked
-          ? 'blocked'
-          : requirementFailed
-            ? 'failed'
-            : evidenceRequired.includes('runtime')
-              ? 'runtime_verified'
-              : 'accepted',
-      evidenceRequired,
-      evidence,
-      ...(missingEvidence.length > 0
-        ? { detail: `Missing required evidence: ${missingEvidence.join(', ')}.` }
-        : {}),
-    }
-  })
-
-  return {
-    status: blocked ? 'blocked' : failed ? 'failed' : 'passed',
-    summary: blocked
-      ? 'Independent sub-agent validation is blocked.'
-      : failed
-        ? 'Document conformance or delivery evidence failed independent validation.'
-        : 'All documented MVP requirements passed independent sub-agent validation.',
-    requirements,
-    requiredCapabilities: audit.requiredCapabilities,
-    findings,
-  }
-}
-
-function parseRuntimeAdapterResult(event: BeeGameEvent | undefined): DeliveryValidationResult | undefined {
-  const result = getDashboardPayloadRecord(event?.payload, 'result')
-  if (
-    typeof result.adapterId !== 'string' ||
-    typeof result.passed !== 'boolean' ||
-    !Array.isArray(result.evidence) ||
-    !Array.isArray(result.failures)
-  ) return undefined
-  return result as DeliveryValidationResult
-}
-
-function writeDeliveryValidationReport(
-  workspacePath: string,
-  contract: DeliveryContract,
-  findings: ParsedDeliveryReview['findings'],
-): void {
-  const docsDirectory = resolve(workspacePath, 'docs')
-  mkdirSync(docsDirectory, { recursive: true })
-  const reportPath = resolve(docsDirectory, 'validation-report.md')
-  const temporaryPath = resolve(docsDirectory, `.validation-report.${randomUUID()}.tmp`)
-  const lines = [
-    '# Delivery Validation Report',
-    '',
-    `Status: ${contract.status}`,
-    '',
-    contract.summary,
-    '',
-    '## Requirements',
-    '',
-  ]
-  for (const requirement of contract.requirements) {
-    lines.push(`### ${requirement.id}: ${requirement.title}`)
-    lines.push('')
-    lines.push(`- Scope: ${requirement.scope}`)
-    lines.push(`- Status: ${requirement.status}`)
-    lines.push(`- Required evidence: ${requirement.evidenceRequired.join(', ') || 'none'}`)
-    if (requirement.detail) lines.push(`- Detail: ${singleLine(requirement.detail)}`)
-    if (requirement.evidence.length === 0) {
-      lines.push('- Evidence: none')
-    } else {
-      lines.push('- Evidence:')
-      for (const evidence of requirement.evidence) {
-        const source = evidence.source ? ` from ${singleLine(evidence.source)}` : ''
-        lines.push(`  - ${evidence.kind}${source}: ${singleLine(evidence.detail)}`)
-      }
-    }
-    lines.push('')
-  }
-  lines.push('## Findings', '')
-  if (findings.length === 0) lines.push('No unresolved findings.', '')
-  else {
-    for (const finding of findings) {
-      const id = finding.requirementId ? `${finding.requirementId}: ` : ''
-      lines.push(`- [${finding.status}] ${id}${singleLine(finding.requirement)} — ${singleLine(finding.detail)}`)
-    }
-    lines.push('')
-  }
-  lines.push('This report is generated by the host from independent validator evidence. Project agents cannot author or edit it.', '')
-  writeFileSync(temporaryPath, lines.join('\n'), 'utf8')
-  renameSync(temporaryPath, reportPath)
-}
-
-function singleLine(value: string): string {
-  return value.replaceAll('\r', ' ').replaceAll('\n', ' ').trim()
-}
-
-function getCompletedDeliveryValidators(events: BeeGameEvent[]): Map<string, BeeGameEvent> {
-  const completed = new Map<string, BeeGameEvent>()
-  for (const event of events) {
-    if (event.type !== 'tool.completed') continue
-    const toolName = getDashboardPayloadString(event.payload, 'toolName')
-    if (toolName !== 'Task' && toolName !== 'Agent') continue
-    if (parseAsyncSubagentLaunch(getDashboardPayloadString(event.payload, 'output'))) continue
-    const input = getDashboardPayloadRecord(event.payload, 'input')
-    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
-    if (!agentType || !DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) continue
-    completed.set(agentType, event)
-  }
-  return completed
-}
-
-function getPendingDeliveryValidators(events: BeeGameEvent[]): Set<string> {
-  const pending = new Set<string>()
-  for (const event of events) {
-    if (event.type !== 'tool.completed') continue
-    const toolName = getDashboardPayloadString(event.payload, 'toolName')
-    if (toolName !== 'Task' && toolName !== 'Agent') continue
-    if (!parseAsyncSubagentLaunch(getDashboardPayloadString(event.payload, 'output'))) continue
-    const input = getDashboardPayloadRecord(event.payload, 'input')
-    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
-    if (agentType && DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) {
-      pending.add(agentType)
-    }
-  }
-  for (const agentType of getCompletedDeliveryValidators(events).keys()) pending.delete(agentType)
-  for (const agentType of getFailedDeliveryValidators(events)) pending.delete(agentType)
-  return pending
-}
-
-function getFailedDeliveryValidators(events: BeeGameEvent[]): Set<string> {
-  const failed = new Set<string>()
-  for (const event of events) {
-    if (event.type !== 'tool.failed') continue
-    const toolName = getDashboardPayloadString(event.payload, 'toolName')
-    if (toolName !== 'Task' && toolName !== 'Agent') continue
-    const input = getDashboardPayloadRecord(event.payload, 'input')
-    const agentType = getStringField(input, 'subagent_type') ?? getStringField(input, 'agent_type')
-    if (agentType && DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as typeof DELIVERY_VALIDATOR_AGENT_TYPES[number])) {
-      failed.add(agentType)
-    }
-  }
-  return failed
-}
-
-function getUnresolvedPendingDeliveryValidators(
-  events: BeeGameEvent[],
-  completedEvent: BeeGameEvent | undefined,
-): string[] {
-  const pending = Array.isArray(completedEvent?.payload?.pendingValidatorTypes)
-    ? completedEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
-    : []
-  if (pending.length === 0) return []
-  const validationStartIndex = events.findLastIndex(event => event.type === 'delivery.validation.started')
-  const completed = getCompletedDeliveryValidators(events.slice(Math.max(0, validationStartIndex)))
-  return pending.filter(agentType => !completed.has(agentType))
-}
-
-function getValidatorEvidenceIds(validators: Map<string, BeeGameEvent>): Set<string> {
-  const ids = new Set<string>()
-  for (const event of validators.values()) {
-    ids.add(String(event.id))
-    const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
-    if (toolUseID) ids.add(toolUseID)
-  }
-  return ids
-}
-
-function getVerifiedDeliveryCapabilities(
-  events: BeeGameEvent[],
-  validators?: Map<string, BeeGameEvent>,
-): string[] {
-  const capabilities = new Set<string>()
-  for (const event of events) {
-    if (event.type === 'delivery.runtime_adapter.completed') {
-      const capability = getDashboardPayloadString(event.payload, 'capability')
-      if (capability) capabilities.add(capability)
-      continue
-    }
-    if (event.type !== 'tool.completed') continue
-    const toolName = getDashboardPayloadString(event.payload, 'toolName')
-    capabilities.add(`tool:${toolName}`)
-    if (toolName !== 'Skill') continue
-    const input = getDashboardPayloadRecord(event.payload, 'input')
-    const skill = ['skill', 'slug', 'name']
-      .map(key => getStringField(input, key))
-      .find(Boolean)
-    if (skill) capabilities.add(`skill:${skill}`)
-  }
-  for (const [agentType, event] of validators ?? []) {
-    capabilities.add(`agent:${agentType}`)
-    const output = getDashboardPayloadString(event.payload, 'output')
-    const report = parseValidatorReport(output)
-    for (const capability of report?.verifiedCapabilities ?? []) capabilities.add(capability)
-  }
-  return [...capabilities].sort((left, right) => left.localeCompare(right))
-}
-
-function parseValidatorReport(value: string): { verifiedCapabilities: string[] } | undefined {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
-    const report = parsed as Record<string, unknown>
-    if (!Array.isArray(report.verifiedCapabilities)) return undefined
-    const verifiedCapabilities = report.verifiedCapabilities.filter((item): item is string => (
-      typeof item === 'string' && item.trim().length > 0
-    ))
-    return { verifiedCapabilities }
-  } catch {
-    return undefined
-  }
-}
-
-function retainVerifiedDeliveryEvidence(
-  review: ParsedDeliveryReview,
-  verifiedEvidenceIds: Set<string>,
-  workspacePath: string,
-): ParsedDeliveryReview {
-  const retain = (evidence: DeliveryEvidence[]) => evidence.filter(item => (
-    Boolean(item.eventId) &&
-    verifiedEvidenceIds.has(item.eventId ?? '') &&
-    isExistingProjectEvidenceSource(item, workspacePath)
-  ))
-  return {
-    ...review,
-    requirements: review.requirements.map(requirement => ({
-      ...requirement,
-      evidence: retain(requirement.evidence),
-    })),
-    findings: review.findings.map(finding => ({
-      ...finding,
-      evidence: retain(finding.evidence),
-    })),
-  }
-}
-
-function isExistingProjectEvidenceSource(evidence: DeliveryEvidence, workspacePath: string): boolean {
-  if (!['implementation', 'test', 'document', 'asset'].includes(evidence.kind)) return true
-  if (!evidence.source) return false
-  const sourcePath = evidence.source.split('#', 1)[0]?.trim()
-  if (!sourcePath || isAbsolute(sourcePath)) return false
-  const root = resolve(workspacePath)
-  const absolutePath = resolve(root, sourcePath)
-  const relativePath = relative(root, absolutePath)
-  return Boolean(relativePath) &&
-    !relativePath.startsWith('..') &&
-    !isAbsolute(relativePath) &&
-    existsSync(absolutePath)
-}
-
-function recoverLatestDeliveryContract(events: BeeGameEvent[]): DeliveryContract | undefined {
-  const event = [...events].reverse().find(item => item.type === 'delivery.contract.updated')
-  const contract = event && isObject(event.payload) ? event.payload.contract : undefined
-  if (!isObject(contract) || contract.version !== 1 || !Array.isArray(contract.requirements)) return undefined
-  if (!['passed', 'failed', 'untested', 'blocked'].includes(String(contract.status))) return undefined
-  return contract as DeliveryContract
-}
-
-function recoverDeliveryRepairAttempts(events: BeeGameEvent[]): number {
-  let latest = 0
-  for (const event of events) {
-    if (event.type !== 'delivery.repair.started') continue
-    const attempt = Number(isObject(event.payload) ? event.payload.attempt : 0)
-    if (Number.isInteger(attempt) && attempt > latest) latest = attempt
-  }
-  const latestContract = recoverLatestDeliveryContract(events)
-  return latestContract?.status === 'passed' ? 0 : latest
-}
-
-function recoverSpecificationGateFailure(
-  events: BeeGameEvent[],
-): { fingerprint?: string; count: number } {
-  const specificationLockedIndex = events.findLastIndex(event => event.type === 'delivery.specification.locked')
-  const gateEvents = events.slice(specificationLockedIndex + 1).filter(event => (
-    getDashboardPayloadString(event.payload, 'type') === 'delivery.implementation_gate.failed'
-  ))
-  const latest = gateEvents.at(-1)
-  const fingerprint = getDashboardPayloadString(latest?.payload, 'fingerprint')
-  const count = Number(isObject(latest?.payload) ? latest.payload.identicalFailureCount : 0)
-  return fingerprint && Number.isInteger(count) && count > 0
-    ? { fingerprint, count }
-    : { count: 0 }
-}
-
-function shouldStartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): boolean {
-  return contract.status !== 'passed' &&
-    hasRepairableProjectFailure(contract) &&
-    !hasRepeatedDeliveryFailure(record, contract)
-}
-
-function hasRepairableProjectFailure(contract: DeliveryContract): boolean {
-  return contract.requirements.some(requirement => (
-    requirement.scope === 'mvp' && requirement.status === 'failed'
-  ))
-}
-
-function hasRepeatedDeliveryFailure(record: SessionRecord, contract: DeliveryContract): boolean {
-  const expected = deliveryFailureFingerprint(contract)
-  const currentRevision = getProjectMutationRevision(record.events)
-  let identical = 0
-  for (let index = record.events.length - 1; index >= 0; index -= 1) {
-    const event = record.events[index]
-    if (event?.type !== 'delivery.contract.updated') continue
-    const candidate = getDashboardPayloadRecord(event.payload, 'contract') as DeliveryContract
-    if (deliveryFailureFingerprint(candidate) !== expected) break
-    if (getDashboardPayloadString(event.payload, 'projectRevision') !== currentRevision) break
-    identical += 1
-    if (identical >= MAX_IDENTICAL_DELIVERY_FAILURES) return true
-  }
-  return false
-}
-
-function getProjectMutationRevision(events: BeeGameEvent[]): string {
-  const revision = createHash('sha256')
-  let count = 0
-  for (const event of events) {
-    if (event.type !== 'tool.completed') continue
-    const toolName = getDashboardPayloadString(event.payload, 'toolName')
-    if (toolName !== 'Bash' && !isFileMutationTool(toolName)) continue
-    count += 1
-    revision.update(String(event.id))
-    revision.update(toolName)
-    revision.update(JSON.stringify(getDashboardPayloadRecord(event.payload, 'input')))
-  }
-  return `${count}:${revision.digest('hex')}`
-}
-
-function deliveryFailureFingerprint(contract: DeliveryContract): string {
-  return JSON.stringify({
-    status: contract.status,
-    requirements: contract.requirements
-      .filter(item => item.scope === 'mvp' && item.status !== 'accepted' && item.status !== 'runtime_verified')
-      .map(item => ({
-        id: item.id,
-        status: item.status,
-        missingEvidence: item.evidenceRequired
-          .filter(kind => !item.evidence.some(evidence => evidence.kind === kind))
-          .sort(),
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
-  })
-}
-
-const MUTABLE_DELIVERY_DOCUMENTS = new Set([
-  'docs/validation-report.md',
-])
-
-async function captureApprovedDocumentSnapshot(workspacePath: string): Promise<Record<string, string>> {
-  const root = resolve(workspacePath)
-  const docsRoot = resolve(root, 'docs')
-  if (!existsSync(docsRoot)) return {}
-  const snapshot: Record<string, string> = {}
-  const visit = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true })
-    for (const entry of entries) {
-      const path = resolve(directory, entry.name)
-      if (entry.isDirectory()) {
-        await visit(path)
-        continue
-      }
-      if (!entry.isFile()) continue
-      const projectPath = relative(root, path).split('\\').join('/')
-      if (MUTABLE_DELIVERY_DOCUMENTS.has(projectPath)) continue
-      snapshot[projectPath] = createHash('sha256').update(await readFile(path)).digest('hex')
-    }
-  }
-  await visit(docsRoot)
-  return snapshot
-}
-
-function getApprovedDocumentChanges(
-  workspacePath: string,
-  snapshot: Record<string, string>,
-): string[] {
-  const root = resolve(workspacePath)
-  const changes: string[] = []
-  for (const [projectPath, expectedHash] of Object.entries(snapshot)) {
-    const path = resolve(root, projectPath)
-    if (!existsSync(path)) {
-      changes.push(projectPath)
-      continue
-    }
-    const actualHash = createHash('sha256').update(readFileSync(path)).digest('hex')
-    if (actualHash !== expectedHash) changes.push(projectPath)
-  }
-  return changes.sort((left, right) => left.localeCompare(right))
-}
-
-function recoverApprovedDocumentSnapshot(events: BeeGameEvent[]): Record<string, string> {
-  const event = [...events].reverse().find(item => item.type === 'delivery.specification.locked')
-  const documents = getDashboardPayloadRecord(event?.payload, 'documents')
-  return Object.fromEntries(
-    Object.entries(documents).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  )
-}
-
-function hasApprovedDocumentSnapshot(events: BeeGameEvent[]): boolean {
-  return Object.keys(recoverApprovedDocumentSnapshot(events)).length > 0
-}
-
-function getLatestDeliveryPipelineTransition(events: BeeGameEvent[]): BeeGameEvent | undefined {
-  return [...events].reverse().find(event => (
-    event.type === 'delivery.validation.started' ||
-    event.type === 'delivery.validation.completed' ||
-    event.type === 'delivery.repair.queued' ||
-    event.type === 'delivery.repair.started' ||
-    event.type === 'delivery.repair.completed' ||
-    event.type === 'delivery.repair.exhausted' ||
-    event.type === 'delivery.pipeline.blocked'
-  ))
 }
 
 async function prepareBeeGamePromptInput(input: {
@@ -3512,9 +1736,6 @@ async function prepareBeeGamePromptInput(input: {
   attachments?: BeeGameAttachment[]
   displayKind?: string
 }): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
-  if (input.displayKind !== 'initial_idea') {
-    await ensureProjectDeliveryContractSkeleton(input.workspace)
-  }
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
   const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
   const materializedFiles = files.length > 0
@@ -3526,11 +1747,11 @@ async function prepareBeeGamePromptInput(input: {
   const localizedInput = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
   const promptText = input.displayKind === 'initial_idea'
     ? withInitialIdeaContract(localizedInput)
-    : withDeliveryContract(withAssetIntegrationContract(
-        input.displayKind === 'confirmed_brief'
-          ? withConfirmedBriefContract(localizedInput)
-          : localizedInput,
-      ))
+    : input.displayKind === 'confirmed_brief'
+      ? withDeliveryContract(withAssetIntegrationContract(withConfirmedBriefContract(localizedInput)))
+      : input.displayKind === 'asset_integration'
+        ? withAssetIntegrationContract(localizedInput)
+        : localizedInput
   if (images.length === 0) {
     return {
       prompt: promptText,
@@ -3983,62 +2204,11 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-function isImplementationMutationTool(
-  workspacePath: string,
-  request: DashboardPermissionRequest,
-): boolean {
-  if (request.toolName === 'Bash') return true
-  if (!isFileMutationTool(request.toolName)) return false
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return true
-  const projectPath = relative(workspacePath, resolve(workspacePath, artifactPath)).split('\\').join('/')
-  return projectPath !== 'docs' && !projectPath.startsWith('docs/')
-}
-
-function getProtectedDeliveryDocument(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): string | undefined {
-  if (!isFileMutationTool(request.toolName)) return undefined
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return undefined
-  const absolutePath = resolve(record.session.cwd, artifactPath)
-  const projectPath = relative(record.session.cwd, absolutePath).split('\\').join('/')
-  if (projectPath === 'docs/validation-report.md') return projectPath
-  if (
-    record.approvedDocumentSnapshotLocked &&
-    (projectPath === 'docs' || projectPath.startsWith('docs/'))
-  ) return projectPath
-  if (record.currentTurnKind === 'delivery_repair' && isDeliveryEvidenceArtifact(record.latestDeliveryContract, projectPath)) {
-    return projectPath
-  }
-  return undefined
-}
-
-function isDeliveryEvidenceArtifact(
-  contract: DeliveryContract | undefined,
-  projectPath: string,
-): boolean {
-  if (!contract) return false
-  return contract.requirements.some(requirement => requirement.evidence.some(evidence => (
-    (evidence.kind === 'test' || evidence.kind === 'document') &&
-    evidence.source === projectPath
-  )))
-}
-
 function getBeeGamePermissionPolicyDecision(
-  record: SessionRecord,
-  allowedRoot: string,
+  _record: SessionRecord,
+  _allowedRoot: string,
   request: DashboardPermissionRequest,
-): { behavior: 'auto_allow' | 'auto_deny' | 'ask_user'; message?: string } {
-  if (isReadOnlyTool(request.toolName)) return { behavior: 'auto_allow' }
-  if (isFileMutationTool(request.toolName)) {
-    return {
-      behavior: isSafeWorkspaceMutation(record, allowedRoot, request)
-        ? 'auto_allow'
-        : 'ask_user',
-    }
-  }
+): { behavior: 'auto_deny' | 'ask_user'; message?: string } {
   if (request.toolName === 'Bash') {
     if (isGlobalProcessControlBashCommand(request.input)) {
       return {
@@ -4052,35 +2222,8 @@ function getBeeGamePermissionPolicyDecision(
         message: 'Background processes are managed by BeeGame preview controls.',
       }
     }
-    return {
-      behavior: isSafeBeeGameBashCommand(
-        request.input,
-        record.session.cwd,
-        allowedRoot,
-      ) ? 'auto_allow' : 'ask_user',
-    }
   }
   return { behavior: 'ask_user' }
-}
-
-function isReadOnlyTool(toolName: string): boolean {
-  return toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep'
-}
-
-function isSafeWorkspaceMutation(
-  record: SessionRecord,
-  allowedRoot: string,
-  request: DashboardPermissionRequest,
-): boolean {
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return false
-  const normalized = getWorkspaceRelativeMutationPath(
-    record.session.cwd,
-    allowedRoot,
-    artifactPath,
-  )
-  if (!normalized) return false
-  return !isSensitiveProjectMutationPath(normalized)
 }
 
 function isSensitiveProjectMutationPath(path: string): boolean {
@@ -4113,40 +2256,6 @@ function isSensitiveProjectMutationPath(path: string): boolean {
   )
 }
 
-function isSafeBeeGameBashCommand(
-  input: Record<string, unknown>,
-  cwd: string,
-  allowedRoot: string,
-): boolean {
-  const command = typeof input.command === 'string' ? input.command.trim() : ''
-  if (!command || hasUnsafeShellControlSyntax(command)) return false
-  const commandParts = splitShellCommandChain(command)
-  if (commandParts.length === 0) return false
-  let commandCwd = cwd
-  for (const part of commandParts) {
-    const tokens = splitShellLike(part)
-      .map(cleanShellToken)
-      .filter(token => token && !isHarmlessShellRedirectionToken(token))
-    if (tokens.length === 0) return false
-    if (isSafeChangeDirectoryCommand(tokens, commandCwd, allowedRoot)) {
-      commandCwd = resolveCommandDirectory(commandCwd, tokens[1] || '.')
-      continue
-    }
-    if (
-      isSafeReadOnlyShellCommand(tokens) ||
-      isSafeProjectFilesystemMutationCommand(tokens, commandCwd, allowedRoot) ||
-      isSafeProjectFilesystemSetupCommand(tokens, commandCwd, allowedRoot)
-    ) {
-      continue
-    }
-    if (tokens.some(token => isDangerousShellToken(token))) return false
-    if (tokens.some(token => isSensitiveShellPathToken(commandCwd, allowedRoot, token))) {
-      return false
-    }
-  }
-  return true
-}
-
 function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
   const turnId = findLatestInterruptedTurnId(record.events)
   if (!turnId) return
@@ -4154,28 +2263,6 @@ function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
   record.currentTurnId = turnId
   record.session.turnStatus = 'idle'
   record.session.status = 'running'
-  const interruptedTurnKind = [...record.events].reverse().find(event => (
-    event.turnId === turnId && event.type === 'user.message'
-  ))?.payload?.displayKind
-  if (interruptedTurnKind === 'delivery_validation') {
-    const interruptedValidation: BeeGameEvent = {
-      id: record.nextEventId,
-      sessionId: record.session.id,
-      turnId,
-      type: 'delivery.validation.completed',
-      text: 'Delivery validation was interrupted before all validators reached a terminal result.',
-      payload: {
-        type: 'delivery.validation.completed',
-        status: 'blocked',
-        reason: 'interrupted',
-        retryable: true,
-      },
-      createdAt: new Date(),
-    }
-    record.events.push(interruptedValidation)
-    appendTranscriptEvent(record.transcriptPath, interruptedValidation)
-    record.nextEventId += 1
-  }
   record.events.push({
     id: record.nextEventId,
     sessionId: record.session.id,
@@ -4202,32 +2289,6 @@ function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
     }
   }
   return ''
-}
-
-function hasReachedBashPermissionRequestLimit(record: SessionRecord): boolean {
-  if (!record.currentTurnId) return false
-  return countBashPermissionRequestsRequiringUserResolution(
-    record.events,
-    record.currentTurnId,
-  ) >= MAX_BEEGAME_TURN_BASH_PERMISSION_REQUESTS
-}
-
-export function countBashPermissionRequestsRequiringUserResolution(
-  events: BeeGameEvent[],
-  turnId: string,
-): number {
-  const toolUseIDs = new Set<string>()
-  for (const event of events) {
-    if (event.turnId !== turnId) continue
-    if (event.type !== 'permission.requested') continue
-    const payload = event.payload
-    if (payload?.toolName !== 'Bash') continue
-    const toolUseID = typeof payload.toolUseID === 'string'
-      ? payload.toolUseID
-      : `${event.id}`
-    toolUseIDs.add(toolUseID)
-  }
-  return toolUseIDs.size
 }
 
 function isGlobalProcessControlBashCommand(input: Record<string, unknown>): boolean {
@@ -4745,7 +2806,7 @@ function appendProjectAgentRawLog(
         sessionId: record.session.id,
         ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
         createdAt: new Date().toISOString(),
-        message: sanitizeBeeGameVisibleValue(message),
+        message,
       })}\n`,
       'utf8',
     )
@@ -4845,23 +2906,6 @@ function collapseLogLine(text: string): string {
     : collapsed
 }
 
-function permissionSignature(request: Pick<DashboardPermissionRequest, 'toolName' | 'input'>): string {
-  return `${request.toolName}:${stableJson(request.input)}`
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJson).join(',')}]`
-  }
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(value)
-}
-
 function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessage): {
   type: BeeGameEventType
   text: string
@@ -4904,7 +2948,38 @@ function mapTextEvent(
   text: string,
 ): { type: BeeGameEventType; text: string } | null {
   const normalized = text.trim()
+  if (
+    (type === 'assistant.partial' || type === 'assistant.message') &&
+    isThinkingProtocolControlText(normalized)
+  ) {
+    return null
+  }
   return normalized ? { type, text: normalized } : null
+}
+
+function isThinkingProtocolControlEvent(event: BeeGameEvent): boolean {
+  return (
+    (event.type === 'assistant.partial' || event.type === 'assistant.message') &&
+    isThinkingProtocolControlText(event.text)
+  )
+}
+
+function isThinkingProtocolControlText(value: string): boolean {
+  let remaining = value.trim()
+  if (!remaining) return false
+
+  let foundControlToken = false
+  while (remaining) {
+    const token = remaining.startsWith('<think>')
+      ? '<think>'
+      : remaining.startsWith('</think>')
+        ? '</think>'
+        : undefined
+    if (!token) return false
+    foundControlToken = true
+    remaining = remaining.slice(token.length).trim()
+  }
+  return foundControlToken
 }
 
 function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
@@ -4931,6 +3006,12 @@ function mapSDKMessageToToolEvents(
   record: SessionRecord,
   message: DashboardSDKMessage,
 ): Array<{ type: BeeGameEventType; text: string; payload: DashboardSDKMessage }> {
+  // Stream fragments are presentation-only and may contain a tool block before
+  // its JSON input is complete. Claude Code emits the authoritative tool_use
+  // block on the final assistant message, so only that block may start a tool.
+  if (message.type === 'stream_event' || message.type === 'partial_assistant') {
+    return []
+  }
   const events: Array<{
     type: BeeGameEventType
     text: string
@@ -5180,146 +3261,3 @@ function toErrorMessage(err: unknown): string {
   }
   return String(err || 'Request failed')
 }
-
-function sanitizeBeeGameVisibleValue(value: unknown): unknown {
-  if (typeof value === 'string') {
-    return sanitizeBeeGameText(value)
-  }
-  if (Array.isArray(value)) {
-    return value.map(item => sanitizeBeeGameVisibleValue(item))
-  }
-  if (!isObject(value)) {
-    return value
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => {
-      const sanitizedKey = shouldPreserveRuntimeKey(key)
-        ? key
-        : sanitizeBeeGameText(key)
-      return [
-        sanitizedKey,
-        shouldPreserveRuntimeValue(key) ? item : sanitizeBeeGameVisibleValue(item),
-      ]
-    }),
-  )
-}
-
-function readSessionRuntimeSettings(
-  userDataRoot: string | undefined,
-): Record<string, unknown> {
-  if (!userDataRoot) return {}
-  const filePath = join(userDataRoot, '.runtime', 'app', 'settings.json')
-  if (!existsSync(filePath)) return {}
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown
-    return isObject(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function runtimeSettingsFeatures(
-  settings: Record<string, unknown>,
-): RuntimeObservationFeature[] {
-  return [
-    runtimeSettingsFeature(
-      'AUTO_MEMORY',
-      'Auto memory',
-      settings.autoMemoryEnabled,
-    ),
-    runtimeSettingsFeature(
-      'AUTO_DREAM',
-      'Auto dream',
-      settings.autoDreamEnabled,
-    ),
-    runtimeSettingsFeature(
-      'SKILL_SEARCH',
-      'Skill search',
-      settings.skillSearchEnabled,
-    ),
-    runtimeSettingsFeature(
-      'TREE_SITTER_BASH',
-      'Tree-sitter Bash',
-      settings.treeSitterBashEnabled,
-    ),
-    runtimeSettingsFeature(
-      'WEB_BROWSER_TOOL',
-      'Web browser tool',
-      settings.webBrowserToolEnabled,
-    ),
-    runtimeSettingsFeature(
-      'BASH_CLASSIFIER',
-      'Bash classifier',
-      settings.bashClassifierEnabled,
-    ),
-    runtimeSettingsFeature(
-      'MCP_SKILLS',
-      'MCP skills',
-      settings.mcpSkillsEnabled,
-    ),
-  ]
-}
-
-function runtimeSettingsFeature(
-  id: string,
-  label: string,
-  value: unknown,
-): RuntimeObservationFeature {
-  return {
-    id,
-    label,
-    stage: 'admin_runtime',
-    status: value === true ? 'enabled' : 'disabled',
-  }
-}
-
-function sanitizeBeeGameText(value: string): string {
-  const protectedSegments: string[] = []
-  const protectedValue = value.replace(pathSegmentPattern, segment => {
-    const placeholder = `__BEEGAME_PATH_${protectedSegments.length}__`
-    protectedSegments.push(segment)
-    return placeholder
-  })
-  const legacyUpper = ['CLAU', 'DE'].join('')
-  const legacyTitle = ['Clau', 'de'].join('')
-  const legacyLower = ['clau', 'de'].join('')
-  const sanitized = protectedValue
-    .split(`${legacyTitle} Code`).join('BeeGame')
-    .split(`${legacyTitle} code`).join('BeeGame')
-    .split(`${legacyLower} code`).join('BeeGame')
-    .split(`${legacyUpper}_CODE`).join('BEEGAME')
-    .split(`${legacyLower}_code`).join('beegame')
-    .split(legacyTitle).join('BeeGame')
-    .split(legacyLower).join('BeeGame')
-  return protectedSegments.reduce(
-    (text, segment, index) => text.replace(`__BEEGAME_PATH_${index}__`, segment),
-    sanitized,
-  )
-}
-
-const pathSegmentPattern = /(?:\/[^\s"'`),\]}]+)+(?:[^\s"'`),\]}.:;!?])?/g
-
-function shouldPreserveRuntimeKey(key: string): boolean {
-  return runtimeDataKeys.has(key)
-}
-
-function shouldPreserveRuntimeValue(key: string): boolean {
-  return runtimeDataKeys.has(key) || key === 'input'
-}
-
-const runtimeDataKeys = new Set([
-  'args',
-  'command',
-  'cwd',
-  'file',
-  'file_path',
-  'filename',
-  'notebook_path',
-  'old_string',
-  'output',
-  'path',
-  'paths',
-  'pattern',
-  'stderr',
-  'stdout',
-])

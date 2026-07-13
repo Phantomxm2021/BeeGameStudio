@@ -4,12 +4,10 @@ import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type BeeGameAutoResourceBindingPayload, type ReviewBindingPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
-import { isBeeGameProjectPackageArtifactId, type BeeGameThinkingMode } from '../../services/beeGameAdapter';
-import type { BeeGameCreditTaskType } from '../../services/creditsApi';
+import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
 import type { WaitingApprovalState } from '../../utils/waitingApproval';
-import type { ProductReadinessView } from '../../types/message';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../viewModels/displayModels';
 
 // Modular Panels
@@ -60,9 +58,7 @@ interface RightSidebarProps {
     progress: number;
     onSendMessage: (
         msg: string,
-        taskType?: BeeGameCreditTaskType,
         attachments?: ChatAttachmentPayload[],
-        thinkingMode?: BeeGameThinkingMode,
         supersedesMessageId?: string,
     ) => void;
     isLoading: boolean;
@@ -82,7 +78,6 @@ interface RightSidebarProps {
     };
     pendingReviews?: ReviewDisplayModel[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
-    runtimeReadiness?: ProductReadinessView | null;
     onUploadManifestCsv?: (gateId: string, csvContent: string, autoApprove?: boolean) => Promise<void>;
     onApproveManifest?: (review: ReviewBindingPayload & { gate_id: string }, feedback?: string) => Promise<void>;
     waitingApproval: WaitingApprovalState;
@@ -128,7 +123,6 @@ export function RightSidebar({
     const [isChatMinimized, setIsChatMinimized] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-    const [chatThinkingMode, setChatThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, any>>({});
     const [artifacts, setArtifacts] = useState<any[]>([]);
@@ -139,7 +133,6 @@ export function RightSidebar({
     const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
     const [isAutoBindingResources, setIsAutoBindingResources] = useState(false);
     const [assetOperationFeedback, setAssetOperationFeedback] = useState<{ message: string; tone: 'success' | 'warning' | 'error' } | null>(null);
-    const [assetIntegrationMessages, setAssetIntegrationMessages] = useState<Record<string, string>>({});
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
@@ -153,10 +146,10 @@ export function RightSidebar({
     const t = useCommonText(lang);
     const uiText = useBeeGameText(lang);
     const isComposerLocked = isLoading || isRuntimeBusy;
+    const canMutateAssets = canUploadAssets && !isRuntimeBusy;
 
     useEffect(() => {
         setAssetManifest(null);
-        setAssetIntegrationMessages({});
         setUploadingAssetSlotId(null);
         setIsAssetsLoading(false);
         setAssetOperationFeedback(null);
@@ -183,7 +176,7 @@ export function RightSidebar({
     // Handlers
     const handleSend = () => {
         if (!canSendMessage || (!chatInput.trim() && attachments.length === 0) || isComposerLocked || waitingApproval.isBlockingChat) return;
-        onSendMessage(chatInput, undefined, attachments, chatThinkingMode, editingMessageId || undefined);
+        onSendMessage(chatInput, attachments, editingMessageId || undefined);
         setChatInput('');
         setAttachments([]);
         setEditingMessageId(null);
@@ -258,28 +251,27 @@ export function RightSidebar({
     };
 
     const handleUploadAsset = async (slotId: string, file: File) => {
-        if (!canUploadAssets) return;
+        if (!canMutateAssets) return;
         setUploadingAssetSlotId(slotId);
         try {
             const result = await api.uploadProjectAsset(projectId, slotId, file);
             setAssetManifest(result.manifest);
-            setAssetIntegrationMessages(current => ({
-                ...current,
-                [slotId]: result.message,
-            }));
         } finally {
             setUploadingAssetSlotId(null);
         }
     };
 
     const handleRequestAssetIntegration = (slot: BeeGameAssetSlotPayload) => {
-        if (!canSendMessage || !canIntegrateAssets) return;
-        const fallbackMessage = buildAssetIntegrationMessage(slot, lang);
-        onSendMessage(assetIntegrationMessages[slot.id] || fallbackMessage, 'asset_integration');
+        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
+        void api.requestProjectAction({
+            project_id: projectId,
+            kind: 'asset_integrate',
+            slotIds: [slot.id],
+        });
     };
 
     const handleReintegrateLibraryResource = async (slotId: string) => {
-        if (!canUploadAssets) return;
+        if (!canMutateAssets) return;
         setReintegratingAssetSlotId(slotId);
         try {
             const result = await api.integrateProjectResource(projectId, slotId);
@@ -290,7 +282,7 @@ export function RightSidebar({
     };
 
     const handleAutoBindLibraryResources = async () => {
-        if (!canUploadAssets) return;
+        if (!canMutateAssets) return;
         setIsAutoBindingResources(true);
         try {
             const result = await api.autoBindProjectResources(projectId);
@@ -304,30 +296,39 @@ export function RightSidebar({
     };
 
     const handleUnbindLibraryResource = async (slotId: string) => {
-        if (!canUploadAssets) return;
+        if (!canMutateAssets) return;
         const result = await api.unbindProjectResource(projectId, slotId);
         setAssetManifest(result.manifest);
     };
     const handleRemoveLibraryIntegration = async (slotId: string) => {
-        if (!canUploadAssets) return;
+        if (!canMutateAssets) return;
         const result = await api.removeProjectResourceIntegration(projectId, slotId);
         setAssetManifest(result.manifest);
     };
     const handleResourceCandidates = async (slot: BeeGameAssetSlotPayload) => api.getProjectResourceCandidates(projectId, slot.id);
     const handleBindResourceCandidate = async (slot: BeeGameAssetSlotPayload, candidate: { packId: string; elementId: string }) => {
+        if (!canMutateAssets) throw new Error('Project assets cannot be changed while the runtime is active');
         const result = await api.bindProjectResource(projectId, slot.id, slot.resource_requirement || {}, candidate);
         setAssetManifest(result.manifest);
     };
 
 
     const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
-        if (!canSendMessage || !canIntegrateAssets) return;
-        onSendMessage(buildAllAssetIntegrationMessage(slots, assetIntegrationMessages, lang), 'asset_integration');
+        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
+        void api.requestProjectAction({
+            project_id: projectId,
+            kind: 'asset_integrate',
+            slotIds: slots.map(slot => slot.id),
+        });
     };
 
     const handleRequestSelectionPreparation = (slots: BeeGameAssetSlotPayload[]) => {
-        if (!canSendMessage || !canIntegrateAssets) return;
-        onSendMessage(buildAssetSelectionPreparationMessage(slots, assetManifest?.project_target, lang), 'asset_integration');
+        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
+        void api.requestProjectAction({
+            project_id: projectId,
+            kind: 'asset_prepare_selection',
+            slotIds: slots.map(slot => slot.id),
+        });
     };
 
     // Auto-resize search input
@@ -368,7 +369,9 @@ export function RightSidebar({
                     setArtifacts(fetchedArtifacts);
                     setIsArtifactsLoading(false);
 
-                    const pendingArtifacts = fetchedArtifacts.filter(a => a.status === 'active');
+                    const pendingArtifacts = variant === 'beegame'
+                        ? []
+                        : fetchedArtifacts.filter(a => a.status === 'active');
                     const newStatuses: Record<string, any> = {};
                     for (const art of pendingArtifacts) {
                         const artifactId = String(art.artifact_id || art.id || '').trim();
@@ -398,7 +401,7 @@ export function RightSidebar({
             const interval = setInterval(fetchData, 5000);
             return () => clearInterval(interval);
         }
-    }, [activeTab, projectId, artifacts.length]);
+    }, [activeTab, projectId, artifacts.length, variant]);
 
     useEffect(() => {
         if (activeTab === 'assets') {
@@ -503,8 +506,6 @@ export function RightSidebar({
                                 editingMessageId={editingMessageId}
                                 onCancelEdit={handleCancelEdit}
                                 attachments={attachments}
-                                thinkingMode={chatThinkingMode}
-                                onThinkingModeChange={setChatThinkingMode}
                                 onAddAttachments={(nextAttachments) => {
                                     setAttachments(current => dedupeAttachments([...current, ...nextAttachments]));
                                 }}
@@ -549,13 +550,13 @@ export function RightSidebar({
                                 isReintegratingSlotId={reintegratingAssetSlotId}
                                 isAutoBinding={isAutoBindingResources}
                                 autoBindFeedback={assetOperationFeedback}
-                                onUpload={canUploadAssets ? handleUploadAsset : undefined}
-                                onReintegrate={canUploadAssets ? handleReintegrateLibraryResource : undefined}
-                                onRemoveIntegration={canUploadAssets ? handleRemoveLibraryIntegration : undefined}
-                                onAutoBind={canUploadAssets ? handleAutoBindLibraryResources : undefined}
-                                onUnbind={canUploadAssets ? handleUnbindLibraryResource : undefined}
+                                onUpload={canMutateAssets ? handleUploadAsset : undefined}
+                                onReintegrate={canMutateAssets ? handleReintegrateLibraryResource : undefined}
+                                onRemoveIntegration={canMutateAssets ? handleRemoveLibraryIntegration : undefined}
+                                onAutoBind={canMutateAssets ? handleAutoBindLibraryResources : undefined}
+                                onUnbind={canMutateAssets ? handleUnbindLibraryResource : undefined}
                                 onCandidates={canUploadAssets ? handleResourceCandidates : undefined}
-                                onBindCandidate={canUploadAssets ? handleBindResourceCandidate : undefined}
+                                onBindCandidate={canMutateAssets ? handleBindResourceCandidate : undefined}
                                 onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
                                 onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 onRequestSelectionPreparation={canSendMessage && canIntegrateAssets ? handleRequestSelectionPreparation : undefined}
@@ -604,88 +605,4 @@ export function RightSidebar({
             />
         </>
     );
-}
-
-function buildAllAssetIntegrationMessage(
-    slots: BeeGameAssetSlotPayload[],
-    uploadedMessages: Record<string, string>,
-    lang: Language
-): string {
-    const directMessages = slots
-        .map(slot => uploadedMessages[slot.id])
-        .filter((message): message is string => Boolean(message));
-    if (directMessages.length === slots.length) {
-        return directMessages.join('\n\n');
-    }
-
-    const lines = slots.map(slot => {
-        const files = slot.uploaded_files?.length
-            ? slot.uploaded_files.join(', ')
-            : slot.target?.path || '';
-        if (lang === 'zh' || lang === 'zh-TW') {
-            return `- ${slot.id}${slot.purpose ? `：${slot.purpose}` : ''}${files ? `；文件：${files}` : ''}`;
-        }
-        return `- ${slot.id}${slot.purpose ? `: ${slot.purpose}` : ''}${files ? `; files: ${files}` : ''}`;
-    });
-
-    if (lang === 'zh' || lang === 'zh-TW') {
-        return [
-            '请统一集成以下已上传资源。',
-            ...lines,
-            '请更新项目引用，运行适合当前项目的检查或预览，并在 assets/asset-manifest.json 中记录每个资源的真实集成状态。',
-        ].join('\n');
-    }
-    return [
-        'Please integrate the following uploaded assets together.',
-        ...lines,
-        'Update project references, run the relevant checks or preview for this project, and record each asset\'s real integration status in assets/asset-manifest.json.',
-    ].join('\n');
-}
-
-function buildAssetIntegrationMessage(slot: BeeGameAssetSlotPayload, lang: Language): string {
-    const files = slot.uploaded_files?.length
-        ? slot.uploaded_files.join(', ')
-        : slot.target?.path || '';
-    if (lang === 'zh' || lang === 'zh-TW') {
-        return [
-            `请集成资源槽 "${slot.id}"。`,
-            files ? `已上传文件：${files}。` : '',
-            slot.purpose ? `用途：${slot.purpose}。` : '',
-            slot.target?.integration_notes ? `集成说明：${slot.target.integration_notes}。` : '',
-            '请更新项目引用，运行适合当前项目的检查或预览，并在 assets/asset-manifest.json 中记录真实集成状态。',
-        ].filter(Boolean).join(' ');
-    }
-    return [
-        `Please integrate asset slot "${slot.id}".`,
-        files ? `Uploaded file: ${files}.` : '',
-        slot.purpose ? `Purpose: ${slot.purpose}.` : '',
-        slot.target?.integration_notes ? `Integration notes: ${slot.target.integration_notes}.` : '',
-        'Update project references, run the relevant checks or preview for this project, and record the real integration status in assets/asset-manifest.json.',
-    ].filter(Boolean).join(' ');
-}
-
-function buildAssetSelectionPreparationMessage(
-    slots: BeeGameAssetSlotPayload[],
-    projectTarget: BeeGameAssetManifestPayload['project_target'],
-    lang: Language,
-): string {
-    const slotLines = slots.map(slot => {
-        const formats = slot.resource_requirement?.accepted_formats?.join(', ') || slot.accepted_formats?.join(', ') || '';
-        if (lang === 'zh' || lang === 'zh-TW') {
-            return `- ${slot.id}${slot.purpose ? `：${slot.purpose}` : ''}${formats ? `；允许格式：${formats}` : ''}`;
-        }
-        return `- ${slot.id}${slot.purpose ? `: ${slot.purpose}` : ''}${formats ? `; accepted formats: ${formats}` : ''}`;
-    });
-    if (lang === 'zh' || lang === 'zh-TW') {
-        return [
-            '请升级 assets/asset-manifest.json 中以下资源槽，使其可以安全匹配资源库。',
-            ...slotLines,
-            `保留原有项目语义与目标路径，但改用顶层 version、project_target、slots 结构。先根据当前项目真实的运行时/构建适配器，在 project_target.asset_format_capabilities 中声明允许的格式${projectTarget?.asset_format_capabilities?.length ? `（当前：${projectTarget.asset_format_capabilities.join(', ')}）` : ''}；不得从 Pack 或文件名推断。每个可自动选择的 slot 必须提供 resource_requirement，并使用资源库用途词表中的精确 tags：character、npc、creature、weapon-equipment、prop、vehicle、building、environment、terrain、vegetation、scene、level-map、tile、ui、icon、effect、combat、interaction、narrative、music、sound-effect、ambient-audio、voice；accepted_formats 必须是该运行时能力的兼容子集。不要根据文件名猜测资源，也不要选择、复制或声称已集成任何资源；不确定时保留 placeholder/missing。`,
-        ].join('\n');
-    }
-    return [
-        'Upgrade the following asset slots in assets/asset-manifest.json so they can safely match the resource library.',
-        ...slotLines,
-        `Preserve each project meaning and target path, but use top-level version, project_target, and slots. First declare the formats the actual runtime/build adapter supports in project_target.asset_format_capabilities${projectTarget?.asset_format_capabilities?.length ? ` (currently: ${projectTarget.asset_format_capabilities.join(', ')})` : ''}; never infer them from a Pack or filename. Every auto-selectable slot must have resource_requirement with exact tags from the resource-library usage vocabulary: character, npc, creature, weapon-equipment, prop, vehicle, building, environment, terrain, vegetation, scene, level-map, tile, ui, icon, effect, combat, interaction, narrative, music, sound-effect, ambient-audio, voice; accepted_formats must be a compatible subset of runtime capabilities. Do not infer assets from filenames, select/copy assets, or claim integration; keep uncertain slots placeholder/missing.`,
-    ].join('\n');
 }

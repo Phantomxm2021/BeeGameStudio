@@ -49,6 +49,7 @@ const apiMocks = vi.hoisted(() => ({
         updatedAt: '2026-06-21T00:00:00.000Z',
         deployedAt: '2026-06-21T00:00:00.000Z',
     }),
+    requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
 }));
 const status = {
     uptime: '1m',
@@ -67,12 +68,12 @@ let mockedMessages: Array<{ id: string; sender: string; content: string; timesta
 let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
 let mockedIsSyncing = false;
 let mockedIsOpeningProject = false;
+let mockedAuthenticationStatus: 'authenticated' | 'anonymous' = 'authenticated';
 let mockedProjectStatus: ProjectBaselineStatusPayload = {
     project_id: 'proj_1',
     phase: 'DESIGN_IN_PROGRESS',
     blocked: true,
     approval_required: true,
-    deployment_gate: { can_deploy: true },
     project_target: { kind: 'web', engine: 'Web' },
     baseline: {
         artifact_id: 'art_1',
@@ -106,6 +107,7 @@ vi.mock('../../store/systemStore', () => ({
             toggleTheme,
             hasPermission: mockedHasPermission,
             currentUser: mockedCurrentUser,
+            authenticationStatus: mockedAuthenticationStatus,
             loadCurrentUser,
             setIsSyncing,
         };
@@ -142,6 +144,9 @@ vi.mock('../../store/projectStore', () => ({
             isOpeningProject: mockedIsOpeningProject,
             loadPendingReviews,
             loadProjectStatus,
+            loadProjectRuntimeState: async (projectId: string) => {
+                await Promise.all([loadPendingReviews(projectId), loadProjectStatus(projectId)]);
+            },
             loadSystemReadiness,
         }),
         {
@@ -200,6 +205,7 @@ vi.mock('../../services/api', () => ({
         listProjectDeployments: apiMocks.listProjectDeployments,
         deployProject: apiMocks.deployProject,
         rollbackProjectDeployment: apiMocks.rollbackProjectDeployment,
+        requestProjectAction: apiMocks.requestProjectAction,
     },
 }));
 
@@ -237,7 +243,10 @@ vi.mock('../../services/currentUserApi', () => ({
 
 vi.mock('../../services/supabaseAuthApi', () => ({
     clearSupabaseSession: vi.fn(),
+    getSupabaseAccessToken: vi.fn(() => ''),
     getValidSupabaseAccessToken: vi.fn(() => Promise.resolve(null)),
+    isHttpOnlySessionsEnabled: vi.fn(() => false),
+    refreshSupabaseSession: vi.fn(() => Promise.resolve(null)),
     updateSupabaseAvatarUrl: vi.fn(() => Promise.resolve({ avatarUrl: 'https://cdn.example.com/avatar.png' })),
     uploadSupabaseAvatarImage: vi.fn(() => Promise.resolve('https://cdn.example.com/avatar.png')),
 }));
@@ -287,12 +296,12 @@ describe('DashboardView runtime loading', () => {
         mockedTokenUsage = {};
         mockedIsSyncing = false;
         mockedIsOpeningProject = false;
+        mockedAuthenticationStatus = 'authenticated';
         mockedProjectStatus = {
             project_id: 'proj_1',
             phase: 'DESIGN_IN_PROGRESS',
             blocked: true,
             approval_required: true,
-            deployment_gate: { can_deploy: true },
             project_target: { kind: 'web', engine: 'Web' },
             baseline: {
                 artifact_id: 'art_1',
@@ -318,6 +327,16 @@ describe('DashboardView runtime loading', () => {
             status: 'ready',
             accessUrl: String(mockedProjectStatus.build_report?.build_url || ''),
         }));
+    });
+
+    it('does not poll protected runtime state after authentication is lost', async () => {
+        mockedAuthenticationStatus = 'anonymous';
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await act(async () => Promise.resolve());
+        expect(loadProjectStatus).not.toHaveBeenCalled();
+        expect(loadPendingReviews).not.toHaveBeenCalled();
     });
 
     it('loads runtime status immediately when mounted', async () => {
@@ -481,30 +500,15 @@ describe('DashboardView runtime loading', () => {
         expect(syncStatus.querySelector('svg')).not.toBeNull();
     });
 
-    it('shows the authoritative delivery review state in the project header', async () => {
+    it('uses deployment permission and project target without a frontend delivery state machine', async () => {
         mockedProjectStatus = {
             ...mockedProjectStatus,
-            delivery_review: { status: 'failed', summary: 'Core player path did not pass.' },
-        } as ProjectBaselineStatusPayload;
-
-        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-
-        expect(await screen.findByTestId('beegame-delivery-review-status')).toHaveTextContent('需要修复');
-    });
-
-    it('mirrors the server deployment gate and project target without frontend policy guesses', async () => {
-        mockedProjectStatus = {
-            ...mockedProjectStatus,
-            deployment_gate: {
-                can_deploy: false,
-                failure: { code: 'delivery_review_required', message: 'Independent validation is required.' },
-            },
             project_target: { kind: 'native', engine: 'custom-engine' },
         };
 
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-        expect(screen.getByRole('button', { name: '发布游戏' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '发布游戏' })).toBeEnabled();
         await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
         expect(screen.getByText('custom-engine')).toBeInTheDocument();
         expect(screen.queryByText('Web')).not.toBeInTheDocument();
@@ -939,8 +943,10 @@ describe('DashboardView runtime loading', () => {
         await waitFor(() => expect(within(deploymentDialog).getAllByText(/lastPoint/).length).toBeGreaterThan(0));
         await user.click(within(deploymentDialog).getByRole('button', { name: '修复' }));
 
-        expect(sendMessage).toHaveBeenCalledTimes(1);
-        expect(sendMessage.mock.calls[0][0]).toContain("src/components/Canvas.tsx(149,14): error TS18048: 'lastPoint' is possibly 'undefined'.");
+        expect(apiMocks.requestProjectAction).toHaveBeenCalledWith(expect.objectContaining({
+            project_id: 'proj_1',
+            kind: 'build_error_repair',
+        }));
         expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });
 
@@ -971,9 +977,10 @@ describe('DashboardView runtime loading', () => {
 
         await user.click(within(consolePanel).getByRole('button', { name: '修复' }));
 
-        expect(sendMessage).toHaveBeenCalledTimes(1);
-        expect(sendMessage.mock.calls[0][0]).toContain('Build failed with TypeScript errors.');
-        expect(sendMessage.mock.calls[0][0]).toContain("src/components/Canvas.tsx(149,14): error TS18048: 'lastPoint' is possibly 'undefined'.");
+        expect(apiMocks.requestProjectAction).toHaveBeenCalledWith(expect.objectContaining({
+            project_id: 'proj_1',
+            kind: 'build_error_repair',
+        }));
     });
 
     it('overlays runtime console errors reported by the live preview iframe', async () => {
@@ -1010,8 +1017,10 @@ describe('DashboardView runtime loading', () => {
 
         await user.click(within(consolePanel).getByRole('button', { name: '修复' }));
 
-        expect(sendMessage).toHaveBeenCalledTimes(1);
-        expect(sendMessage.mock.calls[0][0]).toContain('Uncaught TypeError: Cannot read properties of undefined');
+        expect(apiMocks.requestProjectAction).toHaveBeenCalledWith(expect.objectContaining({
+            project_id: 'proj_1',
+            kind: 'build_error_repair',
+        }));
     });
 
     it('clears runtime console overlay when the preview is refreshed', async () => {

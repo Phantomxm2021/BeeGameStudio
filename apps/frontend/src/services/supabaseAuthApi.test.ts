@@ -6,6 +6,7 @@ import {
   getSupabaseAccessToken,
   getValidSupabaseAccessToken,
   hydrateSupabaseSessionUser,
+  initializeSupabaseSession,
   isSupabaseAuthConfigured,
   refreshSupabaseSession,
   signInWithSupabaseOAuth,
@@ -103,7 +104,7 @@ describe('supabaseAuthApi', () => {
     });
   });
 
-  it('keeps legacy storage when the migration POST succeeds but the cookie session is not authenticated', async () => {
+  it('fails closed instead of activating a browser-token fallback when cookie verification fails', async () => {
     vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
     vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
@@ -118,10 +119,60 @@ describe('supabaseAuthApi', () => {
       .mockResolvedValueOnce(Response.json({ authenticated: false }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await signInWithSupabasePassword({ email: 'user@example.com', password: 'secret-password' });
+    await expect(signInWithSupabasePassword({
+      email: 'user@example.com',
+      password: 'secret-password',
+    })).rejects.toMatchObject({ code: 'secure_session_unavailable' });
 
-    expect(localStorage.getItem('beegame_supabase_session')).toContain('refresh-token');
+    expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
     expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/session');
+  });
+
+  it('restores one HttpOnly cookie session across concurrent StrictMode initialization', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const fetchMock = vi.fn(async () => Response.json({
+      authenticated: true,
+      user: { id: 'cookie-user', email: 'cookie@example.com' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [first, second] = await Promise.all([
+      initializeSupabaseSession(),
+      initializeSupabaseSession(),
+    ]);
+
+    expect(first?.user.id).toBe('cookie-user');
+    expect(second?.user.id).toBe('cookie-user');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/session', { credentials: 'include' });
+  });
+
+  it('reports a frontend/backend secure-session flag mismatch', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+
+    await expect(initializeSupabaseSession()).rejects.toMatchObject({
+      code: 'secure_session_not_configured',
+      status: 404,
+    });
+  });
+
+  it('coalesces concurrent HttpOnly refreshes into one server request', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const fetchMock = vi.fn(async () => Response.json({
+      authenticated: true,
+      user: { id: 'cookie-user' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [first, second] = await Promise.all([
+      refreshSupabaseSession(),
+      refreshSupabaseSession(),
+    ]);
+
+    expect(first?.user.id).toBe('cookie-user');
+    expect(second?.user.id).toBe('cookie-user');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('signs up with email/password and stores the returned session when available', async () => {

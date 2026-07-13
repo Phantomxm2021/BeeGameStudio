@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJSONStorage } from 'zustand/middleware';
 
-const { bootstrapProjectFromIdea, getPendingUserReviews, getProjectStatus, getProjects, openProject, chatActions } = vi.hoisted(() => ({
+const { bootstrapProjectFromIdea, getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProjects, openProject, chatActions } = vi.hoisted(() => ({
     bootstrapProjectFromIdea: vi.fn(),
     getPendingUserReviews: vi.fn(),
     getProjectStatus: vi.fn(),
+    getProjectRuntimeState: vi.fn(),
     getProjects: vi.fn(),
     openProject: vi.fn(),
     chatActions: {
@@ -21,6 +22,7 @@ vi.mock('../services/api', async () => {
             bootstrapProjectFromIdea,
             getPendingUserReviews,
             getProjectStatus,
+            getProjectRuntimeState,
             getProjects,
             openProject,
         },
@@ -43,7 +45,12 @@ describe('projectStore pending review normalization', () => {
         bootstrapProjectFromIdea.mockReset();
         getPendingUserReviews.mockReset();
         getProjectStatus.mockReset();
+        getProjectRuntimeState.mockReset();
         getProjects.mockReset();
+        getProjectRuntimeState.mockImplementation(async (projectId: string) => ({
+            status: await getProjectStatus(projectId),
+            pendingReviews: (await getPendingUserReviews(projectId)).items || [],
+        }));
         openProject.mockReset();
         openProject.mockResolvedValue({});
         chatActions.clearMessages.mockReset();
@@ -281,6 +288,24 @@ describe('projectStore pending review normalization', () => {
 
         expect(useProjectStore.getState().projectStatus?.next_action).toBe('running');
         expect(showToastError).toHaveBeenCalledWith(expect.stringContaining('后端状态不可用'));
+    });
+
+    it('updates project status and pending reviews from one runtime snapshot', async () => {
+        getProjectRuntimeState.mockResolvedValueOnce({
+            status: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+            },
+            pendingReviews: [{ gate_id: 'permission_1' }],
+        });
+
+        await useProjectStore.getState().loadProjectRuntimeState('proj_1');
+
+        expect(getProjectRuntimeState).toHaveBeenCalledTimes(1);
+        expect(getProjectRuntimeState).toHaveBeenCalledWith('proj_1');
+        expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
+        expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
     });
 
     it('stores api-normalized pending review payloads with compact pipeline fields', async () => {

@@ -30,4 +30,20 @@ describe('remote credit control client', () => {
     ])
     expect(settlement?.settledCredits).toBe(2)
   })
+
+  test('surfaces the protected billing service failure instead of replacing it with a generic 500', async () => {
+    const client = createRemoteCreditControlClient({
+      mode: 'remote',
+      remoteApiBaseUrl: 'http://127.0.0.1:62175',
+      creditControlToken: 'service-token',
+    }, (async () => Response.json({
+      error: 'Credit control operation failed',
+      message: 'Credit reservation could not be completed',
+    }, { status: 500 })) as unknown as typeof fetch)
+
+    await expect(client?.reserveCredits('user-1', {
+      credits: 3,
+      idempotencyKey: 'request-1',
+    })).rejects.toThrow('Credit reservation could not be completed')
+  })
 })

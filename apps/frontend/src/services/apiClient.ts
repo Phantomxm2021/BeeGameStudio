@@ -2,6 +2,7 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import {
   getSupabaseAccessToken,
   getValidSupabaseAccessToken,
+  isHttpOnlySessionsEnabled,
   refreshSupabaseSession,
 } from './supabaseAuthApi';
 
@@ -15,6 +16,7 @@ export interface ApiErrorEnvelope {
 }
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+export const AUTHENTICATION_REQUIRED_EVENT = 'beegame:authentication-required';
 
 let showToastError: ((message: string) => void) | null = null;
 
@@ -27,10 +29,12 @@ const getEnvAuthToken = (): string => {
 
 export const hasEnvAuthToken = (): boolean => Boolean(getEnvAuthToken());
 
-export const resolveAuthToken = (): string => getSupabaseAccessToken() || getEnvAuthToken();
+export const resolveAuthToken = (): string => (
+  getSupabaseAccessToken() || (isHttpOnlySessionsEnabled() ? '' : getEnvAuthToken())
+);
 
 export const resolveAuthTokenAsync = async (): Promise<string> => (
-  await getValidSupabaseAccessToken() || getEnvAuthToken()
+  await getValidSupabaseAccessToken() || (isHttpOnlySessionsEnabled() ? '' : getEnvAuthToken())
 );
 
 export const buildApiUrl = (path: string): string => {
@@ -61,14 +65,23 @@ export const authenticatedFetch = (
     credentials: init.credentials ?? 'include',
     headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
-  if (response.status !== 401 || (!getSupabaseAccessToken() && getEnvAuthToken())) return response;
+  if (response.status !== 401) return response;
+  if (!isHttpOnlySessionsEnabled() && !getSupabaseAccessToken() && getEnvAuthToken()) {
+    notifyAuthenticationRequired();
+    return response;
+  }
   const refreshed = await refreshSupabaseSession();
-  if (!refreshed) return response;
-  return fetch(nextInput, {
+  if (!refreshed) {
+    notifyAuthenticationRequired();
+    return response;
+  }
+  const retriedResponse = await fetch(nextInput, {
     ...init,
     credentials: init.credentials ?? 'include',
     headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
+  if (retriedResponse.status === 401) notifyAuthenticationRequired();
+  return retriedResponse;
 })();
 
 export const buildUnauthorizedMessage = (backendMessage?: string): string => {
@@ -111,7 +124,7 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     if (
       error.response?.status === 401 &&
-      (getSupabaseAccessToken() || !getEnvAuthToken()) &&
+      (isHttpOnlySessionsEnabled() || getSupabaseAccessToken() || !getEnvAuthToken()) &&
       error.config &&
       !isRetriedRequest(error.config)
     ) {
@@ -123,6 +136,7 @@ apiClient.interceptors.response.use(
         return apiClient.request(error.config);
       }
     }
+    if (error.response?.status === 401) notifyAuthenticationRequired();
     const hideToast = getHeaderValue(error.config?.headers, 'Hide-Error-Toast') === 'true';
     const hideErrorLog = getHeaderValue(error.config?.headers, 'Hide-Error-Log') === 'true';
     if (!hideErrorLog) {
@@ -174,6 +188,12 @@ apiClient.interceptors.response.use(
 );
 
 const BEEGAME_AUTH_RETRY_HEADER = 'X-BeeGame-Auth-Retry';
+
+const notifyAuthenticationRequired = (): void => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTHENTICATION_REQUIRED_EVENT));
+  }
+};
 
 const buildAuthHeadersAsync = async (headers?: HeadersInit, attachAuth = true): Promise<Headers> => {
   const nextHeaders = new Headers(headers);

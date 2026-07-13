@@ -60,7 +60,6 @@ describe('beeGameAdapter prompt rules', () => {
         filename: 'game-design.md',
       }],
       language: 'zh',
-      thinkingMode: 'disabled',
       clientRequestId: 'attachment-analysis-1',
     });
 
@@ -316,7 +315,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
   });
 
-  it('sends selected BeeGame intake thinking mode to the async job', async () => {
+  it('keeps intake model behavior out of the browser request', async () => {
     const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -343,19 +342,16 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.runIdeaIntake({
       idea: 'LLM generated idea',
       language: 'zh',
-      thinkingMode: 'disabled',
     });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as {
       idea?: string;
       language?: string;
-      thinkingMode?: string;
       clientRequestId?: string;
     };
     expect(requestBody).toEqual({
       idea: 'LLM generated idea',
       language: 'zh',
-      thinkingMode: 'disabled',
       clientRequestId: expect.any(String),
     });
   });
@@ -521,7 +517,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_scoped/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_scoped/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_scoped',
           cwd: '/tmp/beegame-projects/sample-web-game',
@@ -601,7 +597,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_custom_root/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_custom_root/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_custom_root',
           cwd: '/tmp/custom-beegame-projects/arena-prototype',
@@ -651,7 +647,7 @@ describe('beeGameAdapter prompt rules', () => {
         const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
         return jsonResponse({ id: 'beegame_gdd', cwd: body.workspacePath, status: 'running', turnStatus: 'idle' });
       }
-      if (path === '/api/beegame-sessions/beegame_gdd/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_gdd/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({ id: 'beegame_gdd', cwd: '/tmp/beegame-projects/confirmed-gdd', status: 'running', turnStatus: 'running' });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -670,18 +666,16 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_gdd/input' && init?.method === 'POST'
+      String(path) === '/api/beegame-sessions/beegame_gdd/confirmed-brief' && init?.method === 'POST'
     ));
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    const brief = JSON.parse(String(body.text || '{}')) as Record<string, unknown>;
-    expect(brief).toMatchObject({
-      kind: 'confirmed_build_brief',
-      confirmed_gdd: '# Rules\n- Solve the puzzle to win.',
-      build_source: 'gdd',
-      analysis_id: 'analysis_direct_build',
+    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { brief?: Record<string, unknown> };
+    expect(body.brief).toMatchObject({
+      confirmedGdd: '# Rules\n- Solve the puzzle to win.',
+      buildSource: 'gdd',
+      analysisId: 'analysis_direct_build',
     });
-    expect(body.text).not.toContain('Save it as docs/GDD.md first');
-    expect(body.text).not.toContain('Do not regenerate a game plan');
+    expect(JSON.stringify(body)).not.toContain('Save it as docs/GDD.md first');
+    expect(JSON.stringify(body)).not.toContain('Do not regenerate a game plan');
   });
 
   it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
@@ -704,7 +698,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_safe_path/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_safe_path/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_safe_path',
           cwd: '/tmp/beegame-projects/movement-aim-trainer',
@@ -1419,7 +1413,6 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.sendMessage({
       project_id: 'project_backend_ensure',
       content: '继续任务',
-      thinkingMode: 'disabled',
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
@@ -1430,12 +1423,9 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     const ensureBody = JSON.parse(String(ensureCall?.[1]?.body || '{}')) as { language?: string };
     expect(ensureBody.language).toBeTruthy();
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as {
-      text?: string;
-      thinkingMode?: string;
-    };
+    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string; thinkingMode?: string };
     expect(body.text).toBe('继续任务');
-    expect(body.thinkingMode).toBe('disabled');
+    expect(body.thinkingMode).toBeUndefined();
     expect(fetchMock.mock.calls.some(([path, init]) => (
       String(path) === '/api/beegame-sessions' && init?.method === 'POST'
     ))).toBe(false);
@@ -1507,7 +1497,7 @@ describe('beeGameAdapter prompt rules', () => {
           '/tmp/beegame-projects/mode-from-llm',
         ));
       }
-      if (path === '/api/beegame-sessions/beegame_paused/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_paused',
           cwd: '/tmp/beegame-projects/mode-from-llm',
@@ -1534,11 +1524,11 @@ describe('beeGameAdapter prompt rules', () => {
     await beeGameAdapter.continueTask({ project_id: project.id });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_paused/input' && init?.method === 'POST'
+      String(path) === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST'
     ));
     expect(inputCall).toBeTruthy();
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(body.text).toBe('继续任务');
+    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { language?: string };
+    expect(body.language).toBe('zh');
   });
 
   it('keeps an existing session bound to its configured model before continuing', async () => {
@@ -1552,7 +1542,7 @@ describe('beeGameAdapter prompt rules', () => {
           { modelConfigId: 'llm_old' },
         ));
       }
-      if (path === '/api/beegame-sessions/beegame_model_old/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_model_old/continue' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_model_old',
           cwd: '/tmp/beegame-projects/model-sync-game',
@@ -1602,7 +1592,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_brief/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_brief/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_brief',
           cwd: '/tmp/beegame-projects',
@@ -1633,30 +1623,24 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_brief/input' &&
+      String(path) === '/api/beegame-sessions/beegame_brief/confirmed-brief' &&
       init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as {
-      text?: string;
-      displayText?: string;
-      displayKind?: string;
+      brief?: Record<string, any>;
+      language?: string;
     };
 
-    expect(body).toMatchObject({
-      displayText: 'LLM generated idea',
-      displayKind: 'confirmed_brief',
-    });
-    const brief = JSON.parse(body.text || '{}') as Record<string, any>;
-    expect(brief.kind).toBe('confirmed_build_brief');
+    const brief = body.brief || {};
     expect(brief.idea).toBe('LLM generated idea');
     expect(brief.settings).toEqual(expect.objectContaining({
       platform: 'Web',
       inputs: ['Keyboard/mouse', 'Touch'],
     }));
-    expect(body.text).not.toContain('delivery contract');
-    expect(body.text).not.toContain('验收');
-    expect(body.text).not.toContain('subagents');
-    expect(body.text).not.toContain('apps/frontend');
+    expect(JSON.stringify(body)).not.toContain('delivery contract');
+    expect(JSON.stringify(body)).not.toContain('验收');
+    expect(JSON.stringify(body)).not.toContain('subagents');
+    expect(JSON.stringify(body)).not.toContain('apps/frontend');
   });
 
   it('restores the visible idea from transcript display metadata instead of the transport prompt', async () => {
@@ -1723,7 +1707,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_english_brief/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_english_brief/confirmed-brief' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -1748,18 +1732,16 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_english_brief/input' &&
+      String(path) === '/api/beegame-sessions/beegame_english_brief/confirmed-brief' &&
       init?.method === 'POST'
     ));
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
-
-    const brief = JSON.parse(body.text || '{}') as Record<string, unknown>;
-    expect(brief.kind).toBe('confirmed_build_brief');
+    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { brief?: Record<string, unknown> };
+    const brief = body.brief || {};
     expect(brief.idea).toBe('Build a sample game');
     expect(brief.settings).toEqual(expect.objectContaining({ platform: 'Web', dimension: '2D' }));
-    expect(body.text).not.toContain('executable player-path checks');
-    expect(body.text).not.toContain('delivery contract');
-    expect(body.text).not.toContain('Do not count log-only scripts');
+    expect(JSON.stringify(body)).not.toContain('executable player-path checks');
+    expect(JSON.stringify(body)).not.toContain('delivery contract');
+    expect(JSON.stringify(body)).not.toContain('Do not count log-only scripts');
   });
 
   it('keeps intake prompts free of package-name branding policy blocks', async () => {
@@ -1778,7 +1760,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_test/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_test/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_test',
           cwd: '/tmp/beegame-projects',
@@ -1798,14 +1780,15 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_test/input' &&
+      String(path) === '/api/beegame-sessions/beegame_test/idea' &&
       init?.method === 'POST'
     ));
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { text?: string };
+    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { idea?: string };
 
-    expect(body.text).not.toContain('Do not apply BeeGame branding to code identifiers');
-    expect(body.text).not.toContain('Never invent or rewrite package scopes such as @beegame/*');
-    expect(body.text).not.toContain('use the real package name @ant/ink');
+    expect(body.idea).toBe('LLM generated idea');
+    expect(JSON.stringify(body)).not.toContain('Do not apply BeeGame branding to code identifiers');
+    expect(JSON.stringify(body)).not.toContain('Never invent or rewrite package scopes such as @beegame/*');
+    expect(JSON.stringify(body)).not.toContain('use the real package name @ant/ink');
   });
 
   it('sends follow-up messages without repeating session policy blocks', async () => {
@@ -1833,7 +1816,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_followup/input' && init?.method === 'POST') {
+      if ((path === '/api/beegame-sessions/beegame_followup/idea' || path === '/api/beegame-sessions/beegame_followup/input') && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_followup',
           cwd: '/tmp/beegame-projects/followup',
@@ -1874,7 +1857,7 @@ describe('beeGameAdapter prompt rules', () => {
         init?.method === 'POST'
       ))
       .map(([, init]) => JSON.parse(String(init?.body ?? '{}')) as { text?: string });
-    const followUp = inputBodies[1]?.text || '';
+    const followUp = inputBodies[0]?.text || '';
 
     expect(followUp).toBe('开始游戏后蛇没有吃食物也会变长，请修复。');
     expect(followUp).not.toContain('Branding rule:');
@@ -1898,7 +1881,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_tools/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_tools/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_tools',
           cwd: '/tmp/beegame-projects',
@@ -1961,7 +1944,7 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
-  it('treats AskUserQuestion as a clarification review instead of a chat message', async () => {
+  it('does not create a separate clarification protocol for permission events', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/model-configs') {
@@ -1977,7 +1960,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_question/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_question/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_question',
           cwd: '/tmp/beegame-projects',
@@ -2043,26 +2026,20 @@ describe('beeGameAdapter prompt rules', () => {
     const status = await beeGameAdapter.getProjectStatus(result.project.id);
 
     expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
-    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(false);
+    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(true);
     expect(reviews.items).toEqual([
       expect.objectContaining({
         gate_id: 'tool_question',
         task_id: 'beegame_question',
-        type: 'INTENT_CLARIFICATION',
+        type: 'BEEGAME_PERMISSION',
         gate_kind: 'beegame_permission',
-        title: '游戏模式',
+        title: 'AskUserQuestion permission',
         status: 'awaiting_approval',
         artifact: expect.objectContaining({
-          title: '游戏模式',
-          content: expect.stringContaining('你想做单人模式还是双人模式？'),
-        }),
-        summary: expect.objectContaining({
-          next_action: expect.stringContaining('你想做单人模式还是双人模式？'),
+          title: 'AskUserQuestion permission',
         }),
       }),
     ]);
-    expect(reviews.items[0].artifact.content).toContain('单人模式');
-    expect(reviews.items[0].artifact.content).toContain('双人模式');
     expect(status.approval_required).toBe(true);
     expect(status.phase).toBe('waiting_approval');
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -2094,6 +2071,7 @@ describe('beeGameAdapter prompt rules', () => {
       '/api/projects/project_permission/permissions/tool_question',
       expect.objectContaining({
         method: 'POST',
+        body: JSON.stringify({ decision: 'allow', remember: false }),
       }),
     );
   });
@@ -2114,7 +2092,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_multi/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_multi/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_multi',
           cwd: '/tmp/beegame-projects',
@@ -2179,7 +2157,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_idle/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_idle/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_idle',
           cwd: '/tmp/beegame-projects',
@@ -2226,7 +2204,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_review/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_review/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_review',
           cwd: '/tmp/beegame-projects',
@@ -2276,7 +2254,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:01.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_failed_check/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_failed_check/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_failed_check',
           cwd: '/tmp/beegame-projects',
@@ -2331,7 +2309,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_stream/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_stream/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_stream',
           cwd: '/tmp/beegame-projects',
@@ -2457,7 +2435,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_order/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_order/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_order',
           cwd: '/tmp/beegame-projects',
@@ -2546,7 +2524,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_subagent/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_subagent/idea' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
       if (path === '/api/beegame-sessions/beegame_subagent') {
@@ -2637,7 +2615,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_usage/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_usage/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_usage',
           cwd: '/tmp/beegame-projects',
@@ -2700,7 +2678,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_assistant_usage/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_assistant_usage/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_assistant_usage',
           cwd: '/tmp/beegame-projects',
@@ -2767,7 +2745,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_observe/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_observe/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_observe',
           cwd: '/tmp/beegame-projects',
@@ -2789,7 +2767,6 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/beegame-sessions/beegame_observe/events?after=0') {
         return jsonResponse([
-          runtimeObservationEvent(70, 'beegame_observe', 'initialized'),
           resultEvent(71, 'beegame_observe', 'turn-1', 200, 50),
         ]);
       }
@@ -2859,7 +2836,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_gate/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_gate/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_gate',
           cwd: '/tmp/beegame-projects',
@@ -2935,7 +2912,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_delete/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_delete/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_delete',
           cwd: '/tmp/beegame-projects',
@@ -2982,7 +2959,7 @@ describe('beeGameAdapter prompt rules', () => {
           updatedAt: '2026-06-21T00:00:00.000Z',
         });
       }
-      if (path === '/api/beegame-sessions/beegame_delete_missing/input' && init?.method === 'POST') {
+      if (path === '/api/beegame-sessions/beegame_delete_missing/idea' && init?.method === 'POST') {
         return jsonResponse({
           id: 'beegame_delete_missing',
           cwd: '/tmp/beegame-projects/sample-level-game',
@@ -3183,7 +3160,7 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(readBlobText(result.blob)).resolves.toBe('PK zip');
   });
 
-  it('recovers the BeeGame session and retries when package download returns not found', async () => {
+  it('does not create a runtime session when a read-only package download fails', async () => {
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
         projectId: 'project_zip_retry',
@@ -3196,15 +3173,7 @@ describe('beeGameAdapter prompt rules', () => {
       const path = String(input);
       if (path === '/api/beegame-sessions/beegame_zip_retry/package?workspacePath=%2Ftmp%2Fbeegame-projects%2Fzip-retry') {
         packageAttempts += 1;
-        if (packageAttempts === 1) {
-          return jsonResponse({ error: 'Session not found' }, 404);
-        }
-        return new Response('PK retry zip', {
-          headers: {
-            'content-type': 'application/zip',
-            'content-disposition': 'attachment; filename="zip-retry.zip"',
-          },
-        });
+        return jsonResponse({ error: 'Session not found' }, 404);
       }
       if (path === '/api/projects/project_zip_retry/session/ensure' && init?.method === 'POST') {
         return jsonResponse(projectEnsureResponse(
@@ -3217,11 +3186,13 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await beeGameAdapter.downloadProjectPackage('project_zip_retry');
-
-    expect(result.filename).toBe('zip-retry.zip');
-    await expect(readBlobText(result.blob)).resolves.toBe('PK retry zip');
-    expect(packageAttempts).toBe(2);
+    await expect(beeGameAdapter.downloadProjectPackage('project_zip_retry'))
+      .rejects.toThrow('Session not found');
+    expect(packageAttempts).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/projects/project_zip_retry/session/ensure',
+      expect.anything(),
+    );
   });
 
   it('manages preview and deployment through project scoped endpoints', async () => {
@@ -3782,32 +3753,6 @@ function bashFailedEvent(id: number, sessionId: string, turnId: string, command:
       toolName: 'Bash',
       input: { command },
       output,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function runtimeObservationEvent(id: number, sessionId: string, status: string) {
-  return {
-    id,
-    sessionId,
-    type: 'runtime.observation',
-    text: 'BeeGame runtime observability updated',
-    payload: {
-      type: 'runtime.observation',
-      status,
-      phase: 'planning',
-      features: [
-        { id: 'CONTEXT_COLLAPSE', label: 'Context collapse', stage: 'phase_1', status: 'available' },
-        { id: 'HISTORY_SNIP', label: 'History snip', stage: 'phase_1', status: 'available' },
-        { id: 'TOKEN_BUDGET', label: 'Token budget', stage: 'phase_1', status: 'available' },
-        { id: 'MONITOR_TOOL', label: 'Monitor tool', stage: 'phase_1', status: 'available' },
-      ],
-      counters: {
-        eventCount: 12,
-        toolUseCount: 2,
-        turnIndex: 1,
-      },
     },
     createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
   };

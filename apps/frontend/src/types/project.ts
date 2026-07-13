@@ -59,12 +59,6 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   /** Updated name for the project (optional) */
   name?: string;
-  
-  /** Updated root path for the project files (optional) */
-  root_path?: string;
-
-  /** Updated dashboard runtime summary (optional) */
-  runtime_snapshot?: ProjectRuntimeSnapshot;
 }
 
 export type StartProjectResult =

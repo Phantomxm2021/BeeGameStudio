@@ -15,7 +15,6 @@ import type { Agent, SystemStatus, Activity, TaskCandidateAgent } from '../types
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
 import {
-  getSupabaseAccessToken,
   getSupabaseSessionUser,
 } from '../services/supabaseAuthApi';
 import type {
@@ -85,6 +84,9 @@ interface SystemState {
   /** Current BeeGame user and permission snapshot */
   currentUser: BeeGameCurrentUser | null;
 
+  /** Browser authentication bootstrap state. */
+  authenticationStatus: 'initializing' | 'authenticated' | 'anonymous';
+
   /** Whether a synchronization (resync) is in progress */
   isSyncing: boolean;
 
@@ -106,6 +108,8 @@ interface SystemState {
    * Load current BeeGame user and role permissions.
    */
   loadCurrentUser: () => Promise<BeeGameCurrentUser | null>;
+
+  setAuthenticationStatus: (status: SystemState['authenticationStatus']) => void;
 
   /**
    * Check whether the current user has a named permission.
@@ -192,20 +196,28 @@ export const useSystemStore = create<SystemState>()(
       tasks: [],
       taskUsage: {},
       currentUser: null,
+      authenticationStatus: 'initializing',
       lastP2PRoute: null,
 
       loadCurrentUser: async () => {
         try {
           const currentUser = mergeSupabaseSessionProfile(await api.getCurrentUser());
-          set({ currentUser });
+          set({ currentUser, authenticationStatus: 'authenticated' });
           return currentUser;
         } catch (error) {
           if (getErrorStatus(error) !== 401) {
             console.error('Failed to load current user:', error);
           }
-          set({ currentUser: null });
+          set({ currentUser: null, authenticationStatus: 'anonymous' });
           return null;
         }
+      },
+
+      setAuthenticationStatus: (authenticationStatus) => {
+        set({
+          authenticationStatus,
+          ...(authenticationStatus === 'anonymous' ? { currentUser: null } : {}),
+        });
       },
 
       hasPermission: (permission: BeeGamePermission) => (
@@ -359,7 +371,7 @@ function getErrorStatus(error: unknown): number | undefined {
 
 function mergeSupabaseSessionProfile(user: BeeGameCurrentUser): BeeGameCurrentUser {
   const sessionUser = getSupabaseSessionUser();
-  if (!sessionUser || !getSupabaseAccessToken()) return user;
+  if (!sessionUser) return user;
   return {
     ...user,
     email: user.email ?? sessionUser.email,

@@ -637,7 +637,6 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({
             idea: 'LLM generated idea',
             language: 'zh',
-            thinkingMode: 'disabled',
         });
     });
 
@@ -692,7 +691,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh', thinkingMode: 'disabled' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'OAuth generated idea', language: 'zh' });
     });
 
     it('smokes the SaaS entry flow without bypassing login or credit confirmation', async () => {
@@ -739,7 +738,6 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({
             idea: 'LLM generated idea',
             language: 'zh',
-            thinkingMode: 'disabled',
         });
     });
 
@@ -756,7 +754,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
 
         expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
-        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh', thinkingMode: 'disabled' });
+        expect(runIdeaIntake).toHaveBeenCalledWith({ idea: 'Persistent LLM generated idea', language: 'zh' });
     });
 
     it('restores typed idea text after a page refresh without opening intake', () => {
@@ -1364,7 +1362,6 @@ describe('LandingView bootstrap submission', () => {
         expect(runIdeaIntake).toHaveBeenCalledWith({
             idea: 'LLM generated idea',
             language: 'zh',
-            thinkingMode: 'disabled',
         });
         expect(onStart).not.toHaveBeenCalled();
         expect(analyzeIdeaIntake).not.toHaveBeenCalled();
@@ -1743,28 +1740,10 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.getByTestId('landing-background-video')).toBe(video);
     });
 
-    it('uses compact two-option thinking mode controls for idea intake', async () => {
+    it('does not expose model thinking controls in the idea prompt', () => {
         renderLanding();
-
-        const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
-        expect(thinkingSelect).toHaveValue('disabled');
-        expect(thinkingSelect).toHaveClass('type-button');
-        expect(thinkingSelect).not.toHaveClass('type-caption-1');
-        expect(thinkingSelect).toHaveClass('text-zinc-500');
-        expect(within(thinkingSelect).getByRole('option', { name: '默认' })).toBeInTheDocument();
-        expect(within(thinkingSelect).getByRole('option', { name: '深度思考' })).toBeInTheDocument();
-        expect(within(thinkingSelect).queryByRole('option', { name: /自动/ })).not.toBeInTheDocument();
-
-        thinkingSelect.focus();
-        fireEvent.change(thinkingSelect, { target: { value: 'enabled' } });
-        expect(document.activeElement).not.toBe(thinkingSelect);
-        await submitIdeaAndConfirmIntake('LLM generated idea');
-
-        expect(runIdeaIntake).toHaveBeenCalledWith({
-            idea: 'LLM generated idea',
-            language: 'zh',
-            thinkingMode: 'enabled',
-        });
+        expect(screen.queryByLabelText('思考')).not.toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: '深度思考' })).not.toBeInTheDocument();
     });
 
     it('renders the idea prompt as a frosted glass surface', () => {

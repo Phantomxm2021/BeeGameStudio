@@ -54,6 +54,8 @@ let pendingRedirectConsumption: {
   key: string;
   promise: Promise<boolean>;
 } | null = null;
+let pendingSessionInitialization: Promise<BeeGameSupabaseSession | null> | null = null;
+let pendingSessionRefresh: Promise<BeeGameSupabaseSession | null> | null = null;
 let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
@@ -380,7 +382,15 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
     const response = await fetch(buildSameOriginApiUrl('/api/auth/session'), {
       credentials: 'include',
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new SupabaseAuthApiError('BeeGame secure session configuration is inconsistent.', {
+          code: 'secure_session_not_configured',
+          status: response.status,
+        });
+      }
+      return null;
+    }
     const cookieSession = toCookieSession(await response.json());
     httpOnlySessionUser = cookieSession.user;
     return cookieSession;
@@ -413,7 +423,36 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
   return hydrated;
 }
 
+/**
+ * Restore the browser authentication boundary exactly once during concurrent
+ * React mounts. HttpOnly mode restores the server cookie; legacy mode restores
+ * the browser session. Callers must not infer authentication from token
+ * visibility because HttpOnly access tokens are intentionally unreadable.
+ */
+export function initializeSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
+  if (pendingSessionInitialization) return pendingSessionInitialization;
+  const initialization = (async () => {
+    await consumeSupabaseRedirectSession();
+    return hydrateSupabaseSessionUser();
+  })().finally(() => {
+    if (pendingSessionInitialization === initialization) {
+      pendingSessionInitialization = null;
+    }
+  });
+  pendingSessionInitialization = initialization;
+  return initialization;
+}
+
 export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
+  if (pendingSessionRefresh) return pendingSessionRefresh;
+  const refresh = refreshSupabaseSessionOnce().finally(() => {
+    if (pendingSessionRefresh === refresh) pendingSessionRefresh = null;
+  });
+  pendingSessionRefresh = refresh;
+  return refresh;
+}
+
+async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | null> {
   if (isHttpOnlySessionsEnabled()) {
     const response = await fetch(buildSameOriginApiUrl('/api/auth/session/refresh'), {
       method: 'POST',
@@ -500,13 +539,17 @@ async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<
         return;
       }
     } catch {
-      // Keep the legacy session when the server cannot prove cookie auth.
+      // The secure session is authoritative. Do not silently activate a
+      // browser-token fallback when cookie verification fails.
     }
   }
-  saveSupabaseSession(session);
+  throw new SupabaseAuthApiError('Secure BeeGame session could not be established.', {
+    code: 'secure_session_unavailable',
+    status: response.status,
+  });
 }
 
-function isHttpOnlySessionsEnabled(): boolean {
+export function isHttpOnlySessionsEnabled(): boolean {
   return String(import.meta.env.VITE_BEEGAME_HTTPONLY_SESSIONS ?? '').trim() === '1';
 }
 

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  buildDeliveryRepairPrompt,
   createDeliveryContract,
   createDeliveryGateFailure,
   parseDeliveryReview,
@@ -10,7 +9,7 @@ import {
 describe('delivery contract', () => {
   test('accepts only the expected validator identity and host-owned evidence provenance', () => {
     const report = {
-      validatorId: 'beegame-contract-validator',
+      validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Conforms.',
       requirements: [{
@@ -23,11 +22,11 @@ describe('delivery contract', () => {
     }
     expect(parseDeliveryValidatorReport(
       JSON.stringify(report),
-      'beegame-contract-validator',
+      'beegame-acceptance-validator',
     )).toBeDefined()
     expect(parseDeliveryValidatorReport(
       JSON.stringify(report),
-      'beegame-runtime-validator',
+      'project-helper',
     )).toBeUndefined()
     expect(parseDeliveryValidatorReport(JSON.stringify({
       ...report,
@@ -35,7 +34,7 @@ describe('delivery contract', () => {
         ...report.requirements[0],
         evidence: [{ kind: 'implementation', eventId: 'forged', detail: 'Claimed.' }],
       }],
-    }), 'beegame-contract-validator')).toBeUndefined()
+    }), 'beegame-acceptance-validator')).toBeUndefined()
   })
 
   test('requires runtime evidence before accepting an MVP player path', () => {
@@ -126,9 +125,9 @@ describe('delivery contract', () => {
         id: 'performance', title: 'Performance baseline', scope: 'mvp', status: 'runtime_verified',
         evidenceRequired: ['runtime'],
         evidence: [{
-          kind: 'runtime', eventId: 'measure-1', detail: 'Measured by adapter.',
+          kind: 'runtime', eventId: 'measure-1', detail: 'Measured by the project toolchain.',
           metrics: { frame_time_ms: 12.5, startup_ms: 850 },
-          environment: { adapter: 'runtime-adapter-a', profile: 'baseline', accelerated: true },
+          environment: { toolchain: 'project-native', profile: 'baseline', accelerated: true },
         }],
       }],
       findings: [],
@@ -136,31 +135,8 @@ describe('delivery contract', () => {
 
     expect(review?.requirements[0]?.evidence[0]).toEqual(expect.objectContaining({
       metrics: { frame_time_ms: 12.5, startup_ms: 850 },
-      environment: { adapter: 'runtime-adapter-a', profile: 'baseline', accelerated: true },
+      environment: { toolchain: 'project-native', profile: 'baseline', accelerated: true },
     }))
-  })
-
-  test('builds a platform-neutral repair prompt from unresolved contract entries', () => {
-    const prompt = buildDeliveryRepairPrompt({
-      version: 1,
-      status: 'failed',
-      summary: 'Core path failed.',
-      requirements: [{
-        id: 'core-loop',
-        title: 'Core loop',
-        scope: 'mvp',
-        status: 'failed',
-        evidenceRequired: ['runtime'],
-        evidence: [],
-      }],
-      requiredCapabilities: [],
-      verifiedCapabilities: [],
-    }, 1)
-
-    expect(prompt).toContain('Core loop')
-    expect(prompt).toContain('runtime')
-    expect(prompt).toContain('project-selected platform adapter')
-    expect(prompt).not.toContain('tactical-breach-fps')
   })
 
   test('blocks deployment until the evidence-backed review passes', () => {

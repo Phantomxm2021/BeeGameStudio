@@ -15,7 +15,7 @@ describe('BeeGame resource bindings', () => {
     expect(effectiveAssetFormats(manifest.slots[0]!, manifest.project_target)).toEqual(['glb'])
   })
 
-  test('does not permit automatic format selection without a runtime adapter contract', () => {
+  test('does not permit automatic format selection without project target capabilities', () => {
     const manifest = normalizeBeeGameAssetManifest({
       version: 1,
       slots: [{ id: 'slot-1', resource_requirement: { accepted_formats: ['glb'] } }],

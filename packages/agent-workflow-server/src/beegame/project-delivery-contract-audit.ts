@@ -23,7 +23,7 @@ export type ProjectDeliveryContractAudit = {
   issues: string[]
 }
 
-const CAPABILITY_PREFIXES = ['skill:', 'adapter:'] as const
+const CAPABILITY_PREFIXES = ['skill:'] as const
 
 const EVIDENCE_KINDS = new Set<DeliveryEvidenceKind>([
   'implementation', 'build', 'test', 'runtime', 'asset', 'skill', 'document',
@@ -249,7 +249,7 @@ function parseRequiredCapabilities(value: unknown, issues: string[]): string[] {
     capability.endsWith(':')
   ))
   if (unsupported.length > 0) {
-    issues.push(`requiredCapabilities may reference only registered skill:* or adapter:* ids: ${unsupported.join(', ')}`)
+    issues.push(`requiredCapabilities may reference only registered skill:* ids: ${unsupported.join(', ')}`)
   }
   return capabilities
 }

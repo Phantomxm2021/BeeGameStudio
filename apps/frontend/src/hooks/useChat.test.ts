@@ -10,6 +10,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     upsertPendingReview: vi.fn(),
     loadProjectStatus: vi.fn().mockResolvedValue(undefined),
     loadPendingReviews: vi.fn().mockResolvedValue(undefined),
+    loadProjectRuntimeState: vi.fn().mockResolvedValue(undefined),
   };
   const chatState = {
     addMessage: vi.fn(),
@@ -32,6 +33,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     loadAgents: vi.fn().mockResolvedValue(undefined),
     loadTokenUsage: vi.fn().mockResolvedValue(undefined),
     loadCurrentUser: vi.fn().mockResolvedValue(null),
+    authenticationStatus: 'authenticated' as const,
     setAgentStatus: vi.fn(),
     refreshAgents: vi.fn().mockResolvedValue(undefined),
     setIsSyncing: vi.fn(),
@@ -119,6 +121,8 @@ describe('useChat clarification gate handling', () => {
     projectStoreState.upsertPendingReview.mockClear();
     projectStoreState.loadProjectStatus.mockClear();
     projectStoreState.loadPendingReviews.mockClear();
+    projectStoreState.loadProjectRuntimeState.mockReset();
+    projectStoreState.loadProjectRuntimeState.mockResolvedValue(undefined);
     Object.values(chatStoreState).forEach((value) => {
       if (typeof value === 'function' && 'mockClear' in value) {
         value.mockClear();
@@ -310,7 +314,7 @@ describe('useChat clarification gate handling', () => {
   });
 
   it('restores loading state when reconnect sync finds an already running BeeGame project status', async () => {
-    projectStoreState.loadProjectStatus.mockImplementation(async () => {
+    projectStoreState.loadProjectRuntimeState.mockImplementation(async () => {
       projectStoreState.projectStatus = {
         project_id: 'proj_1',
         phase: 'running',
@@ -335,7 +339,7 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.currentTaskId).toBe('proj_1');
   });
 
-  it('refreshes project runtime visibility when a tool starts', async () => {
+  it('does not trigger project-wide polling for every tool-start event', async () => {
     const onTaskEvent = vi.fn();
     renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
 
@@ -357,8 +361,8 @@ describe('useChat clarification gate handling', () => {
       taskKind: 'tool_execution',
     }));
     expect(onTaskEvent).toHaveBeenCalledWith('tool_start', expect.any(Object));
-    expect(projectStoreState.loadProjectStatus).toHaveBeenCalledWith('proj_1');
-    expect(projectStoreState.loadPendingReviews).toHaveBeenCalledWith('proj_1');
+    expect(projectStoreState.loadProjectStatus).not.toHaveBeenCalled();
+    expect(projectStoreState.loadPendingReviews).not.toHaveBeenCalled();
   });
 
   it('stores structured tool card metadata from tool events', async () => {
@@ -468,10 +472,11 @@ describe('useChat clarification gate handling', () => {
       project_id: 'proj_1',
     }));
     await waitFor(() => {
-      expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
-      expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+      expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
       expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
     });
+    expect(systemStoreState.loadPhases).not.toHaveBeenCalled();
+    expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
   });
 
   it('records the source message when sending an edited draft', async () => {
@@ -484,7 +489,7 @@ describe('useChat clarification gate handling', () => {
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
     await act(async () => {
-      await result.current.sendMessage('updated request', undefined, 'edit_turn', undefined, 'disabled', 'msg_original');
+      await result.current.sendMessage('updated request', undefined, undefined, 'msg_original');
     });
 
     expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -512,6 +517,28 @@ describe('useChat clarification gate handling', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',
     }));
+  });
+
+  it('resynchronizes after reconnect without replaying a failed mutating request', async () => {
+    vi.mocked(api.sendMessage).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await result.current.sendMessage('do this once');
+    });
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+    vi.mocked(api.sendMessage).mockResolvedValue({
+      task_id: 'unexpected-replay',
+      command_id: 'unexpected-replay',
+      state: 'running',
+    } as any);
+    await act(async () => {
+      await latestWebSocketOptions.onOpen?.();
+    });
+
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
   });
 
   it('surfaces runtime error events as toast notifications', () => {
@@ -553,10 +580,11 @@ describe('useChat clarification gate handling', () => {
       project_id: 'proj_1',
     }));
     await waitFor(() => {
-      expect(systemStoreState.loadPhases).toHaveBeenCalledWith('proj_1');
-      expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+      expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
       expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
     });
+    expect(systemStoreState.loadPhases).not.toHaveBeenCalled();
+    expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
   });
 
   it('removes the pending review immediately after a successful approve submission', async () => {
@@ -578,8 +606,7 @@ describe('useChat clarification gate handling', () => {
 
     expect(api.approvePlan).toHaveBeenCalledTimes(1);
     expect(projectStoreState.removePendingReview).toHaveBeenCalledWith('gate_approval');
-    expect(projectStoreState.loadProjectStatus).toHaveBeenCalledWith('proj_1');
-    expect(projectStoreState.loadPendingReviews).toHaveBeenCalledWith('proj_1');
+    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
     expect(projectStoreState.upsertPendingReview).not.toHaveBeenCalled();
     expect(result.current.approvalState).toEqual({
       gateId: null,
@@ -605,10 +632,8 @@ describe('useChat clarification gate handling', () => {
 
     expect(api.approveManifest).toHaveBeenCalledTimes(1);
     expect(api.reviseManifest).toHaveBeenCalledTimes(1);
-    expect(projectStoreState.loadProjectStatus).toHaveBeenCalledTimes(2);
-    expect(projectStoreState.loadPendingReviews).toHaveBeenCalledTimes(2);
-    expect(projectStoreState.loadProjectStatus).toHaveBeenNthCalledWith(1, 'proj_1');
-    expect(projectStoreState.loadPendingReviews).toHaveBeenNthCalledWith(1, 'proj_1');
+    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledTimes(2);
+    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenNthCalledWith(1, 'proj_1');
   });
 
   it('restores the pending review when approve submission fails', async () => {

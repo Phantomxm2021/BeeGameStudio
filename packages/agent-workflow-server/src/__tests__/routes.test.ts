@@ -2158,7 +2158,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('persists BeeGame project metadata across app instances in SQLite', async () => {
+  test('persists user-editable project metadata without accepting a client-authored runtime snapshot', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-project-store-'))
 
     try {
@@ -2202,17 +2202,6 @@ describe('agent workflow server routes', () => {
           name: 'SQLite Project',
           root_path: join(workspace, 'sqlite-project'),
           created_at: 1710000000000,
-          runtime_snapshot: {
-            usage: {
-              prompt_tokens: 120,
-              completion_tokens: 34,
-              total_tokens: 154,
-            },
-            phase_name: 'implementation',
-            model_config_id: 'model-balanced',
-            model_name: 'balanced-model',
-            updated_at: 1710000001000,
-          },
         },
       ])
     } finally {
@@ -2329,9 +2318,7 @@ describe('agent workflow server routes', () => {
             rootPath: managedRoot,
             lifecycle: {
               hasWorkspacePath: true,
-              hasRuntimeSnapshot: true,
-              phaseName: 'polish',
-              updatedAt: 1720000001000,
+              hasRuntimeSnapshot: false,
             },
           },
         ],
@@ -2814,6 +2801,76 @@ describe('agent workflow server routes', () => {
       } else {
         process.env.BEEGAME_INTAKE_STREAM_LOG_PATH = originalLogPath
       }
+    }
+  })
+
+  test('finalizes intake when a thinking model first returns reasoning instead of the JSON contract', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Reasoning LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const finalContent = JSON.stringify({
+      maturity: 'concrete',
+      needs_options: false,
+      needs_clarification: false,
+      detected_constraints: [],
+      recommended_next_step: 'configure_details',
+      options: makeModelOptions('reasoning_final').slice(0, 1),
+    })
+    const responses = [
+      JSON.stringify({ thinking: 'Internal analysis without a final contract.' }),
+      finalContent,
+    ]
+    const requestBodies: Array<Record<string, unknown>> = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      const content = responses.shift() ?? finalContent
+      return new Response([
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n'), {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'A concrete game request.' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(requestBodies).toHaveLength(2)
+      expect(requestBodies[0]).not.toHaveProperty('enable_thinking')
+      expect(requestBodies[1]).toEqual(expect.objectContaining({
+        model: 'balanced-model',
+        stream: true,
+        temperature: 0.2,
+      }))
+      const repairMessages = requestBodies[1]?.messages
+      expect(Array.isArray(repairMessages)).toBe(true)
+      expect((repairMessages as unknown[]).length).toBeGreaterThan(2)
+      const intake = await res.json()
+      expect(intake.options).toHaveLength(1)
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'reasoning_final',
+      }))
+    } finally {
+      globalThis.fetch = originalFetch
     }
   })
 
@@ -3352,7 +3409,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('passes selected BeeGame intake thinking mode into the model request', async () => {
+  test('rejects browser attempts to control intake model thinking behavior', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3404,11 +3461,9 @@ describe('agent workflow server routes', () => {
         body: JSON.stringify({ idea: 'LLM generated idea', thinkingMode: 'disabled' }),
       })
 
-      expect(res.status).toBe(200)
-      expect(modelRequestBody).toEqual(expect.objectContaining({
-        stream: true,
-        enable_thinking: false,
-      }))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Intake model behavior is server-owned' })
+      expect(modelRequestBody).toEqual({})
     } finally {
       globalThis.fetch = originalFetch
     }

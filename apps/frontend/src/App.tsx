@@ -11,14 +11,14 @@ import { useSystemStore } from './store/systemStore';
 import { useChatStore } from './store/chatStore';
 import { useToastContext } from './contexts/ToastContext';
 import { setToastErrorCallback, api } from './services/api';
+import { AUTHENTICATION_REQUIRED_EVENT, hasEnvAuthToken } from './services/apiClient';
 import { normalizeChatHistory } from './utils/chatHistory';
 import { buildBootstrapPayload } from './utils/bootstrapIdea';
 import type { StartProjectResult } from './types/project';
-import type { BeeGameBuildBrief } from './services/beeGameAdapter';
+import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
-  consumeSupabaseRedirectSession,
-  getSupabaseAccessToken,
-  hydrateSupabaseSessionUser,
+  initializeSupabaseSession,
+  isHttpOnlySessionsEnabled,
 } from './services/supabaseAuthApi';
 
 // New Demiurge Views
@@ -37,13 +37,24 @@ function App() {
     setToastCallbacks,
     clearActiveProject,
   } = useProjectStore();
-  const { loadStatus, loadAgents, loadActivities, loadCurrentUser, isDark } = useSystemStore();
+  const {
+    loadStatus,
+    loadAgents,
+    loadActivities,
+    loadCurrentUser,
+    authenticationStatus,
+    setAuthenticationStatus,
+    currentUser,
+    isDark,
+  } = useSystemStore();
   const { loadHistory } = useChatStore();
   const { showError, showSuccess } = useToastContext();
 
   const [lang, setLang] = useState<Language>('zh');
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const loadedHistoryProjectRef = useRef<string | null>(null);
+  const authenticationInitializationStartedRef = useRef(false);
+  const loadedProtectedDataUserRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
 
   useEffect(() => {
@@ -67,30 +78,51 @@ function App() {
     setToastCallbacks(showError, showSuccess);
   }, [showError, showSuccess, setToastCallbacks]);
 
+  useEffect(() => {
+    const handleAuthenticationRequired = () => setAuthenticationStatus('anonymous');
+    window.addEventListener(AUTHENTICATION_REQUIRED_EVENT, handleAuthenticationRequired);
+    return () => window.removeEventListener(AUTHENTICATION_REQUIRED_EVENT, handleAuthenticationRequired);
+  }, [setAuthenticationStatus]);
+
   // Initialize app data on mount
   useEffect(() => {
+    if (authenticationInitializationStartedRef.current) return;
+    authenticationInitializationStartedRef.current = true;
     const initializeApp = async () => {
       try {
-        const consumedRedirect = await consumeSupabaseRedirectSession();
-        if (consumedRedirect || getSupabaseAccessToken()) {
-          await hydrateSupabaseSessionUser();
+        setAuthenticationStatus('initializing');
+        const session = await initializeSupabaseSession();
+        if (!session && (isHttpOnlySessionsEnabled() || !hasEnvAuthToken())) {
+          setAuthenticationStatus('anonymous');
+          return;
         }
-        if (!getSupabaseAccessToken()) return;
-        const currentUser = await loadCurrentUser();
-        if (!currentUser) return;
-        await Promise.all([
-          loadProjects(),
-          loadStatus(),
-          loadAgents(),
-          loadActivities(),
-        ]);
+        await loadCurrentUser();
       } catch (error) {
+        setAuthenticationStatus('anonymous');
         console.error('Failed to initialize app:', error);
         showError(error instanceof Error ? error.message : '登录状态初始化失败');
       }
     };
     initializeApp();
-  }, [loadProjects, loadCurrentUser, loadStatus, loadAgents, loadActivities, showError]);
+  }, [loadCurrentUser, setAuthenticationStatus, showError]);
+
+  useEffect(() => {
+    if (authenticationStatus !== 'authenticated' || !currentUser?.id) {
+      if (authenticationStatus === 'anonymous') loadedProtectedDataUserRef.current = null;
+      return;
+    }
+    if (loadedProtectedDataUserRef.current === currentUser.id) return;
+    loadedProtectedDataUserRef.current = currentUser.id;
+    const initialLoads: Array<Promise<unknown>> = [loadProjects()];
+    if (!isBeeGameAdapterEnabled()) {
+      initialLoads.push(loadStatus(), loadAgents(), loadActivities());
+    }
+    Promise.all(initialLoads).catch((error) => {
+      loadedProtectedDataUserRef.current = null;
+      console.error('Failed to load authenticated app data:', error);
+      showError(error instanceof Error ? error.message : '登录数据加载失败');
+    });
+  }, [authenticationStatus, currentUser?.id, loadProjects, loadStatus, loadAgents, loadActivities, showError]);
 
   // Load chat history when active project changes
   useEffect(() => {
@@ -138,17 +170,20 @@ function App() {
     }
   };
 
+  if (authenticationStatus === 'initializing') {
+    return <div className="min-h-screen bg-black" aria-label="Initializing BeeGame" />;
+  }
+
   return (
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
-      {activeProjectId && activeProject && !isResourceRoute ? (
+      {authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute ? (
         <DashboardView
           projectId={activeProjectId}
           projectName={activeProject.name || 'Untitled Project'}
           lang={lang}
           onSetLang={setLang}
           onBack={clearActiveProject}
-          initialPrompt=""
         />
       ) : (
         /* Otherwise, render the Landing View */

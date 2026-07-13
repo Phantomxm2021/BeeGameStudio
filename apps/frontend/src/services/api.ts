@@ -7,7 +7,6 @@ import apiClient, {
   setToastErrorCallback,
 } from './apiClient';
 import { beeGameAdapter, isBeeGameAdapterEnabled } from './beeGameAdapter';
-import type { BeeGameThinkingMode } from './beeGameAdapter';
 import {
   getCurrentUser as getBeeGameCurrentUser,
   type BeeGameCurrentUser,
@@ -137,47 +136,9 @@ export interface ProjectBaselineStatusPayload {
   context?: ContextVisibilityPayload | null;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportPayload | null;
-  delivery_review?: DeliveryReviewPayload | null;
-  delivery_history?: DeliveryReviewHistoryPayload[];
-  delivery_status?: string;
-  deployment_gate?: {
-    can_deploy: boolean;
-    failure?: {
-      code?: string;
-      message?: string;
-      status?: string;
-      summary?: string;
-    };
-  };
   project_target?: BeeGameAssetManifestPayload['project_target'] | null;
   document_bundle?: DocumentBundleStatusPayload | null;
   model_config_id?: string | null;
-}
-
-export interface DeliveryReviewPayload {
-  status?: 'validating' | 'passed' | 'failed' | 'untested' | 'blocked';
-  summary?: string;
-  findings?: Array<{ requirement?: string; status?: string; detail?: string }>;
-  evidence_event_ids?: string[];
-  contract?: Record<string, unknown> | null;
-  updated_at?: string;
-}
-
-export interface DeliveryReviewHistoryPayload {
-  status?: string;
-  summary?: string;
-  attempt?: number;
-  contract?: Record<string, unknown> | null;
-  updated_at?: string;
-}
-
-export interface DeliveryReportPayload {
-  project_id: string;
-  session_id?: string;
-  status: string;
-  summary: string;
-  review: DeliveryReviewPayload | null;
-  history: DeliveryReviewHistoryPayload[];
 }
 
 export interface OperatorVisibilityPayload {
@@ -518,6 +479,11 @@ export interface PendingUserReviewsResponse {
   items: PendingUserReviewItem[];
 }
 
+export interface ProjectRuntimeStatePayload {
+  status: ProjectBaselineStatusPayload;
+  pendingReviews: PendingUserReviewItem[];
+}
+
 const normalizeVerificationSummaryPayload = (
   payload?: VerificationSummaryPayload | null,
 ): VerificationSummaryPayload => ({
@@ -800,10 +766,6 @@ export const normalizeProjectBaselineStatusPayload = (
       context: undefined,
       execution_evidence: undefined,
       build_report: null,
-      delivery_review: null,
-      delivery_history: [],
-      delivery_status: 'implementation',
-      deployment_gate: { can_deploy: false },
       project_target: null,
       document_bundle: null,
     };
@@ -851,14 +813,6 @@ export const normalizeProjectBaselineStatusPayload = (
     review_status: normalizeReviewStatusPayload(normalizedPayload.review_status),
     context: normalizeContextVisibilityPayload(normalizedPayload.context),
     build_report: normalizeBuildReportPayload(normalizedPayload.build_report) ?? null,
-    delivery_review: normalizedPayload.delivery_review ?? null,
-    delivery_history: Array.isArray(normalizedPayload.delivery_history)
-      ? normalizedPayload.delivery_history
-      : [],
-    delivery_status: String(normalizedPayload.delivery_status ?? 'implementation'),
-    deployment_gate: normalizedPayload.deployment_gate && typeof normalizedPayload.deployment_gate === 'object'
-      ? normalizedPayload.deployment_gate as ProjectBaselineStatusPayload['deployment_gate']
-      : { can_deploy: false },
     project_target: normalizedPayload.project_target && typeof normalizedPayload.project_target === 'object'
       ? normalizedPayload.project_target as ProjectBaselineStatusPayload['project_target']
       : null,
@@ -895,9 +849,7 @@ export const api = {
     termination_node?: string;
     client_message_id?: string;
     supersedes_message_id?: string;
-    taskType?: import('./creditsApi').BeeGameCreditTaskType;
     attachments?: ChatAttachmentPayload[];
-    thinkingMode?: BeeGameThinkingMode;
   }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.sendMessage(data)
@@ -912,6 +864,15 @@ export const api = {
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.continueTask(data)
       : apiClient.post('/api/chat/continue', data) as Promise<ContinueTaskResponse>,
+
+  requestProjectAction: (data: {
+    project_id: string;
+    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair';
+    slotIds?: string[];
+  }) => {
+    if (isBeeGameAdapterEnabled()) return beeGameAdapter.requestProjectAction(data);
+    throw new Error('Structured project actions are only available for BeeGame projects');
+  },
 
   /**
    * 停止当前执行的任务
@@ -979,7 +940,7 @@ export const api = {
 
   /**
    * Run BeeGame idea intake without creating a project.
-   * Used by the landing page thinking/clarification flow.
+   * Used by the landing page clarification flow.
    */
   analyzeIdeaIntake: (data: { idea: string; clarification?: Record<string, string>; language?: string }) =>
     apiClient.post('/api/idea-intake/analyze', data) as Promise<IdeaIntakeAnalysisPayload>,
@@ -1000,7 +961,7 @@ export const api = {
    * @param data - 包含要更新的字段（名称和/或根路径）
    * @returns 返回更新后的项目对象
    */
-  updateProject: (projectId: string, data: { name?: string; root_path?: string; runtime_snapshot?: import('../types/project').ProjectRuntimeSnapshot }) =>
+  updateProject: (projectId: string, data: { name?: string }) =>
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.updateProject(projectId, data)
       : apiClient.patch(`/api/projects/${encodeURIComponent(projectId)}`, data),
@@ -1016,14 +977,26 @@ export const api = {
         (await apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/status`)) as ProjectBaselineStatusPayload | OperatorVisibilityPayload
       ),
 
+  /** Read the project runtime snapshot once and derive all dashboard views. */
+  getProjectRuntimeState: async (projectId: string): Promise<ProjectRuntimeStatePayload> => {
+    if (isBeeGameAdapterEnabled()) {
+      return beeGameAdapter.getProjectRuntimeState(projectId);
+    }
+    const [status, reviews] = await Promise.all([
+      apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/status`) as Promise<ProjectBaselineStatusPayload | OperatorVisibilityPayload>,
+      apiClient.get(`/api/pending-user-reviews?project_id=${encodeURIComponent(projectId)}`) as Promise<PendingUserReviewsResponse>,
+    ]);
+    return {
+      status: normalizeProjectBaselineStatusPayload(status),
+      pendingReviews: normalizePendingUserReviewsResponse(reviews).items,
+    };
+  },
+
   getProjectReviewStatus: async (projectId: string) =>
     normalizeReviewStatusPayload(
       ((await apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/review-status`)) as { review_status?: ReviewStatusPayload })
         ?.review_status ?? null
     ),
-
-  getProjectDeliveryReport: (projectId: string): Promise<DeliveryReportPayload> =>
-    apiClient.get(`/api/projects/${encodeURIComponent(projectId)}/delivery-report`),
 
   /**
    * 删除项目
@@ -1286,12 +1259,14 @@ export const api = {
    * 获取交付物的评审状态
    * @param artifactId - 交付物 ID
    */
-  getArtifactReviewStatus: async (artifactId: string, config?: AxiosRequestConfig) =>
-    isBeeGameAdapterEnabled()
-      ? normalizeArtifactReviewResponse(await beeGameAdapter.getArtifactReviewStatus(artifactId))
-      : normalizeArtifactReviewResponse(
-        (await apiClient.get(`/api/artifacts/${encodeURIComponent(artifactId)}/review`, config)) as ArtifactReviewResponse
-      ),
+  getArtifactReviewStatus: async (artifactId: string, config?: AxiosRequestConfig) => {
+    if (isBeeGameAdapterEnabled()) {
+      throw new Error('Artifact review is not part of the BeeGame runtime contract');
+    }
+    return normalizeArtifactReviewResponse(
+      (await apiClient.get(`/api/artifacts/${encodeURIComponent(artifactId)}/review`, config)) as ArtifactReviewResponse
+    );
+  },
 
   // ==================== Manifest (Resource List) API ====================
 

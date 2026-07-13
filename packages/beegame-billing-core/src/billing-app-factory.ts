@@ -10,6 +10,7 @@ import {
   registerBeeGameBillingPublicRoutes,
   registerBeeGameBillingStoreRoutes,
 } from './billing-route-groups'
+import { toErrorMessage } from './http-helpers'
 
 export type BeeGameBillingAppFactoryOptions = BillingRouteDeps & {
   requireRequestUser?: boolean
@@ -21,6 +22,17 @@ export function createBeeGameBillingRouteApp(
   options: BeeGameBillingAppFactoryOptions,
 ): Hono {
   const app = new Hono()
+
+  app.onError((error, c) => {
+    console.error(`[BeeGame billing] ${c.req.method} ${c.req.path} failed:`, error)
+    if (c.req.path.startsWith('/api/internal/credits/')) {
+      return c.json({
+        error: 'Credit control operation failed',
+        message: toErrorMessage(error),
+      }, 500)
+    }
+    return c.json({ error: 'Billing request failed' }, 500)
+  })
 
   app.use('/api/*', cors())
   registerBeeGameBillingPublicRoutes(app, {

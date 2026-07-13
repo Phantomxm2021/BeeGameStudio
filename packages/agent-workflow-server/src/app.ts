@@ -21,17 +21,11 @@ import {
   type BeeGameFileAttachment,
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
-  type BeeGameSessionInternalMetadata,
 } from './beegame/session-manager'
 import {
   parseAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
 } from './beegame/attachment-build'
-import { createDeliveryGateFailure } from './beegame/delivery-contract'
-import {
-  DeliveryValidationAdapterRegistry,
-  type DeliveryValidationAdapter,
-} from './beegame/delivery-validation-adapter'
 import {
   BeeGamePreviewManager,
   type BeeGamePreviewSnapshot,
@@ -224,7 +218,6 @@ const BEEGAME_INTAKE_SETTING_VALUES = {
   inputs: ['Keyboard/mouse', 'Touch', 'Gamepad', 'Motion', 'Voice', 'Hand tracking'],
 } as const
 
-type BeeGameThinkingMode = 'auto' | 'enabled' | 'disabled'
 
 type BeeGameIntakeJob = {
   ownerId: string
@@ -265,7 +258,6 @@ export type AgentWorkflowAppOptions = {
     candidates?(requirement: ResourceSelectionRequirement): Promise<Array<ResourceSelectionResult>>
     refreshBinding?(binding: { packId: string; packVersion: string; elementId: string; dependencies?: Array<{ key: string; elementId: string }> }): Promise<{ sourceUrl: string; dependencies: Array<{ key: string; sourceUrl: string }> }>
   }
-  deliveryValidationAdapters?: DeliveryValidationAdapter[]
 }
 
 export const ROUTE_PERMISSION = {
@@ -369,14 +361,6 @@ export function createAgentWorkflowApp(
   })
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
   const attachmentBuildJobs = new Map<string, BeeGameAttachmentBuildJob>()
-  const synchronizeLibraryResources = async (metadata: BeeGameSessionInternalMetadata) => {
-    if (!metadata.projectId || !options.resourceSelectionClient) return
-    await autoBindLibraryResourcesInWorkspace(metadata.workspacePath, options.resourceSelectionClient)
-  }
-  const deliveryValidationAdapters = new DeliveryValidationAdapterRegistry()
-  for (const adapter of options.deliveryValidationAdapters ?? []) {
-    deliveryValidationAdapters.register(adapter)
-  }
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -391,9 +375,6 @@ export function createAgentWorkflowApp(
     Boolean(supabaseRuntimeEnvClient),
     outboundTargetPolicyOptions,
     resolveOutboundTarget,
-    synchronizeLibraryResources,
-    synchronizeLibraryResources,
-    deliveryValidationAdapters,
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -1139,12 +1120,6 @@ export function createAgentWorkflowApp(
       const nextProject = {
         ...existing,
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
-        ...(typeof body.root_path === 'string'
-          ? { root_path: body.root_path }
-          : {}),
-        ...(isObject(body.runtime_snapshot)
-          ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
-          : {}),
       }
       return c.json(await dashboardRepository.upsertProject(
         c.req.raw,
@@ -1221,53 +1196,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.get('/api/projects/:id/delivery-report', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.read')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      if (!sessionRef) {
-        return c.json({
-          project_id: project.id,
-          status: 'unreviewed',
-          summary: 'No delivery review has been recorded.',
-          review: null,
-          history: [],
-        })
-      }
-      const events = await getProjectRuntimeEvents({
-        sessionId: sessionRef.sessionId,
-        workspacePath: sessionRef.workspacePath,
-        dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
-        beeGameSessions,
-      })
-      const review = deriveDeliveryReview(events)
-      const history = deriveDeliveryReviewHistory(events)
-      return c.json({
-        project_id: project.id,
-        session_id: sessionRef.sessionId,
-        status: typeof review?.status === 'string' ? review.status : 'unreviewed',
-        summary: typeof review?.summary === 'string' ? review.summary : 'No delivery review has been recorded.',
-        review,
-        history,
-        metric_trends: deriveDeliveryMetricTrends(history),
-        environments: deriveDeliveryEnvironments(history),
-      })
-    } catch (err) {
-      return tracedRouteError(c, 'project.delivery-report', err)
-    }
-  })
-
   app.post('/api/projects/:id/permissions/:toolUseID', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.approve_tool')
@@ -1277,6 +1205,9 @@ export function createAgentWorkflowApp(
     const decision = body.decision
     if (decision !== 'allow' && decision !== 'deny') {
       return c.json({ error: 'Permission decision must be allow or deny' }, 400)
+    }
+    if (body.remember === true) {
+      return c.json({ error: 'Persistent runtime permissions are not available through the Web API' }, 400)
     }
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, projectId, dashboardRepository)
@@ -1297,7 +1228,7 @@ export function createAgentWorkflowApp(
           c.req.param('toolUseID'),
           {
             behavior: decision,
-            remember: body.remember === true,
+            remember: false,
             ...(typeof body.message === 'string'
               ? { message: body.message }
               : {}),
@@ -1368,6 +1299,7 @@ export function createAgentWorkflowApp(
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
       })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const snapshot = await beeGamePreviews.start({
         sessionId: ensured.session.id,
         workspacePath: ensured.binding.workspacePath,
@@ -1402,6 +1334,7 @@ export function createAgentWorkflowApp(
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
       })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const snapshot = await beeGamePreviews.restart({
         sessionId: ensured.session.id,
         workspacePath: ensured.binding.workspacePath,
@@ -1496,13 +1429,7 @@ export function createAgentWorkflowApp(
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
       })
-      const deliveryGate = await getDeliveryGateFailure({
-        sessionId: ensured.session.id,
-        workspacePath: ensured.binding.workspacePath,
-        dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
-        beeGameSessions,
-      })
-      if (deliveryGate) return c.json({ error: deliveryGate }, 409)
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const deployment = await beeGameDeployments.deploy({
         sessionId: ensured.session.id,
         userId: user.id,
@@ -1587,14 +1514,6 @@ export function createAgentWorkflowApp(
       }
       try {
         const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
-        if (manifest.slots.length && sessionRef.live) {
-          await dashboardRepository.upsertAssetManifest(
-            c.req.raw,
-            user,
-            beeGameSessions.metadata(sessionRef.sessionId),
-            manifest,
-          )
-        }
         return c.json(manifest)
       } catch (err) {
         if (sessionRef.live) {
@@ -1620,9 +1539,22 @@ export function createAgentWorkflowApp(
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      const workspacePath = sessionRef?.workspacePath ?? (
+        project.root_path
+          ? await resolveSessionWorkspacePath(project.root_path, options.defaultWorkspacePath)
+          : undefined
+      )
+      if (!workspacePath) return c.json({ error: 'Project workspace not found' }, 404)
       const slotId = c.req.param('slotId')
-      const manifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
+      const manifest = await readBeeGameAssetManifest(workspacePath)
       const slot = manifest.slots.find(item => item.id === slotId)
       const requirement = slot ? resourceRequirementForSlot(slot, manifest.project_target) : undefined
       if (!requirement) return c.json({ error: 'Asset slot has no library resource requirement' }, 422)
@@ -1643,6 +1575,7 @@ export function createAgentWorkflowApp(
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
       const body = await c.req.raw.json().catch(() => ({})) as { requirement?: ResourceSelectionRequirement; selection?: { packId?: string; elementId?: string } }
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const slotId = c.req.param('slotId')
       const contractManifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
       const contractSlot = contractManifest.slots.find(slot => slot.id === slotId)
@@ -1702,6 +1635,7 @@ export function createAgentWorkflowApp(
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
       await dashboardRepository.appendAuditEvent(c.req.raw, user, {
@@ -1730,6 +1664,7 @@ export function createAgentWorkflowApp(
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const result = await removeBeeGameAssetIntegrationInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
       await appendAuditEventBestEffort('resource.integration_removed', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
@@ -1758,6 +1693,7 @@ export function createAgentWorkflowApp(
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const existing = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === c.req.param('slotId'))
       if (!existing) return c.json({ error: 'Asset slot not found' }, 404)
       const existingBinding = existing.resource_binding
@@ -1786,6 +1722,7 @@ export function createAgentWorkflowApp(
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const initialManifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
       const repairableBindings = initialManifest.slots.filter(slot => slot.resource_binding && slot.status === 'missing')
       const contractRequirements = initialManifest.slots
@@ -1907,6 +1844,7 @@ export function createAgentWorkflowApp(
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
       })
+      assertProjectWorkspaceMutationIdle(ensured.session)
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
       const uploadedUrl = await dashboardRepository.uploadAssetFile(
         c.req.raw,
@@ -2104,7 +2042,6 @@ export function createAgentWorkflowApp(
         idea: String(body.idea),
         language:
           typeof body.language === 'string' ? body.language : undefined,
-        thinkingMode: normalizeBeeGameThinkingMode(body.thinkingMode),
         ownerId: user.id,
         modelConfigId,
         runtimeEnv: await dashboardRepository.getRuntimeEnv(
@@ -2156,6 +2093,9 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    if (body.thinkingMode !== undefined) {
+      return c.json({ error: 'Intake model behavior is server-owned' }, 400)
+    }
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)
     try {
@@ -2173,6 +2113,9 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     try {
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      if (body.thinkingMode !== undefined) {
+        return c.json({ error: 'Intake model behavior is server-owned' }, 400)
+      }
       const attachments = validateBeeGameAttachments(body.attachments)
       const analysis = await runBeeGameAttachmentAnalysis(c.req.raw, user, body, attachments)
       return c.json(analysis)
@@ -2189,6 +2132,9 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     try {
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      if (body.thinkingMode !== undefined) {
+        return c.json({ error: 'Intake model behavior is server-owned' }, 400)
+      }
       const attachments = validateBeeGameAttachments(body.attachments)
       const jobId = `attachment_analysis_${randomUUID().replaceAll('-', '')}`
       const now = Date.now()
@@ -2226,6 +2172,9 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    if (body.thinkingMode !== undefined) {
+      return c.json({ error: 'Intake model behavior is server-owned' }, 400)
+    }
     const error = requireFields(body, ['idea'])
     if (error) return c.json({ error }, 400)
 
@@ -2786,20 +2735,6 @@ async function requireOwnedModelConfigId(
   return modelConfigId
 }
 
-function normalizeBeeGameThinkingMode(value: unknown): BeeGameThinkingMode | undefined {
-  return value === 'auto' || value === 'enabled' || value === 'disabled' ? value : undefined
-}
-
-function isBeeGameChatThinkingMode(value: unknown): value is 'enabled' | 'disabled' {
-  return value === 'enabled' || value === 'disabled'
-}
-
-function toBeeGameThinkingRequest(value: BeeGameThinkingMode | undefined): JsonObject {
-  if (value === 'enabled') return { enable_thinking: true }
-  if (value === 'disabled') return { enable_thinking: false }
-  return {}
-}
-
 async function generateBeeGameAttachmentAnalysis(input: {
   attachments: BeeGameAttachment[]
   workspace: string
@@ -2893,7 +2828,6 @@ async function generateBeeGameAttachmentAnalysis(input: {
 async function generateBeeGameIntakeOptions(input: {
   idea: string
   language?: string
-  thinkingMode?: BeeGameThinkingMode
   ownerId: string
   modelConfigId?: string
   runtimeEnv?: Record<string, string>
@@ -2926,76 +2860,77 @@ async function generateBeeGameIntakeOptions(input: {
   const dispatcher = createPinnedUndiciDispatcher(approvedTarget)
 
   try {
+  const requestPayload = {
+    model,
+    temperature: 0.7,
+    response_format: { type: 'json_object' },
+    stream: true,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You are BeeGame intake planner.',
+          'You may reason internally before answering, but the final response must contain only the requested JSON contract. Never place private reasoning or a thinking summary inside the final JSON.',
+          'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
+          'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
+          'maturity must be one of vague, directional, concrete.',
+          'Set needs_options=true only when the idea is vague or broad enough that the user should choose between exactly 3 distinct directions.',
+          'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, repeated player activity, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
+          'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty. When needs_options=true, return exactly 3 valid options. When needs_options=false, return exactly 1 valid option.',
+          'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+          'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
+          'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
+          'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
+          'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
+          'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
+          'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
+          'The production setting fields are selected values, not optional suggestions. Choose them by understanding the full user request and the proposed game mode, not by keyword matching.',
+          'Choose recommendedPlatform only from: Web, Mobile, PC, Console, VR/AR.',
+          'Choose recommendedEngine only from: React, Unity, Godot, Unreal.',
+          'Choose recommendedDimension only from: 2D, 2.5D, 3D, VR, AR.',
+          'Choose recommendedGenre only from: Arcade, Action, Adventure, Puzzle, Racing, RPG, Strategy, Simulation, Shooter, Platformer, Casual.',
+          'Choose recommendedStyle only from: Pixel, Cartoon, Stylized, Minimal, Realistic, Low Poly, Hand-drawn, Sci-fi, Fantasy.',
+          'Choose recommendedInputs as a JSON array containing one or more values only from: Keyboard/mouse, Touch, Gamepad, Motion, Voice, Hand tracking.',
+          'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs are selected production settings and must use the exact English enum tokens above. Do not translate these enum token values.',
+          'These selected production settings must fit the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
+          'Choose production settings from the actual game direction and user constraints, not from a fixed menu order or default.',
+          'Do not output Auto or placeholder values for recommended metadata.',
+          'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
+          'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
+          'playerFirstMinute must describe exactly what the player does in the first 60 seconds.',
+          'whyFitsIdea must explain how this game mode preserves the user request and constraints.',
+          'playablePrototype must describe the concrete first playable slice for this mode, including scene/map, player actions, feedback, win/fail state, and what is intentionally deferred until planning.',
+          'validationTarget must describe what demand, fun, control feel, clarity, or risk this game mode validates.',
+          'coreMechanic must name the main repeatable interaction or decision, not a production task.',
+          'firstBuild must describe the first target for this direction in a concise way. It should help the user choose the game mode, not replace the later design documents.',
+          'validationGoal must describe what design assumption this playable validates.',
+          'risk must describe the largest gameplay or delivery risk in plain language.',
+          'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
+          'fit must explain why this direction suits the user idea.',
+          'firstPlayableValidation must explain what the first playable build validates.',
+          'riskComplexity must explain the main delivery risk and complexity level.',
+          'Avoid generic production strategy titles. Titles should name an actual game mode.',
+          'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
+          'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
+          'Do not mention dashboard source paths, package paths, commands, or implementation directories.',
+          input.language
+            ? `Use this selected UI language for every user-facing natural-language JSON value: ${input.language}. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.`
+            : 'Keep the response language aligned with the user idea. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: `Game idea: ${input.idea}`,
+      },
+    ],
+  }
   const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.7,
-      response_format: { type: 'json_object' },
-      stream: true,
-      ...toBeeGameThinkingRequest(input.thinkingMode),
-      messages: [
-        {
-          role: 'system',
-          content: [
-            'You are BeeGame intake planner.',
-            'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
-            'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
-            'maturity must be one of vague, directional, concrete.',
-            'Set needs_options=true only when the idea is vague or broad enough that the user should choose between exactly 3 distinct directions.',
-            'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, repeated player activity, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
-            'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty. When needs_options=true, return exactly 3 valid options. When needs_options=false, return exactly 1 valid option.',
-            'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
-            'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
-            'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
-            'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
-            'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
-            'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
-            'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
-            'The production setting fields are selected values, not optional suggestions. Choose them by understanding the full user request and the proposed game mode, not by keyword matching.',
-            'Choose recommendedPlatform only from: Web, Mobile, PC, Console, VR/AR.',
-            'Choose recommendedEngine only from: React, Unity, Godot, Unreal.',
-            'Choose recommendedDimension only from: 2D, 2.5D, 3D, VR, AR.',
-            'Choose recommendedGenre only from: Arcade, Action, Adventure, Puzzle, Racing, RPG, Strategy, Simulation, Shooter, Platformer, Casual.',
-            'Choose recommendedStyle only from: Pixel, Cartoon, Stylized, Minimal, Realistic, Low Poly, Hand-drawn, Sci-fi, Fantasy.',
-            'Choose recommendedInputs as a JSON array containing one or more values only from: Keyboard/mouse, Touch, Gamepad, Motion, Voice, Hand tracking.',
-            'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs are selected production settings and must use the exact English enum tokens above. Do not translate these enum token values.',
-            'These selected production settings must fit the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
-            'Choose production settings from the actual game direction and user constraints, not from a fixed menu order or default.',
-            'Do not output Auto or placeholder values for recommended metadata.',
-            'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
-            'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
-            'playerFirstMinute must describe exactly what the player does in the first 60 seconds.',
-            'whyFitsIdea must explain how this game mode preserves the user request and constraints.',
-            'playablePrototype must describe the concrete first playable slice for this mode, including scene/map, player actions, feedback, win/fail state, and what is intentionally deferred until planning.',
-            'validationTarget must describe what demand, fun, control feel, clarity, or risk this game mode validates.',
-            'coreMechanic must name the main repeatable interaction or decision, not a production task.',
-            'firstBuild must describe the first target for this direction in a concise way. It should help the user choose the game mode, not replace the later design documents.',
-            'validationGoal must describe what design assumption this playable validates.',
-            'risk must describe the largest gameplay or delivery risk in plain language.',
-            'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
-            'fit must explain why this direction suits the user idea.',
-            'firstPlayableValidation must explain what the first playable build validates.',
-            'riskComplexity must explain the main delivery risk and complexity level.',
-            'Avoid generic production strategy titles. Titles should name an actual game mode.',
-            'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
-            'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
-            'Do not mention dashboard source paths, package paths, commands, or implementation directories.',
-            input.language
-              ? `Use this selected UI language for every user-facing natural-language JSON value: ${input.language}. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.`
-              : 'Keep the response language aligned with the user idea. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.',
-          ].join('\n'),
-        },
-        {
-          role: 'user',
-          content: `Game idea: ${input.idea}`,
-        },
-      ],
-    }),
+    body: JSON.stringify(requestPayload),
     redirect: 'error',
     dispatcher,
   } as RequestInit)
@@ -3008,13 +2943,55 @@ async function generateBeeGameIntakeOptions(input: {
       }),
     )
   }
-  return parseBeeGameIntakeResponse(response)
+  const firstContent = await readBeeGameIntakeResponseContent(response)
+  try {
+    return parseBeeGameIntakeContent(firstContent)
+  } catch (initialError) {
+    const repairResponse = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        ...requestPayload,
+        temperature: 0.2,
+        messages: [
+          ...requestPayload.messages,
+          { role: 'assistant', content: firstContent },
+          {
+            role: 'user',
+            content: 'The previous final response did not satisfy the required JSON contract. Keep any internal reasoning private and return only one complete corrected JSON object now.',
+          },
+        ],
+      }),
+      redirect: 'error',
+      dispatcher,
+    } as RequestInit)
+    if (!repairResponse.ok) {
+      throw new Error(
+        `${toErrorMessage(initialError)} Finalization retry failed: ${await describeModelIntakeFailure(repairResponse, {
+          baseUrl,
+          model,
+          language: input.language,
+        })}`,
+      )
+    }
+    const repairedContent = await readBeeGameIntakeResponseContent(repairResponse)
+    try {
+      return parseBeeGameIntakeContent(repairedContent)
+    } catch (repairError) {
+      throw new Error(
+        `${toErrorMessage(initialError)} Finalization retry was also invalid: ${toErrorMessage(repairError)}`,
+      )
+    }
+  }
   } finally {
     if (typeof dispatcher.close === 'function') await dispatcher.close()
   }
 }
 
-async function parseBeeGameIntakeResponse(response: Response): Promise<BeeGameIntakeAnalysis> {
+async function readBeeGameIntakeResponseContent(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') || ''
   if (contentType.toLowerCase().includes('text/event-stream')) {
     const content = await readOpenAiCompatibleStreamContent(response)
@@ -3022,16 +2999,19 @@ async function parseBeeGameIntakeResponse(response: Response): Promise<BeeGameIn
       contentLength: content.length,
       contentPreview: previewForLog(content, 4000),
     })
-    return parseBeeGameIntakeAnalysis({
-      choices: [
-        {
-          message: { content },
-        },
-      ],
-    })
+    return content
   }
   const payload = (await response.json()) as JsonObject
-  return parseBeeGameIntakeAnalysis(payload)
+  const choices = Array.isArray(payload.choices) ? payload.choices : []
+  const firstChoice = isObject(choices[0]) ? choices[0] : undefined
+  const message = firstChoice && isObject(firstChoice.message) ? firstChoice.message : undefined
+  return message ? extractMessageContentText(message) : ''
+}
+
+function parseBeeGameIntakeContent(content: string): BeeGameIntakeAnalysis {
+  return parseBeeGameIntakeAnalysis({
+    choices: [{ message: { content } }],
+  })
 }
 
 async function readOpenAiCompatibleStreamContent(response: Response): Promise<string> {
@@ -3593,7 +3573,6 @@ async function ensureBeeGameProjectSession(input: {
     ...(getBearerToken(input.request) ? { authToken: getBearerToken(input.request) } : {}),
     userDataRoot: input.getUserDataRoot(input.request),
   })
-  await input.beeGameSessions.resumePendingDeliveryPipeline(session.id)
   const metadata = input.beeGameSessions.metadata(session.id)
   await input.dashboardRepository.upsertSessionMetadata(
     input.request,
@@ -3639,8 +3618,6 @@ async function getBeeGameProjectRuntimeState(input: {
     workspacePath: sessionRef.workspacePath,
     beeGamePreviews: input.beeGamePreviews,
   })
-  const deliveryReview = deriveDeliveryReview(events)
-  const deliveryGate = createDeliveryGateFailure(deliveryReview)
   const assetManifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
     .catch(() => ({ version: 1 as const, slots: [], project_target: undefined }))
   return {
@@ -3651,19 +3628,8 @@ async function getBeeGameProjectRuntimeState(input: {
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
     approval_required: pending.length > 0,
-    next_action: deliveryReview?.status === 'failed'
-      ? 'Fix delivery review findings'
-      : deliveryReview?.status === 'blocked'
-        ? 'Resolve delivery review blocker'
-        : runtime.nextAction,
+    next_action: runtime.nextAction,
     context: deriveBeeGameContextVisibility(events, snapshot),
-    delivery_status: deliveryReview?.status ?? 'implementation',
-    delivery_review: deliveryReview,
-    delivery_history: deriveDeliveryReviewHistory(events),
-    deployment_gate: {
-      can_deploy: deliveryGate === null,
-      ...(deliveryGate ? { failure: deliveryGate } : {}),
-    },
     project_target: assetManifest.project_target ?? null,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
@@ -3711,6 +3677,12 @@ function createProjectSessionBinding(
     sessionId,
     workspacePath,
     ...(language ? { language } : {}),
+  }
+}
+
+function assertProjectWorkspaceMutationIdle(session: BeeGameSession): void {
+  if (session.turnStatus !== 'idle') {
+    throw new Error('Project workspace cannot be changed while an agent turn is active')
   }
 }
 
@@ -3774,115 +3746,12 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     approval_required: false,
     next_action: 'Ready for next request',
     context: null,
-    delivery_review: null,
-    delivery_history: [],
-    delivery_status: 'implementation',
-    deployment_gate: {
-      can_deploy: false,
-      failure: createDeliveryGateFailure(null),
-    },
     project_target: null,
     build_report: null,
     review_status: null,
     model_config_id: null,
     pending_permissions: [],
   }
-}
-
-function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
-  const event = findLatestDeliveryValidationEvent(events)
-  if (!event) return null
-  const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
-  return {
-    status: typeof payload.status === 'string'
-      ? payload.status
-      : event.type === 'delivery.validation.started'
-        ? 'validating'
-        : 'untested',
-    summary: typeof payload.summary === 'string' ? payload.summary : event.text,
-    findings: Array.isArray(payload.findings) ? payload.findings : [],
-    evidence_event_ids: Array.isArray(payload.evidenceEventIds) ? payload.evidenceEventIds : [],
-    contract: isObject(payload.contract) ? payload.contract : null,
-    attempt: typeof payload.attempt === 'number' ? payload.attempt : 0,
-    updated_at: normalizeBeeGameCreatedAt(event.createdAt),
-  }
-}
-
-function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
-  return events
-    .filter(item => item.type === 'delivery.validation.completed')
-    .slice(-20)
-    .map(event => {
-      const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
-      return {
-        status: typeof payload.status === 'string' ? payload.status : 'untested',
-        summary: typeof payload.summary === 'string' ? payload.summary : event.text,
-        attempt: typeof payload.attempt === 'number' ? payload.attempt : 0,
-        contract: isObject(payload.contract) ? payload.contract : null,
-        updated_at: normalizeBeeGameCreatedAt(event.createdAt),
-      }
-    })
-}
-
-function findLatestDeliveryValidationEvent(events: BeeGameEvent[]): BeeGameEvent | undefined {
-  return [...events].reverse().find(item => (
-    item.type === 'delivery.validation.completed' || item.type === 'delivery.validation.started'
-  ))
-}
-
-function deriveDeliveryMetricTrends(history: JsonObject[]): JsonObject[] {
-  const snapshots = history.map(item => extractDeliveryMetrics(item.contract))
-  const latest = snapshots.at(-1) ?? {}
-  const previous = snapshots.at(-2) ?? {}
-  return Object.keys(latest).sort((left, right) => left.localeCompare(right)).map(metric => ({
-    metric,
-    current: latest[metric],
-    previous: typeof previous[metric] === 'number' ? previous[metric] : null,
-    delta: typeof previous[metric] === 'number' ? latest[metric] - previous[metric] : null,
-  }))
-}
-
-function deriveDeliveryEnvironments(history: JsonObject[]): JsonObject[] {
-  const environments = new Map<string, JsonObject>()
-  for (const item of history) {
-    const contract = isObject(item.contract) ? item.contract : {}
-    const requirements = Array.isArray(contract.requirements) ? contract.requirements : []
-    for (const requirement of requirements) {
-      if (!isObject(requirement) || !Array.isArray(requirement.evidence)) continue
-      for (const evidence of requirement.evidence) {
-        if (!isObject(evidence) || !isObject(evidence.environment)) continue
-        const environment = evidence.environment as JsonObject
-        environments.set(JSON.stringify(environment), environment)
-      }
-    }
-  }
-  return [...environments.values()]
-}
-
-function extractDeliveryMetrics(contractValue: unknown): Record<string, number> {
-  if (!isObject(contractValue) || !Array.isArray(contractValue.requirements)) return {}
-  const metrics: Record<string, number> = {}
-  for (const requirement of contractValue.requirements) {
-    if (!isObject(requirement) || !Array.isArray(requirement.evidence)) continue
-    for (const evidence of requirement.evidence) {
-      if (!isObject(evidence) || !isObject(evidence.metrics)) continue
-      for (const [metric, value] of Object.entries(evidence.metrics)) {
-        if (typeof value === 'number' && Number.isFinite(value)) metrics[metric] = value
-      }
-    }
-  }
-  return metrics
-}
-
-async function getDeliveryGateFailure(input: {
-  sessionId: string
-  workspacePath: string
-  dashboardDataRoot?: string
-  beeGameSessions: BeeGameSessionManager
-}) {
-  const events = await getProjectRuntimeEvents(input)
-  const review = deriveDeliveryReview(events)
-  return createDeliveryGateFailure(review)
 }
 
 async function resolveBeeGameProjectSessionReference(input: {
@@ -3983,16 +3852,6 @@ function deriveBeeGameRuntimeStatus(
       agentStatus: 'waiting',
     }
   }
-  const deliveryPipeline = deriveActiveDeliveryPipeline(events)
-  if (deliveryPipeline) {
-    return {
-      phase: deliveryPipeline.phase,
-      nextAction: deliveryPipeline.nextAction,
-      updatedAt,
-      activeAgents: deliveryPipeline.activeAgents,
-      agentStatus: deliveryPipeline.agentStatus,
-    }
-  }
   const activeTurn = getActiveBeeGameTurn(events)
   if (activeTurn) {
     return recoveredFromTranscript
@@ -4029,60 +3888,6 @@ function deriveBeeGameRuntimeStatus(
   }
 }
 
-function deriveActiveDeliveryPipeline(events: BeeGameEvent[]): {
-  phase: string
-  nextAction: string
-  activeAgents: string[]
-  agentStatus: string
-} | undefined {
-  const latestTransition = [...events].reverse().find(event => (
-    event.type === 'delivery.validation.started' ||
-    event.type === 'delivery.validation.waiting' ||
-    event.type === 'delivery.validation.completed' ||
-    event.type === 'delivery.repair.queued' ||
-    event.type === 'delivery.repair.started' ||
-    event.type === 'delivery.repair.completed' ||
-    event.type === 'delivery.pipeline.blocked'
-  ))
-  if (!latestTransition) return undefined
-  if (latestTransition.type === 'delivery.pipeline.blocked') {
-    return {
-      phase: 'blocked',
-      nextAction: latestTransition.text || 'Resolve delivery validation blocker',
-      activeAgents: [],
-      agentStatus: 'failed',
-    }
-  }
-  if (latestTransition.type === 'delivery.validation.started') {
-    return {
-      phase: 'validation',
-      nextAction: 'Running independent delivery validators',
-      activeAgents: ['beegame-contract-validator', 'beegame-runtime-validator', 'beegame-asset-validator'],
-      agentStatus: 'working',
-    }
-  }
-  if (latestTransition.type === 'delivery.validation.waiting') {
-    const pendingValidatorTypes = Array.isArray(latestTransition.payload?.pendingValidatorTypes)
-      ? latestTransition.payload.pendingValidatorTypes.filter((value): value is string => typeof value === 'string')
-      : []
-    return {
-      phase: 'validation',
-      nextAction: 'Waiting for independent delivery validators',
-      activeAgents: pendingValidatorTypes,
-      agentStatus: 'working',
-    }
-  }
-  if (latestTransition.type === 'delivery.repair.queued' || latestTransition.type === 'delivery.repair.started') {
-    return {
-      phase: 'repair',
-      nextAction: 'Repairing failed delivery requirements',
-      activeAgents: latestTransition.type === 'delivery.repair.started' ? ['beegame'] : [],
-      agentStatus: latestTransition.type === 'delivery.repair.started' ? 'working' : 'waiting',
-    }
-  }
-  return undefined
-}
-
 function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
   const ended = new Set(
     events
@@ -4111,33 +3916,27 @@ function deriveBeeGameContextVisibility(
   snapshot?: BeeGameRuntimeSnapshot,
 ): JsonObject | null {
   const usage = getLatestBeeGameTokenUsage(events) ?? snapshot?.usage
-  const observation = [...events].reverse().find(event => event.type === 'runtime.observation')
-  if (!usage && !observation) return null
-  const counters = isObject(observation?.payload?.counters)
-    ? observation.payload.counters
-    : {}
+  if (!usage) return null
+  const toolUseCount = events.filter(event => event.type.startsWith('tool.')).length
   return {
-    bundle_id: observation ? `beegame-runtime-${observation.sessionId}` : 'beegame-runtime',
-    phase: getBeeGamePayloadString(observation, 'phase') || snapshot?.phaseName || 'idle',
-    status: getBeeGamePayloadString(observation, 'status') || 'active',
+    bundle_id: 'beegame-runtime',
+    phase: snapshot?.phaseName || 'idle',
+    status: 'active',
     summary: 'BeeGame runtime observability is active for this session.',
-    blackboard_record_count: Number(counters.eventCount ?? events.length),
-    memory_hits: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
-    rag_sources: observation ? ['transcripts/<project-folder>__<session-hash>.jsonl'] : [],
+    blackboard_record_count: events.length,
+    memory_hits: toolUseCount,
+    rag_sources: [],
     selected_skills: [],
     runtime_features: [],
-    ...(usage ? {
-      token_budget: {
-        status: 'tracking',
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-      },
-    } : {}),
+    token_budget: {
+      status: 'tracking',
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      total_tokens: usage.total_tokens,
+    },
     counters: {
-      eventCount: Number(counters.eventCount ?? events.length),
-      toolUseCount: Number(counters.toolUseCount ?? events.filter(event => event.type.startsWith('tool.')).length),
-      turnIndex: Number(counters.turnIndex ?? 0),
+      eventCount: events.length,
+      toolUseCount,
     },
   }
 }
@@ -4438,7 +4237,10 @@ function registerBeeGameSessionRoutes(
     legacyWorkspacePath?: string,
   ): Promise<string> => {
     const metadata = beeGameSessions.metadata(sessionId)
-    if (metadata?.workspacePath) return metadata.workspacePath
+    if (metadata?.workspacePath) {
+      if (checkSession(request, sessionId)) throw new Error('Session not found')
+      return metadata.workspacePath
+    }
     if (!legacyWorkspacePath) throw new Error('Session not found')
     const resolvedWorkspace = await resolveSessionWorkspacePath(
       legacyWorkspacePath,
@@ -4456,34 +4258,6 @@ function registerBeeGameSessionRoutes(
     }
     return resolvedWorkspace
   }
-  const recoverSessionFromWorkspace = async (
-    request: Request,
-    sessionId: string,
-    workspaceHint: string,
-  ) => {
-    const user = options.getCurrentUser(request)
-    const workspacePath = await getSessionWorkspacePath(request, sessionId, workspaceHint)
-    const modelConfigId = await resolveDefaultModelConfigId(
-      request,
-      user,
-      undefined,
-      options.modelConfigExists,
-      options.listModelConfigs,
-    )
-    if (modelConfigId) await options.assertPermittedModelConfigRuntime(modelConfigId)
-    const session = beeGameSessions.start({
-      workspacePath,
-      transcriptSessionId: sessionId,
-      ...(modelConfigId ? { modelConfigId } : {}),
-      userId: user.id,
-      ...(getBearerToken(request) ? { authToken: getBearerToken(request) } : {}),
-      userDataRoot: options.getUserDataRoot(request),
-    })
-    await beeGameSessions.resumePendingDeliveryPipeline(session.id)
-    await options.persistSessionMetadata(request, beeGameSessions.metadata(session.id))
-    return session
-  }
-
   app.get(basePath, c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
@@ -4494,6 +4268,9 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'agent.send_message')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    if (body.modelConfigId !== undefined || body.transcriptSessionId !== undefined) {
+      return c.json({ error: 'Runtime session fields are server-owned' }, 400)
+    }
     try {
       const currentUser = options.getCurrentUser(c.req.raw)
       const workspacePath = await resolveNewBeeGameSessionWorkspacePath(
@@ -4512,7 +4289,7 @@ function registerBeeGameSessionRoutes(
       const modelConfigId = await resolveDefaultModelConfigId(
         c.req.raw,
         currentUser,
-        body.modelConfigId,
+        undefined,
         options.modelConfigExists,
         options.listModelConfigs,
       )
@@ -4523,9 +4300,6 @@ function registerBeeGameSessionRoutes(
             ? { projectId: body.projectId }
             : {}),
           modelConfigId,
-          ...(typeof body.transcriptSessionId === 'string' && body.transcriptSessionId
-            ? { transcriptSessionId: body.transcriptSessionId }
-            : {}),
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),
@@ -4535,7 +4309,6 @@ function registerBeeGameSessionRoutes(
             : {}),
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
-      await beeGameSessions.resumePendingDeliveryPipeline(session.id)
       await options.persistSessionMetadata(
         c.req.raw,
         beeGameSessions.metadata(session.id),
@@ -4551,8 +4324,6 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
-    await beeGameSessions.resumePendingDeliveryPipeline(c.req.param('id'))
     const session = beeGameSessions.get(c.req.param('id'))
     return session
       ? c.json(session)
@@ -4575,16 +4346,11 @@ function registerBeeGameSessionRoutes(
       if (sessionForbidden.error === 'Session not found' && legacyWorkspacePath) {
         try {
           const after = Number.parseInt(c.req.query('after') || '0', 10)
-          try {
-            const session = await recoverSessionFromWorkspace(c.req.raw, c.req.param('id'), legacyWorkspacePath)
-            return c.json(beeGameSessions.events(session.id, after))
-          } catch {
-            const workspacePath = await getSessionWorkspacePath(c.req.raw, c.req.param('id'), legacyWorkspacePath)
-            return await readTranscriptFromWorkspace(
-              c.req.param('id'), workspacePath, defaultWorkspacePath,
-              getDashboardDataRoot(defaultWorkspacePath), after,
-            )
-          }
+          const workspacePath = await getSessionWorkspacePath(c.req.raw, c.req.param('id'), legacyWorkspacePath)
+          return await readTranscriptFromWorkspace(
+            c.req.param('id'), workspacePath, defaultWorkspacePath,
+            getDashboardDataRoot(defaultWorkspacePath), after,
+          )
         } catch {
           // Preserve the deliberately opaque 404 response for an invalid
           // session/workspace combination.
@@ -4592,9 +4358,7 @@ function registerBeeGameSessionRoutes(
       }
       return c.json(sessionForbidden, 404)
     }
-    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
-      await beeGameSessions.resumePendingDeliveryPipeline(c.req.param('id'))
       const after = Number.parseInt(c.req.query('after') || '0', 10)
       return c.json(beeGameSessions.events(c.req.param('id'), after))
     } catch (err) {
@@ -4607,13 +4371,13 @@ function registerBeeGameSessionRoutes(
       if (toErrorMessage(err) === 'Session not found' && workspacePath) {
         const after = Number.parseInt(c.req.query('after') || '0', 10)
         try {
-          const session = await recoverSessionFromWorkspace(c.req.raw, c.req.param('id'), workspacePath)
-          return c.json(beeGameSessions.events(session.id, after))
-        } catch {
+          const resolvedWorkspace = await getSessionWorkspacePath(c.req.raw, c.req.param('id'), workspacePath)
           return readTranscriptFromWorkspace(
-            c.req.param('id'), workspacePath, defaultWorkspacePath,
+            c.req.param('id'), resolvedWorkspace, defaultWorkspacePath,
             getDashboardDataRoot(defaultWorkspacePath), after,
           )
+        } catch {
+          // Fall through to the opaque route error below.
         }
       }
       return publicSessionRouteError(
@@ -4631,7 +4395,6 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       const workspacePath = getWorkspacePathHint(
         c.req.query('workspacePath'),
@@ -4685,7 +4448,6 @@ function registerBeeGameSessionRoutes(
       }
       return c.json(sessionForbidden, 404)
     }
-    await refreshSessionAuthTokenFromRequest(c.req.raw, beeGameSessions, c.req.param('id'))
     try {
       return c.json(beeGameSessions.transcript(c.req.param('id')))
     } catch (err) {
@@ -4708,72 +4470,23 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.patch(`${basePath}/:id/model`, async c => {
-    const forbidden = check(c.req.raw, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
-    const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['modelConfigId'])
-    if (error) return c.json({ error }, 400)
-    try {
-      const currentUser = options.getCurrentUser(c.req.raw)
-      const modelConfigId = await requireOwnedModelConfigId(
-        c.req.raw,
-        currentUser,
-        body.modelConfigId,
-        options.modelConfigExists,
-      )
-      await options.assertPermittedModelConfigRuntime(modelConfigId)
-      return c.json(
-        beeGameSessions.updateModel(
-          c.req.param('id'),
-          modelConfigId,
-        ),
-      )
-    } catch (err) {
-      const message = toErrorMessage(err)
-      return c.json(
-        { error: message },
-        message === 'Session not found' || message === 'Model config not found'
-          ? 404
-          : 400,
-      )
-    }
-  })
-
   app.get(`${basePath}/:id/artifacts`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
     try {
+      const workspacePath = await getSessionWorkspacePath(
+        c.req.raw,
+        c.req.param('id'),
+        c.req.query('workspacePath'),
+      )
+      if (!beeGameSessions.get(c.req.param('id'))) {
+        return c.json(await readBeeGameProjectArtifact(workspacePath, path))
+      }
       return c.json(await beeGameSessions.readArtifact(c.req.param('id'), path))
     } catch (err) {
       const message = toErrorMessage(err)
-      if (message === 'Session not found' && c.req.query('workspacePath')) {
-        try {
-          const workspacePath = await getSessionWorkspacePath(
-            c.req.raw,
-            c.req.param('id'),
-            c.req.query('workspacePath'),
-          )
-          return c.json(await readBeeGameProjectArtifact(workspacePath, path))
-        } catch (fallbackErr) {
-          const fallbackMessage = toErrorMessage(fallbackErr)
-          return publicSessionRouteError(
-            c,
-            'beegame-session.artifacts.fallback',
-            fallbackErr,
-            fallbackMessage === 'Artifact path must stay inside the session workspace'
-              ? 400
-              : 404,
-            ['Artifact path must stay inside the session workspace', 'Session not found'],
-          )
-        }
-      }
       return publicSessionRouteError(
         c,
         'beegame-session.artifacts',
@@ -4787,8 +4500,6 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/artifact-index`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
@@ -4810,8 +4521,6 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/assets`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
@@ -4819,13 +4528,7 @@ function registerBeeGameSessionRoutes(
         c.req.query('workspacePath'),
       )
       const manifest = await readBeeGameAssetManifest(workspacePath)
-      if (manifest.slots.length) {
-        await options.persistAssetManifest(
-          c.req.raw,
-          beeGameSessions.metadata(c.req.param('id')),
-          manifest,
-        )
-      } else {
+      if (!manifest.slots.length) {
         const storedManifest = await options.loadAssetManifest(
           c.req.raw,
           beeGameSessions.metadata(c.req.param('id')),
@@ -4852,6 +4555,13 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const activeSession = beeGameSessions.get(c.req.param('id'))
+    if (!activeSession) return c.json({ error: 'Session not found' }, 404)
+    try {
+      assertProjectWorkspaceMutationIdle(activeSession)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
     const form = await c.req.raw.formData()
     const file = form.get('file')
     if (!(file instanceof File)) return c.json({ error: 'Missing form file' }, 400)
@@ -4883,8 +4593,6 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/package`, async c => {
     const forbidden = check(c.req.raw, ROUTE_PERMISSION.projectExport)
     if (forbidden) return c.json(forbidden, 403)
-    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
-    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const projectPackage = await beeGameSessions.createProjectPackage(
         c.req.param('id'),
@@ -4935,6 +4643,13 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const activeSession = beeGameSessions.get(c.req.param('id'))
+    if (!activeSession) return c.json({ error: 'Session not found' }, 404)
+    try {
+      assertProjectWorkspaceMutationIdle(activeSession)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
     const body = await readOptionalJson(c.req.raw)
     try {
       const workspacePath = await getSessionWorkspacePath(
@@ -4962,6 +4677,13 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
+    const activeSession = beeGameSessions.get(c.req.param('id'))
+    if (!activeSession) return c.json({ error: 'Session not found' }, 404)
+    try {
+      assertProjectWorkspaceMutationIdle(activeSession)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
     const body = await readOptionalJson(c.req.raw)
     try {
       const workspacePath = await getSessionWorkspacePath(
@@ -5026,6 +4748,13 @@ function registerBeeGameSessionRoutes(
       if (forbidden) return c.json(forbidden, 403)
       const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
       if (sessionForbidden) return c.json(sessionForbidden, 404)
+      const activeSession = beeGameSessions.get(c.req.param('id'))
+      if (!activeSession) return c.json({ error: 'Session not found' }, 404)
+      try {
+        assertProjectWorkspaceMutationIdle(activeSession)
+      } catch (err) {
+        return c.json({ error: toErrorMessage(err) }, 409)
+      }
       const body = await readOptionalJson(c.req.raw)
       try {
         const workspacePath = await getSessionWorkspacePath(
@@ -5035,13 +4764,6 @@ function registerBeeGameSessionRoutes(
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
-        const deliveryGate = await getDeliveryGateFailure({
-          sessionId: c.req.param('id'),
-          workspacePath,
-          dashboardDataRoot: getDashboardDataRoot(defaultWorkspacePath),
-          beeGameSessions,
-        })
-        if (deliveryGate) return c.json({ error: deliveryGate }, 409)
         const deployment = await beeGameDeployments.deploy({
           sessionId: c.req.param('id'),
           userId: currentUser.id,
@@ -5100,19 +4822,18 @@ function registerBeeGameSessionRoutes(
       const attachments = body.attachments === undefined
         ? []
         : validateBeeGameAttachments(body.attachments)
+      if (
+        body.displayText !== undefined ||
+        body.displayKind !== undefined ||
+        body.taskType !== undefined ||
+        body.thinkingMode !== undefined
+      ) {
+        return c.json({ error: 'Internal turn fields are server-owned' }, 400)
+      }
       if (body.text === undefined && attachments.length === 0) {
         return c.json({ error: 'Missing field: text' }, 400)
       }
       const inputText = typeof body.text === 'string' ? body.text : ''
-      const displayText = typeof body.displayText === 'string'
-        ? body.displayText
-        : undefined
-      const displayKind = typeof body.displayKind === 'string'
-        ? body.displayKind
-        : undefined
-      const taskType = typeof body.taskType === 'string'
-        ? getCreditTaskPolicy(body.taskType).taskType
-        : undefined
       const clientMessageId = typeof body.clientMessageId === 'string'
         ? body.clientMessageId
         : typeof body.client_message_id === 'string'
@@ -5125,15 +4846,10 @@ function registerBeeGameSessionRoutes(
           : undefined
       return c.json(
         await beeGameSessions.sendWithDisplay(c.req.param('id'), inputText, {
-          displayText,
-          displayKind,
-          taskType,
+          taskType: 'edit_turn',
           clientMessageId,
           supersedesMessageId,
           attachments,
-          thinkingMode: isBeeGameChatThinkingMode(body.thinkingMode)
-            ? body.thinkingMode
-            : 'disabled',
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),
@@ -5148,6 +4864,156 @@ function registerBeeGameSessionRoutes(
     }
   })
 
+  app.post(`${basePath}/:id/idea`, async c => {
+    const forbidden = check(c.req.raw, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    try {
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      const idea = typeof body.idea === 'string' ? body.idea.trim() : ''
+      if (!idea) return c.json({ error: 'Missing field: idea' }, 400)
+      return c.json(await beeGameSessions.sendWithDisplay(
+        c.req.param('id'),
+        JSON.stringify({ kind: 'game_idea', idea }, null, 2),
+        {
+          displayText: idea,
+          displayKind: 'initial_idea',
+          taskType: 'full_build',
+          ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
+          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        },
+      ))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/confirmed-brief`, async c => {
+    const forbidden = check(c.req.raw, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    try {
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      const brief = isObject(body.brief) ? body.brief : body
+      const idea = typeof brief.idea === 'string' ? brief.idea.trim() : ''
+      if (!idea) return c.json({ error: 'Missing field: brief.idea' }, 400)
+      const prompt = JSON.stringify({
+        kind: 'confirmed_build_brief',
+        idea,
+        selected_option: isObject(brief.option) ? brief.option : null,
+        settings: isObject(brief.settings) ? brief.settings : null,
+        confirmed_gdd: brief.confirmedGdd ?? null,
+        build_source: brief.buildSource ?? null,
+        analysis_id: brief.analysisId ?? null,
+      }, null, 2)
+      return c.json(await beeGameSessions.sendWithDisplay(c.req.param('id'), prompt, {
+        displayText: idea,
+        displayKind: 'confirmed_brief',
+        taskType: 'full_build',
+        ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
+        ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+      }))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/continue`, async c => {
+    const forbidden = check(c.req.raw, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    try {
+      const body = await readOptionalJson(c.req.raw)
+      const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
+      return c.json(await beeGameSessions.sendWithDisplay(
+        c.req.param('id'),
+        getServerOwnedContinuePrompt(language),
+        {
+          taskType: 'continue_turn',
+          language,
+          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        },
+      ))
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
+  app.post(`${basePath}/:id/action`, async c => {
+    const forbidden = check(c.req.raw, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
+    try {
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      const kind = typeof body.kind === 'string' ? body.kind : ''
+      const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
+      if (kind === 'asset_integrate' || kind === 'asset_prepare_selection') {
+        const slotIds = Array.isArray(body.slotIds)
+          ? [...new Set(body.slotIds.filter((value): value is string => (
+              typeof value === 'string' && value.trim().length > 0
+            )).map(value => value.trim()))]
+          : []
+        if (slotIds.length === 0) return c.json({ error: 'Missing field: slotIds' }, 400)
+        const session = beeGameSessions.get(c.req.param('id'))
+        if (!session) return c.json({ error: 'Session not found' }, 404)
+        const manifest = await readBeeGameAssetManifest(session.cwd)
+        const contractedSlotIds = new Set(manifest.slots.map(slot => slot.id))
+        if (slotIds.some(slotId => !contractedSlotIds.has(slotId))) {
+          return c.json({ error: 'Asset action contains slots outside the project contract' }, 422)
+        }
+        return c.json(await beeGameSessions.sendWithDisplay(
+          c.req.param('id'),
+          JSON.stringify({
+            kind: 'asset_integration_request',
+            action: kind === 'asset_integrate' ? 'integrate' : 'prepare_selection',
+            slot_ids: slotIds,
+          }, null, 2),
+          {
+            displayText: getServerOwnedProjectActionLabel(kind, language),
+            displayKind: 'asset_integration',
+            taskType: 'asset_integration',
+            language,
+            ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+          },
+        ))
+      }
+      if (kind === 'build_error_repair') {
+        const session = beeGameSessions.get(c.req.param('id'))
+        if (!session) return c.json({ error: 'Session not found' }, 404)
+        const preview = beeGamePreviews.status(c.req.param('id'), session.cwd)
+        if (preview.status !== 'failed') {
+          return c.json({ error: 'No failed server-owned build report is available' }, 409)
+        }
+        return c.json(await beeGameSessions.sendWithDisplay(
+          c.req.param('id'),
+          JSON.stringify({
+            kind: 'build_error_repair_request',
+            build_report: {
+              status: preview.status,
+              message: preview.message ?? '',
+              script: preview.script ?? null,
+              entrypoint: preview.entrypoint ?? null,
+            },
+          }, null, 2),
+          {
+            displayText: getServerOwnedProjectActionLabel(kind, language),
+            displayKind: 'build_error_repair',
+            taskType: 'edit_turn',
+            language,
+            ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+          },
+        ))
+      }
+      return c.json({ error: 'Unsupported project action' }, 400)
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 400)
+    }
+  })
+
   app.post(`${basePath}/:id/permissions/:toolUseID`, async c => {
     const forbidden = check(c.req.raw, 'agent.approve_tool')
     if (forbidden) return c.json(forbidden, 403)
@@ -5158,13 +5024,16 @@ function registerBeeGameSessionRoutes(
     if (decision !== 'allow' && decision !== 'deny') {
       return c.json({ error: 'Permission decision must be allow or deny' }, 400)
     }
+    if (body.remember === true) {
+      return c.json({ error: 'Persistent runtime permissions are not available through the Web API' }, 400)
+    }
     try {
       const resolved = beeGameSessions.resolvePermission(
         c.req.param('id'),
         c.req.param('toolUseID'),
         {
           behavior: decision,
-          remember: body.remember === true,
+          remember: false,
           ...(typeof body.message === 'string'
             ? { message: body.message }
             : {}),
@@ -5383,34 +5252,6 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
       ? { root_path: body.root_path }
       : {}),
     created_at: Number(body.created_at),
-    ...(isObject(body.runtime_snapshot)
-      ? { runtime_snapshot: toProjectRuntimeSnapshot(body.runtime_snapshot) }
-      : {}),
-  }
-}
-
-function toProjectRuntimeSnapshot(body: JsonObject): NonNullable<BeeGameProjectMetadata['runtime_snapshot']> {
-  const usage = isObject(body.usage)
-    ? {
-        prompt_tokens: Math.max(0, Number(body.usage.prompt_tokens) || 0),
-        completion_tokens: Math.max(0, Number(body.usage.completion_tokens) || 0),
-        total_tokens: Math.max(0, Number(body.usage.total_tokens) || 0),
-      }
-    : undefined
-  return {
-    ...(usage ? { usage } : {}),
-    ...(typeof body.phase_name === 'string' && body.phase_name.trim()
-      ? { phase_name: body.phase_name.trim() }
-      : {}),
-    ...(typeof body.model_config_id === 'string' && body.model_config_id.trim()
-      ? { model_config_id: body.model_config_id.trim() }
-      : {}),
-    ...(typeof body.model_name === 'string' && body.model_name.trim()
-      ? { model_name: body.model_name.trim() }
-      : {}),
-    ...(Number.isFinite(Number(body.updated_at))
-      ? { updated_at: Number(body.updated_at) }
-      : {}),
   }
 }
 
@@ -5554,6 +5395,24 @@ function isBeeGameSessionLanguage(
     value === 'ko'
 }
 
+function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string {
+  if (language === 'zh') return '继续任务'
+  if (language === 'zh-TW') return '繼續任務'
+  if (language === 'ja') return 'タスクを続けてください'
+  if (language === 'ko') return '작업을 계속해 주세요'
+  return 'Continue the task.'
+}
+
+function getServerOwnedProjectActionLabel(
+  kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair',
+  language: BeeGameSessionLanguage,
+): string {
+  const isChinese = language === 'zh' || language === 'zh-TW'
+  if (kind === 'asset_integrate') return isChinese ? '集成所选资源' : 'Integrate selected assets'
+  if (kind === 'asset_prepare_selection') return isChinese ? '完善资源选择条件' : 'Prepare resource selection'
+  return isChinese ? '修复构建错误' : 'Repair build errors'
+}
+
 export function uploadPolicyResponse(error: BeeGameUploadPolicyError, traceId: string = randomUUID()): Response {
   console.warn('[BeeGame] upload policy rejected request', {
     traceId,
@@ -5567,16 +5426,6 @@ export function uploadPolicyResponse(error: BeeGameUploadPolicyError, traceId: s
     status: 400,
     headers: { 'content-type': 'application/json' },
   })
-}
-
-async function refreshSessionAuthTokenFromRequest(
-  request: Request,
-  sessions: BeeGameSessionManager,
-  sessionId: string,
-): Promise<void> {
-  const token = getBearerToken(request)
-  if (token) sessions.updateAuthToken(sessionId, token)
-  await sessions.retryPendingCreditOperation(sessionId)
 }
 
 async function appendAuditEventBestEffort(
@@ -5646,38 +5495,5 @@ function toLibraryBinding(selection: ResourceSelectionResult) {
         ...(dependency.kind ? { kind: dependency.kind } : {}),
       })),
     } : {}),
-  }
-}
-
-/**
- * Post-turn integration entrypoint. It only consumes explicit asset contracts,
- * never names or inferred categories, and leaves existing bindings untouched.
- */
-async function autoBindLibraryResourcesInWorkspace(
-  workspacePath: string,
-  resourceSelectionClient: NonNullable<AgentWorkflowAppOptions['resourceSelectionClient']>,
-): Promise<void> {
-  const manifest = await readBeeGameAssetManifest(workspacePath)
-  const requirements = manifest.slots
-    .filter(slot => !slot.resource_binding && slot.status !== 'integrated')
-    .map(slot => resourceRequirementForSlot(slot, manifest.project_target))
-    .filter((requirement): requirement is ResourceSelectionRequirement => Boolean(requirement))
-    .filter(isSafeAutomaticResourceRequirement)
-  if (!requirements.length) return
-  const selections = await resourceSelectionClient.select(requirements)
-  for (const selection of selections) {
-    try {
-      await bindBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId, {
-        pack_id: selection.packId,
-        pack_version: selection.packVersion,
-        element_id: selection.elementId,
-        ...toLibraryBinding(selection),
-      })
-      await integrateBeeGameLibraryResourceInWorkspace(workspacePath, selection.slotId)
-    } catch (error) {
-      // A failed signed download or an adapter-only target retains its binding
-      // for retry, while the Agent turn and existing project files stay intact.
-      console.warn(`BeeGame resource integration failed for ${selection.slotId}:`, toErrorMessage(error))
-    }
   }
 }

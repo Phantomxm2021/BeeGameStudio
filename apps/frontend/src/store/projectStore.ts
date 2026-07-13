@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { Project, CreateProjectRequest, ProjectRuntimeSnapshot, StartProjectResult, UpdateProjectRequest } from '../types/project';
+import type { Project, CreateProjectRequest, StartProjectResult, UpdateProjectRequest } from '../types/project';
 import {
   api,
   normalizeProjectBaselineStatusPayload,
@@ -116,6 +116,9 @@ interface ProjectState {
    */
   loadPendingReviews: (projectId: string) => Promise<void>;
 
+  /** Load the single server-owned runtime snapshot used by dashboard views. */
+  loadProjectRuntimeState: (projectId: string) => Promise<void>;
+
   /**
    * Remove a pending review from local optimistic state
    */
@@ -172,11 +175,6 @@ interface ProjectState {
    * Requirements: 3.5
    */
   updateProject: (projectId: string, data: UpdateProjectRequest) => Promise<void>;
-
-  /**
-   * Persist project runtime summary without user-facing update chrome.
-   */
-  persistProjectRuntimeSnapshot: (projectId: string, snapshot: ProjectRuntimeSnapshot) => Promise<void>;
 
   /**
    * Delete a project
@@ -244,6 +242,22 @@ export const useProjectStore = create<ProjectState>()(
           console.error(`Failed to load pending reviews for project ${projectId}:`, error);
           // Do not fail hard, just set empty to avoid blocking UI
           set({ pendingReviews: [] });
+        }
+      },
+
+      loadProjectRuntimeState: async (projectId) => {
+        if (!projectId) return;
+        try {
+          const runtimeState = await api.getProjectRuntimeState(projectId);
+          set({
+            projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
+            pendingReviews: runtimeState.pendingReviews,
+          });
+        } catch (error) {
+          if (getProjectStoreErrorStatus(error) !== 401) {
+            console.error(`Failed to load runtime state for project ${projectId}:`, error);
+          }
+          throw error;
         }
       },
 
@@ -387,8 +401,7 @@ export const useProjectStore = create<ProjectState>()(
                 activeProjectId: projects.some((project) => project.id === newProjectId) ? newProjectId : state.activeProjectId,
               }));
             }),
-            get().loadProjectStatus(newProjectId),
-            get().loadPendingReviews(newProjectId),
+            get().loadProjectRuntimeState(newProjectId),
           ]).catch((error) => console.error('Failed to refresh bootstrap project state:', error));
 
           return { status: 'started', projectId: newProjectId };
@@ -455,8 +468,7 @@ export const useProjectStore = create<ProjectState>()(
                 activeProjectId: projects.some((project) => project.id === newProjectId) ? newProjectId : state.activeProjectId,
               }));
             }),
-            get().loadProjectStatus(newProjectId),
-            get().loadPendingReviews(newProjectId),
+            get().loadProjectRuntimeState(newProjectId),
           ]).catch((error) => console.error('Failed to refresh bootstrap project state:', error));
 
           return { status: 'started', projectId: newProjectId };
@@ -519,18 +531,6 @@ export const useProjectStore = create<ProjectState>()(
         }
       },
 
-      persistProjectRuntimeSnapshot: async (projectId, snapshot) => {
-        if (!projectId) return;
-        await api.updateProject(projectId, { runtime_snapshot: snapshot });
-        set((state) => ({
-          projects: state.projects.map((project) => (
-            project.id === projectId
-              ? { ...project, runtime_snapshot: snapshot }
-              : project
-          )),
-        }));
-      },
-
       deleteProject: async (projectId) => {
         try {
           set({ isLoading: true });
@@ -590,3 +590,9 @@ export const useProjectStore = create<ProjectState>()(
     }
   )
 );
+
+function getProjectStoreErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}

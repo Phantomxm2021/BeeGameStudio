@@ -23,7 +23,6 @@ import { normalizeChatHistory } from '../utils/chatHistory';
 import { normalizeWebSocketSemanticType } from '../utils/messageSemantics';
 import { getWaitingApprovalState } from '../utils/waitingApproval';
 import { isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
-import type { BeeGameThinkingMode } from '../services/beeGameAdapter';
 import {
   getCreditQuote,
   type BeeGameCreditQuote,
@@ -95,9 +94,7 @@ export interface UseChatReturn {
   sendMessage: (
     content: string,
     terminationNode?: string,
-    taskType?: BeeGameCreditTaskType,
     attachments?: ChatAttachmentPayload[],
-    thinkingMode?: BeeGameThinkingMode,
     supersedesMessageId?: string,
   ) => Promise<void>;
 
@@ -168,10 +165,6 @@ export interface UseChatReturn {
   wsState: WebSocketState;
 }
 
-type PendingAction =
-  | { kind: 'send_message'; content: string; terminationNode?: string; attachments?: ChatAttachmentPayload[] }
-  | { kind: 'continue_task'; taskId?: string };
-
 /**
  * Custom hook for managing chat functionality
  * 
@@ -221,18 +214,6 @@ export const useChat = ({
     phase: 'idle',
     message: '',
   });
-  const pendingActionRef = useRef<PendingAction | null>(null);
-
-  const isNetworkIssue = useCallback((error: unknown): boolean => {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    const normalized = message.toLowerCase();
-    return (
-      normalized.includes('网络连接失败') ||
-      normalized.includes('network error') ||
-      normalized.includes('failed to fetch') ||
-      normalized.includes('connection error')
-    );
-  }, []);
 
   // Store actions
   const { addMessage, updateMessage, updateThought, removeMessage, finalizeMessage, setCurrentSender, setIsStreaming, loadHistory } = useChatStore();
@@ -259,11 +240,9 @@ export const useChat = ({
   }, [approvalState, pendingReviews]);
 
   const refreshProjectVisibility = useCallback(async () => {
+    if (useSystemStore.getState().authenticationStatus !== 'authenticated') return;
     const store = useProjectStore.getState();
-    await Promise.all([
-      store.loadProjectStatus(projectId),
-      store.loadPendingReviews(projectId),
-    ]);
+    await store.loadProjectRuntimeState(projectId);
   }, [projectId]);
 
   const emitWaitingApprovalBlock = useCallback((message: string) => {
@@ -722,16 +701,15 @@ export const useChat = ({
     setIsSyncing(true);
 
     try {
-      // 1. Sync phases (current progress)
-      await loadPhases(projectId);
+      const isBeeGame = isBeeGameAdapterEnabled();
+      if (!isBeeGame) {
+        await loadPhases(projectId);
+        await loadTokenUsage(projectId);
+        await loadAgents();
+      }
 
-      // 1.1 Sync cumulative token usage so refresh/reconnect does not reset the counter
-      await loadTokenUsage(projectId);
-
-      // 2. Sync active agents
-      await loadAgents();
-
-      // 3. Sync runtime visibility before restoring composer state
+      // BeeGame has one server-owned runtime-state snapshot. Do not fan a
+      // reconnect out into legacy phase, token, agent and task probes.
       await refreshProjectVisibility();
       const projectStatus = useProjectStore.getState().projectStatus;
       if (isProjectStatusRunning(projectStatus)) {
@@ -740,19 +718,18 @@ export const useChat = ({
         setCanContinue(false);
       }
 
-      // 4. Sync tasks
-      await loadTasks(projectId);
-      const activeTask = findActiveTask(useSystemStore.getState().tasks);
-      if (activeTask) {
-        setCurrentTaskId(activeTask.id);
-        setIsLoading(true);
-        setCanContinue(false);
+      if (!isBeeGame) {
+        await loadTasks(projectId);
+        const activeTask = findActiveTask(useSystemStore.getState().tasks);
+        if (activeTask) {
+          setCurrentTaskId(activeTask.id);
+          setIsLoading(true);
+          setCanContinue(false);
+        }
+        await loadActivities();
       }
 
-      // 5. Sync artifacts/activities
-      await loadActivities();
-
-      // 6. Sync chat history (only if not currently streaming)
+      // Sync chat history only after the authoritative runtime state.
       const { isStreaming } = useChatStore.getState();
       if (!isStreaming) {
         const history = await api.getChatHistory(projectId) as unknown;
@@ -761,31 +738,6 @@ export const useChat = ({
         if (messages.length > 0 || currentMessages.length === 0) {
           loadHistory(messages);
         }
-      }
-
-      if (pendingActionRef.current) {
-        const pending = pendingActionRef.current;
-        pendingActionRef.current = null;
-        if (waitingApproval.isBlockingChat) {
-          emitWaitingApprovalBlock(waitingApproval.message);
-          return;
-        }
-        const response = pending.kind === 'continue_task'
-          ? await api.continueTask({
-            project_id: projectId,
-            task_id: pending.taskId || currentTaskId || undefined
-          })
-          : await api.sendMessage({
-            content: pending.content,
-            project_id: projectId,
-            termination_node: pending.terminationNode,
-            attachments: pending.attachments,
-          });
-        const resumed = response as ContinueTaskResponse | SendMessageResponse;
-        const resumedTaskId = 'resume_task_id' in resumed ? resumed.resume_task_id : resumed.task_id;
-        setCurrentTaskId(resumedTaskId);
-        setIsLoading(true);
-        console.log('[useChat] Replayed pending action after reconnection, task ID:', resumedTaskId);
       }
 
       console.log('[useChat] Synchronization complete');
@@ -850,9 +802,7 @@ export const useChat = ({
   const sendMessage = useCallback(async (
     content: string,
     terminationNode?: string,
-    taskType: BeeGameCreditTaskType = 'edit_turn',
     attachments?: ChatAttachmentPayload[],
-    thinkingMode: BeeGameThinkingMode = 'disabled',
     supersedesMessageId?: string,
   ) => {
     if (waitingApproval.isBlockingChat) {
@@ -860,7 +810,7 @@ export const useChat = ({
       return;
     }
     try {
-      const confirmed = await confirmTaskCredits(taskType);
+      const confirmed = await confirmTaskCredits('edit_turn');
       if (!confirmed) return;
       setIsLoading(true);
       setCanContinue(false);
@@ -891,9 +841,7 @@ export const useChat = ({
         project_id: projectId,
         termination_node: terminationNode,
         client_message_id: clientMessageId,
-        taskType,
         attachments,
-        thinkingMode,
         supersedes_message_id: supersedesMessageId,
       }) as SendMessageResponse;
 
@@ -904,15 +852,6 @@ export const useChat = ({
       console.error('[useChat] Failed to send message:', error);
       setIsLoading(false);
       const errorMessage = getErrorDisplayMessage(error, '发送消息失败，请重试');
-      if (isNetworkIssue(error)) {
-        pendingActionRef.current = {
-          kind: 'send_message',
-          content,
-          terminationNode,
-          attachments,
-        };
-      }
-
       // Add error message to chat
       addMessage({
         id: `error-${Date.now()}`,
@@ -925,7 +864,7 @@ export const useChat = ({
       showToastError?.(errorMessage);
       onError?.(error instanceof Error ? error : new Error(errorMessage));
     }
-  }, [projectId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+  }, [projectId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Continue a paused task
@@ -961,13 +900,6 @@ export const useChat = ({
       setIsLoading(false);
       setCanContinue(true);
       const errorMessage = getErrorDisplayMessage(error, '继续任务失败，请重试');
-      if (isNetworkIssue(error)) {
-        pendingActionRef.current = {
-          kind: 'continue_task',
-          taskId: currentTaskId || undefined,
-        };
-      }
-
       // Add error message to chat
       addMessage({
         id: `error-${Date.now()}`,
@@ -980,7 +912,7 @@ export const useChat = ({
       showToastError?.(errorMessage);
       onError?.(error instanceof Error ? error : new Error(errorMessage));
     }
-  }, [projectId, currentTaskId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, isNetworkIssue, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
+  }, [projectId, currentTaskId, addMessage, onError, showToastError, wsState, reconnect, syncAfterReconnect, waitingApproval, emitWaitingApprovalBlock, confirmTaskCredits]);
 
   /**
    * Stop the current task

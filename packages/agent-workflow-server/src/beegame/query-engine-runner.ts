@@ -9,7 +9,6 @@ import {
 } from '@bee-game-studio/security-core'
 import type {
   BeeGameApprovedOutboundTargets,
-  BeeGameChatThinkingMode,
   BeeGamePromptInput,
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
@@ -84,7 +83,6 @@ export function createQueryEngineRunner(): BeeGameSessionRunner {
 
 class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private engine: QueryEngineLike | null = null
-  private engineThinkingMode: BeeGameChatThinkingMode | null = null
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
 
@@ -96,35 +94,28 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         this.input.cwd,
         this.input.env,
         this.input.approvedOutboundTargets,
-        input.thinkingMode,
         async () => {
-        const thinkingMode = input.thinkingMode ?? 'disabled'
-        if (this.engine && this.engineThinkingMode !== thinkingMode) {
-          this.engine.interrupt()
-          this.engine = null
-          this.engineThinkingMode = null
-        }
-        this.currentSubmitInput = input
-        const engine = await this.ensureEngine()
-        if (input.signal.aborted) {
-          this.currentSubmitInput = null
-          return
-        }
-
-        engine.resetAbortController()
-        const abort = () => {
-          engine.interrupt()
-        }
-        input.signal.addEventListener('abort', abort, { once: true })
-        try {
-          for await (const message of engine.submitMessage(input.prompt)) {
-            input.onMessage(message)
-            if (input.signal.aborted) break
+          this.currentSubmitInput = input
+          const engine = await this.ensureEngine()
+          if (input.signal.aborted) {
+            this.currentSubmitInput = null
+            return
           }
-        } finally {
-          input.signal.removeEventListener('abort', abort)
-          this.currentSubmitInput = null
-        }
+
+          engine.resetAbortController()
+          const abort = () => {
+            engine.interrupt()
+          }
+          input.signal.addEventListener('abort', abort, { once: true })
+          try {
+            for await (const message of engine.submitMessage(input.prompt)) {
+              input.onMessage(message)
+              if (input.signal.aborted) break
+            }
+          } finally {
+            input.signal.removeEventListener('abort', abort)
+            this.currentSubmitInput = null
+          }
         },
       )
     })
@@ -307,16 +298,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         )
       },
       readFileCache: new FileStateCache(500, 50 * 1024 * 1024),
-      thinkingConfig: toQueryEngineThinkingConfig(
-        this.currentSubmitInput?.thinkingMode ?? 'disabled',
-      ),
       ...(resumedConversation.length > 0
         ? { initialMessages: resumedConversation }
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
     })
-    this.engineThinkingMode = this.currentSubmitInput?.thinkingMode ?? 'disabled'
 
     return this.engine
   }
@@ -348,12 +335,6 @@ export function mergeManagedAgentDefinitions(
 
 function arrayOfRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter(isRecord) : []
-}
-
-export function toQueryEngineThinkingConfig(
-  mode: BeeGameChatThinkingMode,
-): { type: 'adaptive' } | { type: 'disabled' } {
-  return mode === 'enabled' ? { type: 'adaptive' } : { type: 'disabled' }
 }
 
 export function ensureBeeGameMacroGlobals(): void {
@@ -416,7 +397,7 @@ async function loadInitialMessagesForResume(
       sessionId,
       undefined,
     ) as BeeGameResumeConversation | null
-    return sanitizeBeeGameResumeMessages(result)
+    return Array.isArray(result?.messages) ? result.messages : []
   } catch {
     return []
   }
@@ -424,59 +405,6 @@ async function loadInitialMessagesForResume(
 
 type BeeGameResumeConversation = {
   messages?: unknown[]
-  turnInterruptionState?: {
-    kind?: unknown
-    message?: unknown
-  }
-}
-
-export function sanitizeBeeGameResumeMessages(
-  result: BeeGameResumeConversation | null | undefined,
-): unknown[] {
-  const messages = Array.isArray(result?.messages) ? [...result.messages] : []
-  const interruption = result?.turnInterruptionState
-  if (interruption?.kind !== 'interrupted_prompt') return messages
-
-  const messageIndex = messages.indexOf(interruption.message)
-  if (messageIndex === -1) return messages
-
-  const interruptionUuid = getResumeMessageUuid(interruption.message)
-  if (!interruptionUuid) {
-    messages.splice(messageIndex, 2)
-    return messages
-  }
-
-  const removedUuids = new Set<string>([interruptionUuid])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const message of messages) {
-      const uuid = getResumeMessageUuid(message)
-      if (!uuid || removedUuids.has(uuid)) continue
-      const parentUuid = getResumeMessageParentUuid(message)
-      if (parentUuid && removedUuids.has(parentUuid)) {
-        removedUuids.add(uuid)
-        changed = true
-      }
-    }
-  }
-
-  return messages.filter(message => {
-    const uuid = getResumeMessageUuid(message)
-    return !uuid || !removedUuids.has(uuid)
-  })
-}
-
-function getResumeMessageUuid(message: unknown): string | undefined {
-  if (!isRecord(message)) return undefined
-  const uuid = message.uuid
-  return typeof uuid === 'string' && uuid ? uuid : undefined
-}
-
-function getResumeMessageParentUuid(message: unknown): string | undefined {
-  if (!isRecord(message)) return undefined
-  const parentUuid = message.parentUuid
-  return typeof parentUuid === 'string' && parentUuid ? parentUuid : undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -524,7 +452,6 @@ async function withRuntimeEnvironment(
   cwd: string,
   env: Record<string, string>,
   approvedOutboundTargets: BeeGameApprovedOutboundTargets,
-  thinkingMode: BeeGameChatThinkingMode | undefined,
   fn: () => Promise<void>,
 ): Promise<void> {
   const previousCwd = process.cwd()
@@ -547,11 +474,7 @@ async function withRuntimeEnvironment(
 
   try {
     process.chdir(cwd)
-    globalThis.fetch = createBeeGameThinkingFetch(
-      pinnedFetch,
-      runtimeEnv.OPENAI_BASE_URL,
-      thinkingMode ?? 'disabled',
-    )
+    globalThis.fetch = pinnedFetch
     await fn()
   } finally {
     process.chdir(previousCwd)
@@ -615,54 +538,6 @@ export function createBeeGamePinnedFetch(
   return pinnedFetch
 }
 
-export function createBeeGameThinkingFetch(
-  baseFetch: typeof fetch,
-  openAIBaseUrl: string | undefined,
-  thinkingMode: BeeGameChatThinkingMode,
-): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const requestUrl = getFetchRequestUrl(input)
-    if (!shouldInjectBeeGameThinking(requestUrl, openAIBaseUrl)) {
-      return baseFetch(input, init)
-    }
-
-    const body = init?.body
-    if (typeof body !== 'string') {
-      return baseFetch(input, init)
-    }
-
-    const parsed = parseJsonObject(body)
-    if (!parsed) {
-      return baseFetch(input, init)
-    }
-
-    return baseFetch(input, {
-      ...init,
-      body: JSON.stringify(withBeeGameThinkingBody(parsed, thinkingMode)),
-    })
-  }) as typeof fetch
-}
-
-function withBeeGameThinkingBody(
-  body: Record<string, unknown>,
-  thinkingMode: BeeGameChatThinkingMode,
-): Record<string, unknown> {
-  const enableThinking = thinkingMode === 'enabled'
-  const extraBody = body.extra_body
-  return {
-    ...body,
-    enable_thinking: enableThinking,
-    ...(isRecord(extraBody)
-      ? {
-          extra_body: {
-            ...extraBody,
-            enable_thinking: enableThinking,
-          },
-        }
-      : {}),
-  }
-}
-
 function getFetchRequestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input
   if (input instanceof URL) return input.href
@@ -680,33 +555,6 @@ function getFetchRequestOrigin(input: RequestInfo | URL): string | undefined {
 function getFetchRequestProtocol(value: string): string | undefined {
   try {
     return new URL(value).protocol
-  } catch {
-    return undefined
-  }
-}
-
-function shouldInjectBeeGameThinking(
-  requestUrl: string,
-  openAIBaseUrl: string | undefined,
-): boolean {
-  if (!openAIBaseUrl?.trim()) return false
-  try {
-    const request = new URL(requestUrl)
-    const base = new URL(openAIBaseUrl)
-    if (request.origin !== base.origin) return false
-    const basePath = base.pathname.replace(/\/+$/, '')
-    return request.pathname === `${basePath}/chat/completions`
-  } catch {
-    return false
-  }
-}
-
-function parseJsonObject(value: string): Record<string, unknown> | undefined {
-  try {
-    const parsed = JSON.parse(value)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined
   } catch {
     return undefined
   }

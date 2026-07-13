@@ -1,8 +1,6 @@
 import { FileText, Loader2, Paperclip, Sparkles, X } from 'lucide-react';
-import type { BeeGameThinkingMode } from '../../../services/beeGameAdapter';
 import type { ChatAttachmentPayload } from '../../../services/api';
 import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments } from '../../../services/chatAttachments';
-import { ThinkingModeSelect } from '../ThinkingModeSelect';
 
 function ShinyText({ text, disabled = false, speed = 5, className = "" }: { text: string; disabled?: boolean; speed?: number; className?: string }) {
     return (
@@ -25,12 +23,8 @@ interface IdeaPromptFormProps {
     value: string;
     placeholder: string;
     generateLabel: string;
-    thinkingMode: BeeGameThinkingMode;
-    thinkingLabel: string;
-    thinkingOptions: Array<{ value: BeeGameThinkingMode; label: string }>;
     isTransitioning: boolean;
     onChange: (value: string) => void;
-    onThinkingModeChange: (value: BeeGameThinkingMode) => void;
     onSubmit: (event: React.FormEvent) => void;
     attachments: ChatAttachmentPayload[];
     onAttachmentsChange: (attachments: ChatAttachmentPayload[]) => void;
@@ -40,12 +34,8 @@ export function IdeaPromptForm({
     value,
     placeholder,
     generateLabel,
-    thinkingMode,
-    thinkingLabel,
-    thinkingOptions,
     isTransitioning,
     onChange,
-    onThinkingModeChange,
     onSubmit,
     attachments,
     onAttachmentsChange,
@@ -96,14 +86,6 @@ export function IdeaPromptForm({
                         onChange={(event) => onChange(event.target.value)}
                         disabled={isTransitioning}
                         autoFocus
-                    />
-
-                    <ThinkingModeSelect
-                        label={thinkingLabel}
-                        value={thinkingMode}
-                        options={thinkingOptions}
-                        disabled={isTransitioning}
-                        onChange={onThinkingModeChange}
                     />
 
                     <button

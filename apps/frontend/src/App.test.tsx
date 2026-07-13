@@ -12,6 +12,8 @@ const loadCurrentUser = vi.fn().mockResolvedValue({
   role: 'owner',
   permissions: ['project.read'],
 });
+const setAuthenticationStatus = vi.fn();
+let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' = 'authenticated';
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
@@ -32,6 +34,11 @@ vi.mock('./store/systemStore', () => ({
     loadAgents,
     loadActivities,
     loadCurrentUser,
+    authenticationStatus: mockedAuthenticationStatus,
+    setAuthenticationStatus,
+    currentUser: mockedAuthenticationStatus === 'authenticated'
+      ? { id: 'owner-user', role: 'owner', permissions: ['project.read'] }
+      : null,
     isDark: false,
     toggleTheme: vi.fn(),
     status: { capabilities: {} },
@@ -87,12 +94,38 @@ describe('App view routing', () => {
   afterEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     loadCurrentUser.mockResolvedValue({
       id: 'owner-user',
       role: 'owner',
       permissions: ['project.read'],
     });
+    mockedAuthenticationStatus = 'authenticated';
     window.history.pushState({}, '', '/');
+  });
+
+  it('restores an HttpOnly session without requiring a browser-readable token', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      authenticated: true,
+      user: { id: 'owner-user' },
+    })));
+
+    render(<App />);
+
+    await waitFor(() => expect(loadCurrentUser).toHaveBeenCalledTimes(1));
+    expect(fetch).toHaveBeenCalledWith('/api/auth/session', { credentials: 'include' });
+  });
+
+  it('does not mount protected or anonymous views while authentication is initializing', () => {
+    mockedAuthenticationStatus = 'initializing';
+
+    render(<App />);
+
+    expect(screen.getByLabelText('Initializing BeeGame')).toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
   });
 
   it('keeps the production app on the workspace dashboard when the URL has an internal diagnostics view', () => {
@@ -114,6 +147,7 @@ describe('App view routing', () => {
   });
 
   it('does not load protected dashboard data when no user is signed in', async () => {
+    mockedAuthenticationStatus = 'anonymous';
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'access-token',
       expiresAt: Date.now() + 3600_000,
@@ -123,7 +157,7 @@ describe('App view routing', () => {
 
     render(<App />);
 
-    expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
+    expect(screen.getByTestId('landing-view')).toBeInTheDocument();
     await waitFor(() => expect(loadCurrentUser).toHaveBeenCalledTimes(1));
     expect(loadProjects).not.toHaveBeenCalled();
     expect(loadStatus).not.toHaveBeenCalled();

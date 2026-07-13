@@ -10,7 +10,7 @@ export type BeeGameAssetProjectTarget = {
   engine?: string
   integration_mode?: BeeGameAssetIntegrationMode
   mcp_server?: string
-  /** Formats supported by the selected runtime adapter, never inferred from a Pack. */
+  /** Formats supported by the project target, never inferred from a Pack. */
   asset_format_capabilities?: string[]
 }
 
@@ -46,8 +46,8 @@ export type BeeGameResourceBindingDependency = {
 
 /**
  * The machine-readable matching contract for one project asset slot. This is
- * deliberately independent of the project's target engine: adapters decide
- * how an approved resource is integrated, while selection stays deterministic.
+ * deliberately independent of the project's target engine: the project target
+ * declares what it can consume, while selection stays deterministic.
  */
 export type BeeGameResourceRequirement = {
   category?: string
@@ -68,9 +68,9 @@ export function effectiveAssetFormats(
     : slot.accepted_formats)
   const runtimeFormats = normalizeFormats(target?.asset_format_capabilities)
   // A Pack can contain files for several engines. A project must therefore
-  // declare the formats its own runtime adapter can consume before it is
+  // declare the formats its own target can consume before it is
   // allowed to select or copy library content. Slot formats further narrow
-  // that adapter contract; they never broaden it.
+  // that target contract; they never broaden it.
   if (!runtimeFormats.length) return []
   return slotFormats.length
     ? slotFormats.filter(format => runtimeFormats.includes(format))

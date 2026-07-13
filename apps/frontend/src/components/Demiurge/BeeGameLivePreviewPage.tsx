@@ -12,7 +12,7 @@ import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { ProfileModal } from './Landing/ProfileModal';
-import type { BeeGameDeploymentPayload, BuildReportPayload, DeliveryReviewPayload } from '../../services/api';
+import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { clearSupabaseSession } from '../../services/supabaseAuthApi';
@@ -43,7 +43,6 @@ interface BeeGameLivePreviewPageProps {
     isSyncing: boolean;
     isInteractionLocked?: boolean;
     buildReport?: BuildReportPayload | null;
-    deliveryReview?: DeliveryReviewPayload | null;
     projectTarget?: string;
     deployments?: BeeGameDeploymentPayload[];
     previewRefreshNonce?: number;
@@ -52,7 +51,7 @@ interface BeeGameLivePreviewPageProps {
     onStopPreview?: () => void | Promise<void>;
     onDeployProject?: () => void | Promise<void>;
     onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
-    onFixBuildErrors?: (errorLog: string) => void | Promise<void>;
+    onFixBuildErrors?: () => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
     isDeploying?: boolean;
     onBack?: () => void;
@@ -131,7 +130,6 @@ export function BeeGameLivePreviewPage({
     isSyncing,
     isInteractionLocked = false,
     buildReport,
-    deliveryReview,
     projectTarget,
     deployments = [],
     previewRefreshNonce = 0,
@@ -331,22 +329,6 @@ export function BeeGameLivePreviewPage({
                             <span>{labels.syncing}</span>
                         </div>
                     ) : null}
-                    {deliveryReview ? (
-                        <div
-                            data-testid="beegame-delivery-review-status"
-                            title={deliveryReview.summary || ''}
-                            className={`type-footnote rounded-xl border px-3 py-1 ${deliveryReview.status === 'passed'
-                                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
-                                : deliveryReview.status === 'failed' || deliveryReview.status === 'blocked'
-                                    ? 'border-rose-500/25 bg-rose-500/10 text-rose-300'
-                                    : deliveryReview.status === 'validating'
-                                        ? 'border-amber-500/25 bg-amber-500/10 text-amber-200'
-                                        : 'border-zinc-700 bg-zinc-900 text-zinc-400'
-                                }`}
-                        >
-                            {labels[`deliveryReview_${deliveryReview.status || 'untested'}`] || deliveryReview.status}
-                        </div>
-                    ) : null}
                     {isProjectHintOpen ? (
                         <div
                             id="beegame-project-hint"
@@ -365,12 +347,6 @@ export function BeeGameLivePreviewPage({
                                 </>
                             ) : null}
                             <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
-                            {deliveryReview ? (
-                                <ProjectHintRow
-                                    label={labels.deliveryReview}
-                                    value={labels[`deliveryReview_${deliveryReview.status || 'untested'}`] || deliveryReview.status || labels.unavailable}
-                                />
-                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -548,7 +524,7 @@ export function BeeGameLivePreviewPage({
                                     <button
                                         type="button"
                                         aria-label={labels.fixBuildErrors}
-                                        onClick={() => void onFixBuildErrors?.(buildErrorLog)}
+                                        onClick={() => void onFixBuildErrors?.()}
                                         className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
                                     >
                                         <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
@@ -627,7 +603,7 @@ function DeploymentDialog({
     labels: Record<string, string>;
     onClose: () => void;
     onOpenExternal?: (url: string) => void;
-    onFixBuildErrors?: (errorLog: string) => void | Promise<void>;
+    onFixBuildErrors?: () => void | Promise<void>;
     onDeploy: () => void | Promise<void>;
     onRollback?: (deploymentId: string) => void | Promise<void>;
     isDeploying: boolean;
@@ -749,7 +725,7 @@ function DeploymentDialog({
                                 <button
                                     type="button"
                                     aria-label={labels.fixBuildErrors}
-                                    onClick={() => void onFixBuildErrors?.(failureLog)}
+                                    onClick={() => void onFixBuildErrors?.()}
                                     className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
                                 >
                                     <BsStars className="h-3.5 w-3.5" aria-hidden="true" />

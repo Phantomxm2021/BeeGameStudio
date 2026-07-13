@@ -13,6 +13,7 @@ import type {
   ContinueTaskResponse,
   PendingUserReviewItem,
   ProjectBaselineStatusPayload,
+  ProjectRuntimeStatePayload,
   SendMessageResponse,
   StopTaskResponse,
   ChatAttachmentPayload,
@@ -20,7 +21,6 @@ import type {
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
-import type { BeeGameCreditTaskType } from './creditsApi';
 import { getSupabaseAccessToken, getSupabaseSessionUser } from './supabaseAuthApi';
 import { normalizeAttachmentBuildAnalysis, type AttachmentBuildAnalysis } from './attachmentBuild';
 
@@ -51,18 +51,11 @@ type BeeGameEvent = {
     | 'tool.progress'
     | 'permission.requested'
     | 'permission.resolved'
-    | 'runtime.observation'
     | 'system.status'
     | 'result'
     | 'turn.completed'
     | 'turn.empty'
     | 'turn.failed'
-    | 'delivery.validation.started'
-    | 'delivery.validation.completed'
-    | 'delivery.repair.queued'
-    | 'delivery.repair.started'
-    | 'delivery.repair.completed'
-    | 'delivery.repair.exhausted'
     | 'session.stopped'
     | 'session.failed';
   text: string;
@@ -151,12 +144,10 @@ type BeeGameArtifact = {
 };
 
 type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko';
-export type BeeGameThinkingMode = 'enabled' | 'disabled';
 
 type BeeGameIdeaIntakeRequest = {
   idea: string;
   language?: BeeGameLanguage | string;
-  thinkingMode?: BeeGameThinkingMode;
   clientRequestId?: string;
 };
 
@@ -241,7 +232,6 @@ const WORKSPACE_ROOT_KEY = 'beegame-adapter-workspace-root';
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text';
 const ARTIFACT_ID_PREFIX = 'beegame-artifact:';
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:';
-const USER_QUESTION_TOOL = 'AskUserQuestion';
 const ENV_WORKSPACE_PATH = String(import.meta.env.VITE_BEEGAME_WORKSPACE_PATH ?? '').trim();
 const ALLOW_CLIENT_WORKSPACE_ROOT = String(import.meta.env.VITE_BEEGAME_ALLOW_CLIENT_WORKSPACE_ROOT ?? '').trim() === '1' ||
   import.meta.env.MODE === 'test';
@@ -327,14 +317,12 @@ export const beeGameAdapter = {
     idea?: string;
     attachments: ChatAttachmentPayload[];
     language: string;
-    thinkingMode: BeeGameThinkingMode;
     clientRequestId: string;
   }): Promise<AttachmentBuildAnalysis> {
     const response = await postJson<unknown>('/api/beegame-intake/analyze-attachments', {
       idea: data.idea,
       attachments: data.attachments,
       language: data.language,
-      thinkingMode: data.thinkingMode,
       clientRequestId: data.clientRequestId,
     });
     return normalizeAttachmentBuildAnalysis(response);
@@ -374,12 +362,8 @@ export const beeGameAdapter = {
     saveProjects(upsertProject(readProjects(), syncedProject));
     await syncProjectMetadata(syncedProject);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath, language });
-    const prompt = buildConfirmedBriefPrompt(data);
-    rememberSentDisplayText(session.id, prompt, data.idea);
-    await sendBeeGameInput(session.id, prompt, {
-      displayText: data.idea,
-      displayKind: 'confirmed_brief',
-      taskType: 'full_build',
+    await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/confirmed-brief`, {
+      brief: data,
       language,
     });
     return {
@@ -418,12 +402,8 @@ export const beeGameAdapter = {
     saveProjects(upsertProject(readProjects(), syncedProject));
     await syncProjectMetadata(syncedProject);
     saveBinding({ projectId: project.id, sessionId: session.id, workspacePath, language });
-    const prompt = buildIdeaIntakePrompt(data.idea);
-    rememberSentDisplayText(session.id, prompt, data.idea);
-    await sendBeeGameInput(session.id, prompt, {
-      displayText: data.idea,
-      displayKind: 'initial_idea',
-      taskType: 'full_build',
+    await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/idea`, {
+      idea: data.idea,
       language,
     });
     return {
@@ -438,23 +418,18 @@ export const beeGameAdapter = {
     return { opened: true };
   },
 
-  async updateProject(projectId: string, data: { name?: string; root_path?: string; runtime_snapshot?: Project['runtime_snapshot'] }): Promise<Project> {
+  async updateProject(projectId: string, data: { name?: string }): Promise<Project> {
     const projects = readProjects();
     const existing = projects.find(project => project.id === projectId);
     if (!existing) throw new Error('Project not found');
     const updated: Project = {
       ...existing,
       ...(data.name !== undefined ? { name: data.name.trim() || existing.name } : {}),
-      ...(data.root_path !== undefined ? { root_path: data.root_path } : {}),
-      ...(data.runtime_snapshot !== undefined ? { runtime_snapshot: data.runtime_snapshot } : {}),
     };
     saveProjects(upsertProject(projects, updated));
-    await syncProjectMetadata(updated);
-    if (data.root_path) {
-      const binding = getBinding(projectId);
-      if (binding) saveBinding({ ...binding, workspacePath: data.root_path });
-    }
-    return updated;
+    const persisted = await patchJson<Project>(`/api/projects/${encodeURIComponent(projectId)}`, data);
+    saveProjects(upsertProject(readProjects(), persisted));
+    return persisted;
   },
 
   async deleteProject(projectId: string): Promise<{ ok: boolean }> {
@@ -475,22 +450,16 @@ export const beeGameAdapter = {
     project_id: string;
     client_message_id?: string;
     supersedes_message_id?: string;
-    taskType?: BeeGameCreditTaskType;
     attachments?: ChatAttachmentPayload[];
-    thinkingMode?: BeeGameThinkingMode;
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
     const language = resolveProjectSessionLanguage(data.project_id, data.content);
-    const prompt = data.content;
-    rememberSentDisplayText(session.id, prompt, data.content);
-    await sendBeeGameInput(session.id, prompt, {
-      taskType: data.taskType || 'edit_turn',
+    await sendBeeGameInput(session.id, data.content, {
       clientMessageId: data.client_message_id,
       supersedesMessageId: data.supersedes_message_id,
       language,
       attachments: data.attachments,
-      thinkingMode: data.thinkingMode,
     });
     return {
       command_id: session.id,
@@ -504,10 +473,7 @@ export const beeGameAdapter = {
     const handle = await ensureProjectSession(data.project_id);
     const { session } = handle;
     const language = resolveProjectSessionLanguage(data.project_id, '');
-    const prompt = getContinuePrompt(language);
-    rememberSentDisplayText(session.id, prompt, prompt);
-    await sendBeeGameInput(session.id, prompt, {
-      taskType: 'continue_turn',
+    await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/continue`, {
       language,
     });
     return {
@@ -516,6 +482,26 @@ export const beeGameAdapter = {
       resume_mode: 'resume',
       state: 'resuming',
       trace_id: session.id,
+    };
+  },
+
+  async requestProjectAction(data: {
+    project_id: string;
+    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair';
+    slotIds?: string[];
+  }): Promise<SendMessageResponse> {
+    const handle = await ensureProjectSession(data.project_id);
+    const language = resolveProjectSessionLanguage(data.project_id, '');
+    await postJson(`/api/beegame-sessions/${encodeURIComponent(handle.session.id)}/action`, {
+      kind: data.kind,
+      ...(data.slotIds?.length ? { slotIds: data.slotIds } : {}),
+      language,
+    });
+    return {
+      command_id: handle.session.id,
+      task_id: handle.session.id,
+      state: 'running',
+      trace_id: handle.session.id,
     };
   },
 
@@ -555,7 +541,7 @@ export const beeGameAdapter = {
     return {
       lastEventId,
       messages: normalizedEvents
-        .flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath, normalizedEvents))
+        .flatMap(event => eventToWebSocketMessages(projectId, event, binding.workspacePath))
         // Chat history already renders persisted terminal failures. Replaying
         // them through the live channel would invoke onError again on every
         // dashboard mount and make a historical failure look current.
@@ -565,6 +551,17 @@ export const beeGameAdapter = {
 
   async getProjectStatus(projectId: string): Promise<ProjectBaselineStatusPayload> {
     return fetchProjectRuntimeState(projectId);
+  },
+
+  async getProjectRuntimeState(projectId: string): Promise<ProjectRuntimeStatePayload> {
+    const runtimeState = await fetchProjectRuntimeState(projectId);
+    const pendingPermissions = Array.isArray(runtimeState.pending_permissions)
+      ? runtimeState.pending_permissions
+      : [];
+    return {
+      status: runtimeState,
+      pendingReviews: pendingPermissions.map(permission => pendingPermissionToReview(projectId, permission)),
+    };
   },
 
   async getPendingUserReviews(projectId: string): Promise<{ items: PendingUserReviewItem[] }> {
@@ -586,7 +583,7 @@ export const beeGameAdapter = {
     const decision = data.action === 'approve' ? 'allow' : 'deny';
     await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`, {
       decision,
-      remember: decision === 'allow',
+      remember: false,
       ...(data.feedback ? { message: data.feedback } : {}),
     });
     return { ok: true };
@@ -659,27 +656,14 @@ export const beeGameAdapter = {
     const artifactRef = decodeArtifactId(artifactId);
     if (!artifactRef) throw new Error('Invalid BeeGame artifact id');
     const binding = await ensureProjectBinding(artifactRef.projectId);
-    let result: { path: string; content: string };
-    try {
-      result = await fetchBeeGameArtifactContent(artifactRef, binding);
-    } catch (error) {
-      if (!binding || !isSessionNotFoundError(error)) throw error;
-      const ensured = await ensureBackendProjectBinding(artifactRef.projectId);
-      result = await fetchBeeGameArtifactContent(
-        { ...artifactRef, sessionId: ensured.sessionId },
-        ensured,
-      );
-    }
+    const result = await fetchBeeGameArtifactContent(artifactRef, binding);
     return result.content;
   },
 
   async downloadProjectPackage(projectId: string): Promise<{ blob: Blob; filename: string }> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) throw new Error('BeeGame session not found for project');
-    let response = await fetchProjectPackage(binding);
-    if (response.status === 404) {
-      response = await fetchProjectPackage(await ensureBackendProjectBinding(projectId));
-    }
+    const response = await fetchProjectPackage(binding);
     if (!response.ok) {
       throw new Error(await getResponseErrorMessage(response));
     }
@@ -782,21 +766,6 @@ export const beeGameAdapter = {
     );
   },
 
-  async getArtifactReviewStatus(artifactId: string): Promise<{
-    artifact_id: string;
-    verdicts: Array<{ reviewer_id: string; verdict: string }>;
-    votes: Array<{ reviewer_id: string; verdict: string }>;
-    assigned_reviewers: string[];
-    outcome: string;
-  }> {
-    return {
-      artifact_id: artifactId,
-      verdicts: [{ reviewer_id: 'beegame', verdict: 'approved' }],
-      votes: [{ reviewer_id: 'beegame', verdict: 'approved' }],
-      assigned_reviewers: ['beegame'],
-      outcome: 'Available',
-    };
-  },
 };
 
 function createLocalProject(name: string, rootPath?: string, id = newProjectId()): Project {
@@ -930,17 +899,6 @@ async function ensureProjectSession(projectId: string): Promise<BeeGameSessionHa
     binding,
     recoveredEvents: [],
     ...(response.previousSessionId ? { previousSessionId: response.previousSessionId } : {}),
-  };
-}
-
-async function ensureBackendProjectBinding(projectId: string): Promise<ProjectSessionBinding> {
-  const handle = await ensureProjectSession(projectId);
-  if (handle.binding) return handle.binding;
-  return {
-    projectId,
-    sessionId: handle.session.id,
-    workspacePath: handle.session.cwd,
-    language: getCurrentUiLanguage(),
   };
 }
 
@@ -1095,7 +1053,6 @@ function joinPath(root: string, segment: string): string {
 async function startBeeGameSession(
   options: {
     workspacePath?: string;
-    transcriptSessionId?: string;
     projectId?: string;
     projectName?: string;
     language?: BeeGameLanguage;
@@ -1105,7 +1062,6 @@ async function startBeeGameSession(
     ...(options.workspacePath ? { workspacePath: options.workspacePath } : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(options.projectName ? { projectName: options.projectName } : {}),
-    ...(options.transcriptSessionId ? { transcriptSessionId: options.transcriptSessionId } : {}),
     ...(options.language ? { language: options.language } : {}),
   });
 }
@@ -1153,26 +1109,18 @@ async function sendBeeGameInput(
   sessionId: string,
   text: string,
   display?: {
-    displayText?: string;
-    displayKind?: string;
-    taskType?: BeeGameCreditTaskType;
     clientMessageId?: string;
     supersedesMessageId?: string;
     language?: BeeGameLanguage;
     attachments?: ChatAttachmentPayload[];
-    thinkingMode?: BeeGameThinkingMode;
   },
 ): Promise<BeeGameSession> {
   return postJson(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/input`, {
     text,
-    ...(display?.displayText ? { displayText: display.displayText } : {}),
-    ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
-    ...(display?.taskType ? { taskType: display.taskType } : {}),
     ...(display?.clientMessageId ? { clientMessageId: display.clientMessageId } : {}),
     ...(display?.supersedesMessageId ? { supersedesMessageId: display.supersedesMessageId } : {}),
     ...(display?.language ? { language: display.language } : {}),
     ...(display?.attachments?.length ? { attachments: display.attachments } : {}),
-    ...(display?.thinkingMode ? { thinkingMode: display.thinkingMode } : {}),
   });
 }
 
@@ -1260,7 +1208,7 @@ async function fetchBeeGameTranscriptIfAvailable(
 function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePath = ''): unknown[] {
   const normalizedEvents = normalizeDisplayEvents(events);
   const messages = normalizedEvents
-    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath, normalizedEvents))
+    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath))
     .filter(message => message.type !== 'think_start' && message.type !== 'think_end');
   return messages.map(message => ({
     id: message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
@@ -1282,12 +1230,10 @@ function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePat
   }));
 }
 
-function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = '', events: BeeGameEvent[] = []): WebSocketMessage[] {
+function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, workspacePath = ''): WebSocketMessage[] {
   const taskId = event.sessionId;
-  const isValidationControlTurn = isDeliveryValidationControlTurn(event, events);
   switch (event.type) {
     case 'user.message':
-      if (isValidationControlTurn) return [];
       return [baseMessage('agent_message', { ...event, text: resolveUserMessageDisplayText(event) }, projectId, 'user')];
     case 'turn.started':
       return [
@@ -1316,7 +1262,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'assistant.partial':
       return [];
     case 'assistant.thinking':
-      if (isValidationControlTurn) return [];
       {
         const status = getPayloadString(event, 'status');
         const thinkingMessageId = `beegame-thinking-${event.turnId || event.sessionId}`;
@@ -1342,7 +1287,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         } as WebSocketMessage];
       }
     case 'assistant.message': {
-      if (isValidationControlTurn) return [];
       const usage = getUsageFromEventPayload(event.payload);
       return [
         baseMessage('agent_message', event, projectId, 'beegame'),
@@ -1366,7 +1310,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       } as WebSocketMessage] : [];
     }
     case 'tool.started':
-      if (isValidationControlTurn) return [];
       if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return [];
       const startedInput = getPayloadRecord(event, 'input');
       const startedTool = getPayloadString(event, 'toolName') || event.text;
@@ -1387,7 +1330,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
     case 'tool.progress': {
-      if (isValidationControlTurn) return [];
       const progressInput = getPayloadRecord(event, 'input');
       const progressTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
@@ -1411,7 +1353,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     }
     case 'tool.completed':
     case 'tool.failed': {
-      if (isValidationControlTurn) return [];
       const finishedInput = getPayloadRecord(event, 'input');
       const finishedTool = getPayloadString(event, 'toolName') || event.text;
       const output = typeof event.payload?.output === 'string' ? event.payload.output : event.text;
@@ -1435,9 +1376,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       } as WebSocketMessage];
     }
     case 'permission.requested':
-      if (isUserQuestionPermissionEvent(event)) {
-        return [];
-      }
       return [{
         type: 'human_gate',
         task_id: taskId,
@@ -1457,18 +1395,10 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         text: describePermissionResolution(event),
       }, projectId, 'system')];
     }
-    case 'runtime.observation':
-      return [];
     case 'turn.completed': {
-      if (isValidationControlTurn) {
-        return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
-      }
       return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
     }
     case 'turn.empty':
-      if (isValidationControlTurn) {
-        return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage];
-      }
       return [
         baseMessage('agent_message', event, projectId, 'system'),
         { type: 'status', task_id: taskId, project_id: projectId, status: 'idle' } as WebSocketMessage,
@@ -1478,32 +1408,9 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'turn.failed':
     case 'session.failed':
       return [{ type: 'error', task_id: taskId, project_id: projectId, content: event.text, error: event.text } as WebSocketMessage];
-    case 'delivery.validation.started':
-      return [{ type: 'status', task_id: taskId, project_id: projectId, status: 'running' } as WebSocketMessage];
-    case 'delivery.validation.completed':
-      return [{
-        ...baseMessage('agent_message', event, projectId, 'system'),
-        content: getPayloadString(event, 'summary') || event.text,
-        task_kind: 'delivery_validation',
-      } as WebSocketMessage];
-    case 'delivery.repair.queued':
-    case 'delivery.repair.started':
-    case 'delivery.repair.completed':
-    case 'delivery.repair.exhausted':
-      return [];
     default:
       return [];
   }
-}
-
-function isDeliveryValidationControlTurn(event: BeeGameEvent, events: BeeGameEvent[]): boolean {
-  if (!event.turnId) return false;
-  return events.some(candidate => (
-    candidate.sessionId === event.sessionId &&
-    candidate.turnId === event.turnId &&
-    candidate.type === 'user.message' &&
-    getPayloadString(candidate, 'displayKind') === 'delivery_validation'
-  ));
 }
 
 function normalizeDisplayEvents(events: BeeGameEvent[]): BeeGameEvent[] {
@@ -1862,22 +1769,6 @@ function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption
   };
 }
 
-function buildIdeaIntakePrompt(idea: string): string {
-  return JSON.stringify({ kind: 'game_idea', idea }, null, 2);
-}
-
-function buildConfirmedBriefPrompt(brief: BeeGameBuildBrief): string {
-  return JSON.stringify({
-    kind: 'confirmed_build_brief',
-    idea: brief.idea,
-    selected_option: brief.option,
-    settings: brief.settings,
-    confirmed_gdd: brief.confirmedGdd ?? null,
-    build_source: brief.buildSource ?? null,
-    analysis_id: brief.analysisId ?? null,
-  }, null, 2);
-}
-
 function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' {
   const normalized = String(language || '').trim();
   if (normalized === 'zh-TW' || normalized === 'zh-HK') return 'zh-TW';
@@ -1903,23 +1794,8 @@ function resolveProjectSessionLanguage(
       : normalizeBeeGameLanguage(getCurrentUiLanguage(), ''));
 }
 
-function getContinuePrompt(language: BeeGameLanguage): string {
-  if (language === 'zh') return '继续任务';
-  if (language === 'zh-TW') return '繼續任務';
-  if (language === 'ja') return 'タスクを続けてください';
-  if (language === 'ko') return '작업을 계속해 주세요';
-  return 'Continue the task.';
-}
-
 function containsCjk(text: string): boolean {
   return /[\u3400-\u9fff\uf900-\ufaff]/.test(text);
-}
-
-function rememberSentDisplayText(sessionId: string, transportText: string, displayText: string): void {
-  const storageKey = scopedAdapterCacheKey(SENT_DISPLAY_KEY);
-  const values = readJson<Record<string, string>>(storageKey, {});
-  values[`${sessionId}:${stableTextHash(transportText)}`] = displayText;
-  writeJson(storageKey, values);
 }
 
 function resolveSentDisplayText(sessionId: string, transportText: string): string {
@@ -1941,42 +1817,6 @@ function stableTextHash(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return Math.abs(hash >>> 0).toString(36);
-}
-
-function isUserQuestionPermissionEvent(event: BeeGameEvent): boolean {
-  return getPayloadString(event, 'toolName') === USER_QUESTION_TOOL;
-}
-
-function describeUserQuestionEvent(event: BeeGameEvent): string {
-  const input = getPayloadRecord(event, 'input');
-  const questions = Array.isArray(input.questions) ? input.questions : [];
-  if (questions.length > 0) {
-    const lines: string[] = ['BeeGame 需要你补充几个选择：'];
-    for (const item of questions) {
-      if (!item || typeof item !== 'object') continue;
-      const question = item as Record<string, unknown>;
-      const header = String(question.header || '').trim();
-      const text = String(question.question || question.prompt || '').trim();
-      if (header) lines.push('', `【${header}】`);
-      if (text) lines.push(text);
-      const options = Array.isArray(question.options) ? question.options : [];
-      for (const option of options) {
-        if (!option || typeof option !== 'object') continue;
-        const optionRecord = option as Record<string, unknown>;
-        const label = String(optionRecord.label || '').trim();
-        const description = String(optionRecord.description || '').trim();
-        if (label && description) {
-          lines.push(`- ${label}: ${description}`);
-        } else if (label) {
-          lines.push(`- ${label}`);
-        }
-      }
-    }
-    const content = lines.join('\n').trim();
-    if (content) return content;
-  }
-  const question = String(input.question || input.prompt || input.message || '').trim();
-  return question || event.text || 'BeeGame needs more details from you.';
 }
 
 function extractArtifacts(projectId: string, events: BeeGameEvent[], workspacePath: string): BeeGameArtifact[] {
@@ -2083,10 +1923,6 @@ function decodeArtifactId(artifactId: string): { projectId: string; sessionId: s
 }
 
 function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {
-  if (isUserQuestionPermissionEvent(event)) {
-    return userQuestionEventToReview(event, binding);
-  }
-
   const toolUseID = getPayloadString(event, 'toolUseID');
   const toolName = getPayloadString(event, 'toolName') || 'BeeGame tool';
   const input = event.payload?.input && typeof event.payload.input === 'object'
@@ -2161,69 +1997,6 @@ function pendingPermissionToReview(
   });
 }
 
-function userQuestionEventToReview(event: BeeGameEvent, binding: ProjectSessionBinding): PendingUserReviewItem {
-  const toolUseID = getPayloadString(event, 'toolUseID');
-  const input = event.payload?.input && typeof event.payload.input === 'object'
-    ? event.payload.input as Record<string, unknown>
-    : {};
-  const question = getPrimaryUserQuestion(input);
-  const title = question.header || 'BeeGame clarification';
-  const content = describeUserQuestionEvent(event);
-  return {
-    gate_id: toolUseID,
-    task_id: binding.sessionId,
-    type: 'INTENT_CLARIFICATION',
-    gate_kind: 'beegame_permission',
-    user_action_kind: 'approve',
-    title,
-    status: 'awaiting_approval',
-    artifact_type: 'intent_clarification',
-    ready_for_user_approval: true,
-    ready_for_promotion: true,
-    created_at: event.createdAt,
-    artifact: {
-      title,
-      artifact_type: 'intent_clarification',
-      content,
-      input,
-    },
-    summary: {
-      block_reason: question.text || event.text,
-      next_action: question.text || content,
-    },
-    binding: {
-      workspace_path: binding.workspacePath,
-      workspace_ref: binding.workspacePath,
-    },
-    review_status: {
-      workflow_id: 'beegame',
-      lane_id: 'clarification',
-      lane_status: 'awaiting_approval',
-      decision_status: 'awaiting_user',
-      user_action_kind: 'approve',
-      requires_user_action: true,
-      pending_issue_count: 1,
-      blocking_issue_count: 1,
-    },
-  };
-}
-
-function getPrimaryUserQuestion(input: Record<string, unknown>): { header: string; text: string } {
-  const questions = Array.isArray(input.questions) ? input.questions : [];
-  for (const item of questions) {
-    if (!item || typeof item !== 'object') continue;
-    const question = item as Record<string, unknown>;
-    return {
-      header: String(question.header || '').trim(),
-      text: String(question.question || question.prompt || '').trim(),
-    };
-  }
-  return {
-    header: '',
-    text: String(input.question || input.prompt || input.message || '').trim(),
-  };
-}
-
 function summarizePermissionRequest(
   toolName: string,
   message: string,
@@ -2281,7 +2054,6 @@ function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdea
   return {
     idea: data.idea,
     ...(data.language ? { language: data.language } : {}),
-    ...(data.thinkingMode ? { thinkingMode: data.thinkingMode } : {}),
     clientRequestId: data.clientRequestId ?? createClientRequestId(),
   };
 }
@@ -2321,6 +2093,15 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await authenticatedFetch(path, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return readResponse<T>(response);
+}
+
+async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await authenticatedFetch(path, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });

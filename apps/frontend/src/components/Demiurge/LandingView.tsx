@@ -24,7 +24,6 @@ import {
     type BeeGameBuildBrief,
     type BeeGameIntakeOption,
     type BeeGameIntakeSettings,
-    type BeeGameThinkingMode,
 } from '../../services/beeGameAdapter';
 import {
     getCreditBalance,
@@ -652,7 +651,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
     const [attachmentBuildConflictSelections, setAttachmentBuildConflictSelections] = useState<Record<string, 'gdd' | 'image' | 'custom'>>({});
     const [isAttachmentBuildSubmitting, setIsAttachmentBuildSubmitting] = useState(false);
-    const [thinkingMode, setThinkingMode] = useState<BeeGameThinkingMode>('disabled');
     const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
     const [loginEmail, setLoginEmail] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
@@ -947,7 +945,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             const intake = await beeGameAdapter.runIdeaIntake({
                 idea,
                 language: lang,
-                thinkingMode,
             });
             const nextOptions = intake.options;
             setIntakeOptions(nextOptions);
@@ -994,7 +991,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 idea: projectName.trim(),
                 attachments: attachmentBuildAttachments,
                 language: lang,
-                thinkingMode,
                 clientRequestId: `landing_attachment_${Date.now()}`,
             });
             setAttachmentBuildAnalysis(analysis);
@@ -1760,15 +1756,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                     value={projectName}
                     placeholder={t.ideaPlaceholder}
                     generateLabel={t.generate}
-                    thinkingMode={thinkingMode}
-                    thinkingLabel={t.thinkingLabel || 'Thinking'}
-                    thinkingOptions={[
-                        { value: 'disabled', label: t.thinkingOff || 'Default' },
-                        { value: 'enabled', label: t.thinkingOn || 'Thinking' },
-                    ]}
                     isTransitioning={isTransitioning || isPreparing}
                     onChange={handleProjectNameChange}
-                    onThinkingModeChange={setThinkingMode}
                     onSubmit={handleStart}
                     attachments={attachmentBuildAttachments}
                     onAttachmentsChange={setAttachmentBuildAttachments}

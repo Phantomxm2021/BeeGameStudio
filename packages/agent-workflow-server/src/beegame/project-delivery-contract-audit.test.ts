@@ -103,7 +103,7 @@ describe('project delivery contract audit', () => {
 
     const audit = auditProjectDeliveryContract(workspace)
     expect(audit.issues).toContain(
-      'requiredCapabilities may reference only registered skill:* or adapter:* ids: threejs_rendering',
+      'requiredCapabilities may reference only registered skill:* ids: threejs_rendering',
     )
     expect(audit.issues).toContain('Every runtime MVP requirement must be covered by a player path: core-loop')
   })

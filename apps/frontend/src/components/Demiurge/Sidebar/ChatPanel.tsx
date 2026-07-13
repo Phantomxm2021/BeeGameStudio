@@ -21,8 +21,6 @@ import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCar
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
-import type { BeeGameThinkingMode } from '../../../services/beeGameAdapter';
-import { ThinkingModeSelect } from '../ThinkingModeSelect';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -37,8 +35,6 @@ interface ChatPanelProps {
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];
-    thinkingMode?: BeeGameThinkingMode;
-    onThinkingModeChange?: (mode: BeeGameThinkingMode) => void;
     onAddAttachments?: (attachments: ChatAttachmentPayload[]) => void;
     onRemoveAttachment?: (index: number) => void;
     onPreviewArtifact: (id: string, title: string, content?: string) => void;
@@ -218,8 +214,6 @@ export const ChatPanel = memo(({
     editingMessageId = null,
     onCancelEdit,
     attachments = [],
-    thinkingMode = 'disabled',
-    onThinkingModeChange,
     onAddAttachments,
     onRemoveAttachment,
     onPreviewArtifact,
@@ -244,9 +238,6 @@ export const ChatPanel = memo(({
     currentUserAvatarUrl,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
-    const thinkingLabel = text.thinkingLabel || text.thinking || 'Thinking';
-    const thinkingOff = text.thinkingOff || 'Default';
-    const thinkingOn = text.thinkingOn || 'Thinking';
     const composerPlaceholder = text.chatPlaceholder || waitingApproval.placeholder;
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
     const reviewActionLabel = (
@@ -695,16 +686,6 @@ export const ChatPanel = memo(({
                                         <FaPaperclip className="h-4 w-4" />
                                     </label>
                                     <div className="flex items-center gap-3">
-                                        <ThinkingModeSelect
-                                            label={thinkingLabel}
-                                            value={thinkingMode}
-                                            options={[
-                                                { value: 'disabled', label: thinkingOff },
-                                                { value: 'enabled', label: thinkingOn },
-                                            ]}
-                                            disabled={isComposerDisabled}
-                                            onChange={(mode) => onThinkingModeChange?.(mode)}
-                                        />
                                         <button
                                             onClick={isLoading ? () => void onStop?.() : onSend}
                                             aria-label={isLoading ? (isStopping ? 'Stopping task' : 'Stop task') : 'Send message'}
@@ -769,17 +750,6 @@ export const ChatPanel = memo(({
                                         >
                                             {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 -ml-0.5" />}
                                         </button>
-                                <ThinkingModeSelect
-                                    label={thinkingLabel}
-                                    value={thinkingMode}
-                                    options={[
-                                        { value: 'disabled', label: thinkingOff },
-                                        { value: 'enabled', label: thinkingOn },
-                                    ]}
-                                    disabled={isComposerDisabled}
-                                    onChange={(mode) => onThinkingModeChange?.(mode)}
-                                    className="absolute bottom-2.5 right-14 z-10"
-                                />
                             </div>
                         )}
                     </div>

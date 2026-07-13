@@ -205,26 +205,6 @@ export function createDeliveryContract(
   }
 }
 
-export function buildDeliveryRepairPrompt(contract: DeliveryContract, attempt: number): string {
-  const unresolved = contract.requirements
-    .filter(requirement => requirement.scope === 'mvp' && requirement.status !== 'accepted' && requirement.status !== 'runtime_verified')
-    .map(requirement => ({
-      id: requirement.id,
-      title: requirement.title,
-      status: requirement.status,
-      detail: requirement.detail ?? '',
-      missingEvidence: requirement.evidenceRequired.filter(kind => !requirement.evidence.some(item => item.kind === kind)),
-    }))
-  return [
-    `Delivery repair attempt ${attempt}.`,
-    'Independent delivery validation did not pass. Fix the project-level implementation and evidence gaps listed below.',
-    'Do not weaken the acceptance contract, mark unchecked requirements as accepted, or replace runtime evidence with model claims.',
-    'Use the project-selected platform adapter and project-native toolchain. Do not bind shared logic to a particular engine or platform.',
-    'After fixing, add or update executable regression coverage for the affected player path and run it.',
-    JSON.stringify({ status: contract.status, summary: contract.summary, unresolved }, null, 2),
-  ].join('\n')
-}
-
 export function createDeliveryGateFailure(review: unknown): DeliveryGateFailure | null {
   if (isRecord(review) && review.status === 'passed') return null
   const status = isRecord(review) && typeof review.status === 'string' ? review.status : 'unreviewed'

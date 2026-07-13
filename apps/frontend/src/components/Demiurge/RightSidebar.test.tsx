@@ -22,6 +22,7 @@ vi.mock('../../services/api', () => ({
             manifest: { version: 1, slots: [] },
             message: 'Integrate uploaded asset',
         }),
+        requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
     },
 }));
 
@@ -95,7 +96,7 @@ describe('RightSidebar tabs', () => {
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
-    it('defaults chat thinking off and sends the selected chat thinking mode', async () => {
+    it('does not expose Claude runtime thinking controls in the project chat', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
 
@@ -118,31 +119,14 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        const thinkingSelect = screen.getByLabelText('思考') as HTMLSelectElement;
-        expect(thinkingSelect).toHaveValue('disabled');
-        expect(thinkingSelect).toHaveClass('text-zinc-500');
-        expect(within(thinkingSelect).getByRole('option', { name: '默认' })).toBeInTheDocument();
-        expect(within(thinkingSelect).getByRole('option', { name: '深度思考' })).toBeInTheDocument();
+        expect(screen.queryByLabelText('思考')).not.toBeInTheDocument();
         await waitFor(() => expect(getChatInput()).toHaveStyle({ height: '56px' }));
 
         await user.type(getChatInput(), '先修复渲染问题');
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
         expect(onSendMessage).toHaveBeenLastCalledWith(
             '先修复渲染问题',
-            undefined,
             [],
-            'disabled',
-            undefined,
-        );
-
-        await user.selectOptions(thinkingSelect, 'enabled');
-        await user.type(getChatInput(), '深入分析性能问题');
-        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage).toHaveBeenLastCalledWith(
-            '深入分析性能问题',
-            undefined,
-            [],
-            'enabled',
             undefined,
         );
     });
@@ -200,14 +184,14 @@ describe('RightSidebar tabs', () => {
         await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
         await user.click(screen.getByRole('button', { name: 'Send message' }));
 
-        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+        expect(onSendMessage).toHaveBeenCalledWith('', [
             expect.objectContaining({
                 type: 'image',
                 mediaType: 'image/png',
                 filename: 'screen.png',
             }),
-        ], 'disabled', undefined);
-        expect(onSendMessage.mock.calls[0][2][0].data).toEqual(expect.any(String));
+        ], undefined);
+        expect(onSendMessage.mock.calls[0][1][0].data).toEqual(expect.any(String));
     });
 
     it('sends an uploaded JSONL document attachment without rendering it as an image', async () => {
@@ -243,13 +227,13 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByAltText('events.jsonl')).not.toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Send message' }));
 
-        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+        expect(onSendMessage).toHaveBeenCalledWith('', [
             expect.objectContaining({
                 type: 'file',
                 mediaType: 'application/jsonl',
                 filename: 'events.jsonl',
             }),
-        ], 'disabled', undefined);
+        ], undefined);
     });
 
     it('accepts pasted screenshot attachments in the chat composer', async () => {
@@ -317,13 +301,13 @@ describe('RightSidebar tabs', () => {
 
         await waitFor(() => expect(screen.getByAltText('clipboard-screen.png')).toBeInTheDocument());
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage).toHaveBeenCalledWith('', undefined, [
+        expect(onSendMessage).toHaveBeenCalledWith('', [
             expect.objectContaining({
                 type: 'image',
                 mediaType: 'image/png',
                 filename: 'clipboard-screen.png',
             }),
-        ], 'disabled', undefined);
+        ], undefined);
     });
 
     it('deduplicates pasted screenshots exposed through both clipboard files and items', async () => {
@@ -361,7 +345,7 @@ describe('RightSidebar tabs', () => {
 
         await waitFor(() => expect(screen.getAllByAltText('duplicated-screen.png')).toHaveLength(1));
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+        expect(onSendMessage.mock.calls[0][1]).toHaveLength(1);
     });
 
     it('deduplicates pasted screenshots with identical image data even when clipboard file metadata differs', async () => {
@@ -406,7 +390,7 @@ describe('RightSidebar tabs', () => {
 
         await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(1));
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+        expect(onSendMessage.mock.calls[0][1]).toHaveLength(1);
     });
 
     it('deduplicates the same pasted screenshot if duplicate paste events append it twice', async () => {
@@ -445,7 +429,7 @@ describe('RightSidebar tabs', () => {
 
         await waitFor(() => expect(screen.getAllByAltText('pasted-again.png')).toHaveLength(1));
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage.mock.calls[0][2]).toHaveLength(1);
+        expect(onSendMessage.mock.calls[0][1]).toHaveLength(1);
     });
 
     it('uploads assets without automatically sending an integration prompt', async () => {
@@ -505,8 +489,14 @@ describe('RightSidebar tabs', () => {
         expect(api.uploadProjectAsset).toHaveBeenCalledWith('proj_1', 'bgm_game', file);
         expect(onSendMessage).not.toHaveBeenCalled();
 
-        await user.click(screen.getByRole('button', { name: '让 BeeGame 集成' }));
-        expect(onSendMessage).toHaveBeenCalledWith('Integrate uploaded asset', 'asset_integration');
+        await user.click(screen.getByRole('button', { name: '更多资源操作' }));
+        await user.click(await screen.findByRole('menuitem', { name: '让 BeeGame 集成' }));
+        expect(api.requestProjectAction).toHaveBeenCalledWith({
+            project_id: 'proj_1',
+            kind: 'asset_integrate',
+            slotIds: ['bgm_game'],
+        });
+        expect(onSendMessage).not.toHaveBeenCalled();
     });
 
     it('shows an empty asset contract message when a restored project has no manifest', async () => {

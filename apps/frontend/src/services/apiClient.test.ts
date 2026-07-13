@@ -60,6 +60,30 @@ describe('apiClient defaults', () => {
     expect(headers.get('Authorization')).toBeNull();
   });
 
+  it('does not mix the dev bearer token into HttpOnly cookie authentication', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session/refresh')) {
+        return Response.json({ authenticated: true, user: { id: 'cookie-user' } });
+      }
+      if (fetchMock.mock.calls.filter(([value]) => String(value).includes('/api/current-user')).length === 1) {
+        return new Response(null, { status: 401 });
+      }
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authenticatedFetch('/api/current-user');
+
+    const initialHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(initialHeaders.get('Authorization')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/session/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  });
+
   it('uses the Supabase session token when no deployment token is configured', async () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', '');
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
