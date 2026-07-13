@@ -92,6 +92,7 @@ export type BeeGameCreditControlClient = {
 
 export function createRemoteCreditControlClient(
   billingConfig: BeeGameBillingConfig,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
 ): BeeGameCreditControlClient | undefined {
   if (billingConfig.mode !== 'remote') return undefined
   if (!billingConfig.remoteApiBaseUrl || !billingConfig.creditControlToken) {
@@ -100,6 +101,7 @@ export function createRemoteCreditControlClient(
   return new RemoteCreditControlClient(
     billingConfig.remoteApiBaseUrl,
     billingConfig.creditControlToken,
+    fetchImpl,
   )
 }
 
@@ -125,6 +127,7 @@ class RemoteCreditControlClient implements BeeGameCreditControlClient {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly fetchImpl: typeof fetch,
   ) {}
 
   reserveCredits(
@@ -181,7 +184,7 @@ class RemoteCreditControlClient implements BeeGameCreditControlClient {
   }
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(buildCreditControlUrl(this.baseUrl, path), {
+    const response = await this.fetchImpl(buildCreditControlUrl(this.baseUrl, path), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

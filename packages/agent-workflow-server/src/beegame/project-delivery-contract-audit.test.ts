@@ -41,6 +41,7 @@ describe('project delivery contract audit', () => {
       requiredCapabilities: ['skill:acceptance-capability'],
       requirements: [{
         id: 'core-loop', title: 'Core loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core loop' }],
         evidenceRequired: ['implementation', 'runtime'],
       }],
       playerPaths: [{ id: 'main', requirementIds: ['core-loop'], phases }],
@@ -51,6 +52,60 @@ describe('project delivery contract audit', () => {
       requiredCapabilities: ['skill:acceptance-capability'],
       playerPathIds: ['main'],
     })
+  })
+
+  test('rejects placeholder player-path phase objects without executable actions and assertions', async () => {
+    workspace = await createWorkspace({
+      version: 1,
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: 'core-loop' }],
+        evidenceRequired: ['runtime'],
+      }],
+      playerPaths: [{ id: 'main', requirementIds: ['core-loop'], phases: {
+        entry: [{}], core_action: [{}], state_change: [{}], completion: [{}], recovery: [{}],
+      } }],
+    })
+
+    const audit = auditProjectDeliveryContract(workspace)
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain('Player path main must declare structured entry actions/assertions.')
+  })
+
+  test('rejects source locators that do not exist in the approved document', async () => {
+    workspace = await createWorkspace({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: 'missing-section' }],
+        evidenceRequired: ['document'],
+      }],
+      playerPaths: [],
+    })
+
+    expect(auditProjectDeliveryContract(workspace).issues).toContain(
+      'Requirement core-loop sourceRef locator does not exist in docs/GDD.md: missing-section',
+    )
+  })
+
+  test('rejects free-form capabilities and uncovered runtime requirements', async () => {
+    workspace = await createWorkspace({
+      version: 1,
+      requiredCapabilities: ['threejs_rendering'],
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core loop' }],
+        evidenceRequired: ['runtime'],
+      }],
+      playerPaths: [],
+    })
+
+    const audit = auditProjectDeliveryContract(workspace)
+    expect(audit.issues).toContain(
+      'requiredCapabilities may reference only registered skill:* or adapter:* ids: threejs_rendering',
+    )
+    expect(audit.issues).toContain('Every runtime MVP requirement must be covered by a player path: core-loop')
   })
 
   test('rejects project-authored validation outcomes', async () => {
@@ -64,7 +119,7 @@ describe('project delivery contract audit', () => {
       }],
       playerPaths: [{
         id: 'main', requirementIds: ['core-loop'], phases: {
-          entry: [{}], core_action: [{}], state_change: [{}], completion: [{}], recovery: [{}],
+          entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
         },
       }],
     })
@@ -78,6 +133,7 @@ describe('project delivery contract audit', () => {
   async function createWorkspace(contract: Record<string, unknown>): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'beegame-delivery-doc-'))
     await mkdir(join(root, 'docs'), { recursive: true })
+    await writeFile(join(root, 'docs', 'GDD.md'), '# Core loop\n')
     await writeFile(join(root, 'docs', 'delivery-contract.json'), JSON.stringify(contract))
     return root
   }

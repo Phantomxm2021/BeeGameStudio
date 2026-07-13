@@ -4,9 +4,40 @@ import {
   createDeliveryContract,
   createDeliveryGateFailure,
   parseDeliveryReview,
+  parseDeliveryValidatorReport,
 } from './delivery-contract'
 
 describe('delivery contract', () => {
+  test('accepts only the expected validator identity and host-owned evidence provenance', () => {
+    const report = {
+      validatorId: 'beegame-contract-validator',
+      status: 'passed',
+      summary: 'Conforms.',
+      requirements: [{
+        id: 'core-loop',
+        status: 'passed',
+        evidence: [{ kind: 'implementation', source: 'src/main.ts', detail: 'Observed.' }],
+      }],
+      findings: [],
+      verifiedCapabilities: [],
+    }
+    expect(parseDeliveryValidatorReport(
+      JSON.stringify(report),
+      'beegame-contract-validator',
+    )).toBeDefined()
+    expect(parseDeliveryValidatorReport(
+      JSON.stringify(report),
+      'beegame-runtime-validator',
+    )).toBeUndefined()
+    expect(parseDeliveryValidatorReport(JSON.stringify({
+      ...report,
+      requirements: [{
+        ...report.requirements[0],
+        evidence: [{ kind: 'implementation', eventId: 'forged', detail: 'Claimed.' }],
+      }],
+    }), 'beegame-contract-validator')).toBeUndefined()
+  })
+
   test('requires runtime evidence before accepting an MVP player path', () => {
     const review = parseDeliveryReview(JSON.stringify({
       status: 'passed',
@@ -55,6 +86,24 @@ describe('delivery contract', () => {
 
     const contract = createDeliveryContract(review!, ['skill:game-acceptance'])
     expect(contract.status).toBe('passed')
+  })
+
+  test('reports unavailable required validation capabilities as a blocker', () => {
+    const review = parseDeliveryReview(JSON.stringify({
+      status: 'passed',
+      summary: 'Runtime behavior passed.',
+      requiredCapabilities: ['skill:runtime-acceptance'],
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp', status: 'runtime_verified',
+        evidenceRequired: ['runtime'],
+        evidence: [{ kind: 'runtime', eventId: 'runtime-1', source: 'main-path', detail: 'passed' }],
+      }],
+      findings: [],
+    }))
+
+    const contract = createDeliveryContract(review!, [])
+    expect(contract.status).toBe('blocked')
+    expect(contract.summary).toContain('Missing required validation capabilities')
   })
 
   test('rejects malformed or duplicate requirement contracts', () => {

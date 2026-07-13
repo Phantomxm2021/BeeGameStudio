@@ -235,7 +235,7 @@ export const useChat = ({
   }, []);
 
   // Store actions
-  const { addMessage, updateMessage, updateThought, finalizeMessage, setCurrentSender, setIsStreaming, loadHistory } = useChatStore();
+  const { addMessage, updateMessage, updateThought, removeMessage, finalizeMessage, setCurrentSender, setIsStreaming, loadHistory } = useChatStore();
   const pendingReviews = useProjectStore((state) => state.pendingReviews);
   const projectStatus = useProjectStore((state) => state.projectStatus);
   const removePendingReview = useProjectStore((state) => state.removePendingReview);
@@ -391,6 +391,28 @@ export const useChat = ({
           // Real-time status injection
           setAgentStatus(message.sender, 'working', message.task_id);
         }
+        break;
+
+      case 'think_start':
+        if (message.sender && message.message_id) {
+          finalizeMessage(
+            message.task_id,
+            message.content || 'Thinking',
+            message.sender,
+            'thought',
+            false,
+            undefined,
+            undefined,
+            { taskKind: 'assistant_thinking' },
+            message.timestamp,
+            message.message_id,
+          );
+          setCurrentSender(message.sender);
+        }
+        break;
+
+      case 'think_end':
+        if (message.message_id) removeMessage(message.message_id);
         break;
 
       case 'status':
@@ -686,7 +708,7 @@ export const useChat = ({
       default:
         console.warn('[useChat] Unknown message type:', (message as unknown as Record<string, unknown>).type);
     }
-  }, [addMessage, updateMessage, finalizeMessage, setCurrentSender, updateTokenUsage, setIsStreaming, updateThought, setAgentStatus, refreshAgents, updateLastP2PRoute]);
+  }, [addMessage, updateMessage, finalizeMessage, removeMessage, setCurrentSender, updateTokenUsage, setIsStreaming, updateThought, setAgentStatus, refreshAgents, updateLastP2PRoute]);
 
 
   /**

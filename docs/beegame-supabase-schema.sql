@@ -491,6 +491,16 @@ create table if not exists public.beegame_audit_events (
   created_at timestamptz not null default now()
 );
 
+-- Existing installations may predate the ON DELETE SET NULL declaration.
+-- CREATE TABLE IF NOT EXISTS does not reconcile an already-created foreign
+-- key, so replace it explicitly to preserve audit history when projects are
+-- deleted.
+alter table public.beegame_audit_events
+  drop constraint if exists beegame_audit_events_project_id_fkey;
+alter table public.beegame_audit_events
+  add constraint beegame_audit_events_project_id_fkey
+  foreign key (project_id) references public.beegame_projects(id) on delete set null;
+
 create table if not exists public.beegame_platform_owner_invites (
   email text primary key,
   created_at timestamptz not null default now(),

@@ -63,8 +63,6 @@ type BeeGameEvent = {
     | 'delivery.repair.started'
     | 'delivery.repair.completed'
     | 'delivery.repair.exhausted'
-    | 'delivery.review.started'
-    | 'delivery.review.completed'
     | 'session.stopped'
     | 'session.failed';
   text: string;
@@ -1272,7 +1270,8 @@ async function fetchBeeGameTranscriptIfAvailable(
 function eventsToHistory(projectId: string, events: BeeGameEvent[], workspacePath = ''): unknown[] {
   const normalizedEvents = normalizeDisplayEvents(events);
   const messages = normalizedEvents
-    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath, normalizedEvents));
+    .flatMap(event => eventToWebSocketMessages(projectId, event, workspacePath, normalizedEvents))
+    .filter(message => message.type !== 'think_start' && message.type !== 'think_end');
   return messages.map(message => ({
     id: message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
     message_id: message.message_id,
@@ -1328,13 +1327,30 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
       return [];
     case 'assistant.thinking':
       if (isValidationControlTurn) return [];
-      if (getPayloadString(event, 'status') === 'ended') return [];
-      return [{
-        ...baseMessage('agent_message', event, projectId, 'beegame'),
-        type: 'agent_message',
-        content: event.text || 'Thinking',
-        task_kind: 'assistant_thinking',
-      } as WebSocketMessage];
+      {
+        const status = getPayloadString(event, 'status');
+        const thinkingMessageId = `beegame-thinking-${event.turnId || event.sessionId}`;
+        if (status === 'ended') {
+          return [{
+            type: 'think_end',
+            task_id: taskId,
+            project_id: projectId,
+            sender: 'beegame',
+            message_id: thinkingMessageId,
+            timestamp: Date.parse(event.createdAt) || Date.now(),
+          } as WebSocketMessage];
+        }
+        return [{
+          type: 'think_start',
+          task_id: taskId,
+          project_id: projectId,
+          sender: 'beegame',
+          content: event.text || 'Thinking',
+          task_kind: 'assistant_thinking',
+          message_id: thinkingMessageId,
+          timestamp: Date.parse(event.createdAt) || Date.now(),
+        } as WebSocketMessage];
+      }
     case 'assistant.message': {
       if (isValidationControlTurn) return [];
       const usage = getUsageFromEventPayload(event.payload);
@@ -1484,8 +1500,6 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
     case 'delivery.repair.started':
     case 'delivery.repair.completed':
     case 'delivery.repair.exhausted':
-    case 'delivery.review.started':
-    case 'delivery.review.completed':
       return [];
     default:
       return [];

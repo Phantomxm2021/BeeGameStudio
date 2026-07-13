@@ -194,6 +194,51 @@ describe('SupabaseDashboardStore', () => {
     }
   })
 
+  test('persists deleted-project audit tombstones without a dangling project foreign key', async () => {
+    const ownerId = '00000000-0000-0000-0000-000000000001'
+    let insertedBody: Record<string, unknown> | undefined
+    globalThis.fetch = (async (url, init) => {
+      if (String(url).includes('/rest/v1/beegame_audit_events') && init?.method === 'POST') {
+        insertedBody = JSON.parse(String(init.body)) as Record<string, unknown>
+        return Response.json([{
+          id: '11111111-1111-1111-1111-111111111111',
+          created_at: '2026-07-13T00:00:00.000Z',
+          ...insertedBody,
+        }])
+      }
+      return Response.json([])
+    }) as typeof fetch
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+    })
+
+    const event = await store.appendAuditEvent(ownerId, {
+      actorId: ownerId,
+      action: 'project.deleted',
+      targetType: 'project',
+      targetId: 'deleted-project',
+      projectReference: 'detached',
+      metadata: { cleanupOutcome: 'workspace_deleted' },
+    })
+
+    expect(insertedBody).toEqual(expect.objectContaining({
+      actor_id: ownerId,
+      project_id: null,
+      action: 'project.deleted',
+      metadata: expect.objectContaining({
+        targetType: 'project',
+        targetId: 'deleted-project',
+        cleanupOutcome: 'workspace_deleted',
+      }),
+    }))
+    expect(event).toEqual(expect.objectContaining({
+      targetType: 'project',
+      targetId: 'deleted-project',
+    }))
+  })
+
   test('accepts frontend Supabase env names for dashboard data access', async () => {
     const calls: string[] = []
     globalThis.fetch = (async (url, init) => {

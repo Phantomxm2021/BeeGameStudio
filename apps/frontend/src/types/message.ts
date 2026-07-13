@@ -144,6 +144,8 @@ export type WebSocketMessageType =
   | 'token'         // Streaming token for real-time response
   | 'agent_message' // Agent final message
   | 'thought'       // Streaming thought/reasoning token
+  | 'think_start'   // Redacted assistant thinking lifecycle started
+  | 'think_end'     // Redacted assistant thinking lifecycle ended
   | 'status'        // Task status update
   | 'tool_start'    // Tool invocation started
   | 'tool_end'      // Tool invocation completed

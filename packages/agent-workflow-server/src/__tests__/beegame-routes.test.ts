@@ -30,6 +30,7 @@ import type {
   BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
+import { DeliveryValidationAdapterRegistry } from '../beegame/delivery-validation-adapter'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -818,20 +819,53 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('blocks a missing validator, repairs findings, and revalidates before acceptance', async () => {
+  test('claims a logical turn before async setup so concurrent starts cannot duplicate it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-turn-claim-'))
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            input.onMessage({ type: 'result', result: 'done' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      const starts = await Promise.allSettled([
+        manager.send(session.id, 'First start'),
+        manager.send(session.id, 'Duplicate start'),
+      ])
+      expect(starts.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+      expect(starts.filter(result => result.status === 'rejected')).toHaveLength(1)
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.empty'))
+      expect(manager.events(session.id).filter(event => event.type === 'turn.started')).toHaveLength(1)
+      expect(submits).toBe(1)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('repairs independent sub-agent findings and ignores parent-runner final claims', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-review-'))
     await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Core player path\n')
     await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
       version: 1,
       requiredCapabilities: ['skill:beegame-game-acceptance'],
       requirements: [{
-        id: 'core-path', title: 'Core player path', scope: 'mvp', evidenceRequired: ['runtime', 'skill'],
+        id: 'core-path', title: 'Core player path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core player path' }],
+        evidenceRequired: ['runtime', 'skill'],
       }],
       playerPaths: [{
         id: 'main-path',
         requirementIds: ['core-path'],
         phases: {
-          entry: [{}], core_action: [{}], state_change: [{}], completion: [{}], recovery: [{}],
+          entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
         },
       }],
     }))
@@ -851,14 +885,16 @@ describe('beegame session routes', () => {
               input.onMessage({ type: 'assistant', message: { content: [
                 { type: 'tool_use', id: 'contract-validator-1', name: 'Task', input: { subagent_type: 'beegame-contract-validator', prompt: 'validate' } },
                 { type: 'tool_use', id: 'runtime-validator-1', name: 'Task', input: { subagent_type: 'beegame-runtime-validator', prompt: 'validate' } },
+                { type: 'tool_use', id: 'asset-validator-1', name: 'Task', input: { subagent_type: 'beegame-asset-validator', prompt: 'validate' } },
               ] } })
               input.onMessage({ type: 'user', message: { content: [
-                { type: 'tool_result', tool_use_id: 'contract-validator-1', content: JSON.stringify({ status: 'failed', verifiedCapabilities: [] }) },
-                { type: 'tool_result', tool_use_id: 'runtime-validator-1', content: JSON.stringify({ status: 'failed', verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
+                { type: 'tool_result', tool_use_id: 'contract-validator-1', content: JSON.stringify({ validatorId: 'beegame-contract-validator', status: 'failed', summary: 'Implementation missing.', requirements: [{ id: 'core-path', status: 'failed', evidence: [] }], findings: [{ requirementId: 'core-path', requirement: 'Core player path', status: 'failed', detail: 'Implementation missing.', evidence: [] }], verifiedCapabilities: [] }) },
+                { type: 'tool_result', tool_use_id: 'runtime-validator-1', content: JSON.stringify({ validatorId: 'beegame-runtime-validator', status: 'failed', summary: 'Runtime path failed.', requirements: [{ id: 'core-path', status: 'failed', evidence: [] }], findings: [{ requirementId: 'core-path', requirement: 'Core player path', status: 'failed', detail: 'Runtime path failed.', evidence: [] }], verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
+                { type: 'tool_result', tool_use_id: 'asset-validator-1', content: JSON.stringify({ validatorId: 'beegame-asset-validator', status: 'passed', summary: 'Assets conform.', requirements: [], findings: [], verifiedCapabilities: [] }) },
               ] } })
               input.onMessage({ type: 'result', result: JSON.stringify({
-                status: 'failed',
-                summary: 'Core path failed.',
+                status: 'passed',
+                summary: 'Parent runner incorrectly claimed success.',
                 requiredCapabilities: ['skill:beegame-game-acceptance'],
                 requirements: [{
                   id: 'core-path', title: 'Core player path', scope: 'mvp', status: 'failed',
@@ -872,6 +908,8 @@ describe('beegame session routes', () => {
               return
             }
             if (submitCount === 3) {
+              await mkdir(join(workspace, 'src'), { recursive: true })
+              await writeFile(join(workspace, 'src', 'main.ts'), 'fixed')
               input.onMessage({ type: 'assistant', message: { content: [{
                 type: 'tool_use', id: 'repair-write', name: 'Write', input: { file_path: 'src/main.ts', content: 'fixed' },
               }] } })
@@ -887,9 +925,9 @@ describe('beegame session routes', () => {
               { type: 'tool_use', id: 'asset-validator-2', name: 'Task', input: { subagent_type: 'beegame-asset-validator', prompt: 'validate' } },
             ] } })
             input.onMessage({ type: 'user', message: { content: [
-              { type: 'tool_result', tool_use_id: 'contract-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: [] }) },
-              { type: 'tool_result', tool_use_id: 'runtime-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
-              { type: 'tool_result', tool_use_id: 'asset-validator-2', content: JSON.stringify({ status: 'passed', verifiedCapabilities: [] }) },
+              { type: 'tool_result', tool_use_id: 'contract-validator-2', content: JSON.stringify({ validatorId: 'beegame-contract-validator', status: 'passed', summary: 'Documents and implementation conform.', requirements: [{ id: 'core-path', status: 'passed', evidence: [{ kind: 'implementation', source: 'src/main.ts', detail: 'Core implementation observed.' }] }], findings: [], verifiedCapabilities: [] }) },
+              { type: 'tool_result', tool_use_id: 'runtime-validator-2', content: JSON.stringify({ validatorId: 'beegame-runtime-validator', status: 'passed', summary: 'Runtime path passed.', requirements: [{ id: 'core-path', status: 'passed', evidence: [{ kind: 'runtime', source: 'main-path', detail: 'Player path assertions passed.' }, { kind: 'skill', source: 'beegame-game-acceptance', detail: 'Acceptance capability used.' }] }], findings: [], verifiedCapabilities: ['skill:beegame-game-acceptance'] }) },
+              { type: 'tool_result', tool_use_id: 'asset-validator-2', content: JSON.stringify({ validatorId: 'beegame-asset-validator', status: 'passed', summary: 'Assets conform.', requirements: [], findings: [], verifiedCapabilities: [] }) },
             ] } })
             input.onMessage({ type: 'result', result: JSON.stringify({
               status: 'passed',
@@ -920,13 +958,13 @@ describe('beegame session routes', () => {
       await waitFor(() => manager.events(session.id).filter(event => event.type === 'delivery.validation.completed').length === 2)
       const reviews = manager.events(session.id).filter(event => event.type === 'delivery.validation.completed')
       expect(reviews[0]?.payload).toEqual(expect.objectContaining({
-        status: 'blocked',
+        status: 'failed',
         validators: expect.arrayContaining([
           expect.objectContaining({ agentType: 'beegame-contract-validator' }),
           expect.objectContaining({ agentType: 'beegame-runtime-validator' }),
         ]),
       }))
-      expect((reviews[0]?.payload?.validators as unknown[] | undefined)).toHaveLength(2)
+      expect((reviews[0]?.payload?.validators as unknown[] | undefined)).toHaveLength(3)
       expect(reviews[1]?.payload).toEqual(expect.objectContaining({ status: 'passed' }))
       expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(true)
       expect(submitCount).toBe(4)
@@ -935,7 +973,232 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('terminates a stalled delivery coordinator with a blocked validation event', async () => {
+  test('uses a registered runtime adapter as host-owned player-path evidence', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-runtime-adapter-evidence-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Playable loop\n')
+    await writeFile(join(workspace, 'src', 'main.ts'), 'export const playable = true\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: ['adapter:test-runtime'],
+      requirements: [{
+        id: 'playable-loop', title: 'Playable loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Playable loop' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main-loop', requirementIds: ['playable-loop'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'ready' }] }],
+        core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }],
+        state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }],
+        completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }],
+        recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    const adapters = new DeliveryValidationAdapterRegistry()
+    let adapterCalls = 0
+    adapters.register({
+      id: 'test-runtime',
+      async validate(request) {
+        adapterCalls += 1
+        return {
+          adapterId: 'test-runtime',
+          environment: { harness: 'test' },
+          evidence: [{ kind: 'runtime', source: request.playerPaths[0]?.id, detail: 'All observable assertions passed.' }],
+          metrics: { paths: 1 },
+          passed: true,
+          failures: [],
+        }
+      },
+    })
+    let submits = 0
+    const runner: BeeGameSessionRunner = {
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              input.onMessage({ type: 'result', result: 'build complete' })
+              return
+            }
+            const reports = [
+              ['contract-adapter', 'beegame-contract-validator', [{ kind: 'implementation', source: 'src/main.ts', detail: 'Implementation observed.' }]],
+              ['runtime-adapter', 'beegame-runtime-validator', []],
+              ['asset-adapter', 'beegame-asset-validator', []],
+            ] as const
+            input.onMessage({ type: 'assistant', message: { content: reports.map(([id, validatorId]) => ({
+              type: 'tool_use', id, name: 'Task', input: { subagent_type: validatorId, prompt: 'validate' },
+            })) } })
+            input.onMessage({ type: 'user', message: { content: reports.map(([id, validatorId, evidence]) => ({
+              type: 'tool_result', tool_use_id: id, content: JSON.stringify({
+                validatorId, status: 'passed', summary: 'ok',
+                requirements: validatorId === 'beegame-asset-validator'
+                  ? []
+                  : [{ id: 'playable-loop', status: 'passed', evidence }],
+                findings: [], verifiedCapabilities: [],
+              }),
+            })) } })
+            input.onMessage({ type: 'result', result: 'VALIDATION_SUBAGENTS_COMPLETED' })
+          },
+          stop() {},
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(
+      runner, workspace, undefined, undefined, false, {}, undefined, undefined, undefined, adapters,
+    )
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.validation.completed'))
+      expect(adapterCalls).toBe(1)
+      expect(manager.events(session.id).some(event => event.type === 'delivery.runtime_adapter.completed')).toBe(true)
+      expect(manager.events(session.id).find(event => event.type === 'delivery.validation.completed')?.payload).toEqual(
+        expect.objectContaining({ status: 'passed' }),
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('blocks implementation mutations until the delivery contract is valid', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-specification-gate-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Declared project behavior\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'declared-behavior',
+        title: 'Declared project behavior',
+        scope: 'mvp',
+        sourceRefs: [],
+        evidenceRequired: ['runtime'],
+      }],
+      playerPaths: [],
+    }))
+    let implementationDecision = ''
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              const decision = await input.requestPermission({
+                toolUseID: 'implementation-before-specification',
+                toolName: 'Write',
+                message: 'Write implementation?',
+                input: { file_path: 'src/main.ts', content: 'implementation' },
+              })
+              implementationDecision = decision.behavior
+              input.onMessage({ type: 'result', result: 'implementation attempted' })
+              return
+            }
+            input.onMessage({ type: 'result', result: 'validation unavailable' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => implementationDecision.length > 0)
+      expect(implementationDecision).toBe('deny')
+      expect(manager.events(session.id).some(event => (
+        event.type === 'system.status' && event.payload?.reason === 'invalid_delivery_contract'
+      ))).toBe(true)
+      manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('prevents a repair turn from weakening files cited as independent test evidence', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-repair-evidence-lock-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await mkdir(join(workspace, 'tests'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Core path\n')
+    await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'expect(actual).toBe(expected)\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core path' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main-path', requirementIds: ['core-path'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }],
+        core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }],
+        state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }],
+        completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }],
+        recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    let submits = 0
+    let evidenceMutationDecision = ''
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'build-read', name: 'Read', input: { file_path: 'docs/GDD.md' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'build-read', content: 'read' }] } })
+              input.onMessage({ type: 'result', result: 'built' })
+              return
+            }
+            if (submits === 2) {
+              const validators = [
+                ['contract-evidence-lock', 'beegame-contract-validator', [{ kind: 'implementation', source: 'src/main.ts', detail: 'observed' }]],
+                ['runtime-evidence-lock', 'beegame-runtime-validator', [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'failing assertion observed' }]],
+                ['asset-evidence-lock', 'beegame-asset-validator', []],
+              ] as const
+              input.onMessage({ type: 'assistant', message: { content: validators.map(([id, agentType]) => ({ type: 'tool_use', id, name: 'Task', input: { subagent_type: agentType, prompt: 'validate' } })) } })
+              input.onMessage({ type: 'user', message: { content: validators.map(([id, validatorId, evidence]) => ({
+                type: 'tool_result', tool_use_id: id, content: JSON.stringify({
+                  validatorId,
+                  status: validatorId === 'beegame-asset-validator' ? 'passed' : 'failed',
+                  summary: 'runtime acceptance failed',
+                  requirements: validatorId === 'beegame-asset-validator' ? [] : [{ id: 'core-path', status: 'failed', evidence }],
+                  findings: [], verifiedCapabilities: [],
+                }),
+              })) } })
+              input.onMessage({ type: 'result', result: 'VALIDATION_SUBAGENTS_COMPLETED' })
+              return
+            }
+            if (submits === 3) {
+              const decision = await input.requestPermission({
+                toolUseID: 'weaken-evidence-test',
+                toolName: 'Edit',
+                message: 'Change acceptance assertion?',
+                input: { file_path: 'tests/acceptance.test.ts', old_string: 'expected', new_string: 'actual' },
+              })
+              evidenceMutationDecision = decision.behavior
+              input.onMessage({ type: 'result', result: 'repair attempted' })
+              return
+            }
+            await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => evidenceMutationDecision.length > 0)
+      expect(evidenceMutationDecision).toBe('deny')
+      expect(await readFile(join(workspace, 'tests', 'acceptance.test.ts'), 'utf8')).toContain('toBe(expected)')
+      manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('terminates stalled delivery validators with a blocked validation event', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-timeout-'))
     const previousTimeout = process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS
     process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS = '10'
@@ -971,6 +1234,365 @@ describe('beegame session routes', () => {
     } finally {
       if (previousTimeout === undefined) delete process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS
       else process.env.BEEGAME_DELIVERY_VALIDATION_TIMEOUT_MS = previousTimeout
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('blocks delivery when any required validation sub-agent is missing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-validator-missing-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Core path\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core path' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main', requirementIds: ['core-path'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'build-read', name: 'Read', input: { file_path: 'docs/GDD.md' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'build-read', content: 'read' }] } })
+              input.onMessage({ type: 'result', result: 'built' })
+              return
+            }
+            input.onMessage({ type: 'assistant', message: { content: [
+              { type: 'tool_use', id: 'contract-only', name: 'Task', input: { subagent_type: 'beegame-contract-validator', prompt: 'validate' } },
+              { type: 'tool_use', id: 'runtime-only', name: 'Task', input: { subagent_type: 'beegame-runtime-validator', prompt: 'validate' } },
+            ] } })
+            input.onMessage({ type: 'user', message: { content: [
+              { type: 'tool_result', tool_use_id: 'contract-only', content: JSON.stringify({ validatorId: 'beegame-contract-validator', status: 'passed', summary: 'ok', requirements: [{ id: 'core-path', status: 'passed', evidence: [{ kind: 'implementation', source: 'src/main.ts', detail: 'observed' }] }], findings: [], verifiedCapabilities: [] }) },
+              { type: 'tool_result', tool_use_id: 'runtime-only', content: JSON.stringify({ validatorId: 'beegame-runtime-validator', status: 'passed', summary: 'ok', requirements: [{ id: 'core-path', status: 'passed', evidence: [{ kind: 'runtime', source: 'main', detail: 'observed' }] }], findings: [], verifiedCapabilities: [] }) },
+            ] } })
+            input.onMessage({ type: 'result', result: 'VALIDATION_SUBAGENTS_COMPLETED' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.pipeline.blocked'))
+      expect(manager.events(session.id).find(event => event.type === 'delivery.validation.completed')?.payload).toEqual(
+        expect.objectContaining({ status: 'blocked' }),
+      )
+      expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(false)
+      expect(submits).toBe(2)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('waits for async validation sub-agents and aggregates the original run exactly once', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-async-validators-'))
+    const previousPollMs = process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS
+    const previousTimeoutMs = process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS
+    process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS = '1'
+    process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS = '1000'
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Core path\n')
+    await writeFile(join(workspace, 'src', 'main.ts'), 'export const playable = true\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core path' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main-path', requirementIds: ['core-path'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    const validators = [
+      ['contract-async', 'beegame-contract-validator'],
+      ['runtime-async', 'beegame-runtime-validator'],
+      ['asset-async', 'beegame-asset-validator'],
+    ] as const
+    const outputFiles = Object.fromEntries(validators.map(([id]) => [id, join(workspace, `${id}.jsonl`)]))
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'build-read', name: 'Read', input: { file_path: 'docs/GDD.md' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'build-read', content: 'read' }] } })
+              input.onMessage({ type: 'result', result: 'built' })
+              return
+            }
+            input.onMessage({ type: 'assistant', message: { content: [{
+              type: 'tool_use', id: 'non-validator-read-failure', name: 'Read', input: { file_path: 'optional-diagnostic.txt' },
+            }] } })
+            input.onMessage({ type: 'user', message: { content: [{
+              type: 'tool_result', tool_use_id: 'non-validator-read-failure', content: 'not found', is_error: true,
+            }] } })
+            input.onMessage({ type: 'assistant', message: { content: validators.map(([id, agentType]) => ({
+              type: 'tool_use', id, name: 'Task', input: { subagent_type: agentType, prompt: 'validate' },
+            })) } })
+            input.onMessage({ type: 'user', message: { content: validators.map(([id]) => ({
+              type: 'tool_result',
+              tool_use_id: id,
+              content: [
+                'Async agent launched successfully.',
+                `agentId: ${id}`,
+                `output_file: ${outputFiles[id]}`,
+              ].join('\n'),
+            })) } })
+            input.onMessage({ type: 'result', result: 'Validators are still running.' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.validation.waiting'))
+      expect(manager.events(session.id).some(event => event.type === 'delivery.validation.completed')).toBe(false)
+      expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(false)
+
+      for (const [id, validatorId] of validators) {
+        const report = {
+          validatorId,
+          status: 'passed',
+          summary: 'passed',
+          requirements: validatorId === 'beegame-asset-validator' ? [] : [{
+            id: 'core-path',
+            status: 'passed',
+            evidence: validatorId === 'beegame-contract-validator'
+              ? [{ kind: 'implementation', source: 'src/main.ts', detail: 'observed' }]
+              : [{ kind: 'runtime', source: 'main-path', detail: 'observed' }],
+          }],
+          findings: [],
+          verifiedCapabilities: [],
+        }
+        await writeFile(outputFiles[id], JSON.stringify({
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(report) }], stop_reason: 'end_turn' },
+        }) + '\n')
+      }
+
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.validation.completed'))
+      const completed = manager.events(session.id).filter(event => event.type === 'delivery.validation.completed')
+      expect(completed).toHaveLength(1)
+      expect(completed[0]?.payload).toEqual(expect.objectContaining({ status: 'passed' }))
+      expect(manager.events(session.id).some(event => (
+        event.type === 'tool.failed' && event.payload?.toolUseID === 'non-validator-read-failure'
+      ))).toBe(true)
+      const report = await readFile(join(workspace, 'docs', 'validation-report.md'), 'utf8')
+      expect(report).toContain('Status: passed')
+      expect(report).toContain('core-path: Core path')
+      expect(report).toContain('generated by the host from independent validator evidence')
+      expect(manager.events(session.id).some(event => event.type === 'delivery.repair.started')).toBe(false)
+      expect(submits).toBe(2)
+    } finally {
+      if (previousPollMs === undefined) delete process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS
+      else process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS = previousPollMs
+      if (previousTimeoutMs === undefined) delete process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS
+      else process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS = previousTimeoutMs
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('resumes persisted async validator monitoring after server restart', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-async-resume-'))
+    const previousPollMs = process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS
+    const previousTimeoutMs = process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS
+    process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS = '1'
+    process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS = '1000'
+    const sessionId = 'beegame_async_validator_resume'
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    const gdd = '# Core path\n'
+    await writeFile(join(workspace, 'docs', 'GDD.md'), gdd)
+    await writeFile(join(workspace, 'src', 'main.ts'), 'export const playable = true\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core path' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main-path', requirementIds: ['core-path'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    const validators = [
+      ['contract-resume', 'beegame-contract-validator'],
+      ['runtime-resume', 'beegame-runtime-validator'],
+      ['asset-resume', 'beegame-asset-validator'],
+    ] as const
+    const outputFiles = Object.fromEntries(validators.map(([id]) => [id, join(workspace, `${id}.jsonl`)]))
+    const transcriptDir = join(workspace, 'transcripts')
+    await mkdir(transcriptDir, { recursive: true })
+    const prefix = basename(workspace)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48)
+    const transcriptPath = join(
+      transcriptDir,
+      `${prefix}__${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}.jsonl`,
+    )
+    const now = new Date().toISOString()
+    const events = [
+      {
+        id: 1, sessionId, type: 'delivery.specification.locked', text: 'locked', createdAt: now,
+        payload: { type: 'delivery.specification.locked', documents: { 'docs/GDD.md': createHash('sha256').update(gdd).digest('hex') } },
+      },
+      { id: 2, sessionId, type: 'delivery.validation.started', text: 'started', createdAt: now, payload: { type: 'delivery.validation.started' } },
+      ...validators.map(([id, agentType], index) => ({
+        id: 3 + index,
+        sessionId,
+        type: 'tool.completed',
+        text: 'Task completed',
+        createdAt: now,
+        payload: {
+          type: 'tool.completed', toolUseID: id, toolName: 'Task', input: { subagent_type: agentType, prompt: 'validate' },
+          output: ['Async agent launched successfully.', `agentId: ${id}`, `output_file: ${outputFiles[id]}`].join('\n'),
+        },
+      })),
+      {
+        id: 6, sessionId, type: 'delivery.validation.waiting', text: 'waiting', createdAt: now,
+        payload: { type: 'delivery.validation.waiting', pendingValidatorTypes: validators.map(([, agentType]) => agentType) },
+      },
+    ]
+    await writeFile(transcriptPath, events.map(event => JSON.stringify(event)).join('\n') + '\n')
+    let runnerStarts = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        runnerStarts += 1
+        return { async submit() {}, stop() {} }
+      },
+    }, workspace)
+    try {
+      manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
+      for (const [id, validatorId] of validators) {
+        const report = {
+          validatorId,
+          status: 'passed',
+          summary: 'passed',
+          requirements: validatorId === 'beegame-asset-validator' ? [] : [{
+            id: 'core-path', status: 'passed',
+            evidence: validatorId === 'beegame-contract-validator'
+              ? [{ kind: 'implementation', source: 'src/main.ts', detail: 'observed' }]
+              : [{ kind: 'runtime', source: 'main-path', detail: 'observed' }],
+          }],
+          findings: [],
+          verifiedCapabilities: [],
+        }
+        await writeFile(outputFiles[id], JSON.stringify({
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(report) }], stop_reason: 'end_turn' },
+        }) + '\n')
+      }
+      await waitFor(() => manager.events(sessionId).some(event => event.type === 'delivery.validation.completed'))
+      expect(manager.events(sessionId).filter(event => event.type === 'delivery.validation.completed')).toHaveLength(1)
+      expect(manager.events(sessionId).find(event => event.type === 'delivery.validation.completed')?.payload).toEqual(
+        expect.objectContaining({ status: 'passed' }),
+      )
+      expect(manager.events(sessionId).filter(event => event.type === 'session.resumed')).toHaveLength(0)
+      expect(manager.events(sessionId).filter(event => event.type === 'session.started')).toHaveLength(0)
+      expect(runnerStarts).toBe(0)
+    } finally {
+      if (previousPollMs === undefined) delete process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS
+      else process.env.BEEGAME_SUBAGENT_MONITOR_POLL_MS = previousPollMs
+      if (previousTimeoutMs === undefined) delete process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS
+      else process.env.BEEGAME_SUBAGENT_MONITOR_TIMEOUT_MS = previousTimeoutMs
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('fails delivery when implementation rewrites an approved source document', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-delivery-doc-lock-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Approved core path\n')
+    await writeFile(join(workspace, 'docs', 'delivery-contract.json'), JSON.stringify({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-path', title: 'Core path', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Approved core path' }],
+        evidenceRequired: ['implementation', 'runtime'],
+      }],
+      playerPaths: [{ id: 'main', requirementIds: ['core-path'], phases: {
+        entry: [{ action: { id: 'entry' }, assertions: [{ state: 'entered' }] }], core_action: [{ action: { id: 'act' }, assertions: [{ state: 'acted' }] }], state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }], completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }], recovery: [{ action: { id: 'recover' }, assertions: [{ state: 'ready' }] }],
+      } }],
+    }))
+    let submits = 0
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            submits += 1
+            if (submits === 1) {
+              await writeFile(join(workspace, 'docs', 'GDD.md'), '# Weakened after build began\n')
+              input.onMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'write-code', name: 'Write', input: { file_path: 'src/main.ts' } }] } })
+              input.onMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'write-code', content: 'written' }] } })
+              input.onMessage({ type: 'result', result: 'built' })
+              return
+            }
+            if (submits > 2) {
+              await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+              return
+            }
+            const reports = [
+              ['contract-doc-lock', 'beegame-contract-validator', [{ kind: 'implementation', source: 'src/main.ts', detail: 'observed' }]],
+              ['runtime-doc-lock', 'beegame-runtime-validator', [{ kind: 'runtime', source: 'main', detail: 'observed' }]],
+              ['asset-doc-lock', 'beegame-asset-validator', []],
+            ] as const
+            input.onMessage({ type: 'assistant', message: { content: reports.map(([id, validatorId]) => ({ type: 'tool_use', id, name: 'Task', input: { subagent_type: validatorId, prompt: 'validate' } })) } })
+            input.onMessage({
+              type: 'user',
+              message: {
+                content: reports.map(([id, validatorId, evidence]) => ({
+                  type: 'tool_result',
+                  tool_use_id: id,
+                  content: JSON.stringify({
+                    validatorId,
+                    status: 'passed',
+                    summary: 'ok',
+                    requirements: validatorId === 'beegame-asset-validator'
+                      ? []
+                      : [{ id: 'core-path', status: 'passed', evidence }],
+                    findings: [],
+                    verifiedCapabilities: [],
+                  }),
+                })),
+              },
+            })
+            input.onMessage({ type: 'result', result: 'VALIDATION_SUBAGENTS_COMPLETED' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.sendWithDisplay(session.id, 'Build project', { displayKind: 'confirmed_brief' })
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'delivery.validation.completed'))
+      const validation = manager.events(session.id).find(event => event.type === 'delivery.validation.completed')
+      expect(validation?.payload).toEqual(expect.objectContaining({ status: 'failed' }))
+      expect(JSON.stringify(validation?.payload)).toContain('Approved project documents changed')
+      manager.stop(session.id)
+    } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
@@ -1033,6 +1655,64 @@ describe('beegame session routes', () => {
       expect(manager.events(session.id).filter(event => event.type === 'delivery.repair.started')).toHaveLength(1)
       expect(submits).toBe(1)
       manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('does not bless a legacy empty specification snapshot when the current contract is invalid', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-specification-migration-'))
+    const sessionId = 'beegame_specification_migration'
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Approved behavior\n')
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const contract = {
+      version: 1, status: 'failed', summary: 'Validation must retry.',
+      requirements: [{ id: 'core', title: 'Core', scope: 'mvp', status: 'failed', evidenceRequired: ['runtime'], evidence: [] }],
+      requiredCapabilities: [], verifiedCapabilities: [],
+    }
+    await mkdir(dirname(transcriptPath), { recursive: true })
+    await writeFile(transcriptPath, [
+      { id: 1, sessionId, type: 'delivery.specification.locked', text: 'legacy empty snapshot', payload: { type: 'delivery.specification.locked', documents: {} }, createdAt: new Date().toISOString() },
+      { id: 2, sessionId, type: 'delivery.contract.updated', text: contract.summary, payload: { type: 'delivery.contract.updated', contract }, createdAt: new Date().toISOString() },
+      { id: 3, sessionId, type: 'delivery.validation.completed', text: 'retry', payload: { type: 'delivery.validation.completed', status: 'blocked', retryable: true }, createdAt: new Date().toISOString() },
+    ].map(event => JSON.stringify(event)).join('\n') + '\n')
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return { async submit(input) { await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true })) }, stop() {} }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
+      expect(await manager.resumePendingDeliveryPipeline(session.id)).toBe(true)
+      const locks = manager.events(session.id).filter(event => event.type === 'delivery.specification.locked')
+      expect(locks).toHaveLength(1)
+      expect(locks[0]?.payload?.documents).toEqual({})
+      manager.stop(session.id)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('closes an interrupted persisted validation run before retrying it', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-interrupted-validation-terminal-'))
+    const sessionId = 'beegame_interrupted_validation_terminal'
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const turnId = `beegame-turn-${sessionId}-1`
+    await mkdir(dirname(transcriptPath), { recursive: true })
+    await writeFile(transcriptPath, [
+      { id: 1, sessionId, turnId, type: 'turn.started', text: 'validate', createdAt: new Date().toISOString() },
+      { id: 2, sessionId, turnId, type: 'user.message', text: 'validate', payload: { type: 'user.message', displayKind: 'delivery_validation' }, createdAt: new Date().toISOString() },
+      { id: 3, sessionId, turnId, type: 'delivery.validation.started', text: 'started', payload: { type: 'delivery.validation.started', status: 'validating' }, createdAt: new Date().toISOString() },
+    ].map(event => JSON.stringify(event)).join('\n') + '\n')
+    const manager = new BeeGameSessionManager(createFakeRunner().runner, workspace)
+    try {
+      manager.start({ workspacePath: workspace, transcriptSessionId: sessionId, userId: DEFAULT_LOCAL_USER_ID })
+      const terminal = manager.events(sessionId).find(event => event.type === 'delivery.validation.completed')
+      expect(terminal?.payload).toEqual(expect.objectContaining({
+        status: 'blocked', reason: 'interrupted', retryable: true,
+      }))
+      expect(manager.events(sessionId).some(event => event.type === 'turn.failed')).toBe(true)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -1266,7 +1946,6 @@ describe('beegame session routes', () => {
           role: 'developer',
         },
       })
-
       const viewerCreateRes = await viewerApp.request('/api/beegame-sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -3713,6 +4392,38 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('closes an open thinking lifecycle when the runtime omits content_block_stop', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-thinking-lifecycle-'))
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            input.onMessage({
+              type: 'stream_event',
+              event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+            })
+            input.onMessage({
+              type: 'stream_event',
+              event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'private' } },
+            })
+            input.onMessage({ type: 'result', result: 'done' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Run task')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.empty'))
+      const thinking = manager.events(session.id).filter(event => event.type === 'assistant.thinking')
+      expect(thinking.map(event => event.payload?.status)).toEqual(['started', 'ended'])
+      expect(thinking.at(-1)?.payload).toEqual(expect.objectContaining({ reason: 'turn_empty' }))
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -8418,12 +9129,7 @@ describe('beegame session routes', () => {
         .trim()
         .split('\n')
         .map(line => JSON.parse(line) as { id: number; sessionId: string; type: string })
-      expect(resumedEvents.length).toBeGreaterThan(initialEvents.length)
-      expect(resumedEvents.at(-1)).toEqual(expect.objectContaining({
-        id: initialEvents.length + 2,
-        sessionId: resumedSession.id,
-        type: 'runtime.observation',
-      }))
+      expect(resumedEvents).toHaveLength(initialEvents.length)
 
       await restartedApp.request(`/api/beegame-sessions/${resumedSession.id}/input`, {
         method: 'POST',
@@ -8446,6 +9152,7 @@ describe('beegame session routes', () => {
         .map(line => JSON.parse(line) as { type: string; turnId?: string })
       expect(finalEvents).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({ type: 'session.resumed' }),
           expect.objectContaining({
             type: 'turn.started',
             turnId: `beegame-turn-${resumedSession.id}-1`,

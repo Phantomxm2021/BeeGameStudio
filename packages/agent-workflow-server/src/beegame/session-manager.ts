@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -26,23 +26,33 @@ import {
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { auditAssetContract } from './asset-contract-audit'
-import { auditProjectDeliveryContract } from './project-delivery-contract-audit'
+import {
+  auditProjectDeliveryContract,
+  type ProjectDeliveryContractAudit,
+} from './project-delivery-contract-audit'
 import { ensureProjectDeliveryContractSkeleton } from './project-delivery-contract'
 import {
   createDeliveryValidationAgentDefinitions,
-  deliveryValidationCoordinatorPrompt,
+  deliveryValidationDispatchPrompt,
   DELIVERY_VALIDATOR_AGENT_TYPES,
 } from './delivery-validation-agents'
 import {
   buildDeliveryRepairPrompt,
   createDeliveryContract,
-  parseDeliveryReview,
+  parseDeliveryValidatorReport,
+  type DeliveryCheckStatus,
   type DeliveryContract,
   type DeliveryEvidence,
   type DeliveryRequirement,
   type ParsedDeliveryReview,
 } from './delivery-contract'
 import { createQueryEngineRunner } from './query-engine-runner'
+import {
+  DeliveryValidationAdapterRegistry,
+  readDeliveryValidationRequest,
+  resolveRequiredValidationAdapter,
+  type DeliveryValidationResult,
+} from './delivery-validation-adapter'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -61,7 +71,7 @@ export type BeeGameFileAttachment = {
 export type BeeGameAttachment = BeeGameImageAttachment | BeeGameFileAttachment
 
 const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
-const MAX_DELIVERY_REPAIR_ATTEMPTS = 2
+const MAX_IDENTICAL_DELIVERY_FAILURES = 2
 const DEFAULT_DELIVERY_VALIDATION_TIMEOUT_MS = 10 * 60 * 1000
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
@@ -113,6 +123,7 @@ export type BeeGameChatThinkingMode = 'enabled' | 'disabled'
 
 export type BeeGameEventType =
   | 'session.started'
+  | 'session.resumed'
   | 'turn.started'
   | 'user.message'
   | 'assistant.message'
@@ -130,16 +141,17 @@ export type BeeGameEventType =
   | 'turn.completed'
   | 'turn.empty'
   | 'turn.failed'
-  // Legacy transcript types remain readable during migration; new runs never emit them.
-  | 'delivery.review.started'
-  | 'delivery.review.completed'
   | 'delivery.validation.started'
+  | 'delivery.validation.waiting'
   | 'delivery.validation.completed'
+  | 'delivery.runtime_adapter.completed'
+  | 'delivery.specification.locked'
   | 'delivery.contract.updated'
   | 'delivery.repair.started'
   | 'delivery.repair.completed'
   | 'delivery.repair.queued'
   | 'delivery.repair.exhausted'
+  | 'delivery.pipeline.blocked'
   | 'session.stopped'
   | 'session.failed'
 
@@ -305,9 +317,15 @@ type SessionRecord = {
   latestDeliveryContract?: DeliveryContract
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
+  pendingCreditRetryInFlight: boolean
+  pendingCreditRetryFailures: number
+  pendingCreditRetryAfter: number
   deliveryPipelineResumeFailures: number
   deliveryPipelineResumeTimer?: ReturnType<typeof setTimeout>
   deliveryPipelineResumeInFlight: boolean
+  approvedDocumentSnapshot: Record<string, string>
+  approvedDocumentSnapshotLocked: boolean
+  resumeEventPending: boolean
 }
 
 type RuntimeObservationFeature = {
@@ -405,6 +423,7 @@ export class BeeGameSessionManager {
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
     private readonly onTurnCompleted?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
     private readonly onTurnStarting?: (metadata: BeeGameSessionInternalMetadata) => Promise<void> | void,
+    private readonly deliveryValidationAdapters = new DeliveryValidationAdapterRegistry(),
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -488,18 +507,26 @@ export class BeeGameSessionManager {
       pendingCreditOperation: recoverPendingCreditOperation(
         recoveredTranscript?.events ?? [],
       ),
+      pendingCreditRetryInFlight: false,
+      pendingCreditRetryFailures: 0,
+      pendingCreditRetryAfter: 0,
       deliveryPipelineResumeFailures: 0,
       deliveryPipelineResumeInFlight: false,
+      approvedDocumentSnapshot: recoverApprovedDocumentSnapshot(recoveredTranscript?.events ?? []),
+      approvedDocumentSnapshotLocked: hasApprovedDocumentSnapshot(recoveredTranscript?.events ?? []),
+      resumeEventPending: Boolean(recoveredTranscript),
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
     this.refreshCompletedSubagentOutputs(record)
     this.persistRuntimeSnapshot(record)
-    this.append(record, 'session.started', `Created BeeGame session in ${cwd}`, {
-      type: 'session.started',
-      ...(record.language ? { language: record.language } : {}),
-    })
-    this.appendRuntimeObservation(record, 'initialized')
+    if (!recoveredTranscript) {
+      this.append(record, 'session.started', `Created BeeGame session in ${cwd}`, {
+        type: 'session.started',
+        ...(record.language ? { language: record.language } : {}),
+      })
+    }
+    if (!recoveredTranscript) this.appendRuntimeObservation(record, 'initialized')
 
     return cloneSession(record.session)
   }
@@ -540,7 +567,7 @@ export class BeeGameSessionManager {
       }
       if (!contract || contract.status === 'passed') return false
       if (transition.type === 'delivery.validation.completed') {
-        if (record.deliveryRepairAttempts >= MAX_DELIVERY_REPAIR_ATTEMPTS) return false
+        if (!shouldStartDeliveryRepair(record, contract)) return false
         this.appendDeliveryRepairQueued(record, contract)
         await this.startDeliveryRepair(record, contract)
         return true
@@ -563,7 +590,16 @@ export class BeeGameSessionManager {
         retryCount: record.deliveryPipelineResumeFailures,
         retryDelayMs,
       })
-      if (record.deliveryPipelineResumeFailures <= 3 && !record.deliveryPipelineResumeTimer) {
+      if (record.deliveryPipelineResumeFailures > 3) {
+        this.append(record, 'delivery.pipeline.blocked', 'Delivery pipeline could not resume after repeated infrastructure failures', {
+          type: 'delivery.pipeline.blocked',
+          status: 'needs_user',
+          reason: 'pipeline_resume_unavailable',
+          error: toErrorMessage(error),
+          retryCount: record.deliveryPipelineResumeFailures,
+          ...(contract ? { contract } : {}),
+        })
+      } else if (!record.deliveryPipelineResumeTimer) {
         record.deliveryPipelineResumeTimer = setTimeout(() => {
           record.deliveryPipelineResumeTimer = undefined
           void this.resumePendingDeliveryPipeline(record.session.id)
@@ -590,6 +626,8 @@ export class BeeGameSessionManager {
   async retryPendingCreditOperation(sessionId: string): Promise<boolean> {
     const record = this.sessions.get(sessionId)
     if (!record?.pendingCreditOperation) return false
+    if (record.pendingCreditRetryInFlight || Date.now() < record.pendingCreditRetryAfter) return false
+    record.pendingCreditRetryInFlight = true
     const operation = record.pendingCreditOperation
     try {
       if (operation.kind === 'settle') {
@@ -618,6 +656,8 @@ export class BeeGameSessionManager {
           operation.settleToTotalTokens,
         )
         record.pendingCreditOperation = null
+        record.pendingCreditRetryFailures = 0
+        record.pendingCreditRetryAfter = 0
         this.append(record, 'system.status', 'Credit settled', {
           type: 'credit.settled',
           reservationId: operation.reservation.id,
@@ -645,6 +685,8 @@ export class BeeGameSessionManager {
         ...(record.authToken ? { authToken: record.authToken } : {}),
       })
       record.pendingCreditOperation = null
+      record.pendingCreditRetryFailures = 0
+      record.pendingCreditRetryAfter = 0
       this.append(record, 'system.status', 'Credit reservation refunded', {
         type: 'credit.refunded',
         reservationId: operation.reservation.id,
@@ -654,14 +696,24 @@ export class BeeGameSessionManager {
       })
       return true
     } catch (err) {
+      record.pendingCreditRetryFailures += 1
+      const retryAfterMs = Math.min(
+        30_000,
+        1_000 * (2 ** Math.min(5, record.pendingCreditRetryFailures - 1)),
+      )
+      record.pendingCreditRetryAfter = Date.now() + retryAfterMs
       this.append(record, 'system.status', toErrorMessage(err), {
         type: operation.kind === 'settle'
           ? 'credit.settle_retry_failed'
           : 'credit.refund_retry_failed',
         reservationId: operation.reservation.id,
         error: toErrorMessage(err),
+        retryCount: record.pendingCreditRetryFailures,
+        retryAfterMs,
       })
       return false
+    } finally {
+      record.pendingCreditRetryInFlight = false
     }
   }
 
@@ -832,8 +884,36 @@ export class BeeGameSessionManager {
     if (record.session.turnStatus !== 'idle') {
       throw new Error('Session is already processing a prompt')
     }
+    // Claim the turn synchronously before any preparation, hooks, or remote
+    // credit calls can yield. Delivery resume and polling paths may race each
+    // other; without this claim they can start the same logical turn twice.
+    record.session.turnStatus = 'running'
+    let turnAccepted = false
+    try {
     if (display?.authToken) record.authToken = display.authToken
     if (display?.language) record.language = display.language
+    if (record.resumeEventPending) {
+      record.resumeEventPending = false
+      this.append(record, 'session.resumed', `Resumed BeeGame session in ${record.session.cwd}`, {
+        type: 'session.resumed',
+        ...(record.language ? { language: record.language } : {}),
+      })
+    }
+
+    if (display?.displayKind === 'confirmed_brief' && !record.approvedDocumentSnapshotLocked) {
+      const audit = auditProjectDeliveryContract(record.session.cwd)
+      if (audit.valid && this.hasConfiguredValidationAdapter(audit)) {
+        const documents = await captureApprovedDocumentSnapshot(record.session.cwd)
+        if (Object.keys(documents).length > 0) {
+          record.approvedDocumentSnapshot = documents
+          record.approvedDocumentSnapshotLocked = true
+          this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
+            type: 'delivery.specification.locked',
+            documents,
+          })
+        }
+      }
+    }
 
     const metadata = this.metadata(sessionId)
     if (metadata && this.onTurnStarting) {
@@ -847,13 +927,14 @@ export class BeeGameSessionManager {
       attachments: display?.attachments,
     })
 
-    record.currentTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+    const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
+    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display, nextTurnId)
+    record.currentTurnId = nextTurnId
     record.currentTurnKind = display?.displayKind
     record.nextTurnIndex += 1
-    const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
-    const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display)
     display?.onTurnAccepted?.()
-    record.session.turnStatus = 'running'
+    turnAccepted = true
     record.abortController = new AbortController()
     this.append(record, 'turn.started', text)
     this.append(
@@ -878,6 +959,15 @@ export class BeeGameSessionManager {
       preparedPrompt.attachmentDirectory,
     )
     return cloneSession(record.session)
+    } catch (error) {
+      if (!turnAccepted) {
+        record.currentTurnId = null
+        record.currentTurnKind = undefined
+        record.abortController = null
+        record.session.turnStatus = 'idle'
+      }
+      throw error
+    }
   }
 
   stop(sessionId: string): BeeGameSession {
@@ -895,6 +985,7 @@ export class BeeGameSessionManager {
       record.session.status = 'stopped'
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
+      this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped')
     }
     return cloneSession(record.session)
@@ -1025,6 +1116,7 @@ export class BeeGameSessionManager {
         if (!signal.aborted && record.session.status === 'running') {
           const isControlTurn = record.currentTurnKind === 'delivery_validation'
           if (!hadRuntimeActivity && !isControlTurn) {
+            this.closeOpenThinkingLifecycle(record, 'turn_empty')
             this.appendRuntimeObservation(record, 'empty_turn')
             this.append(
               record,
@@ -1032,6 +1124,18 @@ export class BeeGameSessionManager {
               'Agent ended this turn without using tools. Send continue or retry to start implementation.',
             )
           } else {
+            if (
+              record.currentTurnKind === 'confirmed_brief' &&
+              record.events.slice(eventCountBeforeTurn).some(event => (
+                event.type === 'tool.failed' ||
+                (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
+              ))
+            ) {
+              this.append(record, 'system.status', 'Implementation gate failed before validation', {
+                type: 'delivery.implementation_gate.failed',
+                status: 'failed',
+              })
+            }
             if (isControlTurn) {
               record.latestDeliveryContract = this.completeDeliveryValidation(record, eventCountBeforeTurn)
               if (validationTimedOut) {
@@ -1042,6 +1146,7 @@ export class BeeGameSessionManager {
                 })
               }
             }
+            this.closeOpenThinkingLifecycle(record, 'turn_completed')
             this.appendRuntimeObservation(record, 'turn_completed')
             this.append(record, 'turn.completed', 'Turn ended')
           }
@@ -1067,6 +1172,7 @@ export class BeeGameSessionManager {
         )
       }
       if (record.session.status === 'running') {
+        this.closeOpenThinkingLifecycle(record, 'turn_failed')
         this.append(record, 'turn.failed', toErrorMessage(err))
       }
     } finally {
@@ -1083,6 +1189,7 @@ export class BeeGameSessionManager {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
       const completedTurnKind = record.currentTurnKind
+      const completedTurnId = record.currentTurnId
       record.currentTurnId = null
       record.currentTurnKind = undefined
       record.abortController = null
@@ -1094,11 +1201,29 @@ export class BeeGameSessionManager {
         })
       }
       if (completedTurnKind === 'confirmed_brief' && record.session.status === 'running') {
+        if (!record.approvedDocumentSnapshotLocked) {
+          const audit = auditProjectDeliveryContract(record.session.cwd)
+          const snapshot = audit.valid && this.hasConfiguredValidationAdapter(audit)
+            ? await captureApprovedDocumentSnapshot(record.session.cwd)
+            : {}
+          if (audit.valid && this.hasConfiguredValidationAdapter(audit) && Object.keys(snapshot).length > 0) {
+            record.approvedDocumentSnapshot = snapshot
+            record.approvedDocumentSnapshotLocked = true
+            this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
+              type: 'delivery.specification.locked',
+              documents: snapshot,
+            })
+          }
+        }
         void this.startDeliveryValidation(record).catch(error => {
           this.appendDeliveryValidationFailure(record, 'Delivery validation could not start', error)
         })
       } else if (completedTurnKind === 'delivery_validation' && record.session.status === 'running') {
         const contract = record.latestDeliveryContract
+        const waitingEvent = [...record.events].reverse().find(event => (
+          event.turnId === completedTurnId && event.type === 'delivery.validation.waiting'
+        ))
+        if (waitingEvent) return
         const validationEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
         const validationTimedOut = [...record.events].reverse().some(event => (
           event.turnId === validationEvent?.turnId &&
@@ -1108,18 +1233,13 @@ export class BeeGameSessionManager {
         const unresolvedPendingValidators = getUnresolvedPendingDeliveryValidators(record.events, validationEvent)
         if (!validationTimedOut && unresolvedPendingValidators.length > 0) {
           // Async validator completion restarts validation after all reports arrive.
-        } else if (contract && contract.status !== 'passed' && record.deliveryRepairAttempts < MAX_DELIVERY_REPAIR_ATTEMPTS) {
+        } else if (contract && shouldStartDeliveryRepair(record, contract)) {
           this.appendDeliveryRepairQueued(record, contract)
           void this.startDeliveryRepair(record, contract).catch(error => {
             this.appendDeliveryRepairResumeFailure(record, error)
           })
         } else if (contract && contract.status !== 'passed') {
-          this.append(record, 'delivery.repair.exhausted', 'Delivery repair attempts exhausted', {
-            type: 'delivery.repair.exhausted',
-            status: 'needs_user',
-            attempt: record.deliveryRepairAttempts,
-            contract,
-          })
+          this.appendDeliveryPipelineBlocked(record, contract)
         }
       } else if (completedTurnKind === 'delivery_repair' && record.session.status === 'running') {
         this.append(record, 'delivery.repair.completed', 'Delivery repair turn completed', {
@@ -1163,9 +1283,25 @@ export class BeeGameSessionManager {
 
   private async startDeliveryValidation(record: SessionRecord): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
+    if (!record.approvedDocumentSnapshotLocked) {
+      const audit = auditProjectDeliveryContract(record.session.cwd)
+      const snapshot = audit.valid && this.hasConfiguredValidationAdapter(audit)
+        ? await captureApprovedDocumentSnapshot(record.session.cwd)
+        : {}
+      if (audit.valid && this.hasConfiguredValidationAdapter(audit) && Object.keys(snapshot).length > 0) {
+        record.approvedDocumentSnapshot = snapshot
+        record.approvedDocumentSnapshotLocked = true
+        this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
+          type: 'delivery.specification.locked',
+          documents: snapshot,
+          migrated: true,
+        })
+      }
+    }
+    await this.runConfiguredDeliveryValidationAdapter(record)
     await this.sendWithDisplay(
       record.session.id,
-      `${deliveryValidationCoordinatorPrompt()}\n\n${deliveryValidationResponseSchema()}`,
+      deliveryValidationDispatchPrompt(),
       {
         displayText: 'Running independent delivery validators',
         displayKind: 'delivery_validation',
@@ -1184,6 +1320,43 @@ export class BeeGameSessionManager {
     )
   }
 
+  private async runConfiguredDeliveryValidationAdapter(record: SessionRecord): Promise<void> {
+    const audit = auditProjectDeliveryContract(record.session.cwd)
+    if (!audit.valid) return
+    const adapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
+    if (!adapterId) return
+    try {
+      const request = await readDeliveryValidationRequest(record.session.cwd, adapterId)
+      const result = await this.deliveryValidationAdapters.require(adapterId).validate(request)
+      this.append(record, 'delivery.runtime_adapter.completed', `Runtime adapter ${adapterId} completed`, {
+        type: 'delivery.runtime_adapter.completed',
+        status: result.passed ? 'passed' : 'failed',
+        adapterId,
+        capability: `adapter:${adapterId}`,
+        result,
+      })
+    } catch (error) {
+      this.append(record, 'delivery.runtime_adapter.completed', `Runtime adapter ${adapterId} is unavailable`, {
+        type: 'delivery.runtime_adapter.completed',
+        status: 'blocked',
+        adapterId,
+        capability: `adapter:${adapterId}`,
+        error: toErrorMessage(error),
+      })
+    }
+  }
+
+  private hasConfiguredValidationAdapter(audit: ProjectDeliveryContractAudit): boolean {
+    const adapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
+    if (!adapterId) return true
+    try {
+      this.deliveryValidationAdapters.require(adapterId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private async startDeliveryRepair(record: SessionRecord, contract: DeliveryContract): Promise<void> {
     if (record.session.turnStatus !== 'idle' || record.session.status !== 'running') return
     const attempt = record.deliveryRepairAttempts + 1
@@ -1191,7 +1364,7 @@ export class BeeGameSessionManager {
       record.session.id,
       buildDeliveryRepairPrompt(contract, attempt),
       {
-        displayText: `Fixing delivery gaps (attempt ${attempt}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
+        displayText: `Fixing delivery gaps (attempt ${attempt})`,
         displayKind: 'delivery_repair',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
@@ -1213,7 +1386,7 @@ export class BeeGameSessionManager {
       record.session.id,
       buildDeliveryRepairPrompt(contract, attempt),
       {
-        displayText: `Resuming delivery repair (attempt ${attempt}/${MAX_DELIVERY_REPAIR_ATTEMPTS})`,
+        displayText: `Resuming delivery repair (attempt ${attempt})`,
         displayKind: 'delivery_repair',
         taskType: 'agent_turn',
         thinkingMode: 'enabled',
@@ -1236,6 +1409,19 @@ export class BeeGameSessionManager {
     })
   }
 
+  private appendDeliveryPipelineBlocked(record: SessionRecord, contract: DeliveryContract): void {
+    const noProgress = hasRepeatedDeliveryFailure(record, contract)
+    this.append(record, 'delivery.pipeline.blocked', noProgress
+      ? 'Delivery repair made no progress'
+      : 'Delivery validation is blocked', {
+      type: 'delivery.pipeline.blocked',
+      status: 'needs_user',
+      reason: noProgress ? 'no_progress' : 'validation_blocked',
+      attempt: record.deliveryRepairAttempts,
+      contract,
+    })
+  }
+
   private appendDeliveryRepairResumeFailure(record: SessionRecord, error: unknown): void {
     this.append(record, 'system.status', 'Queued delivery repair could not start', {
       type: 'delivery.repair.resume_failed',
@@ -1247,16 +1433,57 @@ export class BeeGameSessionManager {
 
   private completeDeliveryValidation(record: SessionRecord, eventStartIndex: number): DeliveryContract {
     const reviewEvents = record.events.slice(eventStartIndex)
-    const result = [...reviewEvents].reverse().find(event => event.type === 'result')
-    const failedEvidence = reviewEvents.filter(event =>
-      event.type === 'tool.failed' ||
-      (event.type === 'permission.resolved' && getDashboardPayloadString(event.payload, 'decision') === 'deny')
-    )
     const completedValidators = getCompletedDeliveryValidators(reviewEvents)
     const pendingValidators = getPendingDeliveryValidators(reviewEvents)
-    const missingValidators = DELIVERY_VALIDATOR_AGENT_TYPES.filter(type => !completedValidators.has(type))
-    const parsed = parseDeliveryReview(result?.text) ?? invalidDeliveryReview()
+    const missingValidators = DELIVERY_VALIDATOR_AGENT_TYPES.filter(type => (
+      !completedValidators.has(type) && !pendingValidators.has(type)
+    ))
     const verifiedEvidenceIds = getValidatorEvidenceIds(completedValidators)
+    const previousValidationIndex = record.events
+      .slice(0, eventStartIndex)
+      .findLastIndex(event => event.type === 'delivery.validation.completed')
+    const runtimeAdapterEvent = record.events
+      .slice(previousValidationIndex + 1, eventStartIndex)
+      .findLast(event => event.type === 'delivery.runtime_adapter.completed')
+    if (runtimeAdapterEvent) verifiedEvidenceIds.add(String(runtimeAdapterEvent.id))
+    const documentAudit = auditProjectDeliveryContract(record.session.cwd)
+    if (!record.approvedDocumentSnapshotLocked || Object.keys(record.approvedDocumentSnapshot).length === 0) {
+      documentAudit.valid = false
+      documentAudit.issues.push('No approved project source documents existed when implementation began.')
+    }
+    const changedApprovedDocuments = getApprovedDocumentChanges(
+      record.session.cwd,
+      record.approvedDocumentSnapshot,
+    )
+    if (changedApprovedDocuments.length > 0) {
+      documentAudit.valid = false
+      documentAudit.issues.push(
+        `Approved project documents changed after implementation began: ${changedApprovedDocuments.join(', ')}`,
+      )
+    }
+    const documentAuditEvidenceId = `delivery-contract-audit:${record.currentTurnId ?? record.session.id}`
+    const parsed = buildReviewFromValidatorReports(
+      documentAudit,
+      completedValidators,
+      documentAuditEvidenceId,
+      runtimeAdapterEvent,
+    )
+    const priorEvents = record.events.slice(0, eventStartIndex)
+    const failedGateIndex = priorEvents.findLastIndex(event => (
+      getDashboardPayloadString(event.payload, 'type') === 'delivery.implementation_gate.failed'
+    ))
+    const completedRepairIndex = priorEvents.findLastIndex(event => event.type === 'delivery.repair.completed')
+    const implementationGateFailed = failedGateIndex > completedRepairIndex
+    if (implementationGateFailed) {
+      parsed.status = 'failed'
+      parsed.findings.push({
+        requirementId: 'implementation-gate',
+        requirement: 'Implementation toolchain gate',
+        status: 'failed',
+        detail: 'The implementation turn contained failed or denied tool operations and cannot be accepted as a completed build.',
+        evidence: [],
+      })
+    }
     if (missingValidators.length > 0) {
       parsed.status = 'blocked'
       parsed.summary = `Independent delivery validation was incomplete: ${missingValidators.length} validator(s) did not complete.`
@@ -1268,19 +1495,8 @@ export class BeeGameSessionManager {
         evidence: [],
       })
     }
-    const documentAuditEvidenceId = `delivery-contract-audit:${record.currentTurnId ?? record.session.id}`
-    const documentAudit = auditProjectDeliveryContract(record.session.cwd)
     verifiedEvidenceIds.add(documentAuditEvidenceId)
-    const reviewedRequirementIds = new Set(parsed.requirements.map(item => item.id))
-    const missingReviewedRequirements = documentAudit.requirements
-      .filter(item => item.scope === 'mvp' && !reviewedRequirementIds.has(item.id))
-      .map(item => item.id)
-    const documentIssues = [
-      ...documentAudit.issues,
-      ...(missingReviewedRequirements.length > 0
-        ? [`Delivery review omitted MVP requirement ids: ${missingReviewedRequirements.join(', ')}`]
-        : []),
-    ]
+    const documentIssues = [...documentAudit.issues]
     parsed.requiredCapabilities = [...new Set([
       ...parsed.requiredCapabilities,
       ...documentAudit.requiredCapabilities,
@@ -1294,7 +1510,7 @@ export class BeeGameSessionManager {
       evidence: [{
         kind: 'document',
         eventId: documentAuditEvidenceId,
-        source: documentAudit.path,
+        source: 'docs/delivery-contract.json',
         detail: documentIssues.length === 0
           ? `Validated ${documentAudit.requirements.length} requirements and ${documentAudit.playerPathIds.length} player paths.`
           : documentIssues.join(' '),
@@ -1327,7 +1543,7 @@ export class BeeGameSessionManager {
         evidence: [{
           kind: 'asset',
           eventId: assetAuditEvidenceId,
-          source: assetAudit.manifestPath,
+          source: 'assets/asset-manifest.json',
           detail: assetAudit.valid
             ? `Validated ${assetAudit.slots.length} asset slots.`
             : assetAudit.issues.join(' '),
@@ -1347,23 +1563,48 @@ export class BeeGameSessionManager {
           evidence: [{
             kind: 'asset',
             eventId: assetAuditEvidenceId,
-            source: assetAudit.manifestPath,
+            source: 'assets/asset-manifest.json',
             detail: assetAudit.issues.join(' '),
           }],
         })
       }
     }
     const verifiedCapabilities = getVerifiedDeliveryCapabilities(reviewEvents, completedValidators)
-    const verifiedReview = retainVerifiedDeliveryEvidence(parsed, verifiedEvidenceIds)
-    if (failedEvidence.length > 0) {
-      verifiedReview.status = 'failed'
-      verifiedReview.summary = `${verifiedReview.summary} Validation tools failed or were denied.`
+    const runtimeAdapterCapability = getDashboardPayloadString(runtimeAdapterEvent?.payload, 'capability')
+    if (runtimeAdapterCapability) verifiedCapabilities.push(runtimeAdapterCapability)
+    const verifiedReview = retainVerifiedDeliveryEvidence(parsed, verifiedEvidenceIds, record.session.cwd)
+    let contract = createDeliveryContract(verifiedReview, verifiedCapabilities)
+    if (pendingValidators.size > 0) {
+      this.append(record, 'delivery.validation.waiting', 'Waiting for independent validation sub-agents', {
+        type: 'delivery.validation.waiting',
+        status: 'waiting',
+        pendingValidatorTypes: [...pendingValidators],
+        completedValidatorTypes: [...completedValidators.keys()],
+        attempt: record.deliveryRepairAttempts,
+      })
+      return contract
     }
-    const contract = createDeliveryContract(verifiedReview, verifiedCapabilities)
+    try {
+      writeDeliveryValidationReport(record.session.cwd, contract, verifiedReview.findings)
+    } catch (error) {
+      contract = {
+        ...contract,
+        status: 'blocked',
+        summary: `${contract.summary} The host could not persist the evidence-backed validation report: ${toErrorMessage(error)}`,
+      }
+      verifiedReview.findings.push({
+        requirementId: 'validation-report-persistence',
+        requirement: 'Evidence-backed validation report persistence',
+        status: 'blocked',
+        detail: toErrorMessage(error),
+        evidence: [],
+      })
+    }
     this.append(record, 'delivery.contract.updated', contract.summary, {
       type: 'delivery.contract.updated',
       contract,
       attempt: record.deliveryRepairAttempts,
+      projectRevision: getProjectMutationRevision(record.events),
     })
     this.append(record, 'delivery.validation.completed', contract.summary, {
       type: 'delivery.validation.completed',
@@ -1531,6 +1772,32 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
+    const specificationGateMessage = await this.lockSpecificationBeforeImplementationTool(record, request)
+    if (specificationGateMessage) {
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
+        decision: 'deny', autoDenied: true, reason: specificationGateMessage, input: request.input,
+      })
+      this.append(record, 'system.status', 'Implementation blocked until the delivery contract is valid', {
+        type: 'delivery.implementation_gate.failed',
+        status: 'failed',
+        reason: 'invalid_delivery_contract',
+      })
+      return { behavior: 'deny', message: specificationGateMessage }
+    }
+    const protectedDocument = getProtectedDeliveryDocument(record, request)
+    if (protectedDocument) {
+      const message = protectedDocument === 'docs/validation-report.md'
+        ? 'Validation reports are generated from independent evidence and cannot be authored by the project Agent.'
+        : Object.prototype.hasOwnProperty.call(record.approvedDocumentSnapshot, protectedDocument)
+          ? 'Approved source documents are locked after implementation begins.'
+          : 'Files cited by independent validation as acceptance evidence are read-only during delivery repair.'
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved', toolUseID: request.toolUseID, toolName: request.toolName,
+        decision: 'deny', autoDenied: true, reason: message, input: request.input,
+      })
+      return { behavior: 'deny', message }
+    }
     if (record.currentTurnKind === 'delivery_validation' && isFileMutationTool(request.toolName)) {
       const message = 'Delivery review is read-only and cannot modify project files.'
       this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
@@ -1641,6 +1908,40 @@ export class BeeGameSessionManager {
     })
   }
 
+  private async lockSpecificationBeforeImplementationTool(
+    record: SessionRecord,
+    request: DashboardPermissionRequest,
+  ): Promise<string | undefined> {
+    if (record.currentTurnKind !== 'confirmed_brief' || record.approvedDocumentSnapshotLocked) return undefined
+    if (!isImplementationMutationTool(record.session.cwd, request)) return undefined
+    const contractAudit = auditProjectDeliveryContract(record.session.cwd)
+    if (!contractAudit.valid) {
+      const detail = contractAudit.issues.length > 0
+        ? contractAudit.issues.join(' ')
+        : 'The delivery contract is incomplete.'
+      return `Complete the evidence-backed delivery contract before implementation. ${detail}`
+    }
+    const adapterId = resolveRequiredValidationAdapter(contractAudit.requiredCapabilities)
+    if (adapterId) {
+      try {
+        this.deliveryValidationAdapters.require(adapterId)
+      } catch (error) {
+        return `Configure the declared runtime validation adapter before implementation. ${toErrorMessage(error)}`
+      }
+    }
+    const snapshot = await captureApprovedDocumentSnapshot(record.session.cwd)
+    if (Object.keys(snapshot).length === 0) {
+      return 'Create the approved project specification documents before implementation. Code and build mutations are blocked until the source-of-truth documents exist.'
+    }
+    record.approvedDocumentSnapshot = snapshot
+    record.approvedDocumentSnapshotLocked = true
+    this.append(record, 'delivery.specification.locked', 'Approved project documents locked for delivery', {
+      type: 'delivery.specification.locked',
+      documents: snapshot,
+    })
+    return undefined
+  }
+
   private appendRuntimeObservation(
     record: SessionRecord,
     status: 'initialized' | 'turn_completed' | 'empty_turn' | 'model_updated',
@@ -1694,6 +1995,16 @@ export class BeeGameSessionManager {
         toolUseCount: record.toolUses.size,
         turnIndex: Math.max(0, record.nextTurnIndex - 1),
       },
+    })
+  }
+
+  private closeOpenThinkingLifecycle(record: SessionRecord, reason: string): void {
+    if (record.thinkingBlockIndexes.size === 0) return
+    record.thinkingBlockIndexes.clear()
+    this.append(record, 'assistant.thinking', 'Thinking', {
+      type: 'assistant.thinking',
+      status: 'ended',
+      reason,
     })
   }
 
@@ -1767,9 +2078,10 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     policy: BeeGameCreditTaskPolicy,
     display?: { displayText?: string; displayKind?: string },
+    requestedTurnId?: string,
   ): Promise<CreditReservation | undefined> {
     const dataDir = record.userDataRoot ?? this.dashboardDataRoot
-    const turnId = record.currentTurnId ?? `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
+    const turnId = requestedTurnId ?? record.currentTurnId ?? `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     const idempotencyKey = `turn:${record.session.id}:${turnId}:reserve`
     try {
       return await this.creditBackend.reserveCredits(record.userId, {
@@ -1841,6 +2153,8 @@ export class BeeGameSessionManager {
         weightedTokens: tokenDelta,
         settleToTotalTokens: usage.total_tokens,
       }
+      record.pendingCreditRetryFailures = 0
+      record.pendingCreditRetryAfter = 0
       this.append(record, 'system.status', toErrorMessage(err), {
         type: 'credit.settle_pending',
         reservationId: reservation.id,
@@ -1894,6 +2208,8 @@ export class BeeGameSessionManager {
         kind: 'refund',
         reservation,
       }
+      record.pendingCreditRetryFailures = 0
+      record.pendingCreditRetryAfter = 0
       this.append(record, 'system.status', toErrorMessage(err), {
         type: 'credit.refund_pending',
         reservationId: reservation.id,
@@ -1987,15 +2303,19 @@ export class BeeGameSessionManager {
       const launch = parseAsyncSubagentLaunch(output)
       if (!launch) continue
       if (hasCompletedSubagentOutput(record, launch.agentId)) continue
-      record.monitoredSubagentOutputFiles.add(launch.outputFile)
       let raw = ''
       try {
         raw = readFileSync(launch.outputFile, 'utf8')
       } catch {
+        this.maybeStartSubagentOutputMonitor(record, event)
         continue
       }
       const result = extractCompletedSubagentMessage(raw)
-      if (!result) continue
+      if (!result) {
+        this.maybeStartSubagentOutputMonitor(record, event)
+        continue
+      }
+      record.monitoredSubagentOutputFiles.add(launch.outputFile)
       this.appendCompletedSubagentOutput(record, {
         toolUseID: getDashboardPayloadString(payload, 'toolUseID'),
         toolName,
@@ -2040,10 +2360,14 @@ export class BeeGameSessionManager {
 
   private resumeDelayedDeliveryValidationIfReady(record: SessionRecord): void {
     if (record.session.status !== 'running' || record.session.turnStatus !== 'idle') return
-    const completedEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.completed')
-    if (!completedEvent) return
-    const pending = Array.isArray(completedEvent.payload?.pendingValidatorTypes)
-      ? completedEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
+    const waitingEvent = [...record.events].reverse().find(event => event.type === 'delivery.validation.waiting')
+    if (!waitingEvent) return
+    const laterTerminal = record.events.some(event => (
+      event.id > waitingEvent.id && event.type === 'delivery.validation.completed'
+    ))
+    if (laterTerminal) return
+    const pending = Array.isArray(waitingEvent.payload?.pendingValidatorTypes)
+      ? waitingEvent.payload.pendingValidatorTypes.filter((item): item is string => typeof item === 'string')
       : []
     if (pending.length === 0) return
     const validationStartIndex = record.events.findLastIndex(event => event.type === 'delivery.validation.started')
@@ -2051,25 +2375,16 @@ export class BeeGameSessionManager {
     const completed = getCompletedDeliveryValidators(validationEvents)
     const failed = getFailedDeliveryValidators(validationEvents)
     if (pending.some(agentType => !completed.has(agentType) && !failed.has(agentType))) return
-    if (pending.some(agentType => failed.has(agentType))) {
-      const contract = record.latestDeliveryContract
-      if (!contract || contract.status === 'passed') return
-      if (record.deliveryRepairAttempts >= MAX_DELIVERY_REPAIR_ATTEMPTS) {
-        this.append(record, 'delivery.repair.exhausted', 'Delivery repair attempts exhausted', {
-          type: 'delivery.repair.exhausted', status: 'needs_user',
-          attempt: record.deliveryRepairAttempts, contract,
-        })
-        return
-      }
+    const contract = this.completeDeliveryValidation(record, Math.max(0, validationStartIndex))
+    record.latestDeliveryContract = contract
+    if (shouldStartDeliveryRepair(record, contract)) {
       this.appendDeliveryRepairQueued(record, contract)
       void this.startDeliveryRepair(record, contract).catch(error => {
         this.appendDeliveryRepairResumeFailure(record, error)
       })
-      return
+    } else if (pending.some(agentType => failed.has(agentType)) || contract.status === 'blocked') {
+      this.appendDeliveryPipelineBlocked(record, contract)
     }
-    void this.startDeliveryValidation(record).catch(error => {
-      this.appendDeliveryValidationFailure(record, 'Delayed delivery validation could not restart', error)
-    })
   }
 }
 
@@ -2567,25 +2882,278 @@ function withAssetIntegrationContract(prompt: string): string {
 }
 
 function withDeliveryContract(prompt: string): string {
-  return `${prompt}\n\nEvidence-backed delivery contract:\n- The system has created docs/delivery-contract.json. Populate only its declarative requirements, required capabilities, and structured player paths. Use stable ids, explicit mvp/roadmap scope, required evidence kinds, and observable actions/assertions.\n- Never add status, evidence, verifiedCapabilities, acceptedAt, or validatedAt. Those outcomes are owned by the independent validation pipeline and persisted outside the project-authored declaration.\n- Do not derive actions, adapters, or acceptance behavior from project names or natural-language keyword matching. The selected project adapter must be declared explicitly (for asset projects, project_target.validation_adapter may carry its id).\n- Treat the current project directory as the complete implementation boundary. Never inspect parent or sibling directories to discover adapters, skills, templates, or host implementation details.\n- Adapter identity comes from the explicit project target selected in the build brief. Skill availability comes only from the runtime Skill tool catalog; if a capability is unavailable, record it as required and continue valid project implementation so independent validation can report the blocker.\n- The acceptance checklist remains unchecked until evidence-backed validation completes. Never write accepted or checked states as an implementation claim.\n- Each MVP player path must cover launch/entry, core actions, observable state change, progress or completion, and restart/continue/recovery.\n- If validation fails, fix the implementation and rerun the affected path; do not weaken the declaration to make the failure disappear.`
-}
-
-function deliveryValidationResponseSchema(): string {
   return [
-    'Return one JSON object only with this exact response shape:',
-    '{"status":"passed|failed|untested|blocked","summary":"...","requiredCapabilities":["skill:<invoked-skill-slug>"],"requirements":[{"id":"stable-id-from-project-contract","title":"...","scope":"mvp|roadmap","status":"planned|implemented|statically_verified|runtime_verified|accepted|failed|blocked","evidenceRequired":["implementation|build|test|runtime|asset|skill|document"],"evidence":[{"kind":"runtime","eventId":"validator-task-tool-use-id","source":"...","detail":"..."}],"detail":"..."}],"findings":[{"requirementId":"...","requirement":"...","status":"passed|failed|untested|blocked","detail":"...","evidence":[]}]}',
-    'Evidence eventId must be the Task tool-use id of the validator that observed it. Unsupported ids are discarded.',
+    prompt,
+    '',
+    'Evidence-backed delivery contract:',
+    '- Before implementation, read the approved GDD, technical design, UI/audio/art specifications, and acceptance documents in this project. Treat them as the source of truth.',
+    '- Complete and validate docs/delivery-contract.json before the first code, asset, build, dependency, or shell mutation. Implementation is denied until the contract is valid.',
+    '- Populate docs/delivery-contract.json only with declarative requirements, registered required capabilities, and structured player paths.',
+    '- Requirement shape: {"id":"stable-id","title":"...","scope":"mvp|roadmap","sourceRefs":[{"path":"project-relative-document-path","locator":"exact text present in the approved document"}],"evidenceRequired":["implementation|build|test|runtime|asset|skill|document"]}. sourceRefs are mandatory and every locator must exist verbatim in its source document.',
+    '- Player path phases must use exactly: {"entry":[{"action":{"...":"adapter action"},"assertions":[{"...":"observable assertion"}]}],"core_action":[...],"state_change":[...],"completion":[...],"recovery":[...]}. Every action and assertion object must be non-empty and use the explicitly selected adapter vocabulary; prose strings, placeholders, and phase objects containing actions/assertions arrays are invalid.',
+    '- Before gameplay code, map every normative MVP statement to a requirement and every MVP gameplay requirement to at least one player path.',
+    '- Never add validator-owned status/evidence fields, author docs/validation-report.md, or pre-check acceptance items.',
+    '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
+    '- requiredCapabilities may contain only registered skill:<id> or adapter:<id> values. Framework, language, rendering, input, and state-management names are implementation details, not validation capabilities.',
+    '- Invoke applicable skills from the runtime Skill catalog. Missing required capability must be declared, never simulated.',
+    '- Fix validation failures without weakening sourceRefs, requirements, evidence requirements, or player paths.',
   ].join('\n')
 }
 
-function invalidDeliveryReview(): ParsedDeliveryReview {
-  return {
-    status: 'untested',
-    summary: 'Independent delivery validators did not return a valid structured contract.',
-    requirements: [],
-    requiredCapabilities: [],
-    findings: [],
+function buildReviewFromValidatorReports(
+  audit: ProjectDeliveryContractAudit,
+  validators: Map<string, BeeGameEvent>,
+  documentAuditEvidenceId: string,
+  runtimeAdapterEvent?: BeeGameEvent,
+): ParsedDeliveryReview {
+  const reports = new Map<string, ReturnType<typeof parseDeliveryValidatorReport>>()
+  const findings: ParsedDeliveryReview['findings'] = []
+  let blocked = false
+  let failed = !audit.valid
+  const requiredAdapterId = resolveRequiredValidationAdapter(audit.requiredCapabilities)
+  const runtimeAdapterResult = parseRuntimeAdapterResult(runtimeAdapterEvent)
+  const runtimeAdapterStatus = getDashboardPayloadString(runtimeAdapterEvent?.payload, 'status')
+  if (requiredAdapterId && !runtimeAdapterEvent) {
+    blocked = true
+    findings.push({
+      requirementId: 'runtime-validation-adapter',
+      requirement: 'Executable runtime validation adapter',
+      status: 'blocked',
+      detail: `The required runtime adapter did not run: ${requiredAdapterId}`,
+      evidence: [],
+    })
+  } else if (requiredAdapterId && runtimeAdapterStatus === 'blocked') {
+    blocked = true
+    findings.push({
+      requirementId: 'runtime-validation-adapter',
+      requirement: 'Executable runtime validation adapter',
+      status: 'blocked',
+      detail: getDashboardPayloadString(runtimeAdapterEvent?.payload, 'error') || `Runtime adapter is unavailable: ${requiredAdapterId}`,
+      evidence: [],
+    })
+  } else if (requiredAdapterId && runtimeAdapterStatus === 'failed') {
+    failed = true
+    findings.push({
+      requirementId: 'runtime-validation-adapter',
+      requirement: 'Executable runtime validation adapter',
+      status: 'failed',
+      detail: `The runtime adapter reported failed player-path assertions: ${requiredAdapterId}`,
+      evidence: [],
+    })
+  } else if (requiredAdapterId && !runtimeAdapterResult) {
+    blocked = true
+    findings.push({
+      requirementId: 'runtime-validation-adapter',
+      requirement: 'Executable runtime validation adapter',
+      status: 'blocked',
+      detail: `The runtime adapter returned an invalid result: ${requiredAdapterId}`,
+      evidence: [],
+    })
   }
+
+  for (const validatorId of DELIVERY_VALIDATOR_AGENT_TYPES) {
+    const event = validators.get(validatorId)
+    if (!event) continue
+    const report = parseDeliveryValidatorReport(
+      getDashboardPayloadString(event.payload, 'output'),
+      validatorId,
+    )
+    reports.set(validatorId, report)
+    if (!report) {
+      blocked = true
+      findings.push({
+        requirementId: 'independent-validation-protocol',
+        requirement: 'Independent validation protocol',
+        status: 'blocked',
+        detail: `${validatorId} did not return its required structured report.`,
+        evidence: [],
+      })
+      continue
+    }
+    if (report.status === 'blocked') blocked = true
+    if (report.status === 'failed') failed = true
+    const eventId = getDashboardPayloadString(event.payload, 'toolUseID') || String(event.id)
+    for (const finding of report.findings) {
+      findings.push({
+        ...finding,
+        evidence: finding.evidence.map(evidence => ({ ...evidence, eventId })),
+      })
+    }
+  }
+
+  const contractReport = reports.get('beegame-contract-validator')
+  const runtimeRequirementIds = new Set(audit.playerPathRequirementIds)
+  const requirements: DeliveryRequirement[] = audit.requirements.map(declaration => {
+    const evidenceRequired = [...new Set([
+      ...declaration.evidenceRequired,
+      'document' as const,
+      'implementation' as const,
+      ...(runtimeRequirementIds.has(declaration.id) ? ['runtime' as const] : []),
+    ])]
+    const evidence: DeliveryEvidence[] = declaration.sourceRefs.map(sourceRef => ({
+      kind: 'document',
+      eventId: documentAuditEvidenceId,
+      source: `${sourceRef.path}#${sourceRef.locator}`,
+      detail: `Requirement is traced to ${sourceRef.path} at ${sourceRef.locator}.`,
+    }))
+    const validatorStatuses: DeliveryCheckStatus[] = []
+    for (const [validatorId, report] of reports) {
+      const requirement = report?.requirements.find(item => item.id === declaration.id)
+      if (!requirement) continue
+      validatorStatuses.push(requirement.status)
+      const event = validators.get(validatorId)
+      const eventId = event
+        ? getDashboardPayloadString(event.payload, 'toolUseID') || String(event.id)
+        : undefined
+      const acceptedEvidence = requirement.evidence.filter(item => (
+        item.kind !== 'runtime' || (
+          !requiredAdapterId &&
+          Boolean(item.source && audit.playerPathIds.includes(item.source))
+        )
+      ))
+      if (acceptedEvidence.length !== requirement.evidence.length) {
+        failed = true
+        findings.push({
+          requirementId: declaration.id,
+          requirement: declaration.title,
+          status: 'failed',
+          detail: 'Runtime evidence must identify an exact declared player path id; static files and build output cannot satisfy it.',
+          evidence: [],
+        })
+      }
+      evidence.push(...acceptedEvidence.map(item => ({ ...item, ...(eventId ? { eventId } : {}) })))
+    }
+    if (requiredAdapterId) {
+      const relatedPathIds = Object.entries(audit.playerPathRequirements)
+        .filter(([, requirementIds]) => requirementIds.includes(declaration.id))
+        .map(([pathId]) => pathId)
+      const adapterEventId = runtimeAdapterEvent ? String(runtimeAdapterEvent.id) : undefined
+      const adapterEvidence = (runtimeAdapterResult?.evidence ?? []).filter(item => (
+        item.kind === 'runtime' && Boolean(item.source && relatedPathIds.includes(item.source))
+      ))
+      evidence.push(...adapterEvidence.map(item => ({
+        ...item,
+        ...(adapterEventId ? { eventId: adapterEventId } : {}),
+      })))
+      if (runtimeAdapterStatus === 'blocked' || !runtimeAdapterEvent) validatorStatuses.push('blocked')
+      if ((runtimeAdapterResult?.failures ?? []).some(item => relatedPathIds.includes(item.pathId))) {
+        validatorStatuses.push('failed')
+      }
+    }
+    const contractRequirement = contractReport?.requirements.find(item => item.id === declaration.id)
+    if (declaration.scope === 'mvp' && !contractRequirement) {
+      failed = true
+      findings.push({
+        requirementId: declaration.id,
+        requirement: declaration.title,
+        status: 'failed',
+        detail: 'The contract validator did not prove this documented MVP requirement is implemented.',
+        evidence: [],
+      })
+    }
+    const missingEvidence = evidenceRequired.filter(kind => !evidence.some(item => item.kind === kind))
+    const requirementBlocked = validatorStatuses.includes('blocked')
+    const requirementFailed = validatorStatuses.includes('failed') || missingEvidence.length > 0
+    if (requirementBlocked) blocked = true
+    if (requirementFailed) failed = true
+    return {
+      id: declaration.id,
+      title: declaration.title,
+      scope: declaration.scope,
+      status: declaration.scope === 'roadmap'
+        ? 'planned'
+        : requirementBlocked
+          ? 'blocked'
+          : requirementFailed
+            ? 'failed'
+            : evidenceRequired.includes('runtime')
+              ? 'runtime_verified'
+              : 'accepted',
+      evidenceRequired,
+      evidence,
+      ...(missingEvidence.length > 0
+        ? { detail: `Missing required evidence: ${missingEvidence.join(', ')}.` }
+        : {}),
+    }
+  })
+
+  return {
+    status: blocked ? 'blocked' : failed ? 'failed' : 'passed',
+    summary: blocked
+      ? 'Independent sub-agent validation is blocked.'
+      : failed
+        ? 'Document conformance or delivery evidence failed independent validation.'
+        : 'All documented MVP requirements passed independent sub-agent validation.',
+    requirements,
+    requiredCapabilities: audit.requiredCapabilities,
+    findings,
+  }
+}
+
+function parseRuntimeAdapterResult(event: BeeGameEvent | undefined): DeliveryValidationResult | undefined {
+  const result = getDashboardPayloadRecord(event?.payload, 'result')
+  if (
+    typeof result.adapterId !== 'string' ||
+    typeof result.passed !== 'boolean' ||
+    !Array.isArray(result.evidence) ||
+    !Array.isArray(result.failures)
+  ) return undefined
+  return result as DeliveryValidationResult
+}
+
+function writeDeliveryValidationReport(
+  workspacePath: string,
+  contract: DeliveryContract,
+  findings: ParsedDeliveryReview['findings'],
+): void {
+  const docsDirectory = resolve(workspacePath, 'docs')
+  mkdirSync(docsDirectory, { recursive: true })
+  const reportPath = resolve(docsDirectory, 'validation-report.md')
+  const temporaryPath = resolve(docsDirectory, `.validation-report.${randomUUID()}.tmp`)
+  const lines = [
+    '# Delivery Validation Report',
+    '',
+    `Status: ${contract.status}`,
+    '',
+    contract.summary,
+    '',
+    '## Requirements',
+    '',
+  ]
+  for (const requirement of contract.requirements) {
+    lines.push(`### ${requirement.id}: ${requirement.title}`)
+    lines.push('')
+    lines.push(`- Scope: ${requirement.scope}`)
+    lines.push(`- Status: ${requirement.status}`)
+    lines.push(`- Required evidence: ${requirement.evidenceRequired.join(', ') || 'none'}`)
+    if (requirement.detail) lines.push(`- Detail: ${singleLine(requirement.detail)}`)
+    if (requirement.evidence.length === 0) {
+      lines.push('- Evidence: none')
+    } else {
+      lines.push('- Evidence:')
+      for (const evidence of requirement.evidence) {
+        const source = evidence.source ? ` from ${singleLine(evidence.source)}` : ''
+        lines.push(`  - ${evidence.kind}${source}: ${singleLine(evidence.detail)}`)
+      }
+    }
+    lines.push('')
+  }
+  lines.push('## Findings', '')
+  if (findings.length === 0) lines.push('No unresolved findings.', '')
+  else {
+    for (const finding of findings) {
+      const id = finding.requirementId ? `${finding.requirementId}: ` : ''
+      lines.push(`- [${finding.status}] ${id}${singleLine(finding.requirement)} — ${singleLine(finding.detail)}`)
+    }
+    lines.push('')
+  }
+  lines.push('This report is generated by the host from independent validator evidence. Project agents cannot author or edit it.', '')
+  writeFileSync(temporaryPath, lines.join('\n'), 'utf8')
+  renameSync(temporaryPath, reportPath)
+}
+
+function singleLine(value: string): string {
+  return value.replaceAll('\r', ' ').replaceAll('\n', ' ').trim()
 }
 
 function getCompletedDeliveryValidators(events: BeeGameEvent[]): Map<string, BeeGameEvent> {
@@ -2616,6 +3184,8 @@ function getPendingDeliveryValidators(events: BeeGameEvent[]): Set<string> {
       pending.add(agentType)
     }
   }
+  for (const agentType of getCompletedDeliveryValidators(events).keys()) pending.delete(agentType)
+  for (const agentType of getFailedDeliveryValidators(events)) pending.delete(agentType)
   return pending
 }
 
@@ -2663,6 +3233,11 @@ function getVerifiedDeliveryCapabilities(
 ): string[] {
   const capabilities = new Set<string>()
   for (const event of events) {
+    if (event.type === 'delivery.runtime_adapter.completed') {
+      const capability = getDashboardPayloadString(event.payload, 'capability')
+      if (capability) capabilities.add(capability)
+      continue
+    }
     if (event.type !== 'tool.completed') continue
     const toolName = getDashboardPayloadString(event.payload, 'toolName')
     capabilities.add(`tool:${toolName}`)
@@ -2700,9 +3275,12 @@ function parseValidatorReport(value: string): { verifiedCapabilities: string[] }
 function retainVerifiedDeliveryEvidence(
   review: ParsedDeliveryReview,
   verifiedEvidenceIds: Set<string>,
+  workspacePath: string,
 ): ParsedDeliveryReview {
   const retain = (evidence: DeliveryEvidence[]) => evidence.filter(item => (
-    Boolean(item.eventId) && verifiedEvidenceIds.has(item.eventId ?? '')
+    Boolean(item.eventId) &&
+    verifiedEvidenceIds.has(item.eventId ?? '') &&
+    isExistingProjectEvidenceSource(item, workspacePath)
   ))
   return {
     ...review,
@@ -2715,6 +3293,20 @@ function retainVerifiedDeliveryEvidence(
       evidence: retain(finding.evidence),
     })),
   }
+}
+
+function isExistingProjectEvidenceSource(evidence: DeliveryEvidence, workspacePath: string): boolean {
+  if (!['implementation', 'test', 'document', 'asset'].includes(evidence.kind)) return true
+  if (!evidence.source) return false
+  const sourcePath = evidence.source.split('#', 1)[0]?.trim()
+  if (!sourcePath || isAbsolute(sourcePath)) return false
+  const root = resolve(workspacePath)
+  const absolutePath = resolve(root, sourcePath)
+  const relativePath = relative(root, absolutePath)
+  return Boolean(relativePath) &&
+    !relativePath.startsWith('..') &&
+    !isAbsolute(relativePath) &&
+    existsSync(absolutePath)
 }
 
 function recoverLatestDeliveryContract(events: BeeGameEvent[]): DeliveryContract | undefined {
@@ -2736,6 +3328,122 @@ function recoverDeliveryRepairAttempts(events: BeeGameEvent[]): number {
   return latestContract?.status === 'passed' ? 0 : latest
 }
 
+function shouldStartDeliveryRepair(record: SessionRecord, contract: DeliveryContract): boolean {
+  return contract.status !== 'passed' &&
+    hasRepairableProjectFailure(contract) &&
+    !hasRepeatedDeliveryFailure(record, contract)
+}
+
+function hasRepairableProjectFailure(contract: DeliveryContract): boolean {
+  return contract.requirements.some(requirement => (
+    requirement.scope === 'mvp' && requirement.status === 'failed'
+  ))
+}
+
+function hasRepeatedDeliveryFailure(record: SessionRecord, contract: DeliveryContract): boolean {
+  const expected = deliveryFailureFingerprint(contract)
+  const currentRevision = getProjectMutationRevision(record.events)
+  let identical = 0
+  for (let index = record.events.length - 1; index >= 0; index -= 1) {
+    const event = record.events[index]
+    if (event?.type !== 'delivery.contract.updated') continue
+    const candidate = getDashboardPayloadRecord(event.payload, 'contract') as DeliveryContract
+    if (deliveryFailureFingerprint(candidate) !== expected) break
+    if (getDashboardPayloadString(event.payload, 'projectRevision') !== currentRevision) break
+    identical += 1
+    if (identical >= MAX_IDENTICAL_DELIVERY_FAILURES) return true
+  }
+  return false
+}
+
+function getProjectMutationRevision(events: BeeGameEvent[]): string {
+  const revision = createHash('sha256')
+  let count = 0
+  for (const event of events) {
+    if (event.type !== 'tool.completed') continue
+    const toolName = getDashboardPayloadString(event.payload, 'toolName')
+    if (toolName !== 'Bash' && !isFileMutationTool(toolName)) continue
+    count += 1
+    revision.update(String(event.id))
+    revision.update(toolName)
+    revision.update(JSON.stringify(getDashboardPayloadRecord(event.payload, 'input')))
+  }
+  return `${count}:${revision.digest('hex')}`
+}
+
+function deliveryFailureFingerprint(contract: DeliveryContract): string {
+  return JSON.stringify({
+    status: contract.status,
+    requirements: contract.requirements
+      .filter(item => item.scope === 'mvp' && item.status !== 'accepted' && item.status !== 'runtime_verified')
+      .map(item => ({
+        id: item.id,
+        status: item.status,
+        missingEvidence: item.evidenceRequired
+          .filter(kind => !item.evidence.some(evidence => evidence.kind === kind))
+          .sort(),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  })
+}
+
+const MUTABLE_DELIVERY_DOCUMENTS = new Set([
+  'docs/validation-report.md',
+])
+
+async function captureApprovedDocumentSnapshot(workspacePath: string): Promise<Record<string, string>> {
+  const root = resolve(workspacePath)
+  const docsRoot = resolve(root, 'docs')
+  if (!existsSync(docsRoot)) return {}
+  const snapshot: Record<string, string> = {}
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(path)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const projectPath = relative(root, path).split('\\').join('/')
+      if (MUTABLE_DELIVERY_DOCUMENTS.has(projectPath)) continue
+      snapshot[projectPath] = createHash('sha256').update(await readFile(path)).digest('hex')
+    }
+  }
+  await visit(docsRoot)
+  return snapshot
+}
+
+function getApprovedDocumentChanges(
+  workspacePath: string,
+  snapshot: Record<string, string>,
+): string[] {
+  const root = resolve(workspacePath)
+  const changes: string[] = []
+  for (const [projectPath, expectedHash] of Object.entries(snapshot)) {
+    const path = resolve(root, projectPath)
+    if (!existsSync(path)) {
+      changes.push(projectPath)
+      continue
+    }
+    const actualHash = createHash('sha256').update(readFileSync(path)).digest('hex')
+    if (actualHash !== expectedHash) changes.push(projectPath)
+  }
+  return changes.sort((left, right) => left.localeCompare(right))
+}
+
+function recoverApprovedDocumentSnapshot(events: BeeGameEvent[]): Record<string, string> {
+  const event = [...events].reverse().find(item => item.type === 'delivery.specification.locked')
+  const documents = getDashboardPayloadRecord(event?.payload, 'documents')
+  return Object.fromEntries(
+    Object.entries(documents).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
+}
+
+function hasApprovedDocumentSnapshot(events: BeeGameEvent[]): boolean {
+  return Object.keys(recoverApprovedDocumentSnapshot(events)).length > 0
+}
+
 function getLatestDeliveryPipelineTransition(events: BeeGameEvent[]): BeeGameEvent | undefined {
   return [...events].reverse().find(event => (
     event.type === 'delivery.validation.started' ||
@@ -2743,7 +3451,8 @@ function getLatestDeliveryPipelineTransition(events: BeeGameEvent[]): BeeGameEve
     event.type === 'delivery.repair.queued' ||
     event.type === 'delivery.repair.started' ||
     event.type === 'delivery.repair.completed' ||
-    event.type === 'delivery.repair.exhausted'
+    event.type === 'delivery.repair.exhausted' ||
+    event.type === 'delivery.pipeline.blocked'
   ))
 }
 
@@ -3217,6 +3926,49 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
+function isImplementationMutationTool(
+  workspacePath: string,
+  request: DashboardPermissionRequest,
+): boolean {
+  if (request.toolName === 'Bash') return true
+  if (!isFileMutationTool(request.toolName)) return false
+  const artifactPath = getMutationArtifactPath(request.input)
+  if (!artifactPath) return true
+  const projectPath = relative(workspacePath, resolve(workspacePath, artifactPath)).split('\\').join('/')
+  return projectPath !== 'docs' && !projectPath.startsWith('docs/')
+}
+
+function getProtectedDeliveryDocument(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): string | undefined {
+  if (!isFileMutationTool(request.toolName)) return undefined
+  const artifactPath = getMutationArtifactPath(request.input)
+  if (!artifactPath) return undefined
+  const absolutePath = resolve(record.session.cwd, artifactPath)
+  const projectPath = relative(record.session.cwd, absolutePath).split('\\').join('/')
+  if (projectPath === 'docs/validation-report.md') return projectPath
+  if (
+    record.approvedDocumentSnapshotLocked &&
+    (projectPath === 'docs' || projectPath.startsWith('docs/'))
+  ) return projectPath
+  if (record.currentTurnKind === 'delivery_repair' && isDeliveryEvidenceArtifact(record.latestDeliveryContract, projectPath)) {
+    return projectPath
+  }
+  return undefined
+}
+
+function isDeliveryEvidenceArtifact(
+  contract: DeliveryContract | undefined,
+  projectPath: string,
+): boolean {
+  if (!contract) return false
+  return contract.requirements.some(requirement => requirement.evidence.some(evidence => (
+    (evidence.kind === 'test' || evidence.kind === 'document') &&
+    evidence.source === projectPath
+  )))
+}
+
 function getBeeGamePermissionPolicyDecision(
   record: SessionRecord,
   allowedRoot: string,
@@ -3345,6 +4097,28 @@ function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
   record.currentTurnId = turnId
   record.session.turnStatus = 'idle'
   record.session.status = 'running'
+  const interruptedTurnKind = [...record.events].reverse().find(event => (
+    event.turnId === turnId && event.type === 'user.message'
+  ))?.payload?.displayKind
+  if (interruptedTurnKind === 'delivery_validation') {
+    const interruptedValidation: BeeGameEvent = {
+      id: record.nextEventId,
+      sessionId: record.session.id,
+      turnId,
+      type: 'delivery.validation.completed',
+      text: 'Delivery validation was interrupted before all validators reached a terminal result.',
+      payload: {
+        type: 'delivery.validation.completed',
+        status: 'blocked',
+        reason: 'interrupted',
+        retryable: true,
+      },
+      createdAt: new Date(),
+    }
+    record.events.push(interruptedValidation)
+    appendTranscriptEvent(record.transcriptPath, interruptedValidation)
+    record.nextEventId += 1
+  }
   record.events.push({
     id: record.nextEventId,
     sessionId: record.session.id,
@@ -4085,7 +4859,7 @@ function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
   if (textDelta.trim()) return mapTextEvent('assistant.partial', textDelta)
 
   const thinking = extractStreamThinkingStatus(record, message)
-  if (!thinking) return null
+  if (!thinking || thinking === 'streaming') return null
   return {
     type: 'assistant.thinking',
     text: 'Thinking',

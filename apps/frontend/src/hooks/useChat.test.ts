@@ -15,6 +15,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     addMessage: vi.fn(),
     updateMessage: vi.fn(),
     updateThought: vi.fn(),
+    removeMessage: vi.fn(),
     finalizeMessage: vi.fn(),
     setCurrentSender: vi.fn(),
     setIsStreaming: vi.fn(),
@@ -175,6 +176,35 @@ describe('useChat clarification gate handling', () => {
     });
 
     expect(result.current.canContinue).toBe(false);
+  });
+
+  it('opens and closes one redacted thinking status by stable message id', () => {
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'think_start',
+        task_id: 'task_1',
+        sender: 'beegame',
+        content: 'Thinking',
+        message_id: 'thinking-turn-1',
+        timestamp: 100,
+      });
+    });
+    expect(chatStoreState.finalizeMessage).toHaveBeenCalledWith(
+      'task_1', 'Thinking', 'beegame', 'thought', false, undefined, undefined,
+      { taskKind: 'assistant_thinking' }, 100, 'thinking-turn-1',
+    );
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'think_end',
+        task_id: 'task_1',
+        sender: 'beegame',
+        message_id: 'thinking-turn-1',
+      });
+    });
+    expect(chatStoreState.removeMessage).toHaveBeenCalledWith('thinking-turn-1');
   });
 
   it('renders context updates as collapsed chat-visible system evidence', () => {

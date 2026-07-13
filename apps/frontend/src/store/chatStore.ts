@@ -58,6 +58,7 @@ interface ChatState {
     messageId?: string
   ) => void;
   updateThought: (taskId: string, thought: string, sender: string, timestamp?: number, messageId?: string) => void;
+  removeMessage: (messageId: string) => void;
   finalizeMessage: (
     taskId: string,
     content: string,
@@ -312,6 +313,21 @@ export const useChatStore = create<ChatState>()(
             },
             streamingMessageId: messageId || fallbackId,
             isStreaming: true,
+          };
+        }),
+
+      removeMessage: (messageId) =>
+        set((state) => {
+          const messages = state.messages.filter((message) => message.id !== messageId && message.messageId !== messageId);
+          if (messages.length === state.messages.length) return state;
+          const lastStreamingIdByTask = Object.fromEntries(
+            Object.entries(state.lastStreamingIdByTask).filter(([, id]) => id !== messageId),
+          );
+          return {
+            messages,
+            messageIndexMap: rebuildIndexMap(messages),
+            lastStreamingIdByTask,
+            streamingMessageId: state.streamingMessageId === messageId ? null : state.streamingMessageId,
           };
         }),
 

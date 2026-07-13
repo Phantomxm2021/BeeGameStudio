@@ -1,4 +1,6 @@
 import type { DeliveryEvidence } from './delivery-contract'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 export type DeliveryValidationRequest = {
   workspacePath: string
@@ -50,4 +52,44 @@ export function readExplicitValidationAdapter(projectTarget: unknown): string | 
   if (!projectTarget || typeof projectTarget !== 'object' || Array.isArray(projectTarget)) return undefined
   const value = (projectTarget as Record<string, unknown>).validation_adapter
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+export function resolveRequiredValidationAdapter(requiredCapabilities: string[]): string | undefined {
+  const ids = requiredCapabilities
+    .filter(capability => capability.startsWith('adapter:'))
+    .map(capability => capability.slice('adapter:'.length).trim())
+    .filter(Boolean)
+  return ids.length === 1 ? ids[0] : undefined
+}
+
+export async function readDeliveryValidationRequest(
+  workspacePath: string,
+  adapterId: string,
+): Promise<DeliveryValidationRequest> {
+  const contractPath = resolve(workspacePath, 'docs', 'delivery-contract.json')
+  const contract = JSON.parse(await readFile(contractPath, 'utf8')) as unknown
+  if (!isRecord(contract) || contract.version !== 1 || !Array.isArray(contract.playerPaths)) {
+    throw new Error('A valid delivery contract is required for runtime validation')
+  }
+  const playerPaths = contract.playerPaths.map((value, index) => {
+    if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.phases)) {
+      throw new Error(`Player path ${index} is invalid`)
+    }
+    const actions: Array<Record<string, unknown>> = []
+    const assertions: Array<Record<string, unknown>> = []
+    for (const steps of Object.values(value.phases)) {
+      if (!Array.isArray(steps)) continue
+      for (const step of steps) {
+        if (!isRecord(step) || !isRecord(step.action) || !Array.isArray(step.assertions)) continue
+        actions.push(step.action)
+        assertions.push(...step.assertions.filter(isRecord))
+      }
+    }
+    return { id: value.id.trim(), actions, assertions }
+  })
+  return { workspacePath, adapterId, contractVersion: 1, playerPaths }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

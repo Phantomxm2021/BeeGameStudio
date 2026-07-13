@@ -67,6 +67,19 @@ export type ParsedDeliveryReview = {
   }>
 }
 
+export type DeliveryValidatorReport = {
+  validatorId: string
+  status: 'passed' | 'failed' | 'blocked'
+  summary: string
+  requirements: Array<{
+    id: string
+    status: DeliveryCheckStatus
+    evidence: DeliveryEvidence[]
+  }>
+  findings: ParsedDeliveryReview['findings']
+  verifiedCapabilities: string[]
+}
+
 const CHECK_STATUSES = new Set<DeliveryCheckStatus>([
   'passed',
   'failed',
@@ -116,6 +129,46 @@ export function parseDeliveryReview(text: string | undefined): ParsedDeliveryRev
   }
 }
 
+export function parseDeliveryValidatorReport(
+  text: string | undefined,
+  expectedValidatorId: string,
+): DeliveryValidatorReport | undefined {
+  if (!text?.trim()) return undefined
+  try {
+    const value = JSON.parse(text.trim()) as unknown
+    if (
+      !isRecord(value) ||
+      value.validatorId !== expectedValidatorId ||
+      (value.status !== 'passed' && value.status !== 'failed' && value.status !== 'blocked') ||
+      typeof value.summary !== 'string' ||
+      !Array.isArray(value.requirements)
+    ) return undefined
+    const requirements: DeliveryValidatorReport['requirements'] = []
+    const ids = new Set<string>()
+    for (const item of value.requirements) {
+      if (!isRecord(item)) return undefined
+      const id = normalizedString(item.id)
+      if (!id || ids.has(id) || !isDeliveryCheckStatus(item.status)) return undefined
+      const evidence = parseEvidence(item.evidence)
+      if (!evidence || evidence.some(entry => Boolean(entry.eventId))) return undefined
+      ids.add(id)
+      requirements.push({ id, status: item.status, evidence })
+    }
+    const findings = parseFindings(value.findings)
+    if (!findings) return undefined
+    return {
+      validatorId: expectedValidatorId,
+      status: value.status,
+      summary: value.summary.trim(),
+      requirements,
+      findings,
+      verifiedCapabilities: stringArray(value.verifiedCapabilities),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export function createDeliveryContract(
   review: ParsedDeliveryReview,
   verifiedCapabilities: string[],
@@ -135,7 +188,7 @@ export function createDeliveryContract(
   })
   const status: DeliveryCheckStatus = review.status === 'passed' && requirementsAcceptable && missingCapabilities.length === 0
     ? 'passed'
-    : review.status === 'blocked'
+    : review.status === 'blocked' || missingCapabilities.length > 0
       ? 'blocked'
       : review.status === 'failed' || requirements.some(item => item.status === 'failed')
         ? 'failed'

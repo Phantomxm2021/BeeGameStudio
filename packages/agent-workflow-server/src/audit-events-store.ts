@@ -18,7 +18,9 @@ export type AuditEventsStoreOptions = {
   dataDir?: string
 }
 
-export type AppendAuditEventInput = Omit<BeeGameAuditEvent, 'id' | 'createdAt'>
+export type AppendAuditEventInput = Omit<BeeGameAuditEvent, 'id' | 'createdAt'> & {
+  projectReference?: 'linked' | 'detached'
+}
 
 export function getDefaultAuditEventsStoreDir(): string {
   return (

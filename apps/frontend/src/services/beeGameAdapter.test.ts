@@ -2483,7 +2483,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(firstPoll.messages.some(message => message.type === 'token')).toBe(false);
   });
 
-  it('maps BeeGame thinking events to redacted status messages', async () => {
+  it('maps BeeGame thinking events to one redacted start/end lifecycle', async () => {
     localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
         projectId: 'project_thinking',
@@ -2506,13 +2506,18 @@ describe('beeGameAdapter prompt rules', () => {
 
     const polled = await beeGameAdapter.pollMessages('project_thinking', 0);
 
-    expect(polled.messages).toHaveLength(1);
+    expect(polled.messages).toHaveLength(2);
     expect(polled.messages[0]).toEqual(expect.objectContaining({
-      type: 'agent_message',
+      type: 'think_start',
       sender: 'beegame',
       content: 'Thinking',
       task_kind: 'assistant_thinking',
-      message_id: 'beegame-event-31',
+      message_id: 'beegame-thinking-turn-1',
+    }));
+    expect(polled.messages[1]).toEqual(expect.objectContaining({
+      type: 'think_end',
+      sender: 'beegame',
+      message_id: 'beegame-thinking-turn-1',
     }));
     expect(JSON.stringify(polled.messages)).not.toContain('private reasoning');
   });

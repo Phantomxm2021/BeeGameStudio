@@ -1165,7 +1165,9 @@ export class SupabaseDashboardStore {
       {
         actor_id: input.actorId || ownerId,
         workspace_id: null,
-        project_id: input.targetType === 'project' ? input.targetId : null,
+        project_id: input.targetType === 'project' && input.projectReference !== 'detached'
+          ? input.targetId
+          : null,
         action: input.action,
         metadata,
       },

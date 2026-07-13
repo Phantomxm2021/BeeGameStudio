@@ -29,6 +29,10 @@ import {
 } from './beegame/attachment-build'
 import { createDeliveryGateFailure } from './beegame/delivery-contract'
 import {
+  DeliveryValidationAdapterRegistry,
+  type DeliveryValidationAdapter,
+} from './beegame/delivery-validation-adapter'
+import {
   BeeGamePreviewManager,
   type BeeGamePreviewSnapshot,
   type BeeGamePreviewPortAllocator,
@@ -261,6 +265,7 @@ export type AgentWorkflowAppOptions = {
     candidates?(requirement: ResourceSelectionRequirement): Promise<Array<ResourceSelectionResult>>
     refreshBinding?(binding: { packId: string; packVersion: string; elementId: string; dependencies?: Array<{ key: string; elementId: string }> }): Promise<{ sourceUrl: string; dependencies: Array<{ key: string; sourceUrl: string }> }>
   }
+  deliveryValidationAdapters?: DeliveryValidationAdapter[]
 }
 
 export const ROUTE_PERMISSION = {
@@ -368,6 +373,10 @@ export function createAgentWorkflowApp(
     if (!metadata.projectId || !options.resourceSelectionClient) return
     await autoBindLibraryResourcesInWorkspace(metadata.workspacePath, options.resourceSelectionClient)
   }
+  const deliveryValidationAdapters = new DeliveryValidationAdapterRegistry()
+  for (const adapter of options.deliveryValidationAdapters ?? []) {
+    deliveryValidationAdapters.register(adapter)
+  }
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner,
     dashboardDataRoot,
@@ -384,6 +393,7 @@ export function createAgentWorkflowApp(
     resolveOutboundTarget,
     synchronizeLibraryResources,
     synchronizeLibraryResources,
+    deliveryValidationAdapters,
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -1956,6 +1966,7 @@ export function createAgentWorkflowApp(
             action: 'project.deleted',
             targetType: 'project',
             targetId: c.req.param('id'),
+            projectReference: 'detached',
             metadata: {
               cleanupOutcome,
               storageCleanupOutcome: dashboardRepository.hasSupabaseStorage()
@@ -3772,7 +3783,7 @@ function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
   return {
     status: typeof payload.status === 'string'
       ? payload.status
-      : event.type === 'delivery.validation.started' || event.type === 'delivery.review.started'
+      : event.type === 'delivery.validation.started'
         ? 'validating'
         : 'untested',
     summary: typeof payload.summary === 'string' ? payload.summary : event.text,
@@ -3785,11 +3796,8 @@ function deriveDeliveryReview(events: BeeGameEvent[]): JsonObject | null {
 }
 
 function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
-  const hasNewValidation = events.some(item => item.type === 'delivery.validation.completed')
   return events
-    .filter(item => hasNewValidation
-      ? item.type === 'delivery.validation.completed'
-      : item.type === 'delivery.review.completed')
+    .filter(item => item.type === 'delivery.validation.completed')
     .slice(-20)
     .map(event => {
       const payload: Record<string, unknown> = isObject(event.payload) ? event.payload : {}
@@ -3804,12 +3812,8 @@ function deriveDeliveryReviewHistory(events: BeeGameEvent[]): JsonObject[] {
 }
 
 function findLatestDeliveryValidationEvent(events: BeeGameEvent[]): BeeGameEvent | undefined {
-  const current = [...events].reverse().find(item => (
-    item.type === 'delivery.validation.completed' || item.type === 'delivery.validation.started'
-  ))
-  if (current) return current
   return [...events].reverse().find(item => (
-    item.type === 'delivery.review.completed' || item.type === 'delivery.review.started'
+    item.type === 'delivery.validation.completed' || item.type === 'delivery.validation.started'
   ))
 }
 
@@ -3966,6 +3970,16 @@ function deriveBeeGameRuntimeStatus(
       agentStatus: 'waiting',
     }
   }
+  const deliveryPipeline = deriveActiveDeliveryPipeline(events)
+  if (deliveryPipeline) {
+    return {
+      phase: deliveryPipeline.phase,
+      nextAction: deliveryPipeline.nextAction,
+      updatedAt,
+      activeAgents: deliveryPipeline.activeAgents,
+      agentStatus: deliveryPipeline.agentStatus,
+    }
+  }
   const activeTurn = getActiveBeeGameTurn(events)
   if (activeTurn) {
     return recoveredFromTranscript
@@ -4000,6 +4014,60 @@ function deriveBeeGameRuntimeStatus(
     activeAgents: [],
     agentStatus: 'idle',
   }
+}
+
+function deriveActiveDeliveryPipeline(events: BeeGameEvent[]): {
+  phase: string
+  nextAction: string
+  activeAgents: string[]
+  agentStatus: string
+} | undefined {
+  const latestTransition = [...events].reverse().find(event => (
+    event.type === 'delivery.validation.started' ||
+    event.type === 'delivery.validation.waiting' ||
+    event.type === 'delivery.validation.completed' ||
+    event.type === 'delivery.repair.queued' ||
+    event.type === 'delivery.repair.started' ||
+    event.type === 'delivery.repair.completed' ||
+    event.type === 'delivery.pipeline.blocked'
+  ))
+  if (!latestTransition) return undefined
+  if (latestTransition.type === 'delivery.pipeline.blocked') {
+    return {
+      phase: 'blocked',
+      nextAction: latestTransition.text || 'Resolve delivery validation blocker',
+      activeAgents: [],
+      agentStatus: 'failed',
+    }
+  }
+  if (latestTransition.type === 'delivery.validation.started') {
+    return {
+      phase: 'validation',
+      nextAction: 'Running independent delivery validators',
+      activeAgents: ['beegame-contract-validator', 'beegame-runtime-validator', 'beegame-asset-validator'],
+      agentStatus: 'working',
+    }
+  }
+  if (latestTransition.type === 'delivery.validation.waiting') {
+    const pendingValidatorTypes = Array.isArray(latestTransition.payload?.pendingValidatorTypes)
+      ? latestTransition.payload.pendingValidatorTypes.filter((value): value is string => typeof value === 'string')
+      : []
+    return {
+      phase: 'validation',
+      nextAction: 'Waiting for independent delivery validators',
+      activeAgents: pendingValidatorTypes,
+      agentStatus: 'working',
+    }
+  }
+  if (latestTransition.type === 'delivery.repair.queued' || latestTransition.type === 'delivery.repair.started') {
+    return {
+      phase: 'repair',
+      nextAction: 'Repairing failed delivery requirements',
+      activeAgents: latestTransition.type === 'delivery.repair.started' ? ['beegame'] : [],
+      agentStatus: latestTransition.type === 'delivery.repair.started' ? 'working' : 'waiting',
+    }
+  }
+  return undefined
 }
 
 function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
