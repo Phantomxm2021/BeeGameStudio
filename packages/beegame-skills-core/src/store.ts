@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -8,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { unzipSync } from 'fflate'
 import {
   BeeGameSkillDuplicateError,
@@ -72,7 +74,47 @@ export function getDefaultBeeGameSkillsStoreDir(): string {
 }
 
 export function getDefaultBeeGameBuiltinSkillsDir(): string {
+  if (process.env.BEEGAME_BUILTIN_SKILLS_DIR) {
+    return process.env.BEEGAME_BUILTIN_SKILLS_DIR
+  }
+  const workspaceBuiltinSkills = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+    '.beegame',
+    'skills',
+    BUILTIN_SKILLS_DIR,
+  )
+  if (existsSync(workspaceBuiltinSkills)) return workspaceBuiltinSkills
   return join(getDefaultBeeGameSkillsStoreDir(), BUILTIN_SKILLS_DIR)
+}
+
+export function materializeBuiltinSkills(
+  options: LocalBeeGameSkillsStoreOptions = {},
+  sourceDir = getDefaultBeeGameBuiltinSkillsDir(),
+): void {
+  const targetDir = join(
+    options.dataDir ?? getDefaultBeeGameSkillsStoreDir(),
+    RUNTIME_SKILLS_DIR,
+    BUILTIN_SKILLS_DIR,
+  )
+  if (resolve(sourceDir) === resolve(targetDir)) return
+  if (!existsSync(sourceDir)) {
+    throw new BeeGameSkillValidationError(
+      `BeeGame built-in skills directory is unavailable: ${sourceDir}`,
+    )
+  }
+
+  const temporaryDir = `${targetDir}.${randomUUID()}.tmp`
+  mkdirSync(dirname(targetDir), { recursive: true })
+  try {
+    cpSync(sourceDir, temporaryDir, { recursive: true })
+    rmSync(targetDir, { recursive: true, force: true })
+    renameSync(temporaryDir, targetDir)
+  } finally {
+    rmSync(temporaryDir, { recursive: true, force: true })
+  }
 }
 
 export function parseSkillZipPackage(input: ArrayBuffer | Uint8Array): BeeGameSkillFile[] {

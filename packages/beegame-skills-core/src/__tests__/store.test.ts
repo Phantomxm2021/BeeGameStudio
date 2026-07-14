@@ -6,6 +6,7 @@ import { zipSync, strToU8 } from 'fflate'
 import {
   importUserSkill,
   listUserSkills,
+  materializeBuiltinSkills,
   materializeUserSkills,
   parseSkillZipPackage,
 } from '../store'
@@ -178,6 +179,27 @@ describe('BeeGame skills store', () => {
       join(dataDir, '.runtime', 'app', 'skills', 'user-stale-skill', 'SKILL.md'),
       'utf8',
     )).rejects.toThrow()
+  })
+
+  test('materializes built-in skills into the isolated runtime config', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-builtins-'))
+    const sourceDir = join(dataDir, 'source-builtins')
+    await mkdir(join(sourceDir, 'acceptance'), { recursive: true })
+    await writeFile(join(sourceDir, 'acceptance', 'SKILL.md'), [
+      '---',
+      'name: acceptance',
+      'description: Validate a deliverable.',
+      '---',
+      '',
+      '# Acceptance',
+    ].join('\n'), 'utf8')
+
+    materializeBuiltinSkills({ dataDir }, sourceDir)
+
+    await expect(readFile(
+      join(dataDir, '.runtime', 'app', 'skills', 'builtinskills', 'acceptance', 'SKILL.md'),
+      'utf8',
+    )).resolves.toContain('# Acceptance')
   })
 })
 

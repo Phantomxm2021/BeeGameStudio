@@ -115,6 +115,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private engine: QueryEngineLike | null = null
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
+  private activateNativeSession: (() => void) | null = null
 
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
@@ -127,6 +128,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         async () => {
           this.currentSubmitInput = input
           const engine = await this.ensureEngine()
+          // Claude's bootstrap session pointer is process-global. Another
+          // BeeGame runtime may have changed it while this engine was idle, so
+          // reactivate the owning native session before every turn.
+          this.activateNativeSession?.()
           if (input.signal.aborted) {
             this.currentSubmitInput = null
             return
@@ -197,13 +202,16 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       'setSessionPersistenceDisabled',
       !(await canWriteBeeGameConfigDir()),
     )
-    call(
-      bootstrapModule,
-      'switchSession',
-      this.input.sessionId,
-      call(bootstrapModule, 'getSessionProjectDir'),
-    )
-    call(bootstrapModule, 'setOriginalCwd', this.input.cwd)
+    this.activateNativeSession = () => {
+      call(
+        bootstrapModule,
+        'switchSession',
+        this.input.sessionId,
+        call(bootstrapModule, 'getSessionProjectDir'),
+      )
+      call(bootstrapModule, 'setOriginalCwd', this.input.cwd)
+    }
+    this.activateNativeSession()
 
     const permissionContext = createBeeGameToolPermissionContext(
       call(

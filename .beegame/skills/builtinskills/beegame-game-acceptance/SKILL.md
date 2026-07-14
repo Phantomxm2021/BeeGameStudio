@@ -63,6 +63,8 @@ Compare docs and implementation. Report material mismatches, especially:
 
 Do not count clearly labeled roadmap items as failures.
 
+First determine from the approved project documents whether the project requires managed assets. When it does, `assets/asset-manifest.json` is required; do not interpret a missing manifest as proof that the project is asset-free. A genuinely asset-free project does not need a manifest when that conclusion is consistent with its approved documents.
+
 When `assets/asset-manifest.json` exists, treat it as the canonical BeeGame asset contract rather than a free-form asset inventory. Its root shape is:
 
 ```json

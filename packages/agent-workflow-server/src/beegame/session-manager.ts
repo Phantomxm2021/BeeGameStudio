@@ -1720,7 +1720,13 @@ function withAssetIntegrationContract(prompt: string): string {
     prompt,
     '',
     'Resource integration request:',
-    '- Read assets/asset-manifest.json when it exists. Use the actual bound file paths and formats, preserve provenance, and verify that the project loads the copied files before calling them integrated.',
+    '- Treat assets/asset-manifest.json as the canonical project asset contract. Operate only on the requested slots and preserve their resource binding, Pack version, source element, and dependency provenance.',
+    '- Use the selected file\'s real format and extension. Never rename binary contents to satisfy an earlier requested extension, and choose project loaders from the actual integrated format.',
+    '- Integrate the complete declared dependency closure, including external textures, materials, sidecar data, animation clips, fonts, or audio dependencies. Preserve relative references or update them explicitly; do not guess dependencies from one example filename.',
+    '- Keep target paths project-relative and compatible with the project\'s own packaging and asset-base mechanism. Do not introduce root-relative runtime URLs when the target may be hosted below a base path.',
+    '- A copied file is not yet integrated. Update project code to reference the exact copied paths, run the affected build or package check, and verify observable runtime loading before marking a slot integrated.',
+    '- If the binding, format capability, dependency closure, or runtime evidence is incomplete, leave the slot pending or missing and report the exact blocker instead of silently substituting an incompatible asset.',
+    '- End with a non-empty user-facing result describing the slots changed, the files and dependencies integrated, the verification performed, and any unresolved blocker.',
   ].join('\n')
 }
 
@@ -1749,6 +1755,7 @@ function withConfirmedBriefContract(prompt: string): string {
     '- Then plan and implement against those documents. When assets are required, maintain the canonical assets/asset-manifest.json and use actual bound paths and formats.',
     '- Before claiming completion, use a fresh native acceptance subagent to run the project-native build, tests, and observable player-path checks. Static source inspection cannot pass a runtime player path. Keep the gameplay checklist truthful: unchecked or failed behavior is not delivered.',
     '- If validation fails or is blocked, repair the reported failures when possible and invoke a new fresh acceptance subagent. Do not rewrite failed or blocked checklist items as passed without evidence from the new validation run.',
+    '- After the final fresh validator returns, persist its terminal JSON unchanged to docs/acceptance/validation-report.json. Update checklist state only from that exact result; do not synthesize, strengthen, or omit evidence in a separate prose report.',
     '- Do not claim completion without observed evidence. If an external capability is unavailable, report the concrete blocker and preserve the resumable native task.',
   ].join('\n')
 }
@@ -1758,12 +1765,14 @@ function withProjectChangeContract(prompt: string): string {
     prompt,
     '',
     'Existing project change request:',
+    '- First determine whether the user requested a project mutation or only asked for explanation, diagnosis, review, or status. For a read-only request, inspect only what is necessary, answer with evidence, and do not update documents, change project files, or run delivery acceptance unless the user explicitly requested it.',
     '- Treat the approved project documents already in the workspace as the source of truth. Do not restart ideation or silently expand the approved scope.',
-    '- First classify the requested change by impact. If it changes player-visible behavior, controls, UI, assets, architecture, or acceptance expectations, update only the affected approved documents and acceptance paths before changing code. If it is a bug where the documents are already correct, keep the requirements stable and fix the implementation. Pure internal refactors do not require product-document churn.',
+    '- For a mutation request, classify its impact before editing. If it changes player-visible behavior, controls, UI, assets, architecture, or acceptance expectations, update only the affected approved documents and acceptance paths before changing code. If it is a bug where the documents are already correct, keep the requirements stable and fix the implementation. Pure internal refactors do not require product-document churn.',
     '- Invoke applicable native Skills through the Skill tool. Use beegame-game-acceptance before final validation, and use beegame-interaction-contracts when controls, camera, movement, touch, gamepad, or XR behavior is affected. Do not inspect runtime configuration directories to discover Skills.',
     '- Implement the change against the resulting documents. Preserve the canonical assets/asset-manifest.json structure and actual bound paths when assets are involved; do not invent an alternate manifest shape.',
     '- Run the affected project-native checks and observable player paths. For player-visible changes, use a fresh native acceptance subagent; static source inspection cannot pass runtime behavior.',
     '- If validation fails, repair the findings and invoke a new fresh acceptance subagent before claiming completion. Do not mark checklist items passed without evidence from that validation run.',
+    '- When a fresh validator runs, persist its final terminal JSON unchanged to docs/acceptance/validation-report.json and update checklist state only from that exact result.',
     '- End with a non-empty user-facing result stating what changed, which documents changed, what was actually verified, and any concrete blocker. An unfinished verification step is not completion.',
   ].join('\n')
 }

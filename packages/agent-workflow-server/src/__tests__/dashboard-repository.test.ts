@@ -131,6 +131,16 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(env.CLAUDE_CONFIG_DIR, 'skills', 'user-runtime-skill', 'SKILL.md'),
         'utf8',
       )).resolves.toContain('Runtime Skill')
+      await expect(readFile(
+        join(
+          env.CLAUDE_CONFIG_DIR,
+          'skills',
+          'builtinskills',
+          'beegame-game-acceptance',
+          'SKILL.md',
+        ),
+        'utf8',
+      )).resolves.toContain('name: beegame-game-acceptance')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })

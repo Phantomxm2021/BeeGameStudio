@@ -802,6 +802,8 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[1]).toContain('fresh native acceptance subagent')
       expect(submittedPrompts[1]).toContain('Invoke applicable native Skills through the Skill tool')
       expect(submittedPrompts[1]).toContain('invoke a new fresh acceptance subagent')
+      expect(submittedPrompts[1]).toContain('docs/acceptance/validation-report.json')
+      expect(submittedPrompts[1]).toContain('terminal JSON unchanged')
       expect(submittedPrompts[1]).not.toContain('Game production planning contract:')
       expect(submittedPrompts[1]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[1]).not.toContain('Resource integration contract')
@@ -817,10 +819,29 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[2]).toContain('Continue from the persisted implementation plan.')
       expect(submittedPrompts[2]).not.toContain('Confirmed build request:')
       expect(submittedPrompts[2]).toContain('Existing project change request:')
+      expect(submittedPrompts[2]).toContain('only asked for explanation, diagnosis, review, or status')
       expect(submittedPrompts[2]).toContain('update only the affected approved documents')
+      expect(submittedPrompts[2]).toContain('docs/acceptance/validation-report.json')
       expect(submittedPrompts[2]).toContain('End with a non-empty user-facing result')
       expect(submittedPrompts[2]).not.toContain('Game production planning contract:')
       expect(submittedPrompts[2]).not.toContain('Evidence-backed delivery contract:')
+      await buildManager.sendWithDisplay(
+        buildSession.id,
+        JSON.stringify({
+          kind: 'asset_integration_request',
+          action: 'integrate',
+          slot_ids: ['slot-one'],
+        }),
+        { displayKind: 'asset_integration', taskType: 'asset_integration' },
+      )
+      await waitFor(() => submittedPrompts.length >= 4)
+      await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
+      expect(submittedPrompts[3]).toContain('Resource integration request:')
+      expect(submittedPrompts[3]).toContain('complete declared dependency closure')
+      expect(submittedPrompts[3]).toContain('real format and extension')
+      expect(submittedPrompts[3]).toContain('observable runtime loading')
+      expect(submittedPrompts[3]).toContain('non-empty user-facing result')
+      expect(submittedPrompts[3]).not.toContain('Existing project change request:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -1201,9 +1222,17 @@ describe('beegame session routes', () => {
   })
 
   test('reuses the BeeGame runtime across chat turns while the server is alive', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
     const fake = createFakeRunner()
-    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner, defaultWorkspacePath: projectsRoot })
+    createModelConfig(DEFAULT_LOCAL_USER_ID, {
+      name: 'Default runtime model',
+      provider: 'openai-compatible',
+      baseUrl: 'https://llm.example.invalid/v1',
+      apiKey: 'test-key',
+      models: { balanced: 'test-model' },
+      isDefault: true,
+    })
     try {
       const sessionRes = await app.request('/api/beegame-sessions', {
         method: 'POST',
@@ -1232,7 +1261,7 @@ describe('beegame session routes', () => {
       expect(fake.runtimes).toHaveLength(1)
       expect(fake.runtimes[0]?.stops).toEqual([])
     } finally {
-      await rm(workspace, { recursive: true, force: true })
+      await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 

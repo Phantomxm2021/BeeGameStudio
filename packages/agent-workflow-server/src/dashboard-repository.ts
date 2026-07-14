@@ -48,6 +48,7 @@ import {
   type BeeGameSkillsConfig,
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
+  materializeBuiltinSkills,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
 import {
@@ -997,6 +998,7 @@ export class DashboardRepository {
     modelConfigId?: string,
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
+    materializeBuiltinSkills({ dataDir })
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
       if (!client) {

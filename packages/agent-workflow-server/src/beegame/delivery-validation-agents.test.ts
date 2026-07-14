@@ -26,6 +26,8 @@ describe('delivery validation agents', () => {
     expect(prompt).toContain('logs, transcripts, prior validation reports')
     expect(prompt).toContain('return blocked rather than guessing')
     expect(prompt).toContain('Invoke beegame-game-acceptance through the Skill tool')
+    expect(prompt).toContain('a missing manifest is a failure')
+    expect(prompt).toContain('genuinely asset-free project')
     expect(prompt).toContain('Do not repeatedly list the same directory')
     expect(prompt).toContain('Return one JSON object only')
   })
