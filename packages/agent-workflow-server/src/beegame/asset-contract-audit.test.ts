@@ -143,4 +143,29 @@ describe('asset contract audit', () => {
 
     expect(auditAssetContract(workspace)).toMatchObject({ valid: true })
   })
+
+  test('reports the canonical usage-tag vocabulary with invalid values', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-tag-vocabulary-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: { asset_format_capabilities: ['portable-audio'] },
+      slots: [{
+        id: 'feedback-audio',
+        status: 'missing',
+        target: { path: 'assets/feedback.portable-audio' },
+        resource_requirement: {
+          category: 'audio',
+          dimension: 'agnostic',
+          accepted_formats: ['portable-audio'],
+          tags: ['noncanonical-purpose'],
+        },
+      }],
+    }))
+
+    const issue = auditAssetContract(workspace).issues.find(value =>
+      value.startsWith('feedback-audio: Unbound resource_requirement.tags contains unsupported usage tags:'),
+    )
+    expect(issue).toContain('Allowed canonical values:')
+  })
 })

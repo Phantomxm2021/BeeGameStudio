@@ -171,7 +171,10 @@ function auditAutomaticSelectionRequirement(
   } else {
     const unsupported = tags.filter(tag => !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag))
     if (unsupported.length > 0) {
-      issues.push(`Unbound resource_requirement.tags contains unsupported usage tags: ${unsupported.join(', ')}`)
+      issues.push([
+        `Unbound resource_requirement.tags contains unsupported usage tags: ${unsupported.join(', ')}.`,
+        `Allowed canonical values: ${(RESOURCE_USAGE_TAGS as readonly string[]).join(', ')}.`,
+      ].join(' '))
     }
   }
 }

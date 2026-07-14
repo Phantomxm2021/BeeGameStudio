@@ -41,7 +41,6 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
-import { auditGameProductionCompletion } from './beegame/production-completion-audit'
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
@@ -201,7 +200,6 @@ type BeeGameClarification = {
 
 type BeeGameIntakeAnalysis = {
   maturity: 'vague' | 'directional' | 'concrete'
-  needsOptions: boolean
   needsClarification: boolean
   clarification?: BeeGameClarification
   clarificationQuestions: string[]
@@ -1431,12 +1429,6 @@ export function createAgentWorkflowApp(
         assertPermittedModelConfigRuntime,
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
-      const deliveryFailure = getProductionDeliveryFailure(
-        beeGameSessions,
-        ensured.session.id,
-        ensured.binding.workspacePath,
-      )
-      if (deliveryFailure) return c.json(deliveryFailure, 409)
       const deployment = await beeGameDeployments.deploy({
         sessionId: ensured.session.id,
         userId: user.id,
@@ -2879,11 +2871,10 @@ async function generateBeeGameIntakeOptions(input: {
           'You are BeeGame intake planner.',
           'You may reason internally before answering, but the final response must contain only the requested JSON contract. Never place private reasoning or a thinking summary inside the final JSON.',
           'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
-          'Return only JSON with this schema: maturity, needs_options, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
+          'Return only JSON with this schema: maturity, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
           'maturity must be one of vague, directional, concrete.',
-          'Set needs_options=true only when the idea is vague or broad enough that the user should choose between exactly 3 distinct directions.',
-          'Set needs_options=false for concrete ideas that already specify the main platform, presentation, game mode, repeated player activity, constraints, or MVP scope; in that case return exactly one recommended option and recommended_next_step="configure_details".',
-          'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty. When needs_options=true, return exactly 3 valid options. When needs_options=false, return exactly 1 valid option.',
+          'Always return exactly 3 valid, meaningfully distinct game directions for the user to choose from, including when the submitted idea is already concrete.',
+          'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty, and set recommended_next_step="choose_direction".',
           'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
           'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
           'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
@@ -3188,23 +3179,17 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
       : undefined
   const content = message ? extractMessageContentText(message) : ''
   const parsed = parseJsonObjectFromText(content)
-  const rawNeedsOptions = getBooleanField(parsed, 'needsOptions', 'needs_options')
   const directOptions = Array.isArray(parsed.options) ? parsed.options : []
-  const derivedOptions = directOptions.length === 0
-    ? getClarificationChoiceIntakeOptions(parsed)
-    : []
-  const options = directOptions.length > 0 ? directOptions : derivedOptions
   const normalized: BeeGameIntakeOption[] = []
   const rejectedReasons: string[] = []
-  for (let index = 0; index < options.length; index += 1) {
+  for (let index = 0; index < directOptions.length; index += 1) {
     const intakeOption = normalizeBeeGameIntakeOption(
-      options[index],
+      directOptions[index],
       rejectedReasons,
       index,
     )
     if (intakeOption) normalized.push(intakeOption)
   }
-  const derivedOptionsFromClarification = derivedOptions.length > 0 && normalized.length > 0
   if (normalized.length === 0) {
     const keys = Object.keys(parsed).join(', ') || 'none'
     const reason = rejectedReasons.slice(0, 3).join('; ')
@@ -3213,10 +3198,7 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
     )
   }
   const maturity = normalizeMaturity(parsed.maturity)
-  const needsOptions = derivedOptionsFromClarification
-    ? normalized.length > 1
-    : rawNeedsOptions ?? maturity !== 'concrete'
-  const expectedOptionCount = needsOptions ? 3 : 1
+  const expectedOptionCount = 3
   if (normalized.length < expectedOptionCount) {
     const keys = Object.keys(parsed).join(', ') || 'none'
     throw new Error(
@@ -3225,38 +3207,12 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
   }
   return {
     maturity,
-    needsOptions,
     needsClarification: false,
     clarificationQuestions: [],
     detectedConstraints: getStringArrayField(parsed, 'detectedConstraints', 'detected_constraints'),
-    recommendedNextStep: derivedOptionsFromClarification
-      ? 'choose_direction'
-      : getStringField(parsed, 'recommendedNextStep', 'recommended_next_step') || (maturity === 'concrete' ? 'configure_details' : 'choose_direction'),
+    recommendedNextStep: 'choose_direction',
     options: normalized.slice(0, expectedOptionCount),
   }
-}
-
-function getClarificationChoiceIntakeOptions(value: JsonObject): JsonObject[] {
-  const questions = value.clarificationQuestions ?? value.clarification_questions
-  if (!Array.isArray(questions)) return []
-  const question = questions.find(item => isObject(item))
-  if (!isObject(question)) return []
-  const choices = Array.isArray(question.options) ? question.options : []
-  return choices
-    .map((choice, index): JsonObject | undefined => {
-      if (!isObject(choice)) return undefined
-      const label = getStringField(choice, 'label')
-      if (!label) return undefined
-      const description = getStringField(choice, 'description')
-      return {
-        id: getStringField(choice, 'id') || `mode_${index + 1}`,
-        title: label,
-        pitch: description || label,
-        gameplay: description || label,
-        fit: description || label,
-      }
-    })
-    .filter((choice): choice is JsonObject => Boolean(choice))
 }
 
 function extractMessageContentText(message: JsonObject): string {
@@ -3350,15 +3306,6 @@ function normalizeMaturity(value: unknown): 'vague' | 'directional' | 'concrete'
   return value === 'directional' || value === 'concrete' || value === 'vague'
     ? value
     : 'vague'
-}
-
-function getBooleanField(
-  value: JsonObject,
-  primary: string,
-  fallback?: string,
-): boolean | undefined {
-  const candidate = value[primary] ?? (fallback ? value[fallback] : undefined)
-  return typeof candidate === 'boolean' ? candidate : undefined
 }
 
 function getStringField(
@@ -3639,28 +3586,10 @@ async function getBeeGameProjectRuntimeState(input: {
     context: deriveBeeGameContextVisibility(events, snapshot),
     project_target: assetManifest.project_target ?? null,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
-    review_status: getLatestDeliveryReviewStatus(events),
+    review_status: null,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
-}
-
-function getLatestDeliveryReviewStatus(events: BeeGameEvent[]): JsonObject | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type !== 'delivery.validation') continue
-    const payload = event.payload
-    const report = isObject(payload) && isObject(payload.report) ? payload.report : undefined
-    if (!report || typeof report.status !== 'string' || typeof report.summary !== 'string') continue
-    return {
-      status: report.status,
-      summary: report.summary,
-      validator_id: typeof report.validatorId === 'string' ? report.validatorId : null,
-      event_id: event.id,
-      updated_at: event.createdAt.toISOString(),
-    }
-  }
-  return null
 }
 
 async function getLatestProjectSessionMetadata(input: {
@@ -4787,12 +4716,6 @@ function registerBeeGameSessionRoutes(
           c.req.param('id'),
           getWorkspacePathHint(c.req.query('workspacePath'), body),
         )
-        const deliveryFailure = getProductionDeliveryFailure(
-          beeGameSessions,
-          c.req.param('id'),
-          workspacePath,
-        )
-        if (deliveryFailure) return c.json(deliveryFailure, 409)
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
         const deployment = await beeGameDeployments.deploy({
@@ -5179,26 +5102,6 @@ function registerBeeGameSessionRoutes(
       return tracedRouteError(c, 'beegame-session.delete', err, 404)
     }
   })
-}
-
-export function getProductionDeliveryFailure(
-  sessions: BeeGameSessionManager,
-  sessionId: string,
-  workspacePath: string,
-): { error: { code: 'delivery_not_accepted'; message: string; issues: string[] } } | null {
-  if (!sessions.requiresProductionContract(sessionId)) return null
-  const audit = auditGameProductionCompletion(
-    workspacePath,
-    sessions.events(sessionId).map(event => event.payload ?? event),
-  )
-  if (audit.valid) return null
-  return {
-    error: {
-      code: 'delivery_not_accepted',
-      message: 'Project deployment requires passed evidence-backed delivery validation.',
-      issues: audit.issues,
-    },
-  }
 }
 
 async function readTranscriptFromWorkspace(

@@ -151,11 +151,30 @@ function intakeResponse(): Record<string, unknown> {
         message: {
           content: JSON.stringify({
             maturity: 'concrete',
-            needs_options: false,
             options: [
               {
                 title: 'Puzzle Sprint',
                 gameplay: 'Solve spatial puzzles before the timer expires.',
+                recommendedPlatform: 'Web',
+                recommendedEngine: 'React',
+                recommendedDimension: '2D',
+                recommendedGenre: 'Puzzle',
+                recommendedStyle: 'Minimal',
+                recommendedInputs: ['Keyboard/mouse'],
+              },
+              {
+                title: 'Puzzle Relay',
+                gameplay: 'Complete linked spatial puzzles under a shared limit.',
+                recommendedPlatform: 'Web',
+                recommendedEngine: 'React',
+                recommendedDimension: '2D',
+                recommendedGenre: 'Puzzle',
+                recommendedStyle: 'Minimal',
+                recommendedInputs: ['Keyboard/mouse'],
+              },
+              {
+                title: 'Puzzle Endurance',
+                gameplay: 'Solve an escalating sequence of spatial puzzles.',
                 recommendedPlatform: 'Web',
                 recommendedEngine: 'React',
                 recommendedDimension: '2D',

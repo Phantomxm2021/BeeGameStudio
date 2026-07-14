@@ -63,6 +63,23 @@ Compare docs and implementation. Report material mismatches, especially:
 
 Do not count clearly labeled roadmap items as failures.
 
+When `assets/asset-manifest.json` exists, treat it as the canonical BeeGame asset contract rather than a free-form asset inventory. Its root shape is:
+
+```json
+{
+  "version": 1,
+  "project_target": {
+    "kind": "target kind",
+    "engine": "target runtime or engine",
+    "integration_mode": "filesystem|mcp|manual",
+    "asset_format_capabilities": ["supported-format"]
+  },
+  "slots": []
+}
+```
+
+Each slot requires a stable `id` and project-relative `target.path`. A slot that may use the resource library must carry a structured `resource_requirement` with canonical `category`, `dimension`, non-empty `accepted_formats`, canonical usage `tags`, and `purpose`. Do not replace this contract with project-specific `assets`, `models`, `audio`, `procedural`, or slot-map roots. Do not mark a slot `integrated` merely because metadata exists: verify binding provenance, copied files, code references, packaging, and runtime loading.
+
 ## Evidence
 
 For each command, runtime action, editor check, or manual verification you use as evidence, record:

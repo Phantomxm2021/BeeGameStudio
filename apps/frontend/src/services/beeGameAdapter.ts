@@ -194,7 +194,6 @@ export type BeeGameClarification = {
 
 export type BeeGameIdeaIntakeResult = {
   maturity: 'vague' | 'directional' | 'concrete';
-  needsOptions: boolean;
   needsClarification: boolean;
   clarification?: BeeGameClarification;
   clarificationQuestions: string[];
@@ -307,8 +306,8 @@ export const beeGameAdapter = {
       requestBody,
     );
     const intake = normalizeIdeaIntakeResult(response);
-    if (intake.options.length === 0) {
-      throw new Error('BeeGame intake did not return game mode options');
+    if (intake.options.length !== 3) {
+      throw new Error(`BeeGame intake must return exactly 3 game mode options; received ${intake.options.length}`);
     }
     return intake;
   },
@@ -1787,13 +1786,12 @@ function normalizeIdeaIntakeResult(
     : 'vague';
   return {
     maturity,
-    needsOptions: typeof response.needsOptions === 'boolean' ? response.needsOptions : maturity !== 'concrete',
     needsClarification: false,
     clarificationQuestions: [],
     detectedConstraints: Array.isArray(response.detectedConstraints) ? response.detectedConstraints.map(String).filter(Boolean) : [],
     recommendedNextStep: typeof response.recommendedNextStep === 'string' && response.recommendedNextStep
       ? response.recommendedNextStep
-      : maturity === 'concrete' ? 'configure_details' : 'choose_direction',
+      : 'choose_direction',
     options,
   };
 }

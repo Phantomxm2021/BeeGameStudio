@@ -2539,7 +2539,6 @@ describe('agent workflow server routes', () => {
             message: {
               content: JSON.stringify({
                 maturity: 'vague',
-                needs_options: true,
                 needs_clarification: false,
                 detected_constraints: ['browser playable demo'],
                 recommended_next_step: 'choose_direction',
@@ -2616,7 +2615,6 @@ describe('agent workflow server routes', () => {
       const intake = await res.json()
       expect(intake).toEqual(expect.objectContaining({
         maturity: 'vague',
-        needsOptions: true,
         needsClarification: false,
         clarificationQuestions: [],
         detectedConstraints: ['browser playable demo'],
@@ -2673,7 +2671,8 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('Do not write full GDD')
       expect(systemPrompt).toContain('Do not output internal rubric names')
       expect(systemPrompt).toContain('maturity')
-      expect(systemPrompt).toContain('needs_options')
+      expect(systemPrompt).not.toContain('needs_options')
+      expect(systemPrompt).toContain('Always return exactly 3 valid')
       expect(systemPrompt).toContain('At least one option must stay faithful to the original idea')
       expect(systemPrompt).toContain('not from a fixed menu')
       expect(systemPrompt).toContain('do not force a specific platform')
@@ -2711,26 +2710,15 @@ describe('agent workflow server routes', () => {
 
     const modelContent = JSON.stringify({
       maturity: 'concrete',
-      needs_options: false,
       needs_clarification: false,
       detected_constraints: ['streamed model response'],
-      recommended_next_step: 'configure_details',
-      options: [
-        {
-          id: 'streamed_mode',
-          title: 'Streamed Mode',
-          gameplay: 'The player completes streamed gameplay rules.',
-          risk: 'The main risk is validating the streamed flow.',
-          fit: 'This mode fits the streamed idea.',
-          recommendedPlatform: 'Web',
-          recommendedEngine: 'React',
-          recommendedDimension: '2D',
-          recommendedGenre: 'Action',
-          recommendedStyle: 'Minimal',
-          recommendedInputs: ['Keyboard/mouse'],
-          scope: 'Playable demo',
-        },
-      ],
+      recommended_next_step: 'choose_direction',
+      options: makeModelOptions('streamed_mode', {
+        title: 'Streamed Mode',
+        gameplay: 'The player completes streamed gameplay rules.',
+        risk: 'The main risk is validating the streamed flow.',
+        fit: 'This mode fits the streamed idea.',
+      }),
     })
     const streamBody = [
       `data: ${JSON.stringify({ choices: [{ delta: { content: modelContent.slice(0, 80) } }] })}`,
@@ -2773,12 +2761,11 @@ describe('agent workflow server routes', () => {
       }))
       expect(intake).toEqual(expect.objectContaining({
         maturity: 'concrete',
-        needsOptions: false,
         needsClarification: false,
         detectedConstraints: ['streamed model response'],
-        recommendedNextStep: 'configure_details',
+        recommendedNextStep: 'choose_direction',
       }))
-      expect(intake.options).toHaveLength(1)
+      expect(intake.options).toHaveLength(3)
       expect(intake.options[0]).toEqual(expect.objectContaining({
         id: 'streamed_mode',
         title: 'Streamed Mode',
@@ -2821,11 +2808,10 @@ describe('agent workflow server routes', () => {
 
     const finalContent = JSON.stringify({
       maturity: 'concrete',
-      needs_options: false,
       needs_clarification: false,
       detected_constraints: [],
-      recommended_next_step: 'configure_details',
-      options: makeModelOptions('reasoning_final').slice(0, 1),
+      recommended_next_step: 'choose_direction',
+      options: makeModelOptions('reasoning_final'),
     })
     const responses = [
       JSON.stringify({ thinking: 'Internal analysis without a final contract.' }),
@@ -2865,7 +2851,7 @@ describe('agent workflow server routes', () => {
       expect(Array.isArray(repairMessages)).toBe(true)
       expect((repairMessages as unknown[]).length).toBeGreaterThan(2)
       const intake = await res.json()
-      expect(intake.options).toHaveLength(1)
+      expect(intake.options).toHaveLength(3)
       expect(intake.options[0]).toEqual(expect.objectContaining({
         id: 'reasoning_final',
       }))
@@ -2918,7 +2904,6 @@ describe('agent workflow server routes', () => {
             message: {
               content: JSON.stringify({
                 maturity: 'directional',
-                needs_options: true,
                 needs_clarification: false,
                 detected_constraints: [],
                 recommended_next_step: 'choose_direction',
@@ -2946,7 +2931,6 @@ describe('agent workflow server routes', () => {
         status: 'completed',
         result: expect.objectContaining({
           maturity: 'directional',
-          needsOptions: true,
         }),
       }))
       expect((completed as { result?: { options?: Array<{ id: string; title: string }> } }).result?.options).toHaveLength(3)
@@ -3100,7 +3084,6 @@ describe('agent workflow server routes', () => {
             message: {
               content: JSON.stringify({
                 maturity: 'vague',
-                needs_options: true,
                 needs_clarification: false,
                 detected_constraints: [],
                 recommended_next_step: 'choose_direction',
@@ -3178,7 +3161,6 @@ describe('agent workflow server routes', () => {
           message: {
             content: JSON.stringify({
               maturity: 'vague',
-              needs_options: false,
               needs_clarification: true,
               clarification: {
                 prompt: 'Which interpretation should BeeGame use?',
@@ -3214,7 +3196,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('rejects broad intake responses that return fewer than three options', async () => {
+  test('rejects a concrete intake response that returns only one option', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3235,14 +3217,13 @@ describe('agent workflow server routes', () => {
         {
           message: {
             content: JSON.stringify({
-              maturity: 'vague',
-              needs_options: true,
+              maturity: 'concrete',
               needs_clarification: false,
               clarification: '',
               clarification_questions: [],
-              detected_constraints: ['broad request'],
+              detected_constraints: ['concrete request'],
               recommended_next_step: 'choose_direction',
-              options: makeModelOptions('mode_one').slice(0, 2),
+              options: makeModelOptions('mode_one').slice(0, 1),
             }),
           },
         },
@@ -3253,12 +3234,12 @@ describe('agent workflow server routes', () => {
       const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ idea: 'broad game idea' }),
+        body: JSON.stringify({ idea: 'concrete game idea' }),
       })
 
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({
-        error: expect.stringContaining('Expected 3, received 2'),
+        error: expect.stringContaining('Expected 3, received 1'),
       })
     } finally {
       globalThis.fetch = originalFetch
@@ -3287,7 +3268,6 @@ describe('agent workflow server routes', () => {
           message: {
             content: JSON.stringify({
               maturity: 'vague',
-              needs_options: true,
               needs_clarification: true,
               clarification: 'Which direction should the first playable focus on?',
               clarification_questions: [
@@ -3363,7 +3343,6 @@ describe('agent workflow server routes', () => {
           message: {
             content: JSON.stringify({
               maturity: 'directional',
-              needs_options: true,
               needs_clarification: false,
               recommended_next_step: 'choose_direction',
               options: makeModelOptions('llm_minimal_mode', {
@@ -3434,7 +3413,6 @@ describe('agent workflow server routes', () => {
             message: {
               content: JSON.stringify({
                 maturity: 'directional',
-                needs_options: true,
                 needs_clarification: false,
                 recommended_next_step: 'choose_direction',
                 options: makeModelOptions('llm_thinking_mode', {
@@ -3494,7 +3472,6 @@ describe('agent workflow server routes', () => {
                 type: 'text',
                 text: JSON.stringify({
                   maturity: 'directional',
-                  needs_options: true,
                   needs_clarification: false,
                   recommended_next_step: 'choose_direction',
                   options: makeModelOptions('llm_content_array_mode', {
@@ -3560,13 +3537,15 @@ describe('agent workflow server routes', () => {
                   id: 'llm_array_metadata_mode',
                   title: 'LLM Array Metadata Mode',
                   gameplay: 'LLM generated playable rules with array metadata.',
-                  recommendedPlatform: ['PC', 'Mobile'],
+                  recommendedPlatform: ['PC'],
+                  recommendedEngine: 'React',
                   recommendedDimension: '2.5D',
-                  recommendedGenre: 'STG',
-                  recommendedStyle: 'Vector',
+                  recommendedGenre: 'Action',
+                  recommendedStyle: 'Minimal',
                   recommendedInputs: ['Keyboard/mouse', 'Touch'],
                   scope: 'Playable demo',
                 },
+                ...makeModelOptions('metadata_mode').slice(1),
               ],
             }),
           },
@@ -3585,10 +3564,11 @@ describe('agent workflow server routes', () => {
       const intake = await res.json()
       expect(intake.options[0]).toEqual(expect.objectContaining({
         id: 'llm_array_metadata_mode',
-        recommendedPlatform: 'PC, Mobile',
+        recommendedPlatform: 'PC',
+        recommendedEngine: 'React',
         recommendedDimension: '2.5D',
-        recommendedGenre: 'STG',
-        recommendedStyle: 'Vector',
+        recommendedGenre: 'Action',
+        recommendedStyle: 'Minimal',
         recommendedInputs: ['Keyboard/mouse', 'Touch'],
       }))
     } finally {
@@ -3618,7 +3598,6 @@ describe('agent workflow server routes', () => {
           message: {
             content: JSON.stringify({
               maturity: 'directional',
-              needs_options: true,
               options: makeModelOptions('llm_no_inputs_mode', {
                 title: 'LLM No Inputs Mode',
                 gameplay: 'LLM generated playable rules without input metadata.',
@@ -3670,7 +3649,6 @@ describe('agent workflow server routes', () => {
           message: {
             content: JSON.stringify({
               maturity: 'directional',
-              needs_options: true,
               options: makeModelOptions('single_input_mode', {
                 title: 'Single Input Mode',
                 gameplay: 'LLM generated playable rules with one selected input.',
@@ -3717,7 +3695,6 @@ describe('agent workflow server routes', () => {
 
     const modelJson = JSON.stringify({
       maturity: 'directional',
-      needs_options: true,
       options: makeModelOptions('llm_wrapped_mode', {
         title: 'LLM Wrapped Mode',
         gameplay: 'LLM generated playable rules from wrapped output.',
@@ -3757,7 +3734,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('accepts game-mode options with only title and gameplay', async () => {
+  test('derives narrative brief fields while retaining required production metadata', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3782,7 +3759,14 @@ describe('agent workflow server routes', () => {
                 {
                   title: 'LLM Lean Mode',
                   gameplay: 'LLM generated playable rules without metadata.',
+                  recommendedPlatform: 'Web',
+                  recommendedEngine: 'React',
+                  recommendedDimension: '2D',
+                  recommendedGenre: 'Action',
+                  recommendedStyle: 'Minimal',
+                  recommendedInputs: ['Keyboard/mouse'],
                 },
+                ...makeModelOptions('lean_mode').slice(1),
               ],
             }),
           },
@@ -3803,11 +3787,12 @@ describe('agent workflow server routes', () => {
         id: 'mode_1',
         title: 'LLM Lean Mode',
         gameplay: 'LLM generated playable rules without metadata.',
-        recommendedPlatform: '',
-        recommendedDimension: '',
-        recommendedGenre: '',
-        recommendedStyle: '',
-        recommendedInputs: [],
+        recommendedPlatform: 'Web',
+        recommendedEngine: 'React',
+        recommendedDimension: '2D',
+        recommendedGenre: 'Action',
+        recommendedStyle: 'Minimal',
+        recommendedInputs: ['Keyboard/mouse'],
         scope: '',
       }))
     } finally {

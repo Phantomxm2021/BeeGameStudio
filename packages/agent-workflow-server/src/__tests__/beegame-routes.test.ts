@@ -30,7 +30,6 @@ import type {
   BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
-import { formatProjectDeliveryContract } from '../beegame/project-delivery-contract'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -741,16 +740,14 @@ describe('beegame session routes', () => {
     } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 
-  test('keeps idea intake and confirmed-build policy server-owned and stage-specific', async () => {
+  test('keeps the confirmed build handoff concise without creating a parallel host workflow', async () => {
     const ideaWorkspace = await mkdtemp(join(tmpdir(), 'beegame-idea-policy-'))
     const buildWorkspace = await mkdtemp(join(tmpdir(), 'beegame-build-policy-'))
     const submittedPrompts: string[] = []
-    const productionContractFlags: boolean[] = []
     const manager = new BeeGameSessionManager({
       async start() {
         return {
           async submit(input) {
-            productionContractFlags.push(input.productionContractRequired === true)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -764,7 +761,6 @@ describe('beegame session routes', () => {
       async start() {
         return {
           async submit(input) {
-            productionContractFlags.push(input.productionContractRequired === true)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -784,7 +780,6 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[0]).toContain('Idea intake contract:')
       expect(submittedPrompts[0]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[0]).not.toContain('Game production planning contract:')
-      expect(productionContractFlags[0]).toBe(false)
       await expect(stat(join(ideaWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
 
       const buildSession = buildManager.start({ workspacePath: buildWorkspace, userId: DEFAULT_LOCAL_USER_ID })
@@ -795,34 +790,37 @@ describe('beegame session routes', () => {
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
       expect(buildManager.events(buildSession.id).filter(event => event.type === 'turn.failed')).toEqual([])
       expect(submittedPrompts.length).toBeGreaterThanOrEqual(2)
-      expect(submittedPrompts[1]).toContain('Confirmed brief contract:')
-      expect(submittedPrompts[1]).toContain('Game production planning contract:')
-      expect(submittedPrompts[1]).toContain('docs/specs/GDD.md')
-      expect(submittedPrompts[1]).toContain('docs/specs/ART_DIRECTION.md')
-      expect(submittedPrompts[1]).toContain('docs/specs/ASSET_PLAN.md')
-      expect(submittedPrompts[1]).toContain('writing-plans')
-      expect(submittedPrompts[1]).toContain('docs/superpowers/plans/')
-      expect(submittedPrompts[1]).toContain('Evidence-backed delivery contract:')
-      expect(submittedPrompts[1]).toContain(formatProjectDeliveryContract())
-      expect(submittedPrompts[1]).toContain('Resource integration contract')
-      expect(submittedPrompts[1]).toContain('Canonical resource categories:')
-      expect(submittedPrompts[1]).toContain('Canonical resource usage tags:')
-      expect(productionContractFlags[1]).toBe(true)
-      expect(JSON.parse(await readFile(join(buildWorkspace, 'docs/production-brief.json'), 'utf8'))).toEqual({
-        version: 1,
-        source: 'confirmed_brief',
-        payload: {
-          kind: 'confirmed_build_brief',
-          confirmed_gdd: '# Approved game',
-        },
-      })
-      await buildManager.send(buildSession.id, 'Continue from the persisted implementation plan.')
+      expect(submittedPrompts[1]).toContain('Confirmed build request:')
+      expect(submittedPrompts[1]).toContain('docs/GDD.md')
+      expect(submittedPrompts[1]).toContain('docs/TECHNICAL_DESIGN.md')
+      expect(submittedPrompts[1]).toContain('docs/ART_DIRECTION.md')
+      expect(submittedPrompts[1]).toContain('docs/UI_UX_SPEC.md')
+      expect(submittedPrompts[1]).toContain('docs/AUDIO_DESIGN.md')
+      expect(submittedPrompts[1]).toContain('docs/ASSET_PLAN.md')
+      expect(submittedPrompts[1]).toContain('docs/acceptance/gameplay-checklist.md')
+      expect(submittedPrompts[1]).toContain('fresh Claude Code native subagent')
+      expect(submittedPrompts[1]).toContain('fresh native acceptance subagent')
+      expect(submittedPrompts[1]).toContain('Invoke applicable native Skills through the Skill tool')
+      expect(submittedPrompts[1]).toContain('invoke a new fresh acceptance subagent')
+      expect(submittedPrompts[1]).not.toContain('Game production planning contract:')
+      expect(submittedPrompts[1]).not.toContain('Evidence-backed delivery contract:')
+      expect(submittedPrompts[1]).not.toContain('Resource integration contract')
+      expect(submittedPrompts[1]!.length).toBeLessThan(5_000)
+      await expect(stat(join(buildWorkspace, 'docs/production-brief.json'))).rejects.toThrow()
+      await buildManager.sendWithDisplay(
+        buildSession.id,
+        'Continue from the persisted implementation plan.',
+        { taskType: 'continue_turn' },
+      )
       await waitFor(() => submittedPrompts.length >= 3)
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
-      expect(productionContractFlags[2]).toBe(true)
-      expect(submittedPrompts[2]).toContain('Game production planning contract:')
-      expect(submittedPrompts[2]).toContain('Evidence-backed delivery contract:')
-      expect(submittedPrompts[2]).toContain('Canonical resource usage tags:')
+      expect(submittedPrompts[2]).toContain('Continue from the persisted implementation plan.')
+      expect(submittedPrompts[2]).not.toContain('Confirmed build request:')
+      expect(submittedPrompts[2]).toContain('Existing project change request:')
+      expect(submittedPrompts[2]).toContain('update only the affected approved documents')
+      expect(submittedPrompts[2]).toContain('End with a non-empty user-facing result')
+      expect(submittedPrompts[2]).not.toContain('Game production planning contract:')
+      expect(submittedPrompts[2]).not.toContain('Evidence-backed delivery contract:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -1192,6 +1190,11 @@ describe('beegame session routes', () => {
       expect(inputRes.status).toBe(200)
       await waitFor(() => fake.runtimes[0]?.submits.length === 1)
       expect(fake.runtimes[0]?.submits[0]).not.toHaveProperty('thinkingMode')
+      const submittedPrompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
+      expect(submittedPrompt).toContain('Existing project change request:')
+      expect(submittedPrompt).toContain('update only the affected approved documents')
+      expect(submittedPrompt).toContain('beegame-game-acceptance')
+      expect(submittedPrompt).not.toContain('Confirmed build request:')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -2126,7 +2129,7 @@ describe('beegame session routes', () => {
       const submitted = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
       expect(submitted).toContain('"kind": "confirmed_build_brief"')
       expect(submitted).toContain('"confirmed_gdd": "# Approved design"')
-      expect(submitted).toContain('Confirmed brief contract:')
+      expect(submitted).toContain('Confirmed build request:')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3544,6 +3547,92 @@ describe('beegame session routes', () => {
       expect(manager.transcript(session.id).map(event => event.text)).toEqual([
         'Document the literal </think> marker.',
       ])
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('reports a protocol-incomplete turn when the native runtime returns no visible final result', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-incomplete-terminal-'))
+    const fake = createFakeRunner([
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '' },
+        },
+      },
+      {
+        type: 'stream_event',
+        event: { type: 'content_block_stop', index: 0 },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        stop_reason: 'end_turn',
+        result: '<think>',
+      },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Continue the current native task.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.empty'))
+
+      expect(manager.events(session.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'turn.empty',
+          payload: expect.objectContaining({
+            reason: 'missing_native_final_result',
+          }),
+        }),
+      ]))
+      expect(manager.events(session.id).some(event => event.type === 'turn.completed')).toBe(false)
+      expect(manager.events(session.id).some(event => event.type === 'turn.failed')).toBe(false)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('does not mark an empty native success result as a completed task', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-empty-native-result-'))
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'I will verify the project now.' }],
+          stop_reason: 'tool_use',
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        stop_reason: 'end_turn',
+        result: '',
+      },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, workspace)
+    try {
+      const session = manager.start({
+        workspacePath: workspace,
+        userId: DEFAULT_LOCAL_USER_ID,
+        language: 'zh',
+      })
+      await manager.send(session.id, 'Verify and finish the requested change.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.empty'))
+
+      const events = manager.events(session.id)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'turn.empty',
+          text: expect.stringContaining('没有返回最终答复'),
+        }),
+      ]))
+      expect(events.some(event => event.type === 'turn.completed')).toBe(false)
+      expect(manager.get(session.id)?.turnStatus).toBe('idle')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -7583,7 +7672,6 @@ describe('beegame session routes', () => {
       await waitFor(() => firstManager.events(firstSession.id).some(
         event => event.type === 'turn.completed',
       ))
-      expect(firstFake.runtimes[0]?.submits[0]?.productionContractRequired).toBe(true)
 
       const projectTranscriptDir = join(workspace, 'transcripts')
       const initialFiles = await readdir(projectTranscriptDir)
@@ -7592,8 +7680,6 @@ describe('beegame session routes', () => {
       const initialTranscript = await readFile(transcriptPath, 'utf8')
       const initialEvents = initialTranscript.trim().split('\n')
       expect(initialEvents.length).toBeGreaterThan(0)
-      await rm(join(workspace, 'docs/production-brief.json'))
-
       const restartedFake = createFakeRunner()
       const restartedManager = new BeeGameSessionManager(restartedFake.runner, workspace)
       const resumedSession = restartedManager.start({
@@ -7602,11 +7688,7 @@ describe('beegame session routes', () => {
         transcriptSessionId: firstSession.id,
       })
       expect(resumedSession.id).toBe(firstSession.id)
-      expect(JSON.parse(await readFile(join(workspace, 'docs/production-brief.json'), 'utf8'))).toMatchObject({
-        version: 1,
-        source: 'confirmed_brief',
-        payload: { text: 'Start the approved project.' },
-      })
+      await expect(stat(join(workspace, 'docs/production-brief.json'))).rejects.toThrow()
       expect(await readdir(projectTranscriptDir)).toEqual(initialFiles)
       expect((await readFile(transcriptPath, 'utf8')).trim().split('\n')).toHaveLength(
         initialEvents.length,
@@ -7634,7 +7716,6 @@ describe('beegame session routes', () => {
           }),
         ]),
       )
-      expect(restartedFake.runtimes[0]?.submits[0]?.productionContractRequired).toBe(true)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

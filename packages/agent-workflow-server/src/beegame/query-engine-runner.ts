@@ -16,7 +16,6 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from './session-manager'
-import { evaluateProductionMutationGate } from './production-readiness-audit'
 
 type DynamicModule = Record<string, unknown>
 
@@ -221,9 +220,17 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
     ])
+    const inheritedSessionRules = arrayOfStrings(
+      getField<Record<string, unknown>>(
+        permissionContext,
+        'alwaysAllowRules',
+        {},
+      ).session,
+    )
     const agentDefinitions = mergeManagedAgentDefinitions(
       discoveredAgentDefinitions,
       this.input.agentDefinitions ?? [],
+      inheritedSessionRules,
     )
 
     const appState = {
@@ -241,24 +248,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
       const toolName = getToolName(tool)
-      const productionDecision = evaluateProductionMutationGate({
-        workspacePath: this.input.cwd,
-        productionContractRequired: this.currentSubmitInput?.productionContractRequired === true,
-        toolName,
-        toolInput,
-        toolReadOnly: isToolReadOnly(tool, toolInput),
-      })
-      if (!productionDecision.allowed) {
-        return {
-          behavior: 'deny',
-          message: productionDecision.message ?? 'Game production contract is incomplete.',
-          decisionReason: {
-            type: 'other',
-            reason: 'beegame_production_contract_incomplete',
-          },
-          toolUseID,
-        }
-      }
       const result = (await callAsync(
         permissionsModule,
         'hasPermissionsToUseTool',
@@ -367,6 +356,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 export function mergeManagedAgentDefinitions(
   discovered: unknown,
   managed: BeeGameSessionRunnerStartInput['agentDefinitions'],
+  inheritedSessionRules: string[] = [],
 ): Record<string, unknown> {
   const current = isRecord(discovered) ? discovered : {}
   const active = arrayOfRecords(current.activeAgents)
@@ -375,17 +365,34 @@ export function mergeManagedAgentDefinitions(
   const allowedAgentTypes = Array.isArray(current.allowedAgentTypes)
     ? current.allowedAgentTypes.filter((item): item is string => typeof item === 'string')
     : undefined
-  const retainUnmanaged = (agents: Record<string, unknown>[]) => agents.filter(agent => (
-    typeof agent.agentType !== 'string' || !managedByType.has(agent.agentType)
-  ))
+  const inheritSessionRules = (agent: Record<string, unknown>): Record<string, unknown> => {
+    if (inheritedSessionRules.length === 0) return agent
+    const tools = arrayOfStrings(agent.tools)
+    return {
+      ...agent,
+      tools: [...new Set([...tools, ...inheritedSessionRules])],
+    }
+  }
+  const retainUnmanaged = (agents: Record<string, unknown>[]) => agents
+    .filter(agent => typeof agent.agentType !== 'string' || !managedByType.has(agent.agentType))
+    .map(inheritSessionRules)
+  const inheritedManaged = [...managedByType.values()].map(agent =>
+    inheritSessionRules(agent as unknown as Record<string, unknown>),
+  )
   return {
     ...current,
-    activeAgents: [...retainUnmanaged(active), ...managedByType.values()],
-    allAgents: [...retainUnmanaged(all), ...managedByType.values()],
+    activeAgents: [...retainUnmanaged(active), ...inheritedManaged],
+    allAgents: [...retainUnmanaged(all), ...inheritedManaged],
     ...(allowedAgentTypes
       ? { allowedAgentTypes: [...new Set([...allowedAgentTypes, ...managedByType.keys()])] }
       : {}),
   }
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
 }
 
 function arrayOfRecords(value: unknown): Record<string, unknown>[] {
@@ -491,28 +498,8 @@ function getToolName(tool: unknown): string {
     tool !== null &&
     'name' in tool &&
     typeof tool.name === 'string'
-  ) {
-    return tool.name
-  }
+  ) return tool.name
   return 'Tool'
-}
-
-function isToolReadOnly(tool: unknown, input: Record<string, unknown>): boolean {
-  if (
-    typeof tool !== 'object' ||
-    tool === null ||
-    !('isReadOnly' in tool) ||
-    typeof tool.isReadOnly !== 'function'
-  ) return false
-
-  try {
-    return tool.isReadOnly(input) === true
-  } catch {
-    // A tool that cannot classify its input as read-only must be handled as a
-    // mutation. This keeps the production gate fail-closed without deriving
-    // command semantics in BeeGame.
-    return false
-  }
 }
 
 async function serializeRuntimeTurn(fn: () => Promise<void>): Promise<void> {

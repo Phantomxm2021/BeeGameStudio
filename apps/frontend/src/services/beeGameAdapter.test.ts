@@ -33,6 +33,12 @@ const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const makeLlmOptions = (first: Record<string, unknown> = makeLlmOption()) => [
+  first,
+  makeLlmOption({ id: 'mode_from_llm_2', title: 'Mode From LLM 2' }),
+  makeLlmOption({ id: 'mode_from_llm_3', title: 'Mode From LLM 3' }),
+];
+
 describe('beeGameAdapter prompt rules', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -290,11 +296,10 @@ describe('beeGameAdapter prompt rules', () => {
           status: 'completed',
           result: {
             maturity: 'directional',
-            needsOptions: true,
             needsClarification: false,
             detectedConstraints: ['Async constraint'],
             recommendedNextStep: 'choose_direction',
-            options: [llmOption],
+            options: makeLlmOptions(llmOption),
           },
         });
       }
@@ -327,11 +332,10 @@ describe('beeGameAdapter prompt rules', () => {
           status: 'completed',
           result: {
             maturity: 'directional',
-            needsOptions: true,
             needsClarification: false,
             detectedConstraints: [],
             recommendedNextStep: 'choose_direction',
-            options: [llmOption],
+            options: makeLlmOptions(llmOption),
           },
         });
       }
@@ -373,11 +377,10 @@ describe('beeGameAdapter prompt rules', () => {
         ? jsonResponse({ error: 'not found' }, 404)
         : jsonResponse({
           maturity: 'directional',
-          needsOptions: true,
           needsClarification: false,
           detectedConstraints: ['LLM constraint'],
           recommendedNextStep: 'choose_direction',
-          options: [llmOption],
+          options: makeLlmOptions(llmOption),
         })
     ));
     vi.stubGlobal('fetch', fetchMock);
@@ -386,7 +389,6 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(intake).toMatchObject({
       maturity: 'directional',
-      needsOptions: true,
       needsClarification: false,
       detectedConstraints: ['LLM constraint'],
       recommendedNextStep: 'choose_direction',
@@ -425,11 +427,10 @@ describe('beeGameAdapter prompt rules', () => {
         ? jsonResponse({ error: 'not found' }, 404)
         : jsonResponse({
           maturity: 'directional',
-          needsOptions: true,
           needsClarification: false,
           detectedConstraints: [],
           recommendedNextStep: 'choose_direction',
-          options: [llmOption],
+          options: makeLlmOptions(llmOption),
         })
     ));
     vi.stubGlobal('fetch', fetchMock);
@@ -453,11 +454,10 @@ describe('beeGameAdapter prompt rules', () => {
         ? jsonResponse({ error: 'not found' }, 404)
         : jsonResponse({
           maturity: 'directional',
-          needsOptions: true,
           needsClarification: false,
           detectedConstraints: [],
           recommendedNextStep: 'choose_direction',
-          options: [llmOption],
+          options: makeLlmOptions(llmOption),
         })
     ));
     vi.stubGlobal('fetch', fetchMock);
@@ -474,7 +474,6 @@ describe('beeGameAdapter prompt rules', () => {
         ? jsonResponse({ error: 'not found' }, 404)
         : jsonResponse({
           maturity: 'vague',
-          needsOptions: false,
           needsClarification: true,
           clarification: {
             prompt: 'Which direction should BeeGame use?',
@@ -493,7 +492,7 @@ describe('beeGameAdapter prompt rules', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' })).rejects.toThrow(
-      'BeeGame intake did not return game mode options',
+      'BeeGame intake must return exactly 3 game mode options; received 0',
     );
   });
 
@@ -2247,6 +2246,63 @@ describe('beeGameAdapter prompt rules', () => {
 
     const status = polled.messages.find(message => message.type === 'status');
     expect(status).toEqual(expect.objectContaining({ status: 'idle' }));
+    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
+  });
+
+  it('shows an empty native turn as an incomplete system message while keeping the session resumable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_empty_turn',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_empty_turn/idea' && init?.method === 'POST') {
+        return jsonResponse({
+          id: 'beegame_empty_turn',
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_empty_turn/events?after=0') {
+        return jsonResponse([{
+          id: 30,
+          sessionId: 'beegame_empty_turn',
+          turnId: 'turn-1',
+          type: 'turn.empty',
+          text: 'Claude Code 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。',
+          payload: { type: 'turn.empty', reason: 'missing_native_final_result' },
+          createdAt: '2026-06-21T00:00:02.000Z',
+        }]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'agent_message',
+        content: expect.stringContaining('没有返回最终答复'),
+      }),
+      expect.objectContaining({ type: 'status', status: 'idle' }),
+    ]));
     expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
   });
 

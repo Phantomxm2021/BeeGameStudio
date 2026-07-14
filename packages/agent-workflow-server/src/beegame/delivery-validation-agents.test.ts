@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
   DELIVERY_VALIDATOR_AGENT_TYPES,
-  PRODUCTION_REVIEWER_AGENT_TYPE,
-  createBeeGameProductionAgentDefinitions,
   createDeliveryValidationAgentDefinitions,
 } from './delivery-validation-agents'
 
@@ -22,36 +20,18 @@ describe('delivery validation agents', () => {
     expect(definitions[0]?.maxTurns).toBeGreaterThanOrEqual(24)
 
     const prompt = definitions[0]?.getSystemPrompt() ?? ''
-    expect(prompt).toContain('workspace and docs/delivery-contract.json as the only task inputs')
+    expect(prompt).toContain('approved product, technical, asset, and acceptance documents')
+    expect(prompt).toContain('without inventing a second host-owned contract')
     expect(prompt).toContain('Ignore feature claims')
     expect(prompt).toContain('logs, transcripts, prior validation reports')
     expect(prompt).toContain('return blocked rather than guessing')
+    expect(prompt).toContain('Invoke beegame-game-acceptance through the Skill tool')
     expect(prompt).toContain('Do not repeatedly list the same directory')
     expect(prompt).toContain('Return one JSON object only')
   })
 
-  test('adds one read-only pre-plan production reviewer without creating a host workflow', () => {
-    const definitions = createBeeGameProductionAgentDefinitions()
-    const reviewer = definitions.find(definition => definition.agentType === PRODUCTION_REVIEWER_AGENT_TYPE)
-    const validator = definitions.find(definition => definition.agentType === 'beegame-acceptance-validator')
-
-    expect(definitions).toHaveLength(2)
-    expect(reviewer?.tools).toEqual(['Read', 'Glob', 'Grep', 'Skill'])
-    expect(reviewer?.disallowedTools).toEqual(expect.arrayContaining(['Write', 'Edit']))
-    expect(reviewer?.getSystemPrompt()).toContain('Do not use keyword matching')
-    expect(reviewer?.getSystemPrompt()).toContain('entire bundle in one bounded pass')
-    expect(reviewer?.getSystemPrompt()).toContain('explicit user settings as authoritative over recommendation fields')
-    expect(reviewer?.getSystemPrompt()).toContain('do not automatically expand the MVP')
-    expect(reviewer?.getSystemPrompt()).toContain('without an approved MVP player-path dependency')
-    expect(reviewer?.getSystemPrompt()).toContain('conditional outcomes')
-    expect(reviewer?.getSystemPrompt()).toContain('Return one JSON object only')
-    expect(reviewer?.getSystemPrompt()).toContain('contradictionId')
-    expect(reviewer?.getSystemPrompt()).toContain('blocking|advisory')
-    expect(validator).toBeDefined()
-  })
-
   test('leaves native Agent lifecycle decisions to Claude Code', () => {
-    const definitions = createBeeGameProductionAgentDefinitions()
+    const definitions = createDeliveryValidationAgentDefinitions()
 
     for (const definition of definitions) {
       expect(definition).not.toHaveProperty('background')

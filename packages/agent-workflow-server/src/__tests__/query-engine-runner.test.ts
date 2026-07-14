@@ -68,6 +68,35 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
   })
 
+  test('preserves BeeGame skill read rules when native sub-agents scope their tools', () => {
+    const projectAgent = {
+      agentType: 'project-helper',
+      source: 'project',
+      tools: ['Read', 'Glob'],
+    }
+    const managedAgent = {
+      agentType: 'beegame-acceptance-validator',
+      source: 'policySettings' as const,
+      whenToUse: 'validate delivery',
+      tools: ['Read', 'Bash'],
+      getSystemPrompt: () => 'validate',
+    }
+
+    const merged = mergeManagedAgentDefinitions({
+      activeAgents: [projectAgent],
+      allAgents: [projectAgent],
+    }, [managedAgent], ['Read(/runtime/skills/**)'])
+
+    for (const agent of merged.activeAgents as Array<Record<string, unknown>>) {
+      expect(agent.tools).toEqual(expect.arrayContaining(['Read(/runtime/skills/**)']))
+    }
+    expect((merged.activeAgents as Array<Record<string, unknown>>)[0]?.tools).toEqual([
+      'Read',
+      'Glob',
+      'Read(/runtime/skills/**)',
+    ])
+  })
+
   test('closes runtime dispatchers across supported Undici lifecycle shapes', async () => {
     const closed: string[] = []
 

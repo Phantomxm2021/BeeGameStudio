@@ -13,10 +13,6 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
-  RESOURCE_CATEGORIES,
-  RESOURCE_USAGE_TAGS,
-} from '../../../beegame-resource-core/src/types'
-import {
   refundCreditReservation,
   reserveCredits,
   settleCreditReservation,
@@ -30,21 +26,8 @@ import {
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
-  formatProjectDeliveryContract,
-} from './project-delivery-contract'
-import {
-  DELIVERY_VALIDATOR_AGENT_TYPES,
-  createBeeGameProductionAgentDefinitions,
+  createDeliveryValidationAgentDefinitions,
 } from './delivery-validation-agents'
-import {
-  findLastValidatorReportInText,
-  readValidatorReportFromTaskOutput,
-} from './production-completion-audit'
-import {
-  GAME_PRODUCTION_DOCUMENT_PATHS,
-  GAME_PRODUCTION_PLAN_DIRECTORY,
-  withGameProductionPlanningContract,
-} from './production-planning-contract'
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameImageAttachment = {
@@ -124,7 +107,6 @@ export type BeeGameEventType =
   | 'tool.progress'
   | 'permission.requested'
   | 'permission.resolved'
-  | 'delivery.validation'
   | 'system.status'
   | 'result'
   | 'turn.completed'
@@ -222,7 +204,6 @@ export type BeeGameApprovedOutboundTargets = Partial<
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   signal: AbortSignal
-  productionContractRequired?: boolean
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
     request: DashboardPermissionRequest,
@@ -289,8 +270,6 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
-  currentTurnKind?: string
-  productionContractRequired: boolean
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
   pendingCreditRetryInFlight: boolean
@@ -455,8 +434,6 @@ export class BeeGameSessionManager {
         ? getNextTurnIndex(session.id, recoveredTranscript.events)
         : 1,
       currentTurnId: null,
-      currentTurnKind: undefined,
-      productionContractRequired: hasConfirmedBuildTurn(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
@@ -467,10 +444,6 @@ export class BeeGameSessionManager {
       pendingCreditRetryFailures: 0,
       pendingCreditRetryAfter: 0,
       resumeEventPending: Boolean(recoveredTranscript),
-    }
-    const recoveredBrief = recoverConfirmedBuildBrief(record.events)
-    if (record.productionContractRequired && recoveredBrief) {
-      materializeProductionBriefSync(record.session.cwd, recoveredBrief, false)
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
@@ -696,10 +669,6 @@ export class BeeGameSessionManager {
       .map(event => ({ ...event }))
   }
 
-  requiresProductionContract(sessionId: string): boolean {
-    return this.sessions.get(sessionId)?.productionContractRequired === true
-  }
-
   transcript(sessionId: string): Array<{
     id: number
     type: BeeGameEventType
@@ -771,16 +740,8 @@ export class BeeGameSessionManager {
       workspace: record.session.cwd,
       attachments: display?.attachments,
       displayKind: display?.displayKind,
-      productionContractRequired: record.productionContractRequired || display?.displayKind === 'confirmed_brief',
+      taskType: display?.taskType,
     })
-    if (display?.displayKind === 'confirmed_brief') {
-      await ensureGameProductionDirectories(record.session.cwd)
-      await materializeProductionBrief(record.session.cwd, text)
-    } else if (record.productionContractRequired) {
-      const recoveredBrief = recoverConfirmedBuildBrief(record.events)
-      if (recoveredBrief) await materializeProductionBrief(record.session.cwd, recoveredBrief, false)
-    }
-
     const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display, nextTurnId)
@@ -790,10 +751,6 @@ export class BeeGameSessionManager {
     record.thinkingBlockIndexes.clear()
     record.visibleThinkingBlockIndexes.clear()
     record.currentTurnId = nextTurnId
-    record.currentTurnKind = display?.displayKind
-    if (display?.displayKind === 'confirmed_brief') {
-      record.productionContractRequired = true
-    }
     record.nextTurnIndex += 1
     display?.onTurnAccepted?.()
     turnAccepted = true
@@ -823,7 +780,6 @@ export class BeeGameSessionManager {
     } catch (error) {
       if (!turnAccepted) {
         record.currentTurnId = null
-        record.currentTurnKind = undefined
         record.abortController = null
         record.session.turnStatus = 'idle'
       }
@@ -955,14 +911,31 @@ export class BeeGameSessionManager {
         approvedOutboundTargets,
         // These are ordinary Claude Code sub-agents. BeeGame exposes them to
         // the native runtime but never dispatches or interprets them.
-        agentDefinitions: createBeeGameProductionAgentDefinitions(),
+        agentDefinitions: createDeliveryValidationAgentDefinitions(),
       })
       record.runner = runner
       try {
         await this.submitToRunner(record, runner, prompt, signal)
         if (!signal.aborted && record.session.status === 'running') {
-          this.closeOpenThinkingLifecycle(record, 'turn_completed')
-          this.append(record, 'turn.completed', 'Turn ended')
+          const turnId = record.currentTurnId
+          const hasFinalResult = hasNativeFinalResult(record.events, turnId)
+          this.closeOpenThinkingLifecycle(
+            record,
+            hasFinalResult ? 'turn_completed' : 'turn_empty',
+          )
+          if (hasFinalResult) {
+            this.append(record, 'turn.completed', 'Turn ended')
+          } else {
+            this.append(
+              record,
+              'turn.empty',
+              getEmptyTurnMessage(record.language),
+              {
+                type: 'turn.empty',
+                reason: 'missing_native_final_result',
+              },
+            )
+          }
         }
         if (creditReservation) {
           shouldRefundReservation = !await this.settleTurnCredits(
@@ -1004,7 +977,6 @@ export class BeeGameSessionManager {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
       record.currentTurnId = null
-      record.currentTurnKind = undefined
       record.assistantPartialTextByMessage.clear()
       record.activeAssistantMessageId = null
       record.emittedAssistantMessageIds.clear()
@@ -1045,7 +1017,6 @@ export class BeeGameSessionManager {
     await runner.submit({
       prompt,
       signal,
-      productionContractRequired: record.productionContractRequired,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
         if (isSDKExecutionError(message)) {
@@ -1058,15 +1029,6 @@ export class BeeGameSessionManager {
           record.currentTurnId !== submittedTurnId ||
           hasTurnEnded(record.events, submittedTurnId)
         ) return
-        const validation = extractValidatorTaskCompletion(record, message)
-        if (validation) {
-          this.append(record, 'delivery.validation', validation.report.summary, {
-            type: 'delivery.validation',
-            taskId: validation.taskId,
-            toolUseID: validation.toolUseID,
-            report: validation.report,
-          })
-        }
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
@@ -1450,42 +1412,6 @@ export class BeeGameSessionManager {
 
 }
 
-function extractValidatorTaskCompletion(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): {
-  taskId: string
-  toolUseID: string
-  report: NonNullable<ReturnType<typeof readValidatorReportFromTaskOutput>>
-} | undefined {
-  for (const block of extractContentBlocks(message)) {
-    if (getStringField(block, 'type') !== 'tool_result') continue
-    const toolUseID = getStringField(block, 'tool_use_id')
-    if (!toolUseID || !isValidatorAgentToolUse(record, toolUseID)) continue
-    const report = findLastValidatorReportInText(extractMessageText(block.content))
-    if (report) return { taskId: toolUseID, toolUseID, report }
-  }
-  if (
-    message.type !== 'system' ||
-    getStringField(message, 'subtype') !== 'task_notification' ||
-    getStringField(message, 'status') !== 'completed'
-  ) return undefined
-  const taskId = getStringField(message, 'task_id')
-  const toolUseID = getStringField(message, 'tool_use_id')
-  const outputFile = getStringField(message, 'output_file')
-  if (!taskId || !toolUseID || !outputFile) return undefined
-  if (!isValidatorAgentToolUse(record, toolUseID)) return undefined
-  const report = readValidatorReportFromTaskOutput(taskId, outputFile)
-  return report ? { taskId, toolUseID, report } : undefined
-}
-
-function isValidatorAgentToolUse(record: SessionRecord, toolUseID: string): boolean {
-  const toolUse = record.toolUses.get(toolUseID)
-  return toolUse?.toolName === 'Agent' &&
-    isObject(toolUse.input) &&
-    getStringField(toolUse.input, 'subagent_type') === DELIVERY_VALIDATOR_AGENT_TYPES[0]
-}
-
 function resolveExistingPath(path: string): string {
   const resolved = resolve(path)
   try {
@@ -1661,58 +1587,6 @@ function getNextTurnIndex(sessionId: string, events: BeeGameEvent[]): number {
   return maxTurnIndex + 1
 }
 
-function hasConfirmedBuildTurn(events: BeeGameEvent[]): boolean {
-  return events.some(event => (
-    event.type === 'user.message' && event.payload?.displayKind === 'confirmed_brief'
-  ))
-}
-
-function recoverConfirmedBuildBrief(events: BeeGameEvent[]): string | undefined {
-  return [...events].reverse().find(event => (
-    event.type === 'user.message' && event.payload?.displayKind === 'confirmed_brief'
-  ))?.text
-}
-
-async function materializeProductionBrief(
-  workspacePath: string,
-  text: string,
-  overwrite = true,
-): Promise<void> {
-  const path = resolve(workspacePath, 'docs', 'production-brief.json')
-  if (!overwrite && existsSync(path)) return
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, serializeProductionBrief(text), 'utf8')
-}
-
-function materializeProductionBriefSync(
-  workspacePath: string,
-  text: string,
-  overwrite = true,
-): void {
-  const path = resolve(workspacePath, 'docs', 'production-brief.json')
-  if (!overwrite && existsSync(path)) return
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, serializeProductionBrief(text), 'utf8')
-}
-
-function serializeProductionBrief(text: string): string {
-  let payload: unknown
-  try {
-    payload = JSON.parse(text)
-  } catch {
-    payload = { text }
-  }
-  return `${JSON.stringify({ version: 1, source: 'confirmed_brief', payload }, null, 2)}\n`
-}
-
-async function ensureGameProductionDirectories(workspacePath: string): Promise<void> {
-  const directories = new Set([
-    ...GAME_PRODUCTION_DOCUMENT_PATHS.map(path => dirname(resolve(workspacePath, path))),
-    resolve(workspacePath, GAME_PRODUCTION_PLAN_DIRECTORY),
-  ])
-  await Promise.all([...directories].map(path => mkdir(path, { recursive: true })))
-}
-
 function recoverSessionLanguage(
   events: BeeGameEvent[],
 ): { language: BeeGameSessionLanguage } | Record<string, never> {
@@ -1845,16 +1719,8 @@ function withAssetIntegrationContract(prompt: string): string {
   return [
     prompt,
     '',
-    'Resource integration contract (when assets/asset-manifest.json exists):',
-    '- The canonical root shape is {"version":1,"project_target":{"asset_format_capabilities":["format"]},"slots":[{"id":"stable-id","target":{"path":"project-relative/path"}}]}. slots and asset_format_capabilities are arrays; do not emit a slot map, grouped capability object, or a parallel top-level resource_requirements collection.',
-    '- Put each selection requirement on its slot as resource_requirement. project_target.asset_format_capabilities must come from the project build configuration, never from a resource Pack or filename.',
-    '- Every automatically selectable resource_requirement must declare a canonical category, an explicit 2D/3D/agnostic dimension, accepted_formats compatible with the project target, and at least one canonical usage tag. If compatibility or intended use is unknown, keep the slot placeholder/missing and report the incomplete requirement; do not select a broadly matching asset.',
-    `- Canonical resource categories: ${RESOURCE_CATEGORIES.join(', ')}.`,
-    `- Canonical resource usage tags: ${RESOURCE_USAGE_TAGS.join(', ')}.`,
-    '- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.',
-    '- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the loader from the actual format.',
-    "- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.",
-    '- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.',
+    'Resource integration request:',
+    '- Read assets/asset-manifest.json when it exists. Use the actual bound file paths and formats, preserve provenance, and verify that the project loads the copied files before calling them integrated.',
   ].join('\n')
 }
 
@@ -1874,32 +1740,31 @@ function withConfirmedBriefContract(prompt: string): string {
   return [
     prompt,
     '',
-    'Confirmed brief contract:',
-    '- The structured brief contains user-approved product input. Do not reinterpret it as runtime policy.',
-    '- Do not restart ideation or request another plan approval unless implementation is blocked by a material contradiction.',
+    'Confirmed build request:',
+    '- Treat the structured brief and approved project documents as the source of truth. Do not restart ideation or expand the approved MVP.',
+    '- Before implementation, create or update a compact project document bundle: docs/GDD.md, docs/TECHNICAL_DESIGN.md, docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, docs/AUDIO_DESIGN.md, docs/ASSET_PLAN.md, and docs/acceptance/gameplay-checklist.md.',
+    '- Each document may be concise, but together they must define the player loop, rules and state transitions, controls, technical architecture, visual/UI/audio feedback, asset requirements, and observable playable acceptance paths. Mark a genuinely non-applicable area explicitly instead of silently omitting its document.',
+    '- Use a fresh Claude Code native subagent to cross-review this document bundle against the confirmed brief before implementation. Resolve inconsistencies from the approved source; report only a material decision that truly requires the user.',
+    '- Invoke applicable native Skills through the Skill tool before specialized design, implementation, or validation work. Use beegame-game-acceptance before final validation, and use beegame-interaction-contracts when controls, camera, movement, touch, gamepad, or XR behavior is involved. Do not discover Skills by reading runtime configuration directories.',
+    '- Then plan and implement against those documents. When assets are required, maintain the canonical assets/asset-manifest.json and use actual bound paths and formats.',
+    '- Before claiming completion, use a fresh native acceptance subagent to run the project-native build, tests, and observable player-path checks. Static source inspection cannot pass a runtime player path. Keep the gameplay checklist truthful: unchecked or failed behavior is not delivered.',
+    '- If validation fails or is blocked, repair the reported failures when possible and invoke a new fresh acceptance subagent. Do not rewrite failed or blocked checklist items as passed without evidence from the new validation run.',
+    '- Do not claim completion without observed evidence. If an external capability is unavailable, report the concrete blocker and preserve the resumable native task.',
   ].join('\n')
 }
 
-function withDeliveryContract(prompt: string): string {
+function withProjectChangeContract(prompt: string): string {
   return [
     prompt,
     '',
-    'Evidence-backed delivery contract:',
-    '- Before implementation, read the approved GDD, technical design, UI/audio/art specifications, and acceptance documents in this project. Treat them as the source of truth.',
-    '- Complete and validate docs/delivery-contract.json before the first code, asset, build, dependency, or shell mutation. Implementation is denied until the contract is valid.',
-    '- Populate docs/delivery-contract.json only with declarative requirements, registered required capabilities, and structured player paths.',
-    `- The contract must conform to this server-owned structural schema: ${formatProjectDeliveryContract()}`,
-    '- sourceRefs are mandatory and every locator must exist verbatim in its source document. Every action and assertion object must be non-empty and describe a project-native operation or observation; prose strings and validator-owned outcomes are invalid.',
-    '- Player-path steps must form a deterministic executable sequence from entry through recovery. Each action must be directly performable by a player or an explicitly declared project-native test setup, and every assertion must name an observable expected result. Do not use conditional, optional, random, unbounded, or implementation-internal transitions as acceptance steps.',
-    '- Before gameplay code, map every normative MVP statement to a requirement and every MVP gameplay requirement to at least one player path.',
-    '- Never add validator-owned status/evidence fields or pre-check acceptance items.',
-    '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
-    '- requiredCapabilities may contain only applicable registered skill:<id> values. Framework, language, rendering, input, and state-management names are implementation details, not validation capabilities.',
-    '- Invoke applicable skills from the runtime Skill catalog. Missing required capability must be declared, never simulated.',
-    '- Before claiming completion, invoke the beegame-acceptance-validator through Claude Code\'s native Agent tool in the same task. Let Claude Code manage the sub-agent lifecycle and consume the native terminal result without polling TaskOutput. Treat its observed evidence as authoritative.',
-    '- If validation fails, fix the project and invoke the validator again. Stop only after it passes or it reports a material blocker that requires the user or an unavailable external capability.',
-    '- Persist the final validator JSON unchanged to docs/validation-report.json, render docs/validation-report.md from that exact result without inventing evidence, and keep unchecked acceptance items unchecked unless the validator actually observed them.',
-    '- Fix validation failures without weakening sourceRefs, requirements, evidence requirements, or player paths.',
+    'Existing project change request:',
+    '- Treat the approved project documents already in the workspace as the source of truth. Do not restart ideation or silently expand the approved scope.',
+    '- First classify the requested change by impact. If it changes player-visible behavior, controls, UI, assets, architecture, or acceptance expectations, update only the affected approved documents and acceptance paths before changing code. If it is a bug where the documents are already correct, keep the requirements stable and fix the implementation. Pure internal refactors do not require product-document churn.',
+    '- Invoke applicable native Skills through the Skill tool. Use beegame-game-acceptance before final validation, and use beegame-interaction-contracts when controls, camera, movement, touch, gamepad, or XR behavior is affected. Do not inspect runtime configuration directories to discover Skills.',
+    '- Implement the change against the resulting documents. Preserve the canonical assets/asset-manifest.json structure and actual bound paths when assets are involved; do not invent an alternate manifest shape.',
+    '- Run the affected project-native checks and observable player paths. For player-visible changes, use a fresh native acceptance subagent; static source inspection cannot pass runtime behavior.',
+    '- If validation fails, repair the findings and invoke a new fresh acceptance subagent before claiming completion. Do not mark checklist items passed without evidence from that validation run.',
+    '- End with a non-empty user-facing result stating what changed, which documents changed, what was actually verified, and any concrete blocker. An unfinished verification step is not completion.',
   ].join('\n')
 }
 
@@ -1909,7 +1774,7 @@ async function prepareBeeGamePromptInput(input: {
   workspace: string
   attachments?: BeeGameAttachment[]
   displayKind?: string
-  productionContractRequired?: boolean
+  taskType?: BeeGameCreditTaskType
 }): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
   const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
@@ -1922,19 +1787,13 @@ async function prepareBeeGamePromptInput(input: {
   const localizedInput = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
   const promptText = input.displayKind === 'initial_idea'
     ? withInitialIdeaContract(localizedInput)
-    : input.productionContractRequired
-      ? withDeliveryContract(
-          withAssetIntegrationContract(
-            withGameProductionPlanningContract(
-              input.displayKind === 'confirmed_brief'
-                ? withConfirmedBriefContract(localizedInput)
-                : localizedInput,
-            ),
-          ),
-        )
+    : input.displayKind === 'confirmed_brief'
+      ? withConfirmedBriefContract(localizedInput)
       : input.displayKind === 'asset_integration'
         ? withAssetIntegrationContract(localizedInput)
-        : localizedInput
+        : input.taskType === 'edit_turn' || input.taskType === 'continue_turn'
+          ? withProjectChangeContract(localizedInput)
+          : localizedInput
   if (images.length === 0) {
     return {
       prompt: promptText,
@@ -2041,6 +1900,22 @@ function getSessionLanguageInstruction(
   }
 }
 
+function getEmptyTurnMessage(language?: BeeGameSessionLanguage): string {
+  switch (language) {
+    case 'zh':
+      return 'Claude Code 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。'
+    case 'zh-TW':
+      return 'Claude Code 已結束本輪，但沒有返回最終答覆。目前任務可能尚未完成，請在同一工作階段中繼續。'
+    case 'ja':
+      return 'Claude Code はこのターンを終了しましたが、最終回答を返しませんでした。タスクが未完了の可能性があるため、同じセッションで続行してください。'
+    case 'ko':
+      return 'Claude Code가 이 턴을 종료했지만 최종 답변을 반환하지 않았습니다. 작업이 완료되지 않았을 수 있으므로 같은 세션에서 계속하세요.'
+    case 'en':
+    default:
+      return 'Claude Code ended the turn without a final response. The task may be incomplete; continue in the same session.'
+  }
+}
+
 function getSessionTranscriptPath(
   sessionId: string,
   cwd: string,
@@ -2132,6 +2007,19 @@ function hasTurnEnded(events: BeeGameEvent[], turnId?: string): boolean {
       event.type === 'session.failed'
     )
   )
+}
+
+function hasNativeFinalResult(
+  events: BeeGameEvent[],
+  turnId?: string | null,
+): boolean {
+  if (!turnId) return false
+  return events.some(event => (
+    event.turnId === turnId &&
+    event.type === 'result' &&
+    event.text.trim().length > 0 &&
+    !isThinkingProtocolControlText(event.text)
+  ))
 }
 
 function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
@@ -3153,7 +3041,7 @@ function mapTextEvent(
 ): { type: BeeGameEventType; text: string } | null {
   const normalized = text.trim()
   if (
-    (type === 'assistant.partial' || type === 'assistant.message') &&
+    (type === 'assistant.partial' || type === 'assistant.message' || type === 'result') &&
     isThinkingProtocolControlText(normalized)
   ) {
     return null

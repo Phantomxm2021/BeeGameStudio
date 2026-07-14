@@ -506,13 +506,17 @@ function readPendingIntakeFlowState(): PendingIntakeFlowState | null {
         const raw = sessionStorage.getItem(pendingIntakeFlowStorageKey);
         if (!raw) return null;
         const value = JSON.parse(raw) as unknown;
-        if (!isPendingIntakeFlowState(value)) return null;
+        if (!isPendingIntakeFlowState(value)) {
+            clearPendingIntakeFlowState();
+            return null;
+        }
         if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
             clearPendingIntakeFlowState();
             return null;
         }
         return value;
     } catch {
+        clearPendingIntakeFlowState();
         return null;
     }
 }
@@ -603,7 +607,7 @@ function isPendingIntakeFlowState(value: unknown): value is PendingIntakeFlowSta
     const phase = value.phase;
     if (phase !== 'options_ready' && phase !== 'configuring_details' && phase !== 'confirming_brief') return false;
     if (typeof value.idea !== 'string' || value.idea.trim().length === 0) return false;
-    if (!Array.isArray(value.options)) return false;
+    if (!Array.isArray(value.options) || value.options.length !== 3) return false;
     if (typeof value.language !== 'string') return false;
     if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return false;
     if ((phase === 'configuring_details' || phase === 'confirming_brief') && (!isRecord(value.selectedOption) || !isRecord(value.settings))) {
@@ -949,29 +953,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             const nextOptions = intake.options;
             setIntakeOptions(nextOptions);
             clearPendingIdeaDraftState();
-            if (!intake.needsOptions && intake.options[0]) {
-                const option = intake.options[0];
-                const nextSettings = settingsFromOption(option);
-                setSelectedOption(option);
-                setSettings(nextSettings);
-                setIntakePhase('configuring_details');
-                writePendingIntakeFlowState({
-                    phase: 'configuring_details',
-                    idea: projectName.trim() || idea,
-                    language: lang,
-                    options: nextOptions,
-                    selectedOption: option,
-                    settings: nextSettings,
-                });
-            } else {
-                setIntakePhase('options_ready');
-                writePendingIntakeFlowState({
-                    phase: 'options_ready',
-                    idea: projectName.trim() || idea,
-                    language: lang,
-                    options: nextOptions,
-                });
-            }
+            setIntakePhase('options_ready');
+            writePendingIntakeFlowState({
+                phase: 'options_ready',
+                idea: projectName.trim() || idea,
+                language: lang,
+                options: nextOptions,
+            });
             setIsPreparing(false);
         } catch (error) {
             setIsPreparing(false);

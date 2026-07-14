@@ -360,7 +360,6 @@ beforeEach(() => {
     runIdeaIntake.mockReset();
     runIdeaIntake.mockResolvedValue({
         maturity: 'vague',
-        needsOptions: true,
         needsClarification: false,
         clarificationQuestions: [],
         detectedConstraints: [],
@@ -783,6 +782,21 @@ describe('LandingView bootstrap submission', () => {
         expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode B/ }));
         expect(screen.getByRole('textbox')).toHaveValue('Cached options idea');
         expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+    });
+
+    it('discards a legacy cached selection state containing only one option', () => {
+        sessionStorage.setItem('beegame.pendingIntakeFlow.v1', JSON.stringify({
+            phase: 'options_ready',
+            idea: 'Legacy cached idea',
+            language: 'zh',
+            options: [makeIntakeOptions()[0]],
+            createdAt: Date.now(),
+        }));
+
+        renderLanding();
+
+        expect(screen.queryByRole('dialog', { name: '选择方案' })).not.toBeInTheDocument();
+        expect(screen.getByRole('textbox')).toHaveValue('');
     });
 
     it('restores selected intake settings after a page refresh', async () => {
@@ -1437,7 +1451,6 @@ describe('LandingView bootstrap submission', () => {
 
         resolveOptions({
             maturity: 'vague',
-            needsOptions: true,
             needsClarification: false,
             clarificationQuestions: [],
             detectedConstraints: [],
@@ -1448,56 +1461,28 @@ describe('LandingView bootstrap submission', () => {
         expect(onStart).not.toHaveBeenCalled();
     });
 
-    it('skips direction selection for a concrete idea and opens settings with the recommended brief', async () => {
+    it('shows three selectable directions even for a concrete idea', async () => {
         runIdeaIntake.mockResolvedValueOnce({
             maturity: 'concrete',
-            needsOptions: false,
             needsClarification: false,
             clarificationQuestions: [],
             detectedConstraints: ['LLM concrete constraint'],
-            recommendedNextStep: 'configure_details',
-            options: [
-                {
-                    id: 'llm_concrete_mode',
-                    title: 'LLM Concrete Mode',
-                    pitch: 'LLM concrete pitch.',
-                    gameplay: 'LLM concrete gameplay rules.',
-                    coreGameplayHypothesis: 'LLM concrete hypothesis.',
-                    experienceSnapshot: 'LLM concrete snapshot.',
-                    playerFirstMinute: 'LLM concrete first minute.',
-                    whyFitsIdea: 'LLM concrete fit.',
-                    playablePrototype: 'LLM concrete first playable.',
-                    validationTarget: 'LLM concrete validation target.',
-                    coreMechanic: 'LLM concrete core mechanic.',
-                    firstBuild: 'LLM concrete first build.',
-                    validationGoal: 'LLM concrete validation goal.',
-                    risk: 'LLM concrete risk.',
-                    fit: 'LLM concrete fit.',
-                    firstPlayableValidation: 'LLM concrete validation.',
-                    riskComplexity: 'LLM concrete complexity.',
-                    recommendedPlatform: 'Web',
-                    recommendedDimension: '3D',
-                    recommendedGenre: 'Action',
-                    recommendedStyle: 'Stylized',
-                    recommendedInputs: ['Keyboard/mouse'],
-                    scope: 'Playable demo',
-                },
-            ],
+            recommendedNextStep: 'choose_direction',
+            options: makeIntakeOptions(),
         });
 
         renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM concrete idea');
 
-        expect(await screen.findByRole('dialog', { name: 'LLM Concrete Mode' })).toBeInTheDocument();
-        expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
-        expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+        expect(await screen.findByRole('dialog', { name: '选择方案' })).toBeInTheDocument();
+        expect(screen.getAllByTestId('intake-option-card')).toHaveLength(3);
+        expect(screen.queryByTestId('intake-settings')).not.toBeInTheDocument();
     });
 
     it('requires production settings to stay inside configured values', async () => {
         runIdeaIntake.mockResolvedValueOnce({
             maturity: 'vague',
-            needsOptions: true,
             needsClarification: false,
             clarificationQuestions: [],
             detectedConstraints: [],
@@ -1567,27 +1552,27 @@ describe('LandingView bootstrap submission', () => {
     it('uses configured production setting choices and preselects valid LLM recommendations', async () => {
         runIdeaIntake.mockResolvedValueOnce({
             maturity: 'concrete',
-            needsOptions: false,
             needsClarification: false,
             clarificationQuestions: [],
             detectedConstraints: [],
-            recommendedNextStep: 'configure_details',
-            options: [
-                {
-                    ...makeIntakeOptions()[0],
+            recommendedNextStep: 'choose_direction',
+            options: makeIntakeOptions().map((option, index) => (
+                index === 0 ? {
+                    ...option,
                     recommendedPlatform: 'PC',
                     recommendedEngine: 'Unity',
                     recommendedDimension: '3D',
                     recommendedGenre: 'Racing',
                     recommendedStyle: 'Realistic',
                     recommendedInputs: ['Keyboard/mouse', 'Gamepad', 'Hand tracking'],
-                },
-            ],
+                } : option
+            )),
         });
 
         renderLanding();
 
         await submitIdeaAndConfirmIntake('LLM concrete settings idea');
+        fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
         expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
 
         const platformSelect = screen.getByRole('combobox', { name: '平台' });
