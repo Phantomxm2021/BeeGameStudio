@@ -33,7 +33,7 @@ const PLAYER_PATH_STEP_SCHEMA = {
 /** The single, platform-neutral, server-owned description of the authorable contract shape. */
 export const PROJECT_DELIVERY_CONTRACT_FORMAT = {
   type: 'object',
-  required: ['version', 'requirements', 'playerPaths', 'requiredCapabilities'],
+  required: ['version', 'requirements', 'playerPaths', 'acceptanceCriteria', 'requiredCapabilities'],
   properties: {
     version: { const: PROJECT_DELIVERY_CONTRACT_VERSION },
     requirements: {
@@ -90,6 +90,31 @@ export const PROJECT_DELIVERY_CONTRACT_FORMAT = {
         },
       },
     },
+    acceptanceCriteria: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        required: ['id', 'sourceRef', 'requirementIds', 'playerPathIds'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          sourceRef: {
+            type: 'object',
+            required: ['path', 'locator'],
+            properties: {
+              path: { const: 'docs/specs/ACCEPTANCE_CRITERIA.md' },
+              locator: { type: 'string', minLength: 1 },
+            },
+          },
+          requirementIds: {
+            type: 'array', minItems: 1, items: { type: 'string', minLength: 1 },
+          },
+          playerPathIds: {
+            type: 'array', minItems: 1, items: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
     requiredCapabilities: {
       type: 'array',
       items: { type: 'string', minLength: 1 },
@@ -105,6 +130,7 @@ export type ProjectDeliveryContractSkeleton = {
   version: typeof PROJECT_DELIVERY_CONTRACT_VERSION
   requirements: unknown[]
   playerPaths: unknown[]
+  acceptanceCriteria: unknown[]
   requiredCapabilities: string[]
 }
 
@@ -116,6 +142,7 @@ export async function ensureProjectDeliveryContractSkeleton(workspacePath: strin
     version: PROJECT_DELIVERY_CONTRACT_VERSION,
     requirements: [],
     playerPaths: [],
+    acceptanceCriteria: [],
     requiredCapabilities: [],
   }
   await mkdir(dirname(path), { recursive: true })

@@ -41,6 +41,7 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
+import { auditGameProductionCompletion } from './beegame/production-completion-audit'
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
@@ -1430,6 +1431,12 @@ export function createAgentWorkflowApp(
         assertPermittedModelConfigRuntime,
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
+      const deliveryFailure = getProductionDeliveryFailure(
+        beeGameSessions,
+        ensured.session.id,
+        ensured.binding.workspacePath,
+      )
+      if (deliveryFailure) return c.json(deliveryFailure, 409)
       const deployment = await beeGameDeployments.deploy({
         sessionId: ensured.session.id,
         userId: user.id,
@@ -3632,10 +3639,28 @@ async function getBeeGameProjectRuntimeState(input: {
     context: deriveBeeGameContextVisibility(events, snapshot),
     project_target: assetManifest.project_target ?? null,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
-    review_status: null,
+    review_status: getLatestDeliveryReviewStatus(events),
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
+}
+
+function getLatestDeliveryReviewStatus(events: BeeGameEvent[]): JsonObject | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'delivery.validation') continue
+    const payload = event.payload
+    const report = isObject(payload) && isObject(payload.report) ? payload.report : undefined
+    if (!report || typeof report.status !== 'string' || typeof report.summary !== 'string') continue
+    return {
+      status: report.status,
+      summary: report.summary,
+      validator_id: typeof report.validatorId === 'string' ? report.validatorId : null,
+      event_id: event.id,
+      updated_at: event.createdAt.toISOString(),
+    }
+  }
+  return null
 }
 
 async function getLatestProjectSessionMetadata(input: {
@@ -4762,6 +4787,12 @@ function registerBeeGameSessionRoutes(
           c.req.param('id'),
           getWorkspacePathHint(c.req.query('workspacePath'), body),
         )
+        const deliveryFailure = getProductionDeliveryFailure(
+          beeGameSessions,
+          c.req.param('id'),
+          workspacePath,
+        )
+        if (deliveryFailure) return c.json(deliveryFailure, 409)
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
         const deployment = await beeGameDeployments.deploy({
@@ -5148,6 +5179,26 @@ function registerBeeGameSessionRoutes(
       return tracedRouteError(c, 'beegame-session.delete', err, 404)
     }
   })
+}
+
+export function getProductionDeliveryFailure(
+  sessions: BeeGameSessionManager,
+  sessionId: string,
+  workspacePath: string,
+): { error: { code: 'delivery_not_accepted'; message: string; issues: string[] } } | null {
+  if (!sessions.requiresProductionContract(sessionId)) return null
+  const audit = auditGameProductionCompletion(
+    workspacePath,
+    sessions.events(sessionId).map(event => event.payload ?? event),
+  )
+  if (audit.valid) return null
+  return {
+    error: {
+      code: 'delivery_not_accepted',
+      message: 'Project deployment requires passed evidence-backed delivery validation.',
+      issues: audit.issues,
+    },
+  }
 }
 
 async function readTranscriptFromWorkspace(

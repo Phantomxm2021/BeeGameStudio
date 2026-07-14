@@ -8,6 +8,7 @@ import {
 } from './production-planning-contract'
 import { auditProjectDeliveryContract } from './project-delivery-contract-audit'
 import { PRODUCTION_REVIEWER_AGENT_TYPE } from './delivery-validation-agents'
+import type { DeliveryEvidenceKind } from './delivery-contract'
 
 export type GameProductionReadinessAudit = {
   valid: boolean
@@ -35,6 +36,9 @@ const STRUCTURED_MUTATION_TOOLS = new Set([
   'NotebookEdit',
 ])
 const TOOL_PATH_FIELDS = ['file_path', 'path', 'notebook_path'] as const
+const PLAN_EVIDENCE_KINDS = new Set<DeliveryEvidenceKind>([
+  'implementation', 'build', 'test', 'runtime', 'asset', 'skill', 'document',
+])
 
 export function auditGameProductionReadiness(
   workspacePath: string,
@@ -193,6 +197,8 @@ function auditImplementationPlan(workspace: string, planPath: string): string[] 
     const knownPlayerPathIds = new Set(delivery.playerPathIds)
     const coveredRequirementIds = new Set<string>()
     const coveredPlayerPathIds = new Set<string>()
+    const plannedEvidenceByRequirement = new Map<string, Set<DeliveryEvidenceKind>>()
+    const runtimeCheckedPlayerPathIds = new Set<string>()
     const taskIds = new Set<string>()
 
     for (const [index, task] of value.tasks.entries()) {
@@ -230,6 +236,23 @@ function auditImplementationPlan(workspace: string, planPath: string): string[] 
       }
       if (!isRecord(task.check) || !normalizedString(task.check.command) || !isStructuredList(task.check.assertions)) {
         issues.push(`Implementation plan task ${id || index} must declare a focused command and observable check assertions.`)
+      } else {
+        const evidenceKinds = evidenceKindArray(task.check.evidenceKinds)
+        if (
+          !Array.isArray(task.check.evidenceKinds) ||
+          evidenceKinds.length === 0 ||
+          evidenceKinds.length !== task.check.evidenceKinds.length
+        ) {
+          issues.push(`Implementation plan task ${id || index} check must declare unique supported evidenceKinds.`)
+        }
+        for (const requirementId of requirementIds) {
+          const planned = plannedEvidenceByRequirement.get(requirementId) ?? new Set<DeliveryEvidenceKind>()
+          evidenceKinds.forEach(kind => planned.add(kind))
+          plannedEvidenceByRequirement.set(requirementId, planned)
+        }
+        if (evidenceKinds.includes('runtime')) {
+          playerPathIds.forEach(item => runtimeCheckedPlayerPathIds.add(item))
+        }
       }
     }
 
@@ -244,6 +267,17 @@ function auditImplementationPlan(workspace: string, planPath: string): string[] 
     const uncoveredPlayerPaths = delivery.playerPathIds.filter(id => !coveredPlayerPathIds.has(id))
     if (uncoveredPlayerPaths.length > 0) {
       issues.push(`Implementation plan must cover every player path: ${uncoveredPlayerPaths.join(', ')}`)
+    }
+    for (const requirement of delivery.requirements.filter(item => item.scope === 'mvp')) {
+      const planned = plannedEvidenceByRequirement.get(requirement.id) ?? new Set<DeliveryEvidenceKind>()
+      const missing = requirement.evidenceRequired.filter(kind => !planned.has(kind))
+      if (missing.length > 0) {
+        issues.push(`Implementation plan checks for ${requirement.id} do not cover required evidence kinds: ${missing.join(', ')}`)
+      }
+    }
+    const playerPathsWithoutRuntimeCheck = delivery.playerPathIds.filter(id => !runtimeCheckedPlayerPathIds.has(id))
+    if (playerPathsWithoutRuntimeCheck.length > 0) {
+      issues.push(`Every player path must be covered by a plan check that declares runtime evidence: ${playerPathsWithoutRuntimeCheck.join(', ')}`)
     }
   } catch (error) {
     issues.push(`${GAME_PRODUCTION_PLAN_INDEX_PATH} could not be parsed: ${error instanceof Error ? error.message : String(error)}`)
@@ -309,6 +343,12 @@ function isStructuredList(value: unknown): boolean {
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? [...new Set(value.map(normalizedString).filter(Boolean))]
+    : []
+}
+
+function evidenceKindArray(value: unknown): DeliveryEvidenceKind[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is DeliveryEvidenceKind => PLAN_EVIDENCE_KINDS.has(item as DeliveryEvidenceKind)))]
     : []
 }
 

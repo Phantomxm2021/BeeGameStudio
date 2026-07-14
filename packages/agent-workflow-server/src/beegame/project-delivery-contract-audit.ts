@@ -20,6 +20,7 @@ export type ProjectDeliveryContractAudit = {
   playerPathIds: string[]
   playerPathRequirementIds: string[]
   playerPathRequirements: Record<string, string[]>
+  acceptanceCriterionIds: string[]
   issues: string[]
 }
 
@@ -41,6 +42,7 @@ export function auditProjectDeliveryContract(workspacePath: string): ProjectDeli
       playerPathIds: [],
       playerPathRequirementIds: [],
       playerPathRequirements: {},
+      acceptanceCriterionIds: [],
       issues: ['docs/delivery-contract.json is required before implementation can be accepted.'],
     }
   }
@@ -52,6 +54,13 @@ export function auditProjectDeliveryContract(workspacePath: string): ProjectDeli
     const requirements = parseRequirements(value.requirements, issues)
     validateRequirementSources(workspacePath, requirements, issues)
     const playerPaths = parsePlayerPaths(value.playerPaths, requirements, issues)
+    const acceptanceCriteria = parseAcceptanceCriteria(
+      workspacePath,
+      value.acceptanceCriteria,
+      requirements,
+      playerPaths.ids,
+      issues,
+    )
     const requiredCapabilities = parseRequiredCapabilities(value.requiredCapabilities, issues)
     if (requirements.filter(item => item.scope === 'mvp').length === 0) issues.push('At least one MVP requirement is required.')
     if (playerPaths.ids.length === 0) issues.push('At least one structured player path is required.')
@@ -71,11 +80,76 @@ export function auditProjectDeliveryContract(workspacePath: string): ProjectDeli
       playerPathIds: playerPaths.ids,
       playerPathRequirementIds: playerPaths.requirementIds,
       playerPathRequirements: playerPaths.requirements,
+      acceptanceCriterionIds: acceptanceCriteria.ids,
       issues,
     }
   } catch (error) {
     return invalid(path, [`Delivery contract could not be parsed: ${error instanceof Error ? error.message : String(error)}`])
   }
+}
+
+function parseAcceptanceCriteria(
+  workspacePath: string,
+  value: unknown,
+  requirements: ProjectDeliveryContractRequirement[],
+  playerPathIds: string[],
+  issues: string[],
+): { ids: string[] } {
+  if (!Array.isArray(value) || value.length === 0) {
+    issues.push('acceptanceCriteria must be a non-empty array.')
+    return { ids: [] }
+  }
+  const knownRequirementIds = new Set(requirements.map(item => item.id))
+  const mvpRequirementIds = requirements.filter(item => item.scope === 'mvp').map(item => item.id)
+  const knownPlayerPathIds = new Set(playerPathIds)
+  const coveredRequirements = new Set<string>()
+  const coveredPlayerPaths = new Set<string>()
+  const ids = new Set<string>()
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) {
+      issues.push(`Acceptance criterion ${index} must be an object.`)
+      continue
+    }
+    rejectValidationOutcomes(item, `Acceptance criterion ${index}`, issues)
+    const id = normalizedString(item.id)
+    if (!id || ids.has(id)) {
+      issues.push(`Acceptance criterion ${index} must have a unique stable id.`)
+      continue
+    }
+    ids.add(id)
+    const requirementIds = stringArray(item.requirementIds)
+    const criterionPlayerPathIds = stringArray(item.playerPathIds)
+    if (requirementIds.length === 0 || requirementIds.some(requirementId => !knownRequirementIds.has(requirementId))) {
+      issues.push(`Acceptance criterion ${id} must reference existing requirement ids.`)
+    }
+    if (criterionPlayerPathIds.length === 0 || criterionPlayerPathIds.some(playerPathId => !knownPlayerPathIds.has(playerPathId))) {
+      issues.push(`Acceptance criterion ${id} must reference existing player path ids.`)
+    }
+    requirementIds.forEach(requirementId => coveredRequirements.add(requirementId))
+    criterionPlayerPathIds.forEach(playerPathId => coveredPlayerPaths.add(playerPathId))
+    const sourceRef = isRecord(item.sourceRef) ? item.sourceRef : {}
+    const sourcePath = normalizedString(sourceRef.path)
+    const locator = normalizedString(sourceRef.locator)
+    if (sourcePath !== 'docs/specs/ACCEPTANCE_CRITERIA.md' || !locator) {
+      issues.push(`Acceptance criterion ${id} sourceRef must identify docs/specs/ACCEPTANCE_CRITERIA.md and an exact locator.`)
+    } else {
+      const absolutePath = resolve(workspacePath, sourcePath)
+      if (!existsSync(absolutePath)) {
+        issues.push(`Acceptance criterion ${id} source document does not exist: ${sourcePath}`)
+      } else if (!readFileSync(absolutePath, 'utf8').includes(locator)) {
+        issues.push(`Acceptance criterion ${id} sourceRef locator does not exist in ${sourcePath}: ${locator}`)
+      }
+    }
+  }
+  const uncoveredRequirements = mvpRequirementIds.filter(id => !coveredRequirements.has(id))
+  if (uncoveredRequirements.length > 0) {
+    issues.push(`Every MVP requirement must be mapped to an acceptance criterion: ${uncoveredRequirements.join(', ')}`)
+  }
+  const uncoveredPlayerPaths = playerPathIds.filter(id => !coveredPlayerPaths.has(id))
+  if (uncoveredPlayerPaths.length > 0) {
+    issues.push(`Every player path must be mapped to an acceptance criterion: ${uncoveredPlayerPaths.join(', ')}`)
+  }
+  return { ids: [...ids] }
 }
 
 function validateRequirementSources(
@@ -177,7 +251,7 @@ const VALIDATION_OUTCOME_FIELDS = [
 ] as const
 
 function rejectValidationOutcomes(value: Record<string, unknown>, label: string, issues: string[]): void {
-  const fields = VALIDATION_OUTCOME_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(value, field))
+  const fields = VALIDATION_OUTCOME_FIELDS.filter(field => Object.hasOwn(value, field))
   if (fields.length > 0) {
     issues.push(`${label} must not declare validator-owned outcome fields: ${fields.join(', ')}.`)
   }
@@ -232,7 +306,7 @@ function isPlayerPathStep(value: unknown): boolean {
 }
 
 function invalid(path: string, issues: string[]): ProjectDeliveryContractAudit {
-  return { present: true, valid: false, path, requirements: [], requiredCapabilities: [], playerPathIds: [], playerPathRequirementIds: [], playerPathRequirements: {}, issues }
+  return { present: true, valid: false, path, requirements: [], requiredCapabilities: [], playerPathIds: [], playerPathRequirementIds: [], playerPathRequirements: {}, acceptanceCriterionIds: [], issues }
 }
 
 function stringArray(value: unknown): string[] {

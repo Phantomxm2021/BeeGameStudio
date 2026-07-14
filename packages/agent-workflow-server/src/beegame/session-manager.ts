@@ -33,8 +33,13 @@ import {
   formatProjectDeliveryContract,
 } from './project-delivery-contract'
 import {
+  DELIVERY_VALIDATOR_AGENT_TYPES,
   createBeeGameProductionAgentDefinitions,
 } from './delivery-validation-agents'
+import {
+  findLastValidatorReportInText,
+  readValidatorReportFromTaskOutput,
+} from './production-completion-audit'
 import {
   GAME_PRODUCTION_DOCUMENT_PATHS,
   GAME_PRODUCTION_PLAN_DIRECTORY,
@@ -119,6 +124,7 @@ export type BeeGameEventType =
   | 'tool.progress'
   | 'permission.requested'
   | 'permission.resolved'
+  | 'delivery.validation'
   | 'system.status'
   | 'result'
   | 'turn.completed'
@@ -690,6 +696,10 @@ export class BeeGameSessionManager {
       .map(event => ({ ...event }))
   }
 
+  requiresProductionContract(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.productionContractRequired === true
+  }
+
   transcript(sessionId: string): Array<{
     id: number
     type: BeeGameEventType
@@ -1048,6 +1058,15 @@ export class BeeGameSessionManager {
           record.currentTurnId !== submittedTurnId ||
           hasTurnEnded(record.events, submittedTurnId)
         ) return
+        const validation = extractValidatorTaskCompletion(record, message)
+        if (validation) {
+          this.append(record, 'delivery.validation', validation.report.summary, {
+            type: 'delivery.validation',
+            taskId: validation.taskId,
+            toolUseID: validation.toolUseID,
+            report: validation.report,
+          })
+        }
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
           if (mapped.type === 'assistant.partial') {
@@ -1429,6 +1448,42 @@ export class BeeGameSessionManager {
     }
   }
 
+}
+
+function extractValidatorTaskCompletion(
+  record: SessionRecord,
+  message: DashboardSDKMessage,
+): {
+  taskId: string
+  toolUseID: string
+  report: NonNullable<ReturnType<typeof readValidatorReportFromTaskOutput>>
+} | undefined {
+  for (const block of extractContentBlocks(message)) {
+    if (getStringField(block, 'type') !== 'tool_result') continue
+    const toolUseID = getStringField(block, 'tool_use_id')
+    if (!toolUseID || !isValidatorAgentToolUse(record, toolUseID)) continue
+    const report = findLastValidatorReportInText(extractMessageText(block.content))
+    if (report) return { taskId: toolUseID, toolUseID, report }
+  }
+  if (
+    message.type !== 'system' ||
+    getStringField(message, 'subtype') !== 'task_notification' ||
+    getStringField(message, 'status') !== 'completed'
+  ) return undefined
+  const taskId = getStringField(message, 'task_id')
+  const toolUseID = getStringField(message, 'tool_use_id')
+  const outputFile = getStringField(message, 'output_file')
+  if (!taskId || !toolUseID || !outputFile) return undefined
+  if (!isValidatorAgentToolUse(record, toolUseID)) return undefined
+  const report = readValidatorReportFromTaskOutput(taskId, outputFile)
+  return report ? { taskId, toolUseID, report } : undefined
+}
+
+function isValidatorAgentToolUse(record: SessionRecord, toolUseID: string): boolean {
+  const toolUse = record.toolUses.get(toolUseID)
+  return toolUse?.toolName === 'Agent' &&
+    isObject(toolUse.input) &&
+    getStringField(toolUse.input, 'subagent_type') === DELIVERY_VALIDATOR_AGENT_TYPES[0]
 }
 
 function resolveExistingPath(path: string): string {
@@ -1841,9 +1896,9 @@ function withDeliveryContract(prompt: string): string {
     '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
     '- requiredCapabilities may contain only applicable registered skill:<id> values. Framework, language, rendering, input, and state-management names are implementation details, not validation capabilities.',
     '- Invoke applicable skills from the runtime Skill catalog. Missing required capability must be declared, never simulated.',
-    '- Before claiming completion, invoke the beegame-acceptance-validator through Claude Code\'s native Agent tool in the same task. Treat its observed evidence as authoritative.',
+    '- Before claiming completion, invoke the beegame-acceptance-validator through Claude Code\'s native Agent tool in the same task. Let Claude Code manage the sub-agent lifecycle and consume the native terminal result without polling TaskOutput. Treat its observed evidence as authoritative.',
     '- If validation fails, fix the project and invoke the validator again. Stop only after it passes or it reports a material blocker that requires the user or an unavailable external capability.',
-    '- Write docs/validation-report.md from the final validator result without inventing evidence, and keep unchecked acceptance items unchecked unless the validator actually observed them.',
+    '- Persist the final validator JSON unchanged to docs/validation-report.json, render docs/validation-report.md from that exact result without inventing evidence, and keep unchecked acceptance items unchecked unless the validator actually observed them.',
     '- Fix validation failures without weakening sourceRefs, requirements, evidence requirements, or player paths.',
   ].join('\n')
 }

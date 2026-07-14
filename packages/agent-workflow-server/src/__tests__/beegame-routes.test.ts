@@ -897,7 +897,6 @@ describe('beegame session routes', () => {
       expect(submits).toBe(1)
       expect(definitions.map(definition => definition.agentType)).toContain('beegame-acceptance-validator')
       expect(manager.events(session.id).some(event => event.type.startsWith('delivery.validation'))).toBe(false)
-      expect(manager.events(session.id).some(event => event.type.startsWith('delivery.repair'))).toBe(false)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -7564,70 +7563,6 @@ describe('beegame session routes', () => {
           text: 'Sample game is ready.',
         }),
       ])
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
-  })
-
-  test('keeps session and event reads observational when a persisted delivery transition is pending', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-events-observational-'))
-    const sessionId = 'beegame_events_observational'
-    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
-    const fakeRunner = createFakeRunner()
-    const app = createAgentWorkflowApp({
-      defaultWorkspacePath: workspace,
-      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
-      sessionRunner: fakeRunner.runner,
-    })
-    const contract = {
-      version: 1,
-      status: 'failed',
-      summary: 'Delivery evidence is incomplete.',
-      requirements: [{
-        id: 'runtime-path',
-        title: 'Runtime path',
-        scope: 'mvp',
-        status: 'failed',
-        evidenceRequired: ['runtime'],
-        evidence: [],
-      }],
-      requiredCapabilities: [],
-      verifiedCapabilities: [],
-    }
-
-    try {
-      await mkdir(dirname(transcriptPath), { recursive: true })
-      const persistedTranscript = [
-        {
-          id: 1,
-          sessionId,
-          type: 'delivery.contract.updated',
-          text: contract.summary,
-          payload: { type: 'delivery.contract.updated', contract },
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 2,
-          sessionId,
-          type: 'delivery.repair.queued',
-          text: 'Delivery repair queued',
-          payload: { type: 'delivery.repair.queued', status: 'queued', attempt: 1, contract },
-          createdAt: new Date().toISOString(),
-        },
-      ].map(event => JSON.stringify(event)).join('\n') + '\n'
-      await writeFile(transcriptPath, persistedTranscript)
-
-      const eventsResponse = await app.request(
-        `/api/beegame-sessions/${sessionId}/events?after=0`,
-        { headers: { 'x-beegame-workspace-path': workspace } },
-      )
-      expect(eventsResponse.status).toBe(200)
-      expect(fakeRunner.starts).toHaveLength(0)
-      expect((await eventsResponse.json() as Array<{ type?: string }>).some(
-        event => event.type === 'delivery.repair.started',
-      )).toBe(false)
-      expect(await readFile(transcriptPath, 'utf8')).toBe(persistedTranscript)
-
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

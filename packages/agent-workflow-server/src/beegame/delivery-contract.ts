@@ -76,6 +76,11 @@ export type DeliveryValidatorReport = {
     status: DeliveryCheckStatus
     evidence: DeliveryEvidence[]
   }>
+  playerPaths: Array<{
+    id: string
+    status: DeliveryCheckStatus
+    evidence: DeliveryEvidence[]
+  }>
   findings: ParsedDeliveryReview['findings']
   verifiedCapabilities: string[]
 }
@@ -155,18 +160,38 @@ export function parseDeliveryValidatorReport(
       requirements.push({ id, status: item.status, evidence })
     }
     const findings = parseFindings(value.findings)
-    if (!findings) return undefined
+    const playerPaths = parseValidatorPlayerPaths(value.playerPaths)
+    if (!findings || !playerPaths) return undefined
     return {
       validatorId: expectedValidatorId,
       status: value.status,
       summary: value.summary.trim(),
       requirements,
+      playerPaths,
       findings,
       verifiedCapabilities: stringArray(value.verifiedCapabilities),
     }
   } catch {
     return undefined
   }
+}
+
+function parseValidatorPlayerPaths(
+  value: unknown,
+): DeliveryValidatorReport['playerPaths'] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const playerPaths: DeliveryValidatorReport['playerPaths'] = []
+  const ids = new Set<string>()
+  for (const item of value) {
+    if (!isRecord(item)) return undefined
+    const id = normalizedString(item.id)
+    if (!id || ids.has(id) || !isDeliveryCheckStatus(item.status)) return undefined
+    const evidence = parseEvidence(item.evidence)
+    if (!evidence || evidence.some(entry => Boolean(entry.eventId))) return undefined
+    ids.add(id)
+    playerPaths.push({ id, status: item.status, evidence })
+  }
+  return playerPaths
 }
 
 export function createDeliveryContract(

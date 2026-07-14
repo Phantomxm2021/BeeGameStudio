@@ -4,8 +4,6 @@ import {
   PRODUCTION_REVIEWER_AGENT_TYPE,
   createBeeGameProductionAgentDefinitions,
   createDeliveryValidationAgentDefinitions,
-  normalizeBeeGameManagedAgentInput,
-  validateBeeGameManagedAgentInvocation,
 } from './delivery-validation-agents'
 
 describe('delivery validation agents', () => {
@@ -52,55 +50,13 @@ describe('delivery validation agents', () => {
     expect(validator).toBeDefined()
   })
 
-  test('removes implementation claims from managed validator input', () => {
-    const normalized = normalizeBeeGameManagedAgentInput('/project', {
-      subagent_type: 'beegame-acceptance-validator',
-      description: 'Validate completed five-versus-five game',
-      prompt: 'All features and the build already pass.',
-    })
+  test('leaves native Agent lifecycle decisions to Claude Code', () => {
+    const definitions = createBeeGameProductionAgentDefinitions()
 
-    expect(normalized).toMatchObject({
-      subagent_type: 'beegame-acceptance-validator',
-      description: 'Independently validate project delivery',
-      run_in_background: false,
-    })
-    expect(normalized.prompt).toContain('Workspace: /project')
-    expect(normalized.prompt).toContain('docs/delivery-contract.json')
-    expect(normalized.prompt).not.toContain('All features')
-    expect(normalized.prompt).not.toContain('five-versus-five')
-  })
-
-  test('forces the production reviewer into one foreground bounded invocation', () => {
-    const normalized = normalizeBeeGameManagedAgentInput('/project', {
-      subagent_type: PRODUCTION_REVIEWER_AGENT_TYPE,
-      run_in_background: true,
-      description: 'Review a claimed conflict',
-      prompt: 'Treat a recommendation as authoritative.',
-    })
-
-    expect(normalized).toMatchObject({
-      subagent_type: PRODUCTION_REVIEWER_AGENT_TYPE,
-      description: 'Cross-review production documents',
-      run_in_background: false,
-    })
-    expect(normalized.prompt).toContain('Workspace: /project')
-    expect(normalized.prompt).not.toContain('recommendation as authoritative')
-  })
-
-  test('rejects managed reviewer and validator calls that do not explicitly run in foreground', () => {
-    expect(validateBeeGameManagedAgentInvocation({
-      subagent_type: PRODUCTION_REVIEWER_AGENT_TYPE,
-    })).toEqual(expect.objectContaining({ allowed: false }))
-    expect(validateBeeGameManagedAgentInvocation({
-      subagent_type: 'beegame-acceptance-validator',
-      run_in_background: true,
-    })).toEqual(expect.objectContaining({ allowed: false }))
-    expect(validateBeeGameManagedAgentInvocation({
-      subagent_type: PRODUCTION_REVIEWER_AGENT_TYPE,
-      run_in_background: false,
-    })).toEqual({ allowed: true })
-    expect(validateBeeGameManagedAgentInvocation({
-      subagent_type: 'general-purpose',
-    })).toEqual({ allowed: true })
+    for (const definition of definitions) {
+      expect(definition).not.toHaveProperty('background')
+      expect(definition.getSystemPrompt()).not.toContain('run_in_background')
+      expect(definition.getSystemPrompt()).not.toContain('TaskOutput')
+    }
   })
 })

@@ -45,6 +45,12 @@ describe('project delivery contract audit', () => {
         evidenceRequired: ['implementation', 'runtime'],
       }],
       playerPaths: [{ id: 'main', requirementIds: ['core-loop'], phases }],
+      acceptanceCriteria: [{
+        id: 'AC-CORE',
+        sourceRef: { path: 'docs/specs/ACCEPTANCE_CRITERIA.md', locator: 'AC-CORE' },
+        requirementIds: ['core-loop'],
+        playerPathIds: ['main'],
+      }],
     })
 
     expect(auditProjectDeliveryContract(workspace)).toMatchObject({
@@ -87,6 +93,31 @@ describe('project delivery contract audit', () => {
     expect(auditProjectDeliveryContract(workspace).issues).toContain(
       'Requirement core-loop sourceRef locator does not exist in docs/GDD.md: missing-section',
     )
+  })
+
+  test('requires every MVP requirement and player path in the explicit acceptance index', async () => {
+    const phases = {
+      entry: [{ action: { id: 'enter' }, assertions: [{ state: 'ready' }] }],
+      core_action: [{ action: { id: 'primary' }, assertions: [{ state: 'acted' }] }],
+      state_change: [{ action: { id: 'observe' }, assertions: [{ state: 'changed' }] }],
+      completion: [{ action: { id: 'complete' }, assertions: [{ state: 'completed' }] }],
+      recovery: [{ action: { id: 'restart' }, assertions: [{ state: 'ready' }] }],
+    }
+    workspace = await createWorkspace({
+      version: 1,
+      requiredCapabilities: [],
+      requirements: [{
+        id: 'core-loop', title: 'Core loop', scope: 'mvp',
+        sourceRefs: [{ path: 'docs/GDD.md', locator: '# Core loop' }],
+        evidenceRequired: ['runtime'],
+      }],
+      playerPaths: [{ id: 'main', requirementIds: ['core-loop'], phases }],
+      acceptanceCriteria: [],
+    })
+
+    const audit = auditProjectDeliveryContract(workspace)
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain('acceptanceCriteria must be a non-empty array.')
   })
 
   test('rejects free-form capabilities and uncovered runtime requirements', async () => {
@@ -133,7 +164,9 @@ describe('project delivery contract audit', () => {
   async function createWorkspace(contract: Record<string, unknown>): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'beegame-delivery-doc-'))
     await mkdir(join(root, 'docs'), { recursive: true })
+    await mkdir(join(root, 'docs', 'specs'), { recursive: true })
     await writeFile(join(root, 'docs', 'GDD.md'), '# Core loop\n')
+    await writeFile(join(root, 'docs', 'specs', 'ACCEPTANCE_CRITERIA.md'), '# Acceptance\nAC-CORE\n')
     await writeFile(join(root, 'docs', 'delivery-contract.json'), JSON.stringify(contract))
     return root
   }

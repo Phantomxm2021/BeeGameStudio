@@ -33,7 +33,8 @@ describe('game production planning contract', () => {
       prompt.indexOf('create and read the complete production document bundle'),
     )
     expect(prompt).toContain('beegame-production-reviewer')
-    expect(prompt).toContain('run_in_background=false')
+    expect(prompt).toContain('Let Claude Code manage')
+    expect(prompt).not.toContain('run_in_background=false')
     expect(prompt).toContain('must converge')
     expect(prompt).toContain('Never re-run an unchanged bundle')
     expect(prompt).toContain('Only unresolved blocking contradictions')

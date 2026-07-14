@@ -81,6 +81,12 @@ describe('game production readiness audit', () => {
         evidenceRequired: ['runtime'],
         sourceRefs: [{ path: 'docs/specs/GDD.md', locator: 'specification' }],
       }],
+      acceptanceCriteria: [{
+        id: 'AC-1',
+        sourceRef: { path: 'docs/specs/ACCEPTANCE_CRITERIA.md', locator: 'specification' },
+        requirementIds: ['REQ-1'],
+        playerPathIds: ['PATH-1'],
+      }],
       requiredCapabilities: [],
       playerPaths: [{
         id: 'PATH-1',
@@ -110,6 +116,7 @@ describe('game production readiness audit', () => {
         assertions: [{ description: 'The player-visible state changes.' }],
         check: {
           command: 'project-native-focused-check',
+          evidenceKinds: ['runtime'],
           assertions: [{ description: 'The focused check exits successfully.' }],
         },
       }],
@@ -124,6 +131,21 @@ describe('game production readiness audit', () => {
       toolInput: { file_path: join(workspace, 'source/runtime.file') },
       toolReadOnly: false,
     })).toEqual({ allowed: true })
+
+    const planIndexPath = join(workspace, GAME_PRODUCTION_PLAN_INDEX_PATH)
+    const planIndex = JSON.parse(await Bun.file(planIndexPath).text()) as {
+      tasks: Array<{ check: { evidenceKinds: string[] } }>
+    }
+    planIndex.tasks[0]!.check.evidenceKinds = ['build']
+    await writeFile(planIndexPath, JSON.stringify(planIndex))
+    const buildOnlyAudit = auditGameProductionReadiness(workspace)
+    expect(buildOnlyAudit.valid).toBe(false)
+    expect(buildOnlyAudit.issues).toContain(
+      'Implementation plan checks for REQ-1 do not cover required evidence kinds: runtime',
+    )
+    expect(buildOnlyAudit.issues).toContain(
+      'Every player path must be covered by a plan check that declares runtime evidence: PATH-1',
+    )
   })
 
   test('rejects an unindexed source dump masquerading as an implementation plan', async () => {
@@ -144,6 +166,12 @@ describe('game production readiness audit', () => {
         scope: 'mvp',
         evidenceRequired: ['runtime'],
         sourceRefs: [{ path: 'docs/specs/GDD.md', locator: 'specification' }],
+      }],
+      acceptanceCriteria: [{
+        id: 'AC-1',
+        sourceRef: { path: 'docs/specs/ACCEPTANCE_CRITERIA.md', locator: 'specification' },
+        requirementIds: ['REQ-1'],
+        playerPathIds: ['PATH-1'],
       }],
       requiredCapabilities: [],
       playerPaths: [{
@@ -179,6 +207,7 @@ describe('game production readiness audit', () => {
         assertions: [{ description: 'The player-visible state changes.' }],
         check: {
           command: 'project-native-focused-check',
+          evidenceKinds: ['runtime'],
           assertions: [{ description: 'The focused check exits successfully.' }],
         },
       }],
@@ -207,6 +236,12 @@ describe('game production readiness audit', () => {
         scope: 'mvp',
         evidenceRequired: ['runtime'],
         sourceRefs: [{ path: 'docs/specs/GDD.md', locator: 'Missing section' }],
+      }],
+      acceptanceCriteria: [{
+        id: 'AC-1',
+        sourceRef: { path: 'docs/specs/ACCEPTANCE_CRITERIA.md', locator: 'specification' },
+        requirementIds: ['REQ-1'],
+        playerPathIds: ['PATH-1'],
       }],
       requiredCapabilities: [],
       playerPaths: [{

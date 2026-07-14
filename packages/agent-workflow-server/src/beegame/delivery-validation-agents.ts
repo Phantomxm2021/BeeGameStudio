@@ -16,11 +16,6 @@ export type DeliveryValidatorAgentType = typeof DELIVERY_VALIDATOR_AGENT_TYPES[n
 
 export const PRODUCTION_REVIEWER_AGENT_TYPE = 'beegame-production-reviewer' as const
 
-export type ManagedAgentInvocationDecision = {
-  allowed: boolean
-  message?: string
-}
-
 const ACCEPTANCE_TOOLS = [
   'Read',
   'Glob',
@@ -59,59 +54,10 @@ export function createBeeGameProductionAgentDefinitions(): BeeGameRuntimeAgentDe
   return [createProductionReviewer(), ...createDeliveryValidationAgentDefinitions()]
 }
 
-export function normalizeBeeGameManagedAgentInput(
-  workspacePath: string,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
-  if (input.subagent_type === DELIVERY_VALIDATOR_AGENT_TYPES[0]) {
-    return {
-      ...input,
-      run_in_background: false,
-      description: 'Independently validate project delivery',
-      prompt: [
-        `Workspace: ${workspacePath}`,
-        'Normative contract: docs/delivery-contract.json',
-        'Perform the independent acceptance validation defined by your system prompt. Do not accept or infer any implementation claims from the caller.',
-      ].join('\n'),
-    }
-  }
-  if (input.subagent_type === PRODUCTION_REVIEWER_AGENT_TYPE) {
-    return {
-      ...input,
-      run_in_background: false,
-      description: 'Cross-review production documents',
-      prompt: [
-        `Workspace: ${workspacePath}`,
-        'Review the normalized production document bundle, assets/asset-manifest.json and docs/delivery-contract.json as defined by your system prompt.',
-      ].join('\n'),
-    }
-  }
-  return input
-}
-
-export function validateBeeGameManagedAgentInvocation(
-  input: Record<string, unknown>,
-): ManagedAgentInvocationDecision {
-  const agentType = input.subagent_type
-  if (
-    agentType !== PRODUCTION_REVIEWER_AGENT_TYPE &&
-    !DELIVERY_VALIDATOR_AGENT_TYPES.includes(agentType as DeliveryValidatorAgentType)
-  ) {
-    return { allowed: true }
-  }
-  if (input.run_in_background !== false) {
-    return {
-      allowed: false,
-      message: `${String(agentType)} must be invoked once in the foreground with run_in_background=false. Do not launch it asynchronously or poll TaskOutput.`,
-    }
-  }
-  return { allowed: true }
-}
-
 function createProductionReviewer(): BeeGameRuntimeAgentDefinition {
   return {
     agentType: PRODUCTION_REVIEWER_AGENT_TYPE,
-    whenToUse: 'Perform one complete foreground cross-review of a distinct production document revision before implementation planning.',
+    whenToUse: 'Perform one complete cross-review of a distinct production document revision before implementation planning.',
     tools: ['Read', 'Glob', 'Grep', 'Skill'],
     disallowedTools: MUTATION_TOOLS,
     source: 'policySettings',
@@ -148,8 +94,8 @@ function createValidator(
       ...promptLines,
       'Perform the bounded validation now. Do not enter planning mode and do not create a plan file.',
       `Return one JSON object only. validatorId must equal ${JSON.stringify(agentType)}.`,
-      'Schema: {"validatorId":"...","status":"passed|failed|blocked","summary":"...","requirements":[{"id":"contract requirement id","status":"passed|failed|blocked|untested","evidence":[{"kind":"implementation|build|test|runtime|asset|skill|document","source":"exact observed source","detail":"exact observation"}]}],"findings":[{"requirementId":"optional contract requirement id","requirement":"...","status":"failed|blocked|untested","detail":"...","evidence":[]}],"verifiedCapabilities":["skill:<actually invoked skill slug>"]}.',
-      'Report every contract MVP requirement relevant to your validator. Never invent event ids; the host will attach provenance to your report.',
+      'Schema: {"validatorId":"...","status":"passed|failed|blocked","summary":"...","requirements":[{"id":"contract requirement id","status":"passed|failed|blocked|untested","evidence":[{"kind":"implementation|build|test|runtime|asset|skill|document","source":"exact observed source","detail":"exact observation"}]}],"playerPaths":[{"id":"declared player path id","status":"passed|failed|blocked|untested","evidence":[{"kind":"runtime","source":"exact declared player path id","detail":"observable runtime result"}]}],"findings":[{"requirementId":"optional contract requirement id","requirement":"...","status":"failed|blocked|untested","detail":"...","evidence":[]}],"verifiedCapabilities":["skill:<actually invoked skill slug>"]}.',
+      'Report every contract MVP requirement and every declared player path. A player path may pass only with runtime evidence observed during this validator run. Never invent event ids; the host will attach provenance to your report.',
       'For implementation, test, document, and asset evidence, source must be the exact project-relative file path. For runtime evidence, source must be the exact declared player-path id. Do not append line numbers or prose to source.',
       'verifiedCapabilities may contain only tools or skills you actually invoked in this validator run. Clearly distinguish passed, failed, blocked, and untested evidence.',
     ].join('\n'),

@@ -17,6 +17,11 @@ describe('delivery contract', () => {
         status: 'passed',
         evidence: [{ kind: 'implementation', source: 'src/main.ts', detail: 'Observed.' }],
       }],
+      playerPaths: [{
+        id: 'main-path',
+        status: 'passed',
+        evidence: [{ kind: 'runtime', source: 'main-path', detail: 'Observed.' }],
+      }],
       findings: [],
       verifiedCapabilities: [],
     }

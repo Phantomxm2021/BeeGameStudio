@@ -1,5 +1,5 @@
-import { existsSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
 import {
   parseDeliveryValidatorReport,
   type DeliveryValidatorReport,
@@ -63,11 +63,29 @@ export function auditGameProductionCompletion(
         issues.push(`Acceptance validator did not verify required capability: ${capability}`)
       }
     }
+    const playerPathResults = new Map(validatorReport.playerPaths.map(playerPath => [playerPath.id, playerPath]))
+    for (const playerPathId of contract.playerPathIds) {
+      const result = playerPathResults.get(playerPathId)
+      if (!result) {
+        issues.push(`Acceptance validator omitted player path: ${playerPathId}`)
+        continue
+      }
+      if (result.status !== 'passed') {
+        issues.push(`Player path ${playerPathId} is ${result.status}, not passed.`)
+      }
+      if (!result.evidence.some(evidence => evidence.kind === 'runtime' && evidence.source === playerPathId)) {
+        issues.push(`Player path ${playerPathId} has no direct runtime evidence.`)
+      }
+    }
   }
 
   const validationReportPath = resolve(workspacePath, 'docs', 'validation-report.md')
   if (!isNonEmptyFile(validationReportPath)) {
     issues.push('docs/validation-report.md must be derived from the final validator result.')
+  }
+  const validationResultPath = resolve(workspacePath, 'docs', 'validation-report.json')
+  if (!validatorReport || !persistedValidatorResultMatches(validationResultPath, validatorReport)) {
+    issues.push('docs/validation-report.json must exactly match the final validator result.')
   }
 
   return {
@@ -77,11 +95,35 @@ export function auditGameProductionCompletion(
   }
 }
 
+function persistedValidatorResultMatches(
+  path: string,
+  validatorReport: DeliveryValidatorReport,
+): boolean {
+  try {
+    const persisted = parseDeliveryValidatorReport(
+      readFileSync(path, 'utf8'),
+      DELIVERY_VALIDATOR_AGENT_TYPES[0],
+    )
+    return Boolean(persisted) && JSON.stringify(persisted) === JSON.stringify(validatorReport)
+  } catch {
+    return false
+  }
+}
+
 export function findLatestValidatorReport(messages: unknown[]): DeliveryValidatorReport | undefined {
   const toolUseIds = new Set<string>()
   const toolResults = new Map<string, string[]>()
+  let latestStructuredReport: DeliveryValidatorReport | undefined
   visitValues(messages, value => {
     if (!isRecord(value)) return
+    if (value.type === 'delivery.validation' && isRecord(value.report)) {
+      const report = parseDeliveryValidatorReport(
+        JSON.stringify(value.report),
+        DELIVERY_VALIDATOR_AGENT_TYPES[0],
+      )
+      if (report) latestStructuredReport = report
+      return
+    }
     if (value.type === 'tool_use' && value.name === 'Agent' && isRecord(value.input)) {
       if (
         value.input.subagent_type === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
@@ -95,6 +137,7 @@ export function findLatestValidatorReport(messages: unknown[]): DeliveryValidato
     }
   })
 
+  if (latestStructuredReport) return latestStructuredReport
   let latest: DeliveryValidatorReport | undefined
   for (const toolUseId of toolUseIds) {
     for (const text of toolResults.get(toolUseId) ?? []) {
@@ -102,6 +145,36 @@ export function findLatestValidatorReport(messages: unknown[]): DeliveryValidato
       const report = parseDeliveryValidatorReport(json, DELIVERY_VALIDATOR_AGENT_TYPES[0])
       if (report) latest = report
     }
+  }
+  return latest
+}
+
+export function readValidatorReportFromTaskOutput(
+  taskId: string,
+  outputFile: string,
+): DeliveryValidatorReport | undefined {
+  if (!taskId.trim() || !outputFile.trim()) return undefined
+  try {
+    const resolved = realpathSync(outputFile)
+    if (basename(resolved) !== `${taskId}.output`) return undefined
+    const file = statSync(resolved)
+    if (!file.isFile() || file.size <= 0 || file.size > 8 * 1024 * 1024) return undefined
+    return findLastValidatorReportInText(readFileSync(resolved, 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+export function findLastValidatorReportInText(value: string): DeliveryValidatorReport | undefined {
+  let latest: DeliveryValidatorReport | undefined
+  let offset = 0
+  while (offset < value.length) {
+    const object = readFirstJsonObject(value.slice(offset))
+    if (!object) break
+    const start = value.indexOf(object, offset)
+    const report = parseDeliveryValidatorReport(object, DELIVERY_VALIDATOR_AGENT_TYPES[0])
+    if (report) latest = report
+    offset = start + object.length
   }
   return latest
 }

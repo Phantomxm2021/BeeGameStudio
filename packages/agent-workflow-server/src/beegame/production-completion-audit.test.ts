@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   auditGameProductionCompletion,
+  findLastValidatorReportInText,
   findLatestValidatorReport,
+  readValidatorReportFromTaskOutput,
 } from './production-completion-audit'
 import { GAME_PRODUCTION_DOCUMENT_PATHS } from './production-planning-contract'
 
@@ -15,6 +17,7 @@ describe('production completion validator evidence', () => {
       status: 'passed',
       summary: 'Observed.',
       requirements: [],
+      playerPaths: [],
       findings: [],
       verifiedCapabilities: [],
     })
@@ -36,6 +39,10 @@ describe('production completion validator evidence', () => {
     }]
 
     expect(findLatestValidatorReport(messages)).toMatchObject({ status: 'passed' })
+    expect(findLatestValidatorReport([{
+      type: 'delivery.validation',
+      report: JSON.parse(result),
+    }])).toMatchObject({ status: 'passed' })
   })
 
   test('rejects empty, truncated and unrelated agent results', () => {
@@ -59,6 +66,26 @@ describe('production completion validator evidence', () => {
     expect(findLatestValidatorReport(messages)).toBeUndefined()
   })
 
+  test('reads the final valid report from a native task output file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'beegame-validator-output-'))
+    const taskId = 'native-validator'
+    const outputFile = join(directory, `${taskId}.output`)
+    const report = JSON.stringify({
+      validatorId: 'beegame-acceptance-validator',
+      status: 'blocked',
+      summary: 'A required runtime capability was unavailable.',
+      requirements: [],
+      playerPaths: [],
+      findings: [],
+      verifiedCapabilities: [],
+    })
+    await writeFile(outputFile, `diagnostic\n${report}\n`)
+
+    expect(findLastValidatorReportInText(`diagnostic\n${report}`)).toMatchObject({ status: 'blocked' })
+    expect(readValidatorReportFromTaskOutput(taskId, outputFile)).toMatchObject({ status: 'blocked' })
+    expect(readValidatorReportFromTaskOutput('other-task', outputFile)).toBeUndefined()
+  })
+
   test('accepts completion only when validator evidence covers the declared player path', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-production-complete-'))
     for (const path of GAME_PRODUCTION_DOCUMENT_PATHS) {
@@ -78,6 +105,12 @@ describe('production completion validator evidence', () => {
         evidenceRequired: ['runtime'],
         sourceRefs: [{ path: 'docs/specs/GDD.md', locator: 'specification' }],
       }],
+      acceptanceCriteria: [{
+        id: 'AC-1',
+        sourceRef: { path: 'docs/specs/ACCEPTANCE_CRITERIA.md', locator: 'specification' },
+        requirementIds: ['REQ-1'],
+        playerPathIds: ['PATH-1'],
+      }],
       requiredCapabilities: [],
       playerPaths: [{
         id: 'PATH-1',
@@ -93,6 +126,25 @@ describe('production completion validator evidence', () => {
     }))
     await mkdir(join(workspace, 'docs/superpowers/plans'), { recursive: true })
     await writeFile(join(workspace, 'docs/superpowers/plans/implementation.md'), '# plan\n')
+    await writeFile(join(workspace, 'docs/superpowers/plan-index.json'), JSON.stringify({
+      version: 1,
+      planPath: 'docs/superpowers/plans/implementation.md',
+      tasks: [{
+        id: 'TASK-1',
+        requirementIds: ['REQ-1'],
+        playerPathIds: ['PATH-1'],
+        files: ['source/runtime.file'],
+        assetSlotIds: [],
+        preconditions: [{ description: 'The approved contract exists.' }],
+        actions: [{ description: 'Implement the observable player path.' }],
+        assertions: [{ description: 'The declared runtime state is observable.' }],
+        check: {
+          command: 'project-native-runtime-check',
+          evidenceKinds: ['runtime'],
+          assertions: [{ description: 'The complete player path passes.' }],
+        },
+      }],
+    }))
     await writeFile(join(workspace, 'docs/validation-report.md'), '# observed validation\n')
 
     const validatorResult = JSON.stringify({
@@ -104,9 +156,15 @@ describe('production completion validator evidence', () => {
         status: 'passed',
         evidence: [{ kind: 'runtime', source: 'PATH-1', detail: 'Observed state transition.' }],
       }],
+      playerPaths: [{
+        id: 'PATH-1',
+        status: 'passed',
+        evidence: [{ kind: 'runtime', source: 'PATH-1', detail: 'Completed the declared path.' }],
+      }],
       findings: [],
       verifiedCapabilities: [],
     })
+    await writeFile(join(workspace, 'docs/validation-report.json'), validatorResult)
     const messages = [{
       message: { content: [{
         type: 'tool_use', id: 'acceptance-call', name: 'Agent',

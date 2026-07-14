@@ -17,11 +17,6 @@ import type {
   DashboardSDKMessage,
 } from './session-manager'
 import { evaluateProductionMutationGate } from './production-readiness-audit'
-import { auditGameProductionCompletion } from './production-completion-audit'
-import {
-  normalizeBeeGameManagedAgentInput,
-  validateBeeGameManagedAgentInvocation,
-} from './delivery-validation-agents'
 
 type DynamicModule = Record<string, unknown>
 
@@ -237,25 +232,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       toolPermissionContext: permissionContext,
     }
     this.appState = appState
-    const sessionHooksModule = await loadRootModule('utils/hooks/sessionHooks.js')
-    call(
-      sessionHooksModule,
-      'addFunctionHook',
-      (updater: (prev: MutableAppState) => MutableAppState) => {
-        if (!this.appState) throw new Error('App state was not initialized')
-        this.appState = updater(this.appState)
-      },
-      this.input.sessionId,
-      'Stop',
-      '',
-      async (messages: unknown[]) => {
-        if (this.currentSubmitInput?.productionContractRequired !== true) return true
-        return auditGameProductionCompletion(this.input.cwd, messages).valid
-      },
-      'Game delivery is incomplete. Read the persisted plan and contracts, run project-native tests and player paths, obtain a complete passed JSON result from beegame-acceptance-validator, write docs/validation-report.md from it, then try to finish again.',
-      { id: `beegame-production-completion-${this.input.sessionId}`, timeout: 10_000 },
-    )
-
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -265,32 +241,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
       const toolName = getToolName(tool)
-      if (
-        this.currentSubmitInput?.productionContractRequired === true &&
-        toolName === 'Agent'
-      ) {
-        const managedAgentDecision = validateBeeGameManagedAgentInvocation(toolInput)
-        if (!managedAgentDecision.allowed) {
-          return {
-            behavior: 'deny',
-            message: managedAgentDecision.message ?? 'Managed production agent invocation is invalid.',
-            decisionReason: {
-              type: 'other',
-              reason: 'beegame_managed_agent_must_run_foreground',
-            },
-            toolUseID,
-          }
-        }
-      }
-      const effectiveToolInput = toolName === 'Agent'
-        ? normalizeBeeGameManagedAgentInput(this.input.cwd, toolInput)
-        : toolInput
       const productionDecision = evaluateProductionMutationGate({
         workspacePath: this.input.cwd,
         productionContractRequired: this.currentSubmitInput?.productionContractRequired === true,
         toolName,
-        toolInput: effectiveToolInput,
-        toolReadOnly: isToolReadOnly(tool, effectiveToolInput),
+        toolInput,
+        toolReadOnly: isToolReadOnly(tool, toolInput),
       })
       if (!productionDecision.allowed) {
         return {
@@ -307,7 +263,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         permissionsModule,
         'hasPermissionsToUseTool',
         tool,
-        effectiveToolInput,
+        toolInput,
         toolUseContext,
         assistantMessage,
         toolUseID,
@@ -315,7 +271,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       )) as PermissionDecision
       if (result.behavior !== 'ask') {
         return result.behavior === 'allow'
-          ? { ...result, updatedInput: result.updatedInput ?? effectiveToolInput }
+          ? { ...result, updatedInput: result.updatedInput ?? toolInput }
           : result
       }
       const submitInput = this.currentSubmitInput
@@ -334,12 +290,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         toolUseID,
         toolName,
         message: result.message ?? 'Tool permission is required.',
-        input: effectiveToolInput,
+        input: toolInput,
       })
       if (decision.behavior === 'allow') {
         return {
           behavior: 'allow',
-          updatedInput: result.updatedInput ?? effectiveToolInput,
+          updatedInput: result.updatedInput ?? toolInput,
           decisionReason: {
             type: 'other',
             reason: 'dashboard_permission_approved',

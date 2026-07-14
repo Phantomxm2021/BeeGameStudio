@@ -22,6 +22,7 @@ describe('project delivery contract skeleton', () => {
       version: 1,
       requirements: [],
       playerPaths: [],
+      acceptanceCriteria: [],
       requiredCapabilities: [],
     })
   })
