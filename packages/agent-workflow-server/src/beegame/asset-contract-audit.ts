@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
+import {
+  RESOURCE_CATEGORIES,
+  RESOURCE_USAGE_TAGS,
+} from '../../../beegame-resource-core/src/types'
 
 export type AssetIntegrationStage =
   | 'declared'
@@ -32,13 +36,34 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   }
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
-    if (!isRecord(manifest) || !Array.isArray(manifest.slots) || !isRecord(manifest.project_target)) {
-      return { present: true, valid: false, manifestPath, slots: [], issues: ['Manifest must contain project_target and slots.'] }
+    if (!isRecord(manifest)) {
+      return { present: true, valid: false, manifestPath, slots: [], issues: ['Manifest root must be a JSON object.'] }
     }
-    const capabilities = new Set(stringArray(manifest.project_target.asset_format_capabilities).map(normalizeFormat))
+    const shapeIssues: string[] = []
+    if (!isRecord(manifest.project_target)) {
+      shapeIssues.push(`project_target must be an object; received ${jsonType(manifest.project_target)}.`)
+    }
+    if (!Array.isArray(manifest.slots)) {
+      shapeIssues.push(`slots must be an array; received ${jsonType(manifest.slots)}.`)
+    }
+    if (
+      isRecord(manifest.project_target) &&
+      !Array.isArray(manifest.project_target.asset_format_capabilities)
+    ) {
+      shapeIssues.push(`project_target.asset_format_capabilities must be an array of strings; received ${jsonType(manifest.project_target.asset_format_capabilities)}.`)
+    }
+    if (shapeIssues.length > 0) {
+      return { present: true, valid: false, manifestPath, slots: [], issues: shapeIssues }
+    }
+    // The shape checks above narrow these values for runtime use. Keep the
+    // canonical contract local to this audit instead of accepting legacy
+    // resource_requirements/slot-map variants implicitly.
+    const projectTarget = manifest.project_target as Record<string, unknown>
+    const manifestSlots = manifest.slots as unknown[]
+    const capabilities = new Set(stringArray(projectTarget.asset_format_capabilities).map(normalizeFormat))
     const ids = new Set<string>()
     const issues: string[] = []
-    const slots = manifest.slots.map((value, index) => auditSlot(value, index, workspace, capabilities, ids))
+    const slots = manifestSlots.map((value, index) => auditSlot(value, index, workspace, capabilities, ids))
     for (const slot of slots) issues.push(...slot.issues.map(issue => `${slot.id}: ${issue}`))
     return { present: true, valid: issues.length === 0, manifestPath, slots, issues }
   } catch (error) {
@@ -85,6 +110,10 @@ function auditSlot(
     }
   }
   const bound = isRecord(value.resource_binding)
+  const requirement = isRecord(value.resource_requirement) ? value.resource_requirement : undefined
+  if (requirement && !bound) {
+    auditAutomaticSelectionRequirement(requirement, capabilities, issues)
+  }
   const copied = safeFiles.length > 0 && existingFiles.length === safeFiles.length
   const integrationEvidence = isRecord(value.integration_evidence) ? value.integration_evidence : {}
   const referenced = copied && stringArray(integrationEvidence.references).length > 0
@@ -112,6 +141,41 @@ function auditSlot(
   }
 }
 
+function auditAutomaticSelectionRequirement(
+  requirement: Record<string, unknown>,
+  capabilities: ReadonlySet<string>,
+  issues: string[],
+): void {
+  const category = normalizedString(requirement.category)
+  if (!category) {
+    issues.push('Unbound resource_requirement.category is required for safe automatic selection.')
+  } else if (!(RESOURCE_CATEGORIES as readonly string[]).includes(category)) {
+    issues.push(`Unbound resource_requirement.category is not canonical: ${category}`)
+  }
+
+  const dimension = normalizedString(requirement.dimension)
+  if (!['2D', '3D', 'agnostic'].includes(dimension)) {
+    issues.push('Unbound resource_requirement.dimension must be 2D, 3D, or agnostic.')
+  }
+
+  const formats = stringArray(requirement.accepted_formats).map(normalizeFormat)
+  if (formats.length === 0) {
+    issues.push('Unbound resource_requirement.accepted_formats must not be empty.')
+  } else if (capabilities.size > 0 && !formats.some(format => capabilities.has(format))) {
+    issues.push('Unbound resource_requirement.accepted_formats has no format supported by project_target.')
+  }
+
+  const tags = stringArray(requirement.tags)
+  if (tags.length === 0) {
+    issues.push('Unbound resource_requirement.tags must include at least one canonical usage tag for safe automatic selection.')
+  } else {
+    const unsupported = tags.filter(tag => !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag))
+    if (unsupported.length > 0) {
+      issues.push(`Unbound resource_requirement.tags contains unsupported usage tags: ${unsupported.join(', ')}`)
+    }
+  }
+}
+
 function isWorkspaceRelativePath(workspace: string, value: string): boolean {
   if (!value || isAbsolute(value)) return false
   const resolved = resolve(workspace, value)
@@ -136,4 +200,10 @@ function normalizedString(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function jsonType(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
 }

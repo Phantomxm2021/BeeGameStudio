@@ -52,6 +52,8 @@ export async function* adaptOpenAIStreamToAnthropic(
 
   // Track text block state
   let textBlockOpen = false
+  let visibleTextStarted = false
+  let emptyThinkingMarkerEmitted = false
 
   // Track usage — all four Anthropic fields, populated from OpenAI usage fields:
   // rawInputTokens tracks the raw prompt_tokens (OpenAI total, including cached).
@@ -121,7 +123,32 @@ export async function* adaptOpenAIStreamToAnthropic(
     // requests, otherwise DeepSeek rejects with 400.
     const reasoningContent = (delta as any).reasoning_content
     if (reasoningContent != null) {
-      if (!thinkingBlockOpen) {
+      const hasReasoningDelta = reasoningContent !== ''
+      const shouldOpenThinking = hasReasoningDelta || (
+        !visibleTextStarted && !emptyThinkingMarkerEmitted
+      )
+
+      // Some OpenAI-compatible providers repeat reasoning_content: "" on
+      // ordinary visible-text chunks. That is not a transition back into
+      // reasoning. Reopening thinking here would split one answer into many
+      // text blocks and therefore many SDK assistant fragments. Preserve one
+      // initial empty marker for providers that require it to round-trip, then
+      // ignore later empty markers.
+      if (shouldOpenThinking && !thinkingBlockOpen) {
+        // Some OpenAI-compatible reasoning models alternate between visible
+        // text and reasoning more than once in a single response. Anthropic
+        // content blocks cannot overlap, so close the active text block before
+        // reopening thinking. Without this transition, later text deltas are
+        // attached to a thinking block and disappear from the final message.
+        if (textBlockOpen) {
+          yield {
+            type: 'content_block_stop',
+            index: currentContentIndex,
+          } as BetaRawMessageStreamEvent
+          openBlockIndices.delete(currentContentIndex)
+          textBlockOpen = false
+        }
+
         currentContentIndex++
         thinkingBlockOpen = true
         openBlockIndices.add(currentContentIndex)
@@ -135,9 +162,10 @@ export async function* adaptOpenAIStreamToAnthropic(
             signature: '',
           },
         } as BetaRawMessageStreamEvent
+        if (!hasReasoningDelta) emptyThinkingMarkerEmitted = true
       }
 
-      if (reasoningContent !== '') {
+      if (hasReasoningDelta) {
         yield {
           type: 'content_block_delta',
           index: currentContentIndex,
@@ -151,6 +179,7 @@ export async function* adaptOpenAIStreamToAnthropic(
 
     // Handle text content
     if (delta.content != null && delta.content !== '') {
+      visibleTextStarted = true
       if (!textBlockOpen) {
         // Close thinking block if still open
         if (thinkingBlockOpen) {

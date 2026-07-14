@@ -15,7 +15,7 @@ import {
 import type { ReviewBindingPayload } from '../../../services/api';
 import type { ChatAttachmentPayload } from '../../../services/api';
 import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments, isSupportedChatFile } from '../../../services/chatAttachments';
-import { formatReviewSummary, getReviewWorkspaceRef, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
+import { formatReviewSummary, isBeeGamePermissionReview, isReviewAwaitingUserAction } from './SidebarUtils';
 import type { WaitingApprovalState } from '../../../utils/waitingApproval';
 import { ApprovalActionCard, isApprovalActionPending } from './ApprovalActionCard';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../../viewModels/displayModels';
@@ -127,6 +127,11 @@ const getBeeGamePermissionTarget = (review: ReviewDisplayModel | undefined | nul
     return typeof path === 'string' ? path.trim() : '';
 };
 
+const getPermissionFileName = (path: string): string => {
+    const segments = path.replaceAll('\\', '/').split('/').filter(Boolean);
+    return segments.at(-1) || path;
+};
+
 interface BeeGamePermissionPanelProps {
     review: ReviewDisplayModel;
     text: Record<string, string>;
@@ -141,8 +146,11 @@ const BeeGamePermissionPanel = ({
     onApprovePlan,
 }: BeeGamePermissionPanelProps) => {
     const command = getBeeGamePermissionCommand(review);
-    const target = command || getBeeGamePermissionTarget(review) || formatReviewSummary(review);
-    const workspaceRef = getReviewWorkspaceRef(review) || text.permissionScopeUnknown || '-';
+    const filePath = getBeeGamePermissionTarget(review);
+    const target = command
+        || (filePath ? getPermissionFileName(filePath) : '')
+        || review.title
+        || formatReviewSummary(review);
     const isAllowPending = isApprovalActionPending(approvalState, review.gate_id, 'approve');
     const isDenyPending = isApprovalActionPending(approvalState, review.gate_id, 'revise');
 
@@ -158,26 +166,26 @@ const BeeGamePermissionPanel = ({
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="type-caption-1 mb-1 text-amber-300">{text.permissionRequired}</div>
-                    <h3 className="type-title-3 text-zinc-100">{command ? text.permissionBashTitle : text.permissionToolTitle}</h3>
+                    <h3 className="type-headline text-zinc-100">{command ? text.permissionBashTitle : text.permissionToolTitle}</h3>
                     <p className="type-footnote mt-1 text-zinc-400">{text.permissionPanelDescription}</p>
                 </div>
             </div>
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-4 px-5 py-4">
                 <div>
-                    <div className="type-caption-2 mb-2 uppercase text-zinc-500">{command ? text.permissionCommandLabel : text.permissionTargetLabel}</div>
-                    <pre className="type-code max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-zinc-100 [overflow-wrap:anywhere]">
-                        {target}
-                    </pre>
+                    <div className="type-caption-2 mb-2 text-zinc-500">{command ? text.permissionCommandLabel : text.permissionTargetLabel}</div>
+                    {command ? (
+                        <pre className="type-code-sm max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-zinc-100 [overflow-wrap:anywhere]">
+                            {target}
+                        </pre>
+                    ) : (
+                        <div className="type-body rounded-2xl border border-white/10 bg-black/25 px-4 py-3 font-medium text-zinc-100">
+                            {target}
+                        </div>
+                    )}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-                        <div className="type-caption-2 mb-1 text-zinc-500">{text.permissionScopeLabel}</div>
-                        <div className="type-footnote truncate text-zinc-300" title={workspaceRef}>{workspaceRef}</div>
-                    </div>
-                    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-                        <div className="type-caption-2 mb-1 text-zinc-500">{text.permissionRiskLabel}</div>
-                        <div className="type-footnote truncate text-zinc-300" title={text.permissionRiskGeneric}>{text.permissionRiskGeneric}</div>
-                    </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                    <div className="type-caption-2 mb-1 text-zinc-500">{text.permissionRiskLabel}</div>
+                    <div className="type-footnote text-zinc-300">{text.permissionRiskGeneric}</div>
                 </div>
             </div>
             <div className="grid gap-2 border-t border-white/10 px-5 pb-5 pt-1 min-[420px]:grid-cols-2">

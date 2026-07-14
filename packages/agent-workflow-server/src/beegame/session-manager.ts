@@ -13,6 +13,10 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
+  RESOURCE_CATEGORIES,
+  RESOURCE_USAGE_TAGS,
+} from '../../../beegame-resource-core/src/types'
+import {
   refundCreditReservation,
   reserveCredits,
   settleCreditReservation,
@@ -29,8 +33,13 @@ import {
   formatProjectDeliveryContract,
 } from './project-delivery-contract'
 import {
-  createDeliveryValidationAgentDefinitions,
+  createBeeGameProductionAgentDefinitions,
 } from './delivery-validation-agents'
+import {
+  GAME_PRODUCTION_DOCUMENT_PATHS,
+  GAME_PRODUCTION_PLAN_DIRECTORY,
+  withGameProductionPlanningContract,
+} from './production-planning-contract'
 import { createQueryEngineRunner } from './query-engine-runner'
 
 export type BeeGameImageAttachment = {
@@ -207,6 +216,7 @@ export type BeeGameApprovedOutboundTargets = Partial<
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   signal: AbortSignal
+  productionContractRequired?: boolean
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
     request: DashboardPermissionRequest,
@@ -264,13 +274,17 @@ type SessionRecord = {
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
   toolUses: Map<string, { toolName: string; input?: unknown }>
-  assistantPartialTextByTurn: Map<string, string>
+  assistantPartialTextByMessage: Map<string, string>
+  activeAssistantMessageId: string | null
+  emittedAssistantMessageIds: Set<string>
   thinkingBlockIndexes: Set<number>
+  visibleThinkingBlockIndexes: Set<number>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
   currentTurnKind?: string
+  productionContractRequired: boolean
   lastSettledTotalTokens: number
   pendingCreditOperation: PendingCreditOperation | null
   pendingCreditRetryInFlight: boolean
@@ -422,8 +436,11 @@ export class BeeGameSessionManager {
       abortController: null,
       pendingPermissions: new Map(),
       toolUses: new Map(),
-      assistantPartialTextByTurn: new Map(),
+      assistantPartialTextByMessage: new Map(),
+      activeAssistantMessageId: null,
+      emittedAssistantMessageIds: new Set(),
       thinkingBlockIndexes: new Set(),
+      visibleThinkingBlockIndexes: new Set(),
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
@@ -433,6 +450,7 @@ export class BeeGameSessionManager {
         : 1,
       currentTurnId: null,
       currentTurnKind: undefined,
+      productionContractRequired: hasConfirmedBuildTurn(recoveredTranscript?.events ?? []),
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
@@ -443,6 +461,10 @@ export class BeeGameSessionManager {
       pendingCreditRetryFailures: 0,
       pendingCreditRetryAfter: 0,
       resumeEventPending: Boolean(recoveredTranscript),
+    }
+    const recoveredBrief = recoverConfirmedBuildBrief(record.events)
+    if (record.productionContractRequired && recoveredBrief) {
+      materializeProductionBriefSync(record.session.cwd, recoveredBrief, false)
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
@@ -739,13 +761,29 @@ export class BeeGameSessionManager {
       workspace: record.session.cwd,
       attachments: display?.attachments,
       displayKind: display?.displayKind,
+      productionContractRequired: record.productionContractRequired || display?.displayKind === 'confirmed_brief',
     })
+    if (display?.displayKind === 'confirmed_brief') {
+      await ensureGameProductionDirectories(record.session.cwd)
+      await materializeProductionBrief(record.session.cwd, text)
+    } else if (record.productionContractRequired) {
+      const recoveredBrief = recoverConfirmedBuildBrief(record.events)
+      if (recoveredBrief) await materializeProductionBrief(record.session.cwd, recoveredBrief, false)
+    }
 
     const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
     const creditPolicy = getCreditTaskPolicy(display?.taskType ?? display?.displayKind)
     const creditReservation = await this.reserveTurnCredits(record, creditPolicy, display, nextTurnId)
+    record.assistantPartialTextByMessage.clear()
+    record.activeAssistantMessageId = null
+    record.emittedAssistantMessageIds.clear()
+    record.thinkingBlockIndexes.clear()
+    record.visibleThinkingBlockIndexes.clear()
     record.currentTurnId = nextTurnId
     record.currentTurnKind = display?.displayKind
+    if (display?.displayKind === 'confirmed_brief') {
+      record.productionContractRequired = true
+    }
     record.nextTurnIndex += 1
     display?.onTurnAccepted?.()
     turnAccepted = true
@@ -907,7 +945,7 @@ export class BeeGameSessionManager {
         approvedOutboundTargets,
         // These are ordinary Claude Code sub-agents. BeeGame exposes them to
         // the native runtime but never dispatches or interprets them.
-        agentDefinitions: createDeliveryValidationAgentDefinitions(),
+        agentDefinitions: createBeeGameProductionAgentDefinitions(),
       })
       record.runner = runner
       try {
@@ -957,6 +995,11 @@ export class BeeGameSessionManager {
       }
       record.currentTurnId = null
       record.currentTurnKind = undefined
+      record.assistantPartialTextByMessage.clear()
+      record.activeAssistantMessageId = null
+      record.emittedAssistantMessageIds.clear()
+      record.thinkingBlockIndexes.clear()
+      record.visibleThinkingBlockIndexes.clear()
       record.abortController = null
       record.session.updatedAt = new Date()
     }
@@ -992,6 +1035,7 @@ export class BeeGameSessionManager {
     await runner.submit({
       prompt,
       signal,
+      productionContractRequired: record.productionContractRequired,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
         if (isSDKExecutionError(message)) {
@@ -1010,10 +1054,8 @@ export class BeeGameSessionManager {
             this.append(record, mapped.type, mapped.text, message)
             this.appendAssistantPartialText(record, message)
           } else if (mapped.type === 'assistant.message') {
-            this.append(record, mapped.type, this.reconcileAssistantText(
-              record,
-              mapped.text,
-            ), message)
+            const reconciled = this.reconcileAssistantText(record, message, mapped.text)
+            if (reconciled) this.append(record, mapped.type, reconciled, message)
           } else {
             this.append(record, mapped.type, mapped.text, mapped.payload ?? message)
           }
@@ -1036,23 +1078,33 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     message: DashboardSDKMessage,
   ): void {
-    const turnId = record.currentTurnId
-    if (!turnId) return
+    const messageKey = record.activeAssistantMessageId ?? record.currentTurnId
+    if (!messageKey) return
     const text = extractAssistantPartialText(message)
     if (!text) return
-    record.assistantPartialTextByTurn.set(
-      turnId,
-      `${record.assistantPartialTextByTurn.get(turnId) ?? ''}${text}`,
+    record.assistantPartialTextByMessage.set(
+      messageKey,
+      `${record.assistantPartialTextByMessage.get(messageKey) ?? ''}${text}`,
     )
   }
 
-  private reconcileAssistantText(record: SessionRecord, finalText: string): string {
-    const turnId = record.currentTurnId
-    if (!turnId) return finalText
-    const partialText = record.assistantPartialTextByTurn.get(turnId)
-    record.assistantPartialTextByTurn.delete(turnId)
+  private reconcileAssistantText(
+    record: SessionRecord,
+    message: DashboardSDKMessage,
+    finalText: string,
+  ): string | null {
+    const messageId = getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId
+    if (messageId && record.emittedAssistantMessageIds.has(messageId)) return null
+
+    const messageKey = messageId ?? record.currentTurnId
+    const partialText = messageKey
+      ? record.assistantPartialTextByMessage.get(messageKey)
+      : undefined
+    if (messageKey) record.assistantPartialTextByMessage.delete(messageKey)
+    if (messageId) record.emittedAssistantMessageIds.add(messageId)
     const normalizedPartial = partialText?.trim()
     if (!normalizedPartial) return finalText
+    if (messageId) return normalizedPartial
     return normalizedPartial.length > finalText.trim().length + 24
       ? normalizedPartial
       : finalText
@@ -1161,6 +1213,8 @@ export class BeeGameSessionManager {
   private closeOpenThinkingLifecycle(record: SessionRecord, reason: string): void {
     if (record.thinkingBlockIndexes.size === 0) return
     record.thinkingBlockIndexes.clear()
+    if (record.visibleThinkingBlockIndexes.size === 0) return
+    record.visibleThinkingBlockIndexes.clear()
     this.append(record, 'assistant.thinking', 'Thinking', {
       type: 'assistant.thinking',
       status: 'ended',
@@ -1552,6 +1606,58 @@ function getNextTurnIndex(sessionId: string, events: BeeGameEvent[]): number {
   return maxTurnIndex + 1
 }
 
+function hasConfirmedBuildTurn(events: BeeGameEvent[]): boolean {
+  return events.some(event => (
+    event.type === 'user.message' && event.payload?.displayKind === 'confirmed_brief'
+  ))
+}
+
+function recoverConfirmedBuildBrief(events: BeeGameEvent[]): string | undefined {
+  return [...events].reverse().find(event => (
+    event.type === 'user.message' && event.payload?.displayKind === 'confirmed_brief'
+  ))?.text
+}
+
+async function materializeProductionBrief(
+  workspacePath: string,
+  text: string,
+  overwrite = true,
+): Promise<void> {
+  const path = resolve(workspacePath, 'docs', 'production-brief.json')
+  if (!overwrite && existsSync(path)) return
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, serializeProductionBrief(text), 'utf8')
+}
+
+function materializeProductionBriefSync(
+  workspacePath: string,
+  text: string,
+  overwrite = true,
+): void {
+  const path = resolve(workspacePath, 'docs', 'production-brief.json')
+  if (!overwrite && existsSync(path)) return
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, serializeProductionBrief(text), 'utf8')
+}
+
+function serializeProductionBrief(text: string): string {
+  let payload: unknown
+  try {
+    payload = JSON.parse(text)
+  } catch {
+    payload = { text }
+  }
+  return `${JSON.stringify({ version: 1, source: 'confirmed_brief', payload }, null, 2)}\n`
+}
+
+async function ensureGameProductionDirectories(workspacePath: string): Promise<void> {
+  const directories = new Set([
+    ...GAME_PRODUCTION_DOCUMENT_PATHS.map(path => dirname(resolve(workspacePath, path))),
+    resolve(workspacePath, GAME_PRODUCTION_PLAN_DIRECTORY),
+  ])
+  await Promise.all([...directories].map(path => mkdir(path, { recursive: true })))
+}
+
 function recoverSessionLanguage(
   events: BeeGameEvent[],
 ): { language: BeeGameSessionLanguage } | Record<string, never> {
@@ -1681,7 +1787,20 @@ function withSessionLanguageContract(
 }
 
 function withAssetIntegrationContract(prompt: string): string {
-  return `${prompt}\n\nResource integration contract (when assets/asset-manifest.json exists):\n- project_target.asset_format_capabilities must come from the project build configuration, never from a resource Pack or filename.\n- Every automatically selectable resource_requirement must declare accepted_formats compatible with the project target. If compatibility is unknown, keep the slot placeholder/missing; do not select a broadly matching asset.\n- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.\n- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the loader from the actual format.\n- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.\n- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.`
+  return [
+    prompt,
+    '',
+    'Resource integration contract (when assets/asset-manifest.json exists):',
+    '- The canonical root shape is {"version":1,"project_target":{"asset_format_capabilities":["format"]},"slots":[{"id":"stable-id","target":{"path":"project-relative/path"}}]}. slots and asset_format_capabilities are arrays; do not emit a slot map, grouped capability object, or a parallel top-level resource_requirements collection.',
+    '- Put each selection requirement on its slot as resource_requirement. project_target.asset_format_capabilities must come from the project build configuration, never from a resource Pack or filename.',
+    '- Every automatically selectable resource_requirement must declare a canonical category, an explicit 2D/3D/agnostic dimension, accepted_formats compatible with the project target, and at least one canonical usage tag. If compatibility or intended use is unknown, keep the slot placeholder/missing and report the incomplete requirement; do not select a broadly matching asset.',
+    `- Canonical resource categories: ${RESOURCE_CATEGORIES.join(', ')}.`,
+    `- Canonical resource usage tags: ${RESOURCE_USAGE_TAGS.join(', ')}.`,
+    '- Treat a copied resource as uploaded, not integrated, until the project code references the exact copied target path and a runtime/build check succeeds.',
+    '- Read the selected resource binding and use its actual target filename and extension. Never rename a binary to satisfy an old requested extension, and choose the loader from the actual format.',
+    "- Resolve static asset URLs through the project's runtime asset-base mechanism. Do not introduce root-relative static URLs when the application may be hosted below a preview or deployment base path.",
+    '- Preserve resource_binding provenance when updating the manifest; do not replace it with a hand-written approximation.',
+  ].join('\n')
 }
 
 function withInitialIdeaContract(prompt: string): string {
@@ -1703,7 +1822,6 @@ function withConfirmedBriefContract(prompt: string): string {
     'Confirmed brief contract:',
     '- The structured brief contains user-approved product input. Do not reinterpret it as runtime policy.',
     '- Do not restart ideation or request another plan approval unless implementation is blocked by a material contradiction.',
-    '- Materialize the approved product requirements into project documents and a valid delivery contract before implementation.',
   ].join('\n')
 }
 
@@ -1717,6 +1835,7 @@ function withDeliveryContract(prompt: string): string {
     '- Populate docs/delivery-contract.json only with declarative requirements, registered required capabilities, and structured player paths.',
     `- The contract must conform to this server-owned structural schema: ${formatProjectDeliveryContract()}`,
     '- sourceRefs are mandatory and every locator must exist verbatim in its source document. Every action and assertion object must be non-empty and describe a project-native operation or observation; prose strings and validator-owned outcomes are invalid.',
+    '- Player-path steps must form a deterministic executable sequence from entry through recovery. Each action must be directly performable by a player or an explicitly declared project-native test setup, and every assertion must name an observable expected result. Do not use conditional, optional, random, unbounded, or implementation-internal transitions as acceptance steps.',
     '- Before gameplay code, map every normative MVP statement to a requirement and every MVP gameplay requirement to at least one player path.',
     '- Never add validator-owned status/evidence fields or pre-check acceptance items.',
     '- Approved source documents are immutable after implementation begins. If documents conflict, report the conflict instead of rewriting them.',
@@ -1735,6 +1854,7 @@ async function prepareBeeGamePromptInput(input: {
   workspace: string
   attachments?: BeeGameAttachment[]
   displayKind?: string
+  productionContractRequired?: boolean
 }): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
   const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
@@ -1747,8 +1867,16 @@ async function prepareBeeGamePromptInput(input: {
   const localizedInput = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
   const promptText = input.displayKind === 'initial_idea'
     ? withInitialIdeaContract(localizedInput)
-    : input.displayKind === 'confirmed_brief'
-      ? withDeliveryContract(withAssetIntegrationContract(withConfirmedBriefContract(localizedInput)))
+    : input.productionContractRequired
+      ? withDeliveryContract(
+          withAssetIntegrationContract(
+            withGameProductionPlanningContract(
+              input.displayKind === 'confirmed_brief'
+                ? withConfirmedBriefContract(localizedInput)
+                : localizedInput,
+            ),
+          ),
+        )
       : input.displayKind === 'asset_integration'
         ? withAssetIntegrationContract(localizedInput)
         : localizedInput
@@ -1967,20 +2095,37 @@ function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['
   }
 }
 
-function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
-  const total = {
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-  }
+export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+  const usageByMessage = new Map<string, BeeGameRuntimeSnapshot['usage']>()
   for (const event of events) {
     if (event.type !== 'assistant.message') continue
-    const usage = getUsageFromEventPayload(event.payload)
+    usageByMessage.set(getAssistantUsageIdentity(event), getUsageFromEventPayload(event.payload))
+  }
+
+  return [...usageByMessage.values()].reduce<BeeGameRuntimeSnapshot['usage']>((total, usage) => {
     total.prompt_tokens += usage.prompt_tokens
     total.completion_tokens += usage.completion_tokens
     total.total_tokens += usage.total_tokens
+    return total
+  }, {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  })
+}
+
+function getAssistantUsageIdentity(event: BeeGameEvent): string {
+  const payload = event.payload
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const message = payload.message
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      const messageId = (message as Record<string, unknown>).id
+      if (typeof messageId === 'string' && messageId.trim()) {
+        return `${event.turnId ?? ''}:${messageId}`
+      }
+    }
   }
-  return total
+  return `${event.turnId ?? ''}:event:${event.id}`
 }
 
 function getUsageFromEventPayload(
@@ -2936,11 +3081,15 @@ function isSDKExecutionError(message: DashboardSDKMessage): boolean {
   return message.type === 'result' && getBooleanField(message, 'is_error') === true
 }
 
-function getSDKExecutionErrorDetail(message: DashboardSDKMessage): string {
+export function getSDKExecutionErrorDetail(message: DashboardSDKMessage): string {
   const errors = Array.isArray(message.errors)
     ? message.errors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     : []
-  return errors[0]?.trim() || 'Model runtime returned an execution error.'
+  if (errors[0]) return errors[0].trim()
+  if (typeof message.result === 'string' && message.result.trim()) {
+    return message.result.trim()
+  }
+  return extractMessageText(message).trim() || 'Model runtime returned an execution error.'
 }
 
 function mapTextEvent(
@@ -2987,6 +3136,9 @@ function mapStreamEvent(record: SessionRecord, message: DashboardSDKMessage): {
   text: string
   payload?: DashboardSDKMessage
 } | null {
+  const streamMessageId = extractStreamMessageId(message)
+  if (streamMessageId) record.activeAssistantMessageId = streamMessageId
+
   const textDelta = extractStreamTextDelta(message)
   if (textDelta.trim()) return mapTextEvent('assistant.partial', textDelta)
 
@@ -3168,21 +3320,39 @@ function extractStreamThinkingStatus(
     if (blockType !== 'thinking' && blockType !== 'redacted_thinking') return null
     const index = getNumberField(event, 'index')
     if (index !== undefined) record.thinkingBlockIndexes.add(index)
-    return 'started'
+    return 'streaming'
   }
   if (eventType === 'content_block_stop') {
     const index = getNumberField(event, 'index')
     if (index === undefined || !record.thinkingBlockIndexes.has(index)) return null
     record.thinkingBlockIndexes.delete(index)
+    if (!record.visibleThinkingBlockIndexes.has(index)) return null
+    record.visibleThinkingBlockIndexes.delete(index)
     return 'ended'
   }
   if (eventType !== 'content_block_delta') return null
 
   const delta = getObjectField(event, 'delta')
   const deltaType = getStringField(delta, 'type')
-  return deltaType === 'thinking_delta' || deltaType === 'redacted_thinking_delta'
-    ? 'streaming'
-    : null
+  if (deltaType !== 'thinking_delta' && deltaType !== 'redacted_thinking_delta') {
+    return null
+  }
+  const index = getNumberField(event, 'index')
+  if (index === undefined || !record.thinkingBlockIndexes.has(index)) return 'streaming'
+  if (record.visibleThinkingBlockIndexes.has(index)) return 'streaming'
+  record.visibleThinkingBlockIndexes.add(index)
+  return 'started'
+}
+
+function extractStreamMessageId(message: DashboardSDKMessage): string | undefined {
+  const event = getObjectField(message, 'event') ?? message
+  if (getStringField(event, 'type') !== 'message_start') return undefined
+  return getStringField(getObjectField(event, 'message'), 'id') || undefined
+}
+
+function getSDKAssistantMessageId(message: DashboardSDKMessage): string | undefined {
+  if (message.type !== 'assistant') return undefined
+  return getStringField(getObjectField(message, 'message'), 'id') || undefined
 }
 
 function extractAssistantPartialText(message: DashboardSDKMessage): string {

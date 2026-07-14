@@ -398,6 +398,96 @@ describe('thinking support (reasoning_content)', () => {
     expect(textDelta.delta.text).toBe('Here is my answer.')
   })
 
+  test('keeps text visible when reasoning and text alternate repeatedly', async () => {
+    const events = await collectEvents([
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: 'first thought' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { content: 'first visible text' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_content: 'second thought' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { content: '{"status":"passed"}' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      }),
+    ])
+
+    const starts = events.filter(
+      event => event.type === 'content_block_start',
+    ) as any[]
+    expect(starts.map(event => event.content_block.type)).toEqual([
+      'thinking',
+      'text',
+      'thinking',
+      'text',
+    ])
+    expect(starts.map(event => event.index)).toEqual([0, 1, 2, 3])
+
+    const deltas = events.filter(
+      event => event.type === 'content_block_delta',
+    ) as any[]
+    expect(deltas.map(event => [event.index, event.delta.type])).toEqual([
+      [0, 'thinking_delta'],
+      [1, 'text_delta'],
+      [2, 'thinking_delta'],
+      [3, 'text_delta'],
+    ])
+    expect(deltas.at(-1)?.delta.text).toBe('{"status":"passed"}')
+  })
+
+  test('does not split visible text when empty reasoning markers repeat', async () => {
+    const events = await collectEvents([
+      makeChunk({
+        choices: [{ index: 0, delta: { reasoning_content: '', content: 'First' }, finish_reason: null }],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: { reasoning_content: '', content: ' second' }, finish_reason: null }],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: { reasoning_content: '', content: ' third.' }, finish_reason: null }],
+      }),
+      makeChunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+    ])
+
+    const starts = events.filter(event => event.type === 'content_block_start') as any[]
+    expect(starts.map(event => event.content_block.type)).toEqual(['thinking', 'text'])
+
+    const textDeltas = events.filter(event =>
+      event.type === 'content_block_delta' && event.delta.type === 'text_delta',
+    ) as any[]
+    expect(textDeltas.map(event => event.delta.text).join('')).toBe('First second third.')
+    expect(new Set(textDeltas.map(event => event.index))).toEqual(new Set([1]))
+  })
+
   test('handles reasoning then tool_calls', async () => {
     const events = await collectEvents([
       makeChunk({

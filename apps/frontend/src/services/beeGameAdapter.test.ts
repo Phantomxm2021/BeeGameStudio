@@ -2141,6 +2141,68 @@ describe('beeGameAdapter prompt rules', () => {
     ]);
   });
 
+  it('coalesces historical assistant blocks that share an upstream message id', async () => {
+    const sessionId = 'beegame_coalesced';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/model-configs') {
+        return jsonResponse([{ id: 'model_default', isDefault: true }]);
+      }
+      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
+        return jsonResponse({
+          id: sessionId,
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        });
+      }
+      if (path === `/api/beegame-sessions/${sessionId}/idea` && init?.method === 'POST') {
+        return jsonResponse({
+          id: sessionId,
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === `/api/beegame-sessions/${sessionId}`) {
+        return jsonResponse({
+          id: sessionId,
+          cwd: '/tmp/beegame-projects',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:01.000Z',
+        });
+      }
+      if (path === `/api/beegame-sessions/${sessionId}/events?after=0`) {
+        return jsonResponse([
+          assistantLogicalMessageEvent(30, sessionId, 'turn-1', 'logical-1', 'First', 'First second.'),
+          assistantLogicalMessageEvent(31, sessionId, 'turn-1', 'logical-1', ' second.', ' second.'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await beeGameAdapter.bootstrapProjectFromIdea({
+      idea: 'LLM generated idea',
+      root_path: '/tmp/beegame-projects',
+    });
+    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
+
+    const assistantMessages = polled.messages.filter(message => message.type === 'agent_message');
+    expect(assistantMessages).toEqual([
+      expect.objectContaining({
+        content: 'First second.',
+        message_id: `beegame-assistant-${sessionId}-logical-1`,
+      }),
+    ]);
+  });
+
   it('maps BeeGame turn completion to idle instead of finished project status', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -3574,6 +3636,31 @@ function assistantMessageEvent(id: number, sessionId: string, turnId: string, te
     type: 'assistant.message',
     text,
     payload: { type: 'assistant.message' },
+    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
+  };
+}
+
+function assistantLogicalMessageEvent(
+  id: number,
+  sessionId: string,
+  turnId: string,
+  messageId: string,
+  payloadText: string,
+  displayText: string,
+) {
+  return {
+    id,
+    sessionId,
+    turnId,
+    type: 'assistant.message',
+    text: displayText,
+    payload: {
+      type: 'assistant',
+      message: {
+        id: messageId,
+        content: [{ type: 'text', text: payloadText }],
+      },
+    },
     createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
   };
 }

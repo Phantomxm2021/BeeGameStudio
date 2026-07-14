@@ -1424,6 +1424,7 @@ function normalizeBeeGameEvents(
   events: BeeGameEvent[],
   options: { includeUserMessages: boolean; includePartialsWhenFinalExists: boolean },
 ): BeeGameEvent[] {
+  events = coalesceLogicalAssistantMessages(events);
   const visible: BeeGameEvent[] = [];
   const terminalEventByTurn = new Map<string, number>();
   for (const event of events) {
@@ -1514,6 +1515,71 @@ function normalizeBeeGameEvents(
   flushPartial();
   flushThinking();
   return visible;
+}
+
+function coalesceLogicalAssistantMessages(events: BeeGameEvent[]): BeeGameEvent[] {
+  const representativeByMessage = new Map<string, {
+    event: BeeGameEvent;
+    payloadText: string;
+    longestVisibleText: string;
+  }>();
+  const suppressedEventIds = new Set<number>();
+
+  for (const event of events) {
+    if (event.type !== 'assistant.message') continue;
+    const messageId = getAssistantPayloadMessageId(event);
+    if (!messageId) continue;
+    const identity = `${event.sessionId}:${event.turnId ?? ''}:${messageId}`;
+    const payloadText = getAssistantPayloadVisibleText(event);
+    const existing = representativeByMessage.get(identity);
+    if (!existing) {
+      representativeByMessage.set(identity, {
+        event,
+        payloadText,
+        longestVisibleText: event.text,
+      });
+      continue;
+    }
+    existing.payloadText += payloadText;
+    if (event.text.length > existing.longestVisibleText.length) {
+      existing.longestVisibleText = event.text;
+    }
+    suppressedEventIds.add(event.id);
+  }
+
+  const replacementByEventId = new Map<number, BeeGameEvent>();
+  for (const { event, payloadText, longestVisibleText } of representativeByMessage.values()) {
+    const text = payloadText.length >= longestVisibleText.length
+      ? payloadText
+      : longestVisibleText;
+    replacementByEventId.set(event.id, text === event.text ? event : { ...event, text });
+  }
+
+  return events.flatMap(event => {
+    if (suppressedEventIds.has(event.id)) return [];
+    return [replacementByEventId.get(event.id) ?? event];
+  });
+}
+
+function getAssistantPayloadMessageId(event: BeeGameEvent): string {
+  if (!event.payload) return '';
+  const message = event.payload.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return '';
+  const id = (message as Record<string, unknown>).id;
+  return typeof id === 'string' ? id.trim() : '';
+}
+
+function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
+  if (!event.payload) return '';
+  const message = event.payload.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return '';
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return '';
+  return content.map(block => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return '';
+    const record = block as Record<string, unknown>;
+    return record.type === 'text' && typeof record.text === 'string' ? record.text : '';
+  }).join('');
 }
 
 function isTurnTerminalEvent(event: BeeGameEvent): boolean {
@@ -1702,7 +1768,10 @@ function normalizePositiveNumber(value: unknown, fallback = 0): number {
 }
 
 function getFinalAssistantMessageId(event: BeeGameEvent): string {
-  return `beegame-event-${event.id}`;
+  const upstreamMessageId = getAssistantPayloadMessageId(event);
+  return upstreamMessageId
+    ? `beegame-assistant-${event.sessionId}-${upstreamMessageId}`
+    : `beegame-event-${event.id}`;
 }
 
 function getTurnDisplayId(event: BeeGameEvent): string {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines'
 import {
   createPinnedUndiciDispatcher,
@@ -16,6 +16,12 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from './session-manager'
+import { evaluateProductionMutationGate } from './production-readiness-audit'
+import { auditGameProductionCompletion } from './production-completion-audit'
+import {
+  normalizeBeeGameManagedAgentInput,
+  validateBeeGameManagedAgentInvocation,
+} from './delivery-validation-agents'
 
 type DynamicModule = Record<string, unknown>
 
@@ -78,6 +84,36 @@ export function createQueryEngineRunner(): BeeGameSessionRunner {
     async start(input) {
       return new QueryEngineSessionRuntime(input)
     },
+  }
+}
+
+export function createBeeGameToolPermissionContext(
+  base: Record<string, unknown>,
+  skillReadRoot?: string,
+): Record<string, unknown> {
+  const existingRules = isRecord(base.alwaysAllowRules)
+    ? base.alwaysAllowRules
+    : {}
+  const existingSessionRules = Array.isArray(existingRules.session)
+    ? existingRules.session.filter((value): value is string => typeof value === 'string')
+    : []
+  const skillReadRule = skillReadRoot
+    ? `Read(${resolve(skillReadRoot)}/**)`
+    : undefined
+  return {
+    ...base,
+    // This is a Claude Code native permission mode, not a BeeGame-owned
+    // allowlist. Its evaluator still asks for commands and sensitive access.
+    mode: 'acceptEdits',
+    isBypassPermissionsModeAvailable: false,
+    ...(skillReadRule
+      ? {
+          alwaysAllowRules: {
+            ...existingRules,
+            session: [...new Set([...existingSessionRules, skillReadRule])],
+          },
+        }
+      : {}),
   }
 }
 
@@ -175,10 +211,16 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     )
     call(bootstrapModule, 'setOriginalCwd', this.input.cwd)
 
-    const permissionContext = call(
-      toolModule,
-      'getEmptyToolPermissionContext',
-    ) as Record<string, unknown>
+    const permissionContext = createBeeGameToolPermissionContext(
+      call(
+        toolModule,
+        'getEmptyToolPermissionContext',
+      ) as Record<string, unknown>,
+      resolve(
+        process.env.BEEGAME_CONFIG_DIR ?? join(homedir(), '.beegame'),
+        'skills',
+      ),
+    )
     const tools = call(toolsModule, 'getTools', permissionContext)
     const [commands, discoveredAgentDefinitions] = await Promise.all([
       callAsync(commandsModule, 'getCommands', this.input.cwd),
@@ -192,13 +234,27 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     const appState = {
       ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
       agentDefinitions,
-      toolPermissionContext: {
-        ...permissionContext,
-        mode: 'default',
-        isBypassPermissionsModeAvailable: false,
-      },
+      toolPermissionContext: permissionContext,
     }
     this.appState = appState
+    const sessionHooksModule = await loadRootModule('utils/hooks/sessionHooks.js')
+    call(
+      sessionHooksModule,
+      'addFunctionHook',
+      (updater: (prev: MutableAppState) => MutableAppState) => {
+        if (!this.appState) throw new Error('App state was not initialized')
+        this.appState = updater(this.appState)
+      },
+      this.input.sessionId,
+      'Stop',
+      '',
+      async (messages: unknown[]) => {
+        if (this.currentSubmitInput?.productionContractRequired !== true) return true
+        return auditGameProductionCompletion(this.input.cwd, messages).valid
+      },
+      'Game delivery is incomplete. Read the persisted plan and contracts, run project-native tests and player paths, obtain a complete passed JSON result from beegame-acceptance-validator, write docs/validation-report.md from it, then try to finish again.',
+      { id: `beegame-production-completion-${this.input.sessionId}`, timeout: 10_000 },
+    )
 
     const canUseTool = async (
       tool: unknown,
@@ -208,17 +264,60 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       toolUseID: string,
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
+      const toolName = getToolName(tool)
+      if (
+        this.currentSubmitInput?.productionContractRequired === true &&
+        toolName === 'Agent'
+      ) {
+        const managedAgentDecision = validateBeeGameManagedAgentInvocation(toolInput)
+        if (!managedAgentDecision.allowed) {
+          return {
+            behavior: 'deny',
+            message: managedAgentDecision.message ?? 'Managed production agent invocation is invalid.',
+            decisionReason: {
+              type: 'other',
+              reason: 'beegame_managed_agent_must_run_foreground',
+            },
+            toolUseID,
+          }
+        }
+      }
+      const effectiveToolInput = toolName === 'Agent'
+        ? normalizeBeeGameManagedAgentInput(this.input.cwd, toolInput)
+        : toolInput
+      const productionDecision = evaluateProductionMutationGate({
+        workspacePath: this.input.cwd,
+        productionContractRequired: this.currentSubmitInput?.productionContractRequired === true,
+        toolName,
+        toolInput: effectiveToolInput,
+        toolReadOnly: isToolReadOnly(tool, effectiveToolInput),
+      })
+      if (!productionDecision.allowed) {
+        return {
+          behavior: 'deny',
+          message: productionDecision.message ?? 'Game production contract is incomplete.',
+          decisionReason: {
+            type: 'other',
+            reason: 'beegame_production_contract_incomplete',
+          },
+          toolUseID,
+        }
+      }
       const result = (await callAsync(
         permissionsModule,
         'hasPermissionsToUseTool',
         tool,
-        toolInput,
+        effectiveToolInput,
         toolUseContext,
         assistantMessage,
         toolUseID,
         forceDecision,
       )) as PermissionDecision
-      if (result.behavior !== 'ask') return result
+      if (result.behavior !== 'ask') {
+        return result.behavior === 'allow'
+          ? { ...result, updatedInput: result.updatedInput ?? effectiveToolInput }
+          : result
+      }
       const submitInput = this.currentSubmitInput
       if (!submitInput) {
         return {
@@ -233,14 +332,14 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       }
       const decision = await submitInput.requestPermission({
         toolUseID,
-        toolName: getToolName(tool),
+        toolName,
         message: result.message ?? 'Tool permission is required.',
-        input: toolInput,
+        input: effectiveToolInput,
       })
       if (decision.behavior === 'allow') {
         return {
           behavior: 'allow',
-          updatedInput: result.updatedInput ?? toolInput,
+          updatedInput: result.updatedInput ?? effectiveToolInput,
           decisionReason: {
             type: 'other',
             reason: 'dashboard_permission_approved',
@@ -440,6 +539,24 @@ function getToolName(tool: unknown): string {
     return tool.name
   }
   return 'Tool'
+}
+
+function isToolReadOnly(tool: unknown, input: Record<string, unknown>): boolean {
+  if (
+    typeof tool !== 'object' ||
+    tool === null ||
+    !('isReadOnly' in tool) ||
+    typeof tool.isReadOnly !== 'function'
+  ) return false
+
+  try {
+    return tool.isReadOnly(input) === true
+  } catch {
+    // A tool that cannot classify its input as read-only must be handled as a
+    // mutation. This keeps the production gate fail-closed without deriving
+    // command semantics in BeeGame.
+    return false
+  }
 }
 
 async function serializeRuntimeTurn(fn: () => Promise<void>): Promise<void> {

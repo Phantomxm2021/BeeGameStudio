@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   closeBeeGameRuntimeDispatcher,
+  createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
   ensureBeeGameMacroGlobals,
   mergeManagedAgentDefinitions,
@@ -10,6 +11,38 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('uses Claude Code native accept-edits mode without enabling bypass permissions', () => {
+    expect(createBeeGameToolPermissionContext({
+      mode: 'default',
+      customRule: 'preserved',
+      isBypassPermissionsModeAvailable: true,
+    })).toEqual({
+      mode: 'acceptEdits',
+      customRule: 'preserved',
+      isBypassPermissionsModeAvailable: false,
+    })
+  })
+
+  test('allows read-only access to the materialized skill root without granting edit access', () => {
+    const context = createBeeGameToolPermissionContext({
+      mode: 'default',
+      alwaysAllowRules: { session: ['Read(/existing/reference/**)'] },
+      isBypassPermissionsModeAvailable: true,
+    }, '/runtime/skills')
+
+    expect(context).toMatchObject({
+      mode: 'acceptEdits',
+      alwaysAllowRules: {
+        session: [
+          'Read(/existing/reference/**)',
+          'Read(/runtime/skills/**)',
+        ],
+      },
+      isBypassPermissionsModeAvailable: false,
+    })
+    expect(JSON.stringify(context)).not.toContain('Edit(/runtime/skills')
+  })
 
   test('injects managed validators while preserving unrelated project agents', () => {
     const projectAgent = { agentType: 'project-helper', source: 'project' }

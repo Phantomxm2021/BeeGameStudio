@@ -36,6 +36,20 @@ describe('asset contract audit', () => {
     expect(audit.issues).toContain('character-primary: Integrated slot has no runtime load evidence.')
   })
 
+  test('reports exact canonical manifest shape errors instead of treating legacy maps as missing fields', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-shape-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      project_target: { asset_format_capabilities: { models: ['glb'] } },
+      slots: { character: { target: { path: 'assets/character.glb' } } },
+    }))
+
+    expect(auditAssetContract(workspace).issues).toEqual([
+      'slots must be an array; received object.',
+      'project_target.asset_format_capabilities must be an array of strings; received object.',
+    ])
+  })
+
   test('verifies declared, bound, copied, referenced and runtime-loaded states separately', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-complete-'))
     await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
@@ -80,5 +94,53 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace).issues).toContain(
       'character-primary: File format is outside project_target capabilities: assets/models/character.engineasset',
     )
+  })
+
+  test('rejects unbound selection requirements that cannot be safely matched', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-selection-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: { asset_format_capabilities: ['portable-model'] },
+      slots: [{
+        id: 'primary-visual',
+        status: 'missing',
+        target: { path: 'assets/primary.portable-model' },
+        resource_requirement: {
+          accepted_formats: ['portable-model'],
+        },
+      }],
+    }))
+
+    const audit = auditAssetContract(workspace)
+    expect(audit.valid).toBe(false)
+    expect(audit.issues).toContain(
+      'primary-visual: Unbound resource_requirement.category is required for safe automatic selection.',
+    )
+    expect(audit.issues).toContain(
+      'primary-visual: Unbound resource_requirement.tags must include at least one canonical usage tag for safe automatic selection.',
+    )
+  })
+
+  test('accepts an explicit platform-neutral automatic selection requirement', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-selection-valid-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: { asset_format_capabilities: ['glb'] },
+      slots: [{
+        id: 'primary-visual',
+        status: 'missing',
+        target: { path: 'assets/primary.glb' },
+        resource_requirement: {
+          category: 'models',
+          dimension: '3D',
+          accepted_formats: ['glb'],
+          tags: ['character'],
+        },
+      }],
+    }))
+
+    expect(auditAssetContract(workspace)).toMatchObject({ valid: true })
   })
 })

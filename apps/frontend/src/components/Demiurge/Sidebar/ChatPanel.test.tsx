@@ -218,12 +218,33 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
         expect(screen.getByText('BeeGame 想运行 Bash 命令')).toBeInTheDocument();
         expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
-        expect(screen.getByText('/Projects/BeeGameStudio/generated-game')).toBeInTheDocument();
+        expect(screen.queryByText('/Projects/BeeGameStudio/generated-game')).not.toBeInTheDocument();
+        expect(screen.queryByText('作用范围')).not.toBeInTheDocument();
         expect(screen.getByText('可能创建文件、安装依赖或访问网络')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '允许本次' })).toBeInTheDocument();
         expect(screen.getByPlaceholderText('等待权限确认')).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('询问团队（Shift+Enter 换行）...')).not.toBeInTheDocument();
+    });
+
+    it('shows only the file name for file permission targets', () => {
+        renderChatPanel({
+            actionReview: {
+                ...beeGamePermissionReview,
+                title: 'Edit permission',
+                artifact: {
+                    input: {
+                        file_path: '/Projects/BeeGameStudio/generated-game/src/game/Player.tsx',
+                    },
+                },
+            },
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        expect(screen.getByText('Player.tsx')).toBeInTheDocument();
+        expect(screen.queryByText('/Projects/BeeGameStudio/generated-game/src/game/Player.tsx')).not.toBeInTheDocument();
+        expect(screen.queryByText('作用范围')).not.toBeInTheDocument();
     });
 
     it('uses the BeeGame dock styling for the normal composer', () => {

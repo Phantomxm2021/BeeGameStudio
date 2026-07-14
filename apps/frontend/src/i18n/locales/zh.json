@@ -637,8 +637,6 @@
     "permissionPanelDescription": "请确认这次操作是否允许。处理前，当前任务会暂停。",
     "permissionCommandLabel": "命令",
     "permissionTargetLabel": "目标",
-    "permissionScopeLabel": "作用范围",
-    "permissionScopeUnknown": "当前工作区",
     "permissionRiskLabel": "风险提示",
     "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
     "permissionPendingPlaceholder": "等待权限确认",
