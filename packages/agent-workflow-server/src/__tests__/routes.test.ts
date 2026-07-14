@@ -14,6 +14,7 @@ import {
 
 describe('agent workflow server routes', () => {
   const testOwner = { id: 'owner-user', role: 'owner' } as const
+  const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   let testRoot = ''
   let app: ReturnType<typeof createAgentWorkflowApp>
 
@@ -25,6 +26,7 @@ describe('agent workflow server routes', () => {
 
   beforeEach(async () => {
     resetAgentWorkflow()
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString('base64')
     testRoot = await mkdtemp(join(tmpdir(), 'beegame-routes-'))
     app = createAgentWorkflowApp({
       defaultWorkspacePath: testRoot,
@@ -38,6 +40,8 @@ describe('agent workflow server routes', () => {
   })
 
   afterEach(async () => {
+    if (originalEncryptionKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
+    else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = originalEncryptionKey
     await rm(testRoot, { recursive: true, force: true })
   })
 
@@ -168,7 +172,7 @@ describe('agent workflow server routes', () => {
       ['/api/mcp-servers', undefined, ['owner']],
       ['/api/admin/credits/ledger', undefined, ['owner']],
       ['/api/admin/projects/lifecycle', undefined, ['owner']],
-      ['/api/projects/missing-project', { method: 'DELETE' }, ['owner']],
+      ['/api/projects/missing-project', { method: 'DELETE' }, ['viewer', 'developer', 'owner']],
       ['/api/beegame-sessions/missing-session/package', undefined, ['viewer', 'developer', 'owner']],
       ['/api/projects/missing-project/assets/missing-slot/upload', { method: 'POST' }, ['developer', 'owner']],
     ] as const
@@ -2397,6 +2401,10 @@ describe('agent workflow server routes', () => {
       const retentionApp = createAgentWorkflowApp({
         defaultWorkspacePath: workspace,
         currentUser: testOwner,
+        outboundTargetPolicyOptions: {
+          resolve4: async () => ['93.184.216.34'],
+          resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
+        },
         deploymentRunner: async (_command, options) => {
           const outputDir = join(options.cwd, 'dist')
           await mkdir(outputDir, { recursive: true })
@@ -2404,6 +2412,19 @@ describe('agent workflow server routes', () => {
           return { exitCode: 0, stdout: 'built', stderr: '' }
         },
       })
+      const modelRes = await retentionApp.request('/api/model-configs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Retention runtime',
+          provider: 'openai-compatible',
+          baseUrl: 'https://llm.example.invalid/v1',
+          apiKey: 'test-key',
+          models: { balanced: 'test-model' },
+          isDefault: true,
+        }),
+      })
+      expect(modelRes.status).toBe(200)
       const createRes = await retentionApp.request('/api/projects', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -3327,7 +3348,7 @@ describe('agent workflow server routes', () => {
 
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({
-        error: expect.stringContaining('recommendedPlatform'),
+        error: expect.stringContaining('valid options'),
       })
     } finally {
       globalThis.fetch = originalFetch

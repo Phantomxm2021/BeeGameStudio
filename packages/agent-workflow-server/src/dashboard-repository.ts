@@ -425,12 +425,13 @@ export class DashboardRepository {
   ): Promise<string | undefined> {
     const supabase = this.supabaseForRequest(request)
     if (!supabase || !metadata?.projectId) return undefined
+    const uploadBody = file.slice(0, file.size, file.type || 'application/octet-stream')
     return supabase.uploadAssetFile({
       ownerId: user.id,
       projectId: metadata.projectId,
       fileName: file.name,
       contentType: file.type,
-      body: file,
+      body: uploadBody,
     })
   }
 

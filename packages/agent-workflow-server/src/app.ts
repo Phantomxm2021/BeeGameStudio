@@ -3520,12 +3520,27 @@ async function ensureBeeGameProjectSession(input: {
     }
   }
 
-  if (latest?.modelConfigId) await input.assertPermittedModelConfigRuntime(latest.modelConfigId)
+  const readableConfigs = await input.dashboardRepository.listModelConfigs(
+    input.request,
+    input.user,
+  )
+  const restoredModelConfigId = latest?.modelConfigId &&
+    await input.dashboardRepository.modelConfigExists(
+      input.request,
+      input.user,
+      latest.modelConfigId,
+    )
+    ? latest.modelConfigId
+    : undefined
+  const modelConfigId = restoredModelConfigId ??
+    readableConfigs.find(config => config.isDefault)?.id ??
+    readableConfigs[0]?.id
+  if (modelConfigId) await input.assertPermittedModelConfigRuntime(modelConfigId)
   const session = input.beeGameSessions.start({
     workspacePath,
     projectId: input.project.id,
     ...(latest?.id ? { transcriptSessionId: latest.id } : {}),
-    ...(latest?.modelConfigId ? { modelConfigId: latest.modelConfigId } : {}),
+    ...(modelConfigId ? { modelConfigId } : {}),
     ...(language ? { language } : {}),
     userId: input.user.id,
     ...(getBearerToken(input.request) ? { authToken: getBearerToken(input.request) } : {}),

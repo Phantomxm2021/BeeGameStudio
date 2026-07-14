@@ -10,7 +10,9 @@ describe('filesystem routes', () => {
     try {
       await mkdir(join(root, 'ProjectA'))
       await mkdir(join(root, 'ProjectB'))
-      const app = createAgentWorkflowApp()
+      const app = createAgentWorkflowApp({
+        currentUser: { id: 'filesystem-owner', role: 'owner' },
+      })
 
       const res = await app.request(
         `/api/filesystem/directories?path=${encodeURIComponent(root)}`,
@@ -37,7 +39,9 @@ describe('filesystem routes', () => {
   })
 
   test('rejects relative directory listing paths', async () => {
-    const app = createAgentWorkflowApp()
+    const app = createAgentWorkflowApp({
+      currentUser: { id: 'filesystem-owner', role: 'owner' },
+    })
 
     const res = await app.request('/api/filesystem/directories?path=./WO')
 
@@ -50,7 +54,10 @@ describe('filesystem routes', () => {
   test('creates and returns a default workspace directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cc-default-workspace-'))
     const workspace = join(root, 'Projects')
-    const app = createAgentWorkflowApp({ defaultWorkspacePath: workspace })
+    const app = createAgentWorkflowApp({
+      defaultWorkspacePath: workspace,
+      currentUser: { id: 'filesystem-owner', role: 'owner' },
+    })
 
     try {
       const res = await app.request('/api/filesystem/default-workspace')
