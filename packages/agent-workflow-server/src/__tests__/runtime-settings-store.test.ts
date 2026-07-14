@@ -192,4 +192,23 @@ describe('runtime settings store', () => {
       rmSync(dataDir, { recursive: true, force: true })
     }
   })
+
+  test('propagates explicit admin feature disables instead of inheriting host flags', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-settings-disabled-'))
+    try {
+      const env = mapRuntimeSettingsToEnv({
+        treeSitterBashEnabled: false,
+        webBrowserToolEnabled: false,
+        bashClassifierEnabled: false,
+        mcpSkillsEnabled: false,
+      }, { dataDir })
+
+      expect(env.FEATURE_TREE_SITTER_BASH).toBe('0')
+      expect(env.FEATURE_WEB_BROWSER_TOOL).toBe('0')
+      expect(env.FEATURE_BASH_CLASSIFIER).toBe('0')
+      expect(env.FEATURE_MCP_SKILLS).toBe('0')
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
 })

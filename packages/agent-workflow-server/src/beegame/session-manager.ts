@@ -28,7 +28,7 @@ import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
   createDeliveryValidationAgentDefinitions,
 } from './delivery-validation-agents'
-import { createQueryEngineRunner } from './query-engine-runner'
+import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -213,10 +213,17 @@ export type BeeGameSessionSubmitInput = {
 export type BeeGameSessionRuntime = {
   submit(input: BeeGameSessionSubmitInput): Promise<void>
   stop(): void
+  dispose?(): void
 }
 
 export type BeeGameSessionRunner = {
   start(input: BeeGameSessionRunnerStartInput): Promise<BeeGameSessionRuntime>
+}
+
+function disposeRunner(runner: BeeGameSessionRuntime | null): void {
+  if (!runner) return
+  if (runner.dispose) runner.dispose()
+  else runner.stop()
 }
 
 export type DashboardPermissionRequest = {
@@ -350,7 +357,7 @@ export class BeeGameSessionManager {
   private readonly dashboardDataRoot: string
 
   constructor(
-    private readonly runner: BeeGameSessionRunner = createQueryEngineRunner(),
+    private readonly runner: BeeGameSessionRunner = createProcessIsolatedQueryEngineRunner(),
     dashboardDataRoot?: string,
     private readonly getAdditionalRuntimeEnv: (
       userDataRoot?: string,
@@ -792,7 +799,8 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
     if (record.session.status === 'running') {
       record.abortController?.abort()
-      record.runner?.stop()
+      disposeRunner(record.runner)
+      record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session stopped before permission was resolved',
@@ -815,7 +823,8 @@ export class BeeGameSessionManager {
 
     if (record.session.status === 'running') {
       record.abortController?.abort()
-      record.runner?.stop()
+      disposeRunner(record.runner)
+      record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session deleted before permission was resolved',
@@ -946,11 +955,12 @@ export class BeeGameSessionManager {
         }
       } finally {
         if (signal.aborted && record.runner === runner) {
+          disposeRunner(record.runner)
           record.runner = null
         }
       }
     } catch (err) {
-      record.runner?.stop()
+      disposeRunner(record.runner)
       record.runner = null
       if (creditReservation) {
         shouldRefundReservation = !await this.settleTurnCredits(
@@ -1793,10 +1803,11 @@ async function prepareBeeGamePromptInput(input: {
   const documentContext = materializedFiles.length > 0
     ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
     : ''
-  const localizedInput = withSessionLanguageContract(`${input.text}${documentContext}`, input.language)
+  const requestText = input.text || (images.length > 0 ? 'Analyze the attached image.' : '')
+  const localizedInput = withSessionLanguageContract(`${requestText}${documentContext}`, input.language)
   const promptText = input.displayKind === 'initial_idea'
     ? withInitialIdeaContract(localizedInput)
-    : input.displayKind === 'confirmed_brief'
+    : input.displayKind === 'confirmed_brief' || input.displayKind === 'direct_build'
       ? withConfirmedBriefContract(localizedInput)
       : input.displayKind === 'asset_integration'
         ? withAssetIntegrationContract(localizedInput)

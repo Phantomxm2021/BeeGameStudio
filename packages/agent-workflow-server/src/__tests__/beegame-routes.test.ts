@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
   createModelConfig,
+  listModelConfigs,
   resetAgentWorkflow,
 } from '@bee-game-studio/agent-workflow'
 import {
@@ -86,18 +87,49 @@ function createAgentWorkflowApp(
   if (!options.dashboardDataRoot && !options.defaultWorkspacePath) {
     testDashboardRoots.push(dashboardDataRoot)
   }
-  return createAgentWorkflowAppBase({
+  const currentUser = options.currentUser ??
+    (options.currentUserResolver
+      ? undefined
+      : { id: DEFAULT_LOCAL_USER_ID, role: 'owner' as const })
+  const app = createAgentWorkflowAppBase({
     ...options,
+    skillsConfig: options.skillsConfig ?? false,
     outboundTargetPolicyOptions: options.outboundTargetPolicyOptions ?? {
       resolve4: async () => ['93.184.216.34'],
       resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
     },
     dashboardDataRoot,
-    currentUser: options.currentUser ??
-      (options.currentUserResolver
-        ? undefined
-        : { id: DEFAULT_LOCAL_USER_ID, role: 'owner' }),
+    currentUser,
   })
+  // Fake runners exercise route behavior without a real provider. Provision
+  // their model fixture lazily so tests that install a specific model before
+  // the first session request still control the selected configuration.
+  if (options.sessionRunner) {
+    const request = app.request.bind(app)
+    app.request = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      const pathname = new URL(url, 'http://beegame.test').pathname
+      const requestUser = currentUser ?? await options.currentUserResolver?.(
+        new Request(new URL(url, 'http://beegame.test'), init),
+      )
+      if (
+        init?.method === 'POST' &&
+        (pathname === '/api/beegame-sessions' || pathname === '/api/console/sessions') &&
+        requestUser &&
+        listModelConfigs(requestUser.id).length === 0
+      ) {
+        createModelConfig(requestUser.id, {
+          name: 'Test provider',
+          provider: 'openai-compatible',
+          baseUrl: 'https://llm.example.invalid/v1',
+          apiKey: 'test-provider-key',
+          models: { balanced: 'test-model' },
+        })
+      }
+      return request(input, init)
+    }) as typeof app.request
+  }
+  return app
 }
 
 function cryptoRandomSuffix(): string {
@@ -842,6 +874,15 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[3]).toContain('observable runtime loading')
       expect(submittedPrompts[3]).toContain('non-empty user-facing result')
       expect(submittedPrompts[3]).not.toContain('Existing project change request:')
+      await buildManager.sendWithDisplay(
+        buildSession.id,
+        JSON.stringify({ kind: 'game_idea', idea: 'direct build request' }),
+        { displayKind: 'direct_build', taskType: 'full_build' },
+      )
+      await waitFor(() => submittedPrompts.length >= 5)
+      await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
+      expect(submittedPrompts[4]).toContain('Confirmed build request:')
+      expect(submittedPrompts[4]).not.toContain('Idea intake contract:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -1786,7 +1827,6 @@ describe('beegame session routes', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           workspacePath: workspace,
-          modelConfigId: model.id,
         }),
       })
       const session = await sessionRes.json()
@@ -1798,11 +1838,11 @@ describe('beegame session routes', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             text: 'Build a tiny puzzle game.',
-            displayText: 'Tiny puzzle game',
-            displayKind: 'initial_idea',
           }),
         },
       )
+
+      expect(inputRes.status).toBe(200)
 
       await waitFor(async () => {
         const eventsRes = await app.request(
@@ -1813,7 +1853,6 @@ describe('beegame session routes', () => {
       })
       const resolvedWorkspace = await realpath(workspace)
 
-      expect(inputRes.status).toBe(200)
       expect(fake.starts).toEqual([
         expect.objectContaining({
           sessionId: session.id,
@@ -1830,9 +1869,8 @@ describe('beegame session routes', () => {
         }),
       ])
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toBe(fake.starts[0]?.env.BEEGAME_CONFIG_DIR)
-      expect(fake.runtimes[0].submits[0].prompt).toBe(
-        'Build a tiny puzzle game.',
-      )
+      expect(fake.runtimes[0].submits[0].prompt).toContain('Build a tiny puzzle game.')
+      expect(fake.runtimes[0].submits[0].prompt).toContain('Existing project change request:')
 
       const eventsRes = await app.request(
         `/api/console/sessions/${session.id}/events`,
@@ -1883,8 +1921,7 @@ describe('beegame session routes', () => {
             type: 'user.message',
             text: 'Build a tiny puzzle game.',
             payload: expect.objectContaining({
-              displayText: 'Tiny puzzle game',
-              displayKind: 'initial_idea',
+              type: 'user.message',
             }),
           }),
           expect.objectContaining({
@@ -1999,10 +2036,10 @@ describe('beegame session routes', () => {
 
       expect(inputRes.status).toBe(200)
       expect(fake.runtimes[0].submits[0].prompt).toEqual([
-        {
+        expect.objectContaining({
           type: 'text',
-          text: 'Analyze the attached image.',
-        },
+          text: expect.stringContaining('Analyze the attached image.'),
+        }),
         {
           type: 'image',
           source: {

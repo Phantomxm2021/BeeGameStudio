@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
@@ -50,13 +50,18 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      saveRuntimeSettingsConfig({ skillSearchEnabled: true }, { dataDir: dataRoot })
+      saveRuntimeSettingsConfig({
+        skillSearchEnabled: true,
+        mcpSkillsEnabled: false,
+      }, { dataDir: dataRoot })
 
       const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
       const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
 
       expect(ownerAEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(ownerBEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
+      expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
       await expect(readFile(
         join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
@@ -65,6 +70,10 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
       )).resolves.toContain('"skillSearchEnabled": true')
+      await expect(readFile(
+        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
+        'utf8',
+      )).resolves.toContain('"mcpSkillsEnabled": false')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -143,6 +152,82 @@ describe('DashboardRepository Supabase boundaries', () => {
       )).resolves.toContain('name: beegame-game-acceptance')
     } finally {
       globalThis.fetch = originalFetch
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('fails closed when required user skills cannot be synchronized', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-required-skills-'))
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      skillsConfig: {
+        apiBaseUrl: 'http://skills.test',
+        required: true,
+      },
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('skills unavailable')
+    }) as unknown as typeof fetch
+
+    try {
+      await expect(repository.getRuntimeEnv(dataRoot, 'owner-user'))
+        .rejects.toThrow('User skills synchronization failed')
+    } finally {
+      globalThis.fetch = originalFetch
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('continues without stale user skills when optional development sync is unavailable', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-optional-skills-'))
+    const staleSkillDir = join(dataRoot, '.runtime', 'app', 'skills', 'user-stale')
+    await mkdir(staleSkillDir, { recursive: true })
+    await writeFile(join(staleSkillDir, 'SKILL.md'), 'stale', 'utf8')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      skillsConfig: {
+        apiBaseUrl: 'http://skills.test',
+        required: false,
+      },
+    })
+    const originalFetch = globalThis.fetch
+    const originalWarn = console.warn
+    let warningCount = 0
+    globalThis.fetch = (async () => {
+      throw new Error('skills unavailable')
+    }) as unknown as typeof fetch
+    console.warn = () => { warningCount += 1 }
+
+    try {
+      await repository.getRuntimeEnv(dataRoot, 'owner-user')
+      await repository.getRuntimeEnv(dataRoot, 'owner-user')
+      await expect(readFile(join(staleSkillDir, 'SKILL.md'), 'utf8')).rejects.toThrow()
+      expect(warningCount).toBe(1)
+    } finally {
+      globalThis.fetch = originalFetch
+      console.warn = originalWarn
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('removes stale user skill materialization when remote skills are disabled', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-disabled-skills-'))
+    const staleSkillDir = join(dataRoot, '.runtime', 'app', 'skills', 'user-stale')
+    await mkdir(staleSkillDir, { recursive: true })
+    await writeFile(join(staleSkillDir, 'SKILL.md'), 'stale', 'utf8')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      skillsConfig: false,
+    })
+
+    try {
+      await repository.getRuntimeEnv(dataRoot, 'owner-user')
+      await expect(readFile(join(staleSkillDir, 'SKILL.md'), 'utf8')).rejects.toThrow()
+    } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })

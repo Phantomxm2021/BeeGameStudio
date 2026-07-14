@@ -217,6 +217,7 @@ export class ProjectQuotaExceededError extends Error {
 }
 
 export class DashboardRepository {
+  private readonly warnedSkillSyncFailures = new Set<string>()
   readonly supabaseStore?: SupabaseDashboardStore
   private readonly projectStores = new Map<string, BeeGameProjectMetadataStore>()
 
@@ -1027,15 +1028,29 @@ export class DashboardRepository {
     userId: string,
     dataDir: string,
   ): Promise<void> {
+    if (this.options.skillsConfig === false) {
+      materializeUserSkills([], { dataDir })
+      return
+    }
+    const config = this.options.skillsConfig ?? resolveBeeGameSkillsConfig()
     try {
-      if (this.options.skillsConfig === false) return
       const skills = await fetchEnabledUserSkills(
-        this.options.skillsConfig ?? resolveBeeGameSkillsConfig(),
+        config,
         userId,
       )
       materializeUserSkills(skills, { dataDir })
+      this.warnedSkillSyncFailures.delete(userId)
     } catch (err) {
-      console.warn('[BeeGame] Failed to materialize remote user skills:', err)
+      if (config.required) {
+        throw new Error('User skills synchronization failed', { cause: err })
+      }
+      // Optional development mode must not execute a stale skill after the
+      // user disabled or deleted it while the skills service was unavailable.
+      materializeUserSkills([], { dataDir })
+      if (!this.warnedSkillSyncFailures.has(userId)) {
+        this.warnedSkillSyncFailures.add(userId)
+        console.warn('[BeeGame] User skills are temporarily unavailable; continuing without user skills:', err)
+      }
     }
   }
 

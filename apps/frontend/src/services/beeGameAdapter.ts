@@ -384,6 +384,9 @@ export const beeGameAdapter = {
     status: string;
     pipeline: { pipeline_id: string; status: string };
   }> {
+    // Compatibility path for callers that explicitly skip Landing intake.
+    // The server treats /idea as a direct build; normal UI builds use
+    // bootstrapProjectFromBrief after the user confirms an intake option.
     const title = data.title || summarizeTitle(data.idea);
     const requestedWorkspacePath = await resolveNewProjectClientWorkspacePath(data.root_path, title);
     const project = createLocalProject(title, requestedWorkspacePath);

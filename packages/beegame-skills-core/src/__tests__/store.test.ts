@@ -64,6 +64,25 @@ describe('BeeGame skills store', () => {
     )).resolves.toContain('XR movement')
   })
 
+  test('keeps custom skills isolated by authenticated user', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-users-'))
+    const files = parseSkillZipPackage(createSkillZip({
+      'SKILL.md': [
+        '---',
+        'name: private-workflow',
+        'description: User-owned workflow.',
+        '---',
+        '',
+        '# Private Workflow',
+      ].join('\n'),
+    }))
+
+    importUserSkill('user-a', { files }, { dataDir })
+
+    expect(listUserSkills('user-a', { dataDir })).toHaveLength(1)
+    expect(listUserSkills('user-b', { dataDir })).toEqual([])
+  })
+
   test('rejects unsafe package paths', () => {
     expect(() => parseSkillZipPackage(createSkillZip({
       'SKILL.md': [

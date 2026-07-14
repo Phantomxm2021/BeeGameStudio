@@ -1702,6 +1702,19 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('disables user skill management when the global skills feature is disabled', async () => {
+    for (const [path, init] of [
+      ['/api/user-skills', undefined],
+      ['/api/user-skills/import', { method: 'POST', body: 'zip-bytes' }],
+      ['/api/user-skills/skill-1/enabled', { method: 'PUT', body: '{}' }],
+      ['/api/user-skills/skill-1', { method: 'DELETE' }],
+    ] as const) {
+      const response = await app.request(path, init)
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({ error: 'User skills are disabled' })
+    }
+  })
+
   test('traces skills proxy failures without exposing upstream details', async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async () => {

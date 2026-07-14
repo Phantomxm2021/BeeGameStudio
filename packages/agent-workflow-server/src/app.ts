@@ -346,7 +346,7 @@ export function createAgentWorkflowApp(
   }
   const billingConfig = resolveBeeGameBillingConfig()
   const skillsConfig = options.skillsConfig === false
-    ? resolveBeeGameSkillsConfig()
+    ? null
     : options.skillsConfig ?? resolveBeeGameSkillsConfig()
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
@@ -973,6 +973,7 @@ export function createAgentWorkflowApp(
   app.get('/api/user-skills', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
+    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
     try {
       return await proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills')
     } catch (error) {
@@ -983,6 +984,7 @@ export function createAgentWorkflowApp(
   app.post('/api/user-skills/import', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
+    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
     try {
       return await proxyBeeGameSkillsRequest(skillsConfig, c.req.raw, '/api/user-skills/import')
     } catch (err) {
@@ -1001,6 +1003,7 @@ export function createAgentWorkflowApp(
   app.put('/api/user-skills/:id/enabled', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
+    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
     try {
       return await proxyBeeGameSkillsRequest(
         skillsConfig,
@@ -1015,6 +1018,7 @@ export function createAgentWorkflowApp(
   app.delete('/api/user-skills/:id', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.userSkills)
     if (forbidden) return c.json(forbidden, 403)
+    if (!skillsConfig) return c.json({ error: 'User skills are disabled' }, 503)
     try {
       return await proxyBeeGameSkillsRequest(
         skillsConfig,
@@ -4475,6 +4479,8 @@ function registerBeeGameSessionRoutes(
   app.get(`${basePath}/:id/assets`, async c => {
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
+    const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
+    if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
@@ -4832,7 +4838,10 @@ function registerBeeGameSessionRoutes(
         JSON.stringify({ kind: 'game_idea', idea }, null, 2),
         {
           displayText: idea,
-          displayKind: 'initial_idea',
+          // Idea intake is handled before project creation by
+          // /api/beegame-intake/*. This legacy project endpoint is a direct
+          // build compatibility path and must never restart intake.
+          displayKind: 'direct_build',
           taskType: 'full_build',
           ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
           ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),

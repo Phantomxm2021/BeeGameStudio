@@ -106,17 +106,17 @@ export function mapRuntimeSettingsToEnv(
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
   }
-  if (config.treeSitterBashEnabled) {
-    env.FEATURE_TREE_SITTER_BASH = '1'
+  if (config.treeSitterBashEnabled !== undefined) {
+    env.FEATURE_TREE_SITTER_BASH = config.treeSitterBashEnabled ? '1' : '0'
   }
-  if (config.webBrowserToolEnabled) {
-    env.FEATURE_WEB_BROWSER_TOOL = '1'
+  if (config.webBrowserToolEnabled !== undefined) {
+    env.FEATURE_WEB_BROWSER_TOOL = config.webBrowserToolEnabled ? '1' : '0'
   }
-  if (config.bashClassifierEnabled) {
-    env.FEATURE_BASH_CLASSIFIER = '1'
+  if (config.bashClassifierEnabled !== undefined) {
+    env.FEATURE_BASH_CLASSIFIER = config.bashClassifierEnabled ? '1' : '0'
   }
-  if (config.mcpSkillsEnabled) {
-    env.FEATURE_MCP_SKILLS = '1'
+  if (config.mcpSkillsEnabled !== undefined) {
+    env.FEATURE_MCP_SKILLS = config.mcpSkillsEnabled ? '1' : '0'
   }
   return env
 }

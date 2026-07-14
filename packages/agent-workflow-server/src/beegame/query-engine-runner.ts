@@ -71,8 +71,6 @@ const PRODUCTION_INSTALL_ENV_KEYS = [
   'pnpm_config_prod',
 ] as const
 
-let runtimeQueue: Promise<void> = Promise.resolve()
-
 export function createQueryEngineRunner(): BeeGameSessionRunner {
   return {
     async start(input) {
@@ -120,40 +118,38 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
-    await serializeRuntimeTurn(async () => {
-      await withRuntimeEnvironment(
-        this.input.cwd,
-        this.input.env,
-        this.input.approvedOutboundTargets,
-        async () => {
-          this.currentSubmitInput = input
-          const engine = await this.ensureEngine()
-          // Claude's bootstrap session pointer is process-global. Another
-          // BeeGame runtime may have changed it while this engine was idle, so
-          // reactivate the owning native session before every turn.
-          this.activateNativeSession?.()
-          if (input.signal.aborted) {
-            this.currentSubmitInput = null
-            return
-          }
+    await withRuntimeEnvironment(
+      this.input.cwd,
+      this.input.env,
+      this.input.approvedOutboundTargets,
+      async () => {
+        this.currentSubmitInput = input
+        const engine = await this.ensureEngine()
+        // The worker owns one native session. Reactivate it before every turn
+        // so a native compaction or resume transition cannot leave a stale
+        // bootstrap pointer inside that worker.
+        this.activateNativeSession?.()
+        if (input.signal.aborted) {
+          this.currentSubmitInput = null
+          return
+        }
 
-          engine.resetAbortController()
-          const abort = () => {
-            engine.interrupt()
+        engine.resetAbortController()
+        const abort = () => {
+          engine.interrupt()
+        }
+        input.signal.addEventListener('abort', abort, { once: true })
+        try {
+          for await (const message of engine.submitMessage(input.prompt)) {
+            input.onMessage(message)
+            if (input.signal.aborted) break
           }
-          input.signal.addEventListener('abort', abort, { once: true })
-          try {
-            for await (const message of engine.submitMessage(input.prompt)) {
-              input.onMessage(message)
-              if (input.signal.aborted) break
-            }
-          } finally {
-            input.signal.removeEventListener('abort', abort)
-            this.currentSubmitInput = null
-          }
-        },
-      )
-    })
+        } finally {
+          input.signal.removeEventListener('abort', abort)
+          this.currentSubmitInput = null
+        }
+      },
+    )
   }
 
   stop(): void {
@@ -508,12 +504,6 @@ function getToolName(tool: unknown): string {
     typeof tool.name === 'string'
   ) return tool.name
   return 'Tool'
-}
-
-async function serializeRuntimeTurn(fn: () => Promise<void>): Promise<void> {
-  const run = runtimeQueue.then(fn, fn)
-  runtimeQueue = run.catch(() => {})
-  return run
 }
 
 async function withRuntimeEnvironment(
