@@ -12,6 +12,7 @@ import {
   type ApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
+import { RESOURCE_ASSET_MANIFEST_VOCABULARY } from '../../../beegame-resource-core/src/types'
 import {
   refundCreditReservation,
   reserveCredits,
@@ -204,14 +205,6 @@ export type BeeGameApprovedOutboundTargets = Partial<
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   signal: AbortSignal
-  /**
-   * Enables the native Claude Code delivery stop hook for this turn. The hook
-   * runs inside the same QueryEngine session; BeeGame does not schedule a
-   * second repair turn or maintain a parallel delivery state machine.
-   */
-  deliveryValidationRequired?: boolean
-  /** Validate an edit/continue turn only when it actually changed project files. */
-  deliveryValidationOnMutation?: boolean
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
     request: DashboardPermissionRequest,
@@ -805,9 +798,6 @@ export class BeeGameSessionManager {
       creditReservation,
       creditPolicy,
       preparedPrompt.attachmentDirectory,
-      display?.displayKind === 'confirmed_brief' ||
-        display?.displayKind === 'direct_build',
-      display?.taskType === 'edit_turn' || display?.taskType === 'continue_turn',
     )
     return cloneSession(record.session)
     } catch (error) {
@@ -923,8 +913,6 @@ export class BeeGameSessionManager {
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
     attachmentDirectory?: string,
-    deliveryValidationRequired = false,
-    deliveryValidationOnMutation = false,
   ): Promise<void> {
     let shouldRefundReservation = Boolean(creditReservation)
     try {
@@ -952,14 +940,7 @@ export class BeeGameSessionManager {
       })
       record.runner = runner
       try {
-        await this.submitToRunner(
-          record,
-          runner,
-          prompt,
-          signal,
-          deliveryValidationRequired,
-          deliveryValidationOnMutation,
-        )
+        await this.submitToRunner(record, runner, prompt, signal)
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
           const hasFinalResult = hasNativeFinalResult(record.events, turnId)
@@ -1056,16 +1037,12 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
-    deliveryValidationRequired: boolean,
-    deliveryValidationOnMutation: boolean,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
     await runner.submit({
       prompt,
       signal,
-      deliveryValidationRequired,
-      deliveryValidationOnMutation,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
         if (isSDKExecutionError(message)) {
@@ -1776,6 +1753,7 @@ function withAssetIntegrationContract(prompt: string): string {
     '- A copied file is not yet integrated. Update project code to reference the exact copied paths, run the affected build or package check, and verify observable runtime loading before marking a slot integrated.',
     '- If the binding, format capability, dependency closure, or runtime evidence is incomplete, leave the slot pending or missing and report the exact blocker instead of silently substituting an incompatible asset.',
     '- End with a non-empty user-facing result describing the slots changed, the files and dependencies integrated, the verification performed, and any unresolved blocker.',
+    `- Canonical manifest vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. delivery_mode is managed-file, embedded, or procedural. uploaded_files lists resource files only; target.path and integration_evidence.references have distinct meanings.`,
   ].join('\n')
 }
 
@@ -1798,13 +1776,13 @@ function withConfirmedBriefContract(prompt: string): string {
     'Confirmed build request:',
     '- Treat the structured brief and approved project documents as the source of truth. Do not restart ideation or expand the approved MVP.',
     '- Before implementation, create or update a compact project document bundle: docs/GDD.md, docs/TECHNICAL_DESIGN.md, docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, docs/AUDIO_DESIGN.md, docs/ASSET_PLAN.md, and docs/acceptance/gameplay-checklist.md.',
-    '- Each document may be concise, but together they must define the player loop, rules and state transitions, controls, technical architecture, visual/UI/audio feedback, asset requirements, and observable playable acceptance paths. Mark a genuinely non-applicable area explicitly instead of silently omitting its document.',
+    '- Each document may be concise, but together they must define the player loop, rules and state transitions, controls, technical architecture, visual/UI/audio feedback, asset requirements, and observable playable acceptance paths. In gameplay-checklist.md, begin every task with [requirement:stable-id] or [player-path:stable-id]. Mark a genuinely non-applicable area explicitly instead of silently omitting its document.',
     '- Use a fresh Claude Code native subagent to cross-review this document bundle against the confirmed brief before implementation. Resolve inconsistencies from the approved source; report only a material decision that truly requires the user.',
     '- Invoke applicable native Skills through the Skill tool before specialized design, implementation, or validation work. Use beegame-game-acceptance before final validation, and use beegame-interaction-contracts when controls, camera, movement, touch, gamepad, or XR behavior is involved. Do not discover Skills by reading runtime configuration directories.',
-    '- Then plan and implement against those documents. When assets are required, maintain the canonical assets/asset-manifest.json and use actual bound paths and formats.',
-    '- Before claiming completion, use a fresh native acceptance subagent to run the project-native build, tests, and observable player-path checks. Static source inspection cannot pass a runtime player path. Keep the gameplay checklist truthful: unchecked or failed behavior is not delivered.',
-    '- If validation fails or is blocked, repair the reported failures when possible and invoke a new fresh acceptance subagent. Do not rewrite failed or blocked checklist items as passed without evidence from the new validation run.',
-    '- After the final fresh validator returns, persist its terminal JSON unchanged to docs/acceptance/validation-report.json. Update checklist state only from that exact result; do not synthesize, strengthen, or omit evidence in a separate prose report.',
+    `- Then plan and implement against those documents. When assets are required, maintain assets/asset-manifest.json using this canonical vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. Use delivery_mode managed-file, embedded, or procedural; never guess enum values or treat a code reference as an uploaded resource file.`,
+    '- Before claiming completion, use one fresh native acceptance subagent for the current implementation revision to run the project-native build, tests, and observable player-path checks. Its Agent prompt may contain only the workspace and neutral review scope; never prescribe its status, findings, evidence, or summary. Static source inspection cannot pass a runtime player path.',
+    '- If validation fails, repair the exact findings before invoking another validator. Do not revalidate an unchanged implementation, rewrite evidence to remove failures, or loop on the same finding without progress. If the Validator tool itself fails twice, report that concrete resumable blocker instead of fabricating a report. Keep the gameplay checklist truthful: unchecked or failed behavior is not delivered.',
+    '- After the final validator returns, update checklist state only from that exact result, then persist its terminal JSON unchanged to docs/acceptance/validation-report.json as the final project write. Do not synthesize, strengthen, or omit evidence in a separate prose report.',
     '- Do not claim completion without observed evidence. If an external capability is unavailable, report the concrete blocker and preserve the resumable native task.',
   ].join('\n')
 }
@@ -1819,9 +1797,9 @@ function withProjectChangeContract(prompt: string): string {
     '- For a mutation request, classify its impact before editing. If it changes player-visible behavior, controls, UI, assets, architecture, or acceptance expectations, update only the affected approved documents and acceptance paths before changing code. If it is a bug where the documents are already correct, keep the requirements stable and fix the implementation. Pure internal refactors do not require product-document churn.',
     '- Invoke applicable native Skills through the Skill tool. Use beegame-game-acceptance before final validation, and use beegame-interaction-contracts when controls, camera, movement, touch, gamepad, or XR behavior is affected. Do not inspect runtime configuration directories to discover Skills.',
     '- Implement the change against the resulting documents. Preserve the canonical assets/asset-manifest.json structure and actual bound paths when assets are involved; do not invent an alternate manifest shape.',
-    '- Run the affected project-native checks and observable player paths. For player-visible changes, use a fresh native acceptance subagent; static source inspection cannot pass runtime behavior.',
-    '- If validation fails, repair the findings and invoke a new fresh acceptance subagent before claiming completion. Do not mark checklist items passed without evidence from that validation run.',
-    '- When a fresh validator runs, persist its final terminal JSON unchanged to docs/acceptance/validation-report.json and update checklist state only from that exact result.',
+    '- Run the affected project-native checks and observable player paths. For player-visible changes, use one fresh native acceptance subagent for the changed implementation revision, with only the workspace and neutral review scope in its Agent prompt; static source inspection cannot pass runtime behavior.',
+    '- If validation fails, repair the exact findings before invoking another validator. Do not revalidate unchanged files, prescribe a passing result, or loop on the same finding without progress. If the Validator tool itself fails twice, report that concrete resumable blocker instead of fabricating a report. Do not mark checklist items passed without evidence from that validation run.',
+    '- When a validator runs, update checklist state only from its exact result, then persist its terminal JSON unchanged to docs/acceptance/validation-report.json as the final project write.',
     '- End with a non-empty user-facing result stating what changed, which documents changed, what was actually verified, and any concrete blocker. An unfinished verification step is not completion.',
   ].join('\n')
 }

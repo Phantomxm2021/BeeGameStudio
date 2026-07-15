@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -9,12 +8,6 @@ import {
   type ApprovedOutboundTarget,
 } from '@bee-game-studio/security-core'
 import { getDefaultBeeGameBuiltinSkillsDir } from '@bee-game-studio/beegame-skills-core/store'
-import {
-  evaluateDeliveryCompletion,
-  readDeliveryReportSignature,
-  readProjectMutationSignature,
-  type DeliveryReportSignature,
-} from './delivery-completion-gate'
 import type {
   BeeGameApprovedOutboundTargets,
   BeeGamePromptInput,
@@ -139,8 +132,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
   private activateNativeSession: (() => void) | null = null
-  private deliveryReportBaseline: DeliveryReportSignature | undefined
-  private projectMutationBaseline: string | undefined
 
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
@@ -151,13 +142,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       this.input.approvedOutboundTargets,
       async () => {
         this.currentSubmitInput = input
-        this.deliveryReportBaseline = input.deliveryValidationRequired
-          || input.deliveryValidationOnMutation
-          ? readDeliveryReportSignature(this.input.cwd)
-          : undefined
-        this.projectMutationBaseline = input.deliveryValidationOnMutation
-          ? readProjectMutationSignature(this.input.cwd)
-          : undefined
         const engine = await this.ensureEngine()
         // The worker owns one native session. Reactivate it before every turn
         // so a native compaction or resume transition cannot leave a stale
@@ -165,8 +149,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         this.activateNativeSession?.()
         if (input.signal.aborted) {
           this.currentSubmitInput = null
-          this.deliveryReportBaseline = undefined
-          this.projectMutationBaseline = undefined
           return
         }
 
@@ -183,8 +165,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         } finally {
           input.signal.removeEventListener('abort', abort)
           this.currentSubmitInput = null
-          this.deliveryReportBaseline = undefined
-          this.projectMutationBaseline = undefined
         }
       },
     )
@@ -215,8 +195,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       configModule,
       permissionsModule,
       conversationRecoveryModule,
-      sessionHooksModule,
-      sessionStorageModule,
     ] = await Promise.all([
       loadRootModule('QueryEngine.js'),
       loadRootModule('Tool.js'),
@@ -229,8 +207,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       loadRootModule('utils/config.js'),
       loadRootModule('utils/permissions/permissions.js'),
       loadRootModule('utils/conversationRecovery.js'),
-      loadRootModule('utils/hooks/sessionHooks.js'),
-      loadRootModule('utils/sessionStorage.js'),
     ])
 
     call(configModule, 'enableConfigs')
@@ -283,55 +259,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       toolPermissionContext: permissionContext,
     }
     this.appState = appState
-    call(
-      sessionHooksModule,
-      'addFunctionHook',
-      (updater: (prev: MutableAppState) => MutableAppState) => {
-        if (!this.appState) throw new Error('App state was not initialized')
-        this.appState = updater(this.appState)
-      },
-      this.input.sessionId,
-      'Stop',
-      '',
-      (messages: unknown[]) => {
-        const submitInput = this.currentSubmitInput
-        if (!submitInput) return true
-        const validationRequired = submitInput.deliveryValidationRequired || (
-          submitInput.deliveryValidationOnMutation &&
-          this.projectMutationBaseline !== readProjectMutationSignature(this.input.cwd)
-        )
-        if (!validationRequired) return true
-        return evaluateDeliveryCompletion({
-          workspace: this.input.cwd,
-          messages,
-          readValidatorTranscript: agentId => {
-            try {
-              const path = call(
-                sessionStorageModule,
-                'getAgentTranscriptPath',
-                agentId,
-              ) as string
-              return readFileSync(path, 'utf8')
-                .split('\n')
-                .filter(Boolean)
-                .map(line => JSON.parse(line) as unknown)
-            } catch {
-              return []
-            }
-          },
-          ...(this.deliveryReportBaseline
-            ? { reportBaseline: this.deliveryReportBaseline }
-            : {}),
-        }).allowed
-      },
-      [
-        'Delivery acceptance is incomplete. Continue in this same task: run the beegame-acceptance-validator Agent and collect its terminal result,',
-        'repair every failed finding, invoke a fresh validator, and persist its exact terminal JSON to docs/acceptance/validation-report.json.',
-        'A passed report requires runtime evidence for every declared player path, the acceptance Skill capability, a valid canonical asset manifest when present, and evidence created during this turn.',
-        'Do not claim completion or stop with failed or untested requirements.',
-      ].join(' '),
-      { timeout: 10_000, id: 'beegame-delivery-completion-gate' },
-    )
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,

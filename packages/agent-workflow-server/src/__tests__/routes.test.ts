@@ -2399,6 +2399,13 @@ describe('agent workflow server routes', () => {
         'utf8',
       )
       await mkdir(join(projectRoot, 'docs', 'acceptance'), { recursive: true })
+      await mkdir(join(projectRoot, 'tests'), { recursive: true })
+      await writeFile(join(projectRoot, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+      await writeFile(
+        join(projectRoot, 'docs', 'acceptance', 'gameplay-checklist.md'),
+        '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
+        'utf8',
+      )
       await writeFile(
         join(projectRoot, 'docs', 'acceptance', 'validation-report.json'),
         JSON.stringify({
@@ -2408,12 +2415,17 @@ describe('agent workflow server routes', () => {
           requirements: [{
             id: 'requirement-primary',
             status: 'passed',
-            evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+            evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
           }],
           playerPaths: [{
             id: 'path-primary',
             status: 'passed',
-            evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+            evidence: [{
+              id: 'evidence-path-primary', kind: 'runtime', source: 'path-primary', result: 'passed',
+              workingDirectory: '.', action: 'Run the native player path.',
+              assertion: 'The declared outcome is observable.', artifact: 'tests/acceptance.test.ts',
+              detail: 'Observed.',
+            }],
           }],
           findings: [],
           verifiedCapabilities: ['skill:beegame-game-acceptance'],

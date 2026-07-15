@@ -1,6 +1,13 @@
 export const RESOURCE_DIMENSIONS = ['2D', '3D', 'agnostic'] as const
 export type ResourceDimension = (typeof RESOURCE_DIMENSIONS)[number]
 
+export const RESOURCE_SLOT_DELIVERY_MODES = [
+  'managed-file',
+  'embedded',
+  'procedural',
+] as const
+export type ResourceSlotDeliveryMode = (typeof RESOURCE_SLOT_DELIVERY_MODES)[number]
+
 export const RESOURCE_CATEGORIES = [
   // Canonical categories describe the resource type, not its subject matter.
   'sprites',
@@ -36,6 +43,15 @@ export const RESOURCE_USAGE_TAGS = [
   'music', 'sound-effect', 'ambient-audio', 'voice',
 ] as const
 export type ResourceUsageTag = (typeof RESOURCE_USAGE_TAGS)[number]
+
+/** Single machine-readable vocabulary used by manifest authors and auditors. */
+export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
+  version: 1,
+  deliveryModes: RESOURCE_SLOT_DELIVERY_MODES,
+  dimensions: RESOURCE_DIMENSIONS,
+  categories: RESOURCE_CATEGORIES,
+  usageTags: RESOURCE_USAGE_TAGS,
+} as const
 
 export const RESOURCE_PACK_PRIMARY_CATEGORIES = [
   '2d-art',

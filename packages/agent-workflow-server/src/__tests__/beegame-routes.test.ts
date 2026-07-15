@@ -828,14 +828,10 @@ describe('beegame session routes', () => {
     const ideaWorkspace = await mkdtemp(join(tmpdir(), 'beegame-idea-policy-'))
     const buildWorkspace = await mkdtemp(join(tmpdir(), 'beegame-build-policy-'))
     const submittedPrompts: string[] = []
-    const deliveryValidationFlags: Array<boolean | undefined> = []
-    const mutationValidationFlags: Array<boolean | undefined> = []
     const manager = new BeeGameSessionManager({
       async start() {
         return {
           async submit(input) {
-            deliveryValidationFlags.push(input.deliveryValidationRequired)
-            mutationValidationFlags.push(input.deliveryValidationOnMutation)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -849,8 +845,6 @@ describe('beegame session routes', () => {
       async start() {
         return {
           async submit(input) {
-            deliveryValidationFlags.push(input.deliveryValidationRequired)
-            mutationValidationFlags.push(input.deliveryValidationOnMutation)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -870,8 +864,6 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[0]).toContain('Idea intake contract:')
       expect(submittedPrompts[0]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[0]).not.toContain('Game production planning contract:')
-      expect(deliveryValidationFlags[0]).toBe(false)
-      expect(mutationValidationFlags[0]).toBe(false)
       await expect(stat(join(ideaWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
 
       const buildSession = buildManager.start({ workspacePath: buildWorkspace, userId: DEFAULT_LOCAL_USER_ID })
@@ -893,15 +885,15 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[1]).toContain('fresh Claude Code native subagent')
       expect(submittedPrompts[1]).toContain('fresh native acceptance subagent')
       expect(submittedPrompts[1]).toContain('Invoke applicable native Skills through the Skill tool')
-      expect(submittedPrompts[1]).toContain('invoke a new fresh acceptance subagent')
+      expect(submittedPrompts[1]).toContain('before invoking another validator')
+      expect(submittedPrompts[1]).toContain('never prescribe its status')
+      expect(submittedPrompts[1]).toContain('[player-path:stable-id]')
       expect(submittedPrompts[1]).toContain('docs/acceptance/validation-report.json')
       expect(submittedPrompts[1]).toContain('terminal JSON unchanged')
       expect(submittedPrompts[1]).not.toContain('Game production planning contract:')
       expect(submittedPrompts[1]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[1]).not.toContain('Resource integration contract')
       expect(submittedPrompts[1]!.length).toBeLessThan(5_000)
-      expect(deliveryValidationFlags[1]).toBe(true)
-      expect(mutationValidationFlags[1]).toBe(false)
       await expect(stat(join(buildWorkspace, 'docs/production-brief.json'))).rejects.toThrow()
       await buildManager.sendWithDisplay(
         buildSession.id,
@@ -919,8 +911,6 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[2]).toContain('End with a non-empty user-facing result')
       expect(submittedPrompts[2]).not.toContain('Game production planning contract:')
       expect(submittedPrompts[2]).not.toContain('Evidence-backed delivery contract:')
-      expect(deliveryValidationFlags[2]).toBe(false)
-      expect(mutationValidationFlags[2]).toBe(true)
       await buildManager.sendWithDisplay(
         buildSession.id,
         JSON.stringify({
@@ -947,8 +937,6 @@ describe('beegame session routes', () => {
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
       expect(submittedPrompts[4]).toContain('Confirmed build request:')
       expect(submittedPrompts[4]).not.toContain('Idea intake contract:')
-      expect(deliveryValidationFlags[4]).toBe(true)
-      expect(mutationValidationFlags[4]).toBe(false)
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -8099,6 +8087,12 @@ describe('beegame session routes', () => {
 async function writeAcceptedDeliveryReport(workspace: string): Promise<void> {
   const acceptanceDirectory = join(workspace, 'docs', 'acceptance')
   await mkdir(acceptanceDirectory, { recursive: true })
+  await mkdir(join(workspace, 'tests'), { recursive: true })
+  await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+  await writeFile(
+    join(acceptanceDirectory, 'gameplay-checklist.md'),
+    '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
+  )
   await writeFile(
     join(acceptanceDirectory, 'validation-report.json'),
     JSON.stringify({
@@ -8108,12 +8102,17 @@ async function writeAcceptedDeliveryReport(workspace: string): Promise<void> {
       requirements: [{
         id: 'requirement-primary',
         status: 'passed',
-        evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+        evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
       }],
       playerPaths: [{
         id: 'path-primary',
         status: 'passed',
-        evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+        evidence: [{
+          id: 'evidence-path-primary', kind: 'runtime', source: 'path-primary', result: 'passed',
+          workingDirectory: '.', action: 'Run the native player path.',
+          assertion: 'The declared outcome is observable.', artifact: 'tests/acceptance.test.ts',
+          detail: 'Observed.',
+        }],
       }],
       findings: [],
       verifiedCapabilities: ['skill:beegame-game-acceptance'],

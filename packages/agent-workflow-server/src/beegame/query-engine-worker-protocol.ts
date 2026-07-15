@@ -29,8 +29,6 @@ export type QueryEngineParentMessage =
     type: 'turn.submit'
     turnId: string
     prompt: BeeGamePromptInput
-    deliveryValidationRequired?: boolean
-    deliveryValidationOnMutation?: boolean
   }
   | { type: 'turn.stop'; turnId?: string }
   | {

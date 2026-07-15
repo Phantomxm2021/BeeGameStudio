@@ -10,7 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { evaluatePersistedDeliveryAcceptance } from './delivery-completion-gate'
+import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -245,8 +245,7 @@ export class BeeGameDeploymentManager {
         if (!acceptance.allowed || acceptance.outcome !== 'passed') {
           record = this.fail(
             record,
-            acceptance.issues[0] ??
-              'Deployment requires a passed native delivery acceptance report.',
+            formatAcceptanceIssues(acceptance.issues),
           )
           await this.saveRecord(record)
           return record
@@ -466,6 +465,17 @@ export class BeeGameDeploymentManager {
     await rm(resolve(this.deploymentsRoot, record.id), { recursive: true, force: true })
     return true
   }
+}
+
+function formatAcceptanceIssues(issues: string[]): string {
+  if (issues.length === 0) return 'Deployment requires a passed native delivery acceptance report.'
+  const visible = issues.slice(0, 12)
+  const remaining = issues.length - visible.length
+  return [
+    'Deployment acceptance failed:',
+    ...visible.map(issue => `- ${issue}`),
+    ...(remaining > 0 ? [`- …and ${remaining} more issue${remaining === 1 ? '' : 's'}.`] : []),
+  ].join('\n')
 }
 
 export function createSupabaseStorageDeploymentPublisher(options: {

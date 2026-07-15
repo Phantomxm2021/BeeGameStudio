@@ -41,12 +41,6 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
       await runtime.submit({
         prompt: message.prompt,
         signal: abortController.signal,
-        ...(message.deliveryValidationRequired
-          ? { deliveryValidationRequired: true }
-          : {}),
-        ...(message.deliveryValidationOnMutation
-          ? { deliveryValidationOnMutation: true }
-          : {}),
         onMessage: sdkMessage => send({
           type: 'turn.message',
           turnId: message.turnId,

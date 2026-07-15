@@ -31,11 +31,17 @@ Only claim what you actually verified.
    - implemented in this delivery
    - roadmap or future work
 6. Keep acceptance criteria in docs as requirements. Do not pre-check or mark them as passed inside planning docs.
+   - Every checklist task must begin with `[requirement:stable-id]` or `[player-path:stable-id]`.
+   - IDs are explicit document structure. Do not derive them from keywords, game names, or platform assumptions.
 7. If production art/audio is not available, make placeholder assets or asset slots intentional, named, documented, and replaceable.
 8. Run the checks that fit this project.
 9. Exercise the real player path when the environment allows it.
 10. Fix discovered problems and rerun the relevant checks.
 11. Report evidence and known gaps honestly.
+
+Run one validator for one implementation revision. After a failed result, change the implementation or approved documents before validating again. If the same finding repeats without a relevant change, report the concrete blocker or remaining work instead of spawning validators indefinitely or rewriting evidence.
+
+After the final validation result, update checklist markers from that exact result first, then write `docs/acceptance/validation-report.json` last. Any subsequent project change makes the persisted report stale and requires validation of the affected behavior.
 
 ## Player Path
 
@@ -82,6 +88,8 @@ When `assets/asset-manifest.json` exists, treat it as the canonical BeeGame asse
 
 Each slot requires a stable `id` and project-relative `target.path`. A slot that may use the resource library must carry a structured `resource_requirement` with canonical `category`, `dimension`, non-empty `accepted_formats`, canonical usage `tags`, and `purpose`. Do not replace this contract with project-specific `assets`, `models`, `audio`, `procedural`, or slot-map roots. Do not mark a slot `integrated` merely because metadata exists: verify binding provenance, copied files, code references, packaging, and runtime loading.
 
+Use the canonical manifest vocabulary supplied in the current BeeGame build prompt or validator system prompt; never guess enum values. `delivery_mode` distinguishes `managed-file`, `embedded`, and `procedural` slots. `uploaded_files` contains actual resource files only. `target.path` identifies the integration destination or embedded/procedural source, while `integration_evidence.references` records code or scene references separately. `required` defaults to true, and every required slot must have observable runtime-load evidence before delivery can pass.
+
 ## Evidence
 
 For each command, runtime action, editor check, or manual verification you use as evidence, record:
@@ -90,6 +98,8 @@ For each command, runtime action, editor check, or manual verification you use a
 - exact command or action
 - exit code or observed result
 - conclusion
+
+Give every evidence observation a stable id. For a player path, also record the declared player-path id, exact action, observable assertion, result, and any project-relative evidence artifact. Asset `runtime_event_ids` may reference only these observed runtime evidence ids. A function existing, a source file compiling, or a test printing success without an assertion is not player-path runtime evidence.
 
 Prefer unfiltered command output when exit status matters. If you summarize output, keep enough detail for the user to understand what passed or failed.
 

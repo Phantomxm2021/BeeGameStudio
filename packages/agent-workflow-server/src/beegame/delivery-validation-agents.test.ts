@@ -29,6 +29,11 @@ describe('delivery validation agents', () => {
     expect(prompt).toContain('a missing manifest is a failure')
     expect(prompt).toContain('genuinely asset-free project')
     expect(prompt).toContain('Do not repeatedly list the same directory')
+    expect(prompt).toContain('caller-supplied desired status')
+    expect(prompt).toContain('[player-path:stable-id]')
+    expect(prompt).toContain('"deliveryModes":["managed-file","embedded","procedural"]')
+    expect(prompt).toContain('workingDirectory')
+    expect(prompt).toContain('assertion')
     expect(prompt).toContain('Return one JSON object only')
   })
 

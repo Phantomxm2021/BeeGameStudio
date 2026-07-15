@@ -26,6 +26,7 @@ describe('asset contract audit', () => {
         id: 'character-primary',
         status: 'integrated',
         target: { path: 'assets/models/character.glb' },
+        uploaded_files: ['assets/models/character.glb'],
       }],
     }))
 
@@ -53,7 +54,9 @@ describe('asset contract audit', () => {
   test('verifies declared, bound, copied, referenced and runtime-loaded states separately', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-complete-'))
     await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'models', 'character.glb'), 'asset')
+    await writeFile(join(workspace, 'src', 'game-entry.ts'), 'export const character = true\n')
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
       version: 1,
       project_target: { asset_format_capabilities: ['glb'] },
@@ -88,6 +91,7 @@ describe('asset contract audit', () => {
         id: 'character-primary',
         status: 'placeholder',
         target: { path: 'assets/models/character.engineasset' },
+        uploaded_files: ['assets/models/character.engineasset'],
       }],
     }))
 
@@ -142,6 +146,36 @@ describe('asset contract audit', () => {
     }))
 
     expect(auditAssetContract(workspace)).toMatchObject({ valid: true })
+  })
+
+  test('does not treat embedded source references as uploaded resource files', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-embedded-'))
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    await writeFile(join(workspace, 'src', 'embedded-visual.ts'), 'export const visual = `<svg />`\n')
+    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+      version: 1,
+      project_target: { asset_format_capabilities: ['svg'] },
+      slots: [{
+        id: 'embedded-visual',
+        delivery_mode: 'embedded',
+        status: 'integrated',
+        target: { path: 'src/embedded-visual.ts' },
+        integration_evidence: {
+          references: ['src/embedded-visual.ts'],
+          runtime_event_ids: ['visual-observed'],
+        },
+      }],
+    }))
+
+    expect(auditAssetContract(workspace)).toMatchObject({
+      valid: true,
+      slots: [{
+        id: 'embedded-visual',
+        deliveryMode: 'embedded',
+        stage: 'runtime_loaded',
+      }],
+    })
   })
 
   test('reports the canonical usage-tag vocabulary with invalid values', async () => {

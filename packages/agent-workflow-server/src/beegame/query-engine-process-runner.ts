@@ -26,6 +26,15 @@ const SAFE_INHERITED_ENV = [
   'TMPDIR',
   'USER',
 ] as const
+const DEFAULT_RUNTIME_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
+const MIN_RUNTIME_INACTIVITY_TIMEOUT_MS = 60 * 1000
+const MAX_RUNTIME_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000
+
+export function resolveRuntimeInactivityTimeout(env: Record<string, string>): number {
+  const configured = Number(env.BEEGAME_RUNTIME_INACTIVITY_TIMEOUT_MS)
+  if (!Number.isFinite(configured)) return DEFAULT_RUNTIME_INACTIVITY_TIMEOUT_MS
+  return Math.min(MAX_RUNTIME_INACTIVITY_TIMEOUT_MS, Math.max(MIN_RUNTIME_INACTIVITY_TIMEOUT_MS, configured))
+}
 
 export function createProcessIsolatedQueryEngineRunner(): BeeGameSessionRunner {
   return {
@@ -42,9 +51,13 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
     resolve(): void
     reject(error: Error): void
   } | null = null
+  private inactivityTimer: ReturnType<typeof setTimeout> | null = null
   private disposed = false
 
-  private constructor(private readonly child: RuntimeProcess) {}
+  private constructor(
+    private readonly child: RuntimeProcess,
+    private readonly inactivityTimeoutMs: number,
+  ) {}
 
   static async start(
     input: BeeGameSessionRunnerStartInput,
@@ -72,7 +85,10 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
           }
         },
       })
-      runtime = new ProcessIsolatedQueryEngineRuntime(child)
+      runtime = new ProcessIsolatedQueryEngineRuntime(
+        child,
+        resolveRuntimeInactivityTimeout(input.env),
+      )
       child.exited.then(code => {
         if (!runtime?.disposed) {
           const error = new Error(`Claude runtime process exited (${code})`)
@@ -98,6 +114,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
     const turnId = randomUUID()
     await new Promise<void>((resolve, reject) => {
       this.activeTurn = { id: turnId, input, resolve, reject }
+      this.armInactivityTimer(turnId)
       const abort = () => this.send({ type: 'turn.stop', turnId })
       input.signal.addEventListener('abort', abort, { once: true })
       const finalize = () => input.signal.removeEventListener('abort', abort)
@@ -115,12 +132,6 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
         type: 'turn.submit',
         turnId,
         prompt: input.prompt,
-        ...(input.deliveryValidationRequired
-          ? { deliveryValidationRequired: true }
-          : {}),
-        ...(input.deliveryValidationOnMutation
-          ? { deliveryValidationOnMutation: true }
-          : {}),
       })
     })
   }
@@ -133,6 +144,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.clearInactivityTimer()
     this.send({ type: 'runtime.dispose' })
     this.failActiveTurn(new Error('Claude runtime process was closed'))
     setTimeout(() => {
@@ -141,6 +153,9 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
   }
 
   private onMessage(message: QueryEngineWorkerMessage): void {
+    if ('turnId' in message && this.activeTurn?.id === message.turnId) {
+      this.armInactivityTimer(message.turnId)
+    }
     if (message.type === 'turn.message') {
       if (this.activeTurn?.id === message.turnId) {
         this.activeTurn.input.onMessage(message.message)
@@ -169,6 +184,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
     if (message.type === 'turn.completed' && this.activeTurn?.id === message.turnId) {
       const turn = this.activeTurn
       this.activeTurn = null
+      this.clearInactivityTimer()
       turn.resolve()
       return
     }
@@ -180,7 +196,26 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
   private failActiveTurn(error: Error): void {
     const turn = this.activeTurn
     this.activeTurn = null
+    this.clearInactivityTimer()
     turn?.reject(error)
+  }
+
+  private armInactivityTimer(turnId: string): void {
+    this.clearInactivityTimer()
+    this.inactivityTimer = setTimeout(() => {
+      if (this.activeTurn?.id !== turnId) return
+      this.send({ type: 'turn.stop', turnId })
+      this.failActiveTurn(new Error(
+        `Claude runtime produced no events for ${this.inactivityTimeoutMs}ms; the turn was stopped and can be resumed.`,
+      ))
+    }, this.inactivityTimeoutMs)
+    this.inactivityTimer.unref?.()
+  }
+
+  private clearInactivityTimer(): void {
+    if (!this.inactivityTimer) return
+    clearTimeout(this.inactivityTimer)
+    this.inactivityTimer = null
   }
 
   private send(message: QueryEngineParentMessage): void {

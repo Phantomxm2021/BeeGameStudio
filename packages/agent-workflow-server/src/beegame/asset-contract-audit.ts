@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
 import {
   RESOURCE_CATEGORIES,
+  RESOURCE_SLOT_DELIVERY_MODES,
   RESOURCE_USAGE_TAGS,
 } from '../../../beegame-resource-core/src/types'
 
@@ -15,9 +16,12 @@ export type AssetIntegrationStage =
 
 export type AssetSlotAudit = {
   id: string
+  required: boolean
+  deliveryMode: string
   stage: AssetIntegrationStage
   issues: string[]
   files: string[]
+  runtimeEventIds: string[]
 }
 
 export type AssetContractAudit = {
@@ -84,17 +88,33 @@ function auditSlot(
   capabilities: Set<string>,
   ids: Set<string>,
 ): AssetSlotAudit {
-  if (!isRecord(value)) return { id: `slot-${index}`, stage: 'failed', files: [], issues: ['Slot must be an object.'] }
+  if (!isRecord(value)) return {
+    id: `slot-${index}`,
+    required: true,
+    deliveryMode: 'managed-file',
+    stage: 'failed',
+    files: [],
+    runtimeEventIds: [],
+    issues: ['Slot must be an object.'],
+  }
   const id = normalizedString(value.id) || `slot-${index}`
   const issues: string[] = []
+  const required = value.required !== false
+  const deliveryMode = normalizedString(value.delivery_mode) || 'managed-file'
+  if (!(RESOURCE_SLOT_DELIVERY_MODES as readonly string[]).includes(deliveryMode)) {
+    issues.push(`delivery_mode must be one of ${(RESOURCE_SLOT_DELIVERY_MODES as readonly string[]).join(', ')}.`)
+  }
   if (!normalizedString(value.id)) issues.push('Stable id is required.')
   if (ids.has(id)) issues.push('Stable id is duplicated.')
   ids.add(id)
   const target = isRecord(value.target) ? value.target : {}
   const targetPath = normalizedString(target.path)
   if (!targetPath) issues.push('target.path is required.')
+  if (targetPath && !isWorkspaceRelativePath(workspace, targetPath)) {
+    issues.push(`target.path escapes the project workspace: ${targetPath}`)
+  }
   const uploadedFiles = stringArray(value.uploaded_files)
-  const files = uploadedFiles.length > 0 ? uploadedFiles : targetPath ? [targetPath] : []
+  const files = uploadedFiles
   const safeFiles = files.filter(file => {
     if (!isWorkspaceRelativePath(workspace, file)) {
       issues.push(`File path escapes the project workspace: ${file}`)
@@ -103,6 +123,11 @@ function auditSlot(
     return true
   })
   const existingFiles = safeFiles.filter(file => existsSync(resolve(workspace, file)))
+  const targetExists = Boolean(
+    targetPath &&
+    isWorkspaceRelativePath(workspace, targetPath) &&
+    existsSync(resolve(workspace, targetPath)),
+  )
   if (capabilities.size > 0) {
     for (const file of safeFiles) {
       const format = normalizeFormat(extname(file))
@@ -111,21 +136,38 @@ function auditSlot(
   }
   const bound = isRecord(value.resource_binding)
   const requirement = isRecord(value.resource_requirement) ? value.resource_requirement : undefined
-  if (requirement && !bound) {
+  if (deliveryMode === 'managed-file' && requirement && !bound) {
     auditAutomaticSelectionRequirement(requirement, capabilities, issues)
   }
-  const copied = safeFiles.length > 0 && existingFiles.length === safeFiles.length
+  if (deliveryMode !== 'managed-file' && bound) {
+    issues.push(`${deliveryMode} slots must not declare resource_binding provenance.`)
+  }
+  const copied = deliveryMode === 'managed-file'
+    ? safeFiles.length > 0 && existingFiles.length === safeFiles.length
+    : targetExists
   const integrationEvidence = isRecord(value.integration_evidence) ? value.integration_evidence : {}
-  const referenced = copied && stringArray(integrationEvidence.references).length > 0
-  const runtimeLoaded = referenced && stringArray(integrationEvidence.runtime_event_ids).length > 0
+  const references = stringArray(integrationEvidence.references)
+  for (const reference of references) {
+    if (!isWorkspaceRelativePath(workspace, reference) || !existsSync(resolve(workspace, reference))) {
+      issues.push(`Integration reference does not exist in the project: ${reference}`)
+    }
+  }
+  const runtimeEventIds = stringArray(integrationEvidence.runtime_event_ids)
+  const referenced = copied && references.length > 0
+  const runtimeLoaded = referenced && runtimeEventIds.length > 0
   const declaredIntegrated = value.status === 'integrated'
-  if (declaredIntegrated && !bound) issues.push('Integrated slot has no resource_binding provenance.')
+  if (declaredIntegrated && deliveryMode === 'managed-file' && !bound) {
+    issues.push('Integrated managed-file slot has no resource_binding provenance.')
+  }
   if (declaredIntegrated && !copied) issues.push('Integrated slot files are missing from the project.')
   if (declaredIntegrated && !referenced) issues.push('Integrated slot has no code/reference evidence.')
   if (declaredIntegrated && !runtimeLoaded) issues.push('Integrated slot has no runtime load evidence.')
   return {
     id,
+    required,
+    deliveryMode,
     files: safeFiles,
+    runtimeEventIds,
     stage: issues.length > 0 && declaredIntegrated
       ? 'failed'
       : runtimeLoaded

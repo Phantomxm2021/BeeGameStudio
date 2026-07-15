@@ -275,6 +275,18 @@ describe('BeeGameDeploymentManager', () => {
     expect(builds).toBe(0)
 
     await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
+    await mkdir(join(workspace, 'src'), { recursive: true })
+    await mkdir(join(workspace, 'tests'), { recursive: true })
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = true\n')
+    await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+    await writeFile(
+      join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
+      [
+        '- [x] [requirement:requirement-primary] Primary behavior',
+        '- [x] [player-path:path-primary] Primary playable path',
+        '',
+      ].join('\n'),
+    )
     await writeFile(
       join(workspace, 'docs', 'acceptance', 'validation-report.json'),
       JSON.stringify({
@@ -284,12 +296,22 @@ describe('BeeGameDeploymentManager', () => {
         requirements: [{
           id: 'requirement-primary',
           status: 'passed',
-          evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+          evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
         }],
         playerPaths: [{
           id: 'path-primary',
           status: 'passed',
-          evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+          evidence: [{
+            kind: 'runtime',
+            id: 'evidence-path-primary',
+            source: 'path-primary',
+            result: 'passed',
+            workingDirectory: '.',
+            action: 'Run the project-native acceptance path.',
+            assertion: 'The declared outcome is observable.',
+            artifact: 'tests/acceptance.test.ts',
+            detail: 'Observed.',
+          }],
         }],
         findings: [],
         verifiedCapabilities: ['skill:beegame-game-acceptance'],
