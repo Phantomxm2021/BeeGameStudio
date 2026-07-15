@@ -3,14 +3,16 @@ import { existsSync, readFileSync } from 'node:fs'
 import {
   cp,
   mkdir,
+  realpath,
   readdir,
   readFile,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
+import { digestWorkspace } from './native-acceptance-evidence'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -121,6 +123,16 @@ type DeploymentPlan =
 
 const DEFAULT_OUTPUT_CANDIDATES = ['dist', 'build', 'out']
 const PUBLIC_PATH_PREFIX = '/deployments'
+const SAFE_BUILD_ENV_KEYS = [
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'LOGNAME',
+  'PATH',
+  'SHELL',
+  'TMPDIR',
+  'USER',
+] as const
 
 export class BeeGameDeploymentManager {
   private readonly deploymentsRoot: string
@@ -240,8 +252,12 @@ export class BeeGameDeploymentManager {
     await this.saveRecord(record)
 
     try {
+      const acceptedWorkspaceDigest = digestWorkspace(workspacePath)
       if (this.requireAcceptedDelivery) {
-        const acceptance = evaluatePersistedDeliveryAcceptance(workspacePath)
+        const acceptance = evaluatePersistedDeliveryAcceptance(workspacePath, {
+          dataRoot: dirname(this.deploymentsRoot),
+          sessionId: input.sessionId,
+        })
         if (!acceptance.allowed || acceptance.outcome !== 'passed') {
           record = this.fail(
             record,
@@ -280,6 +296,14 @@ export class BeeGameDeploymentManager {
         await this.saveRecord(record)
         return record
       }
+      if (digestWorkspace(workspacePath) !== acceptedWorkspaceDigest) {
+        record = this.fail(
+          { ...record, buildLog },
+          'Project source changed after acceptance or during the deployment build. Re-run native acceptance for the new revision.',
+        )
+        await this.saveRecord(record)
+        return record
+      }
 
       const outputDir = await this.findOutputDir(plan.cwd, workspacePath)
       const artifactPath = join(this.deploymentsRoot, id, 'site')
@@ -297,6 +321,7 @@ export class BeeGameDeploymentManager {
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
       await injectDeploymentAssetPathCompatibility(artifactPath)
+      await validateDeploymentArtifact(artifactPath)
       const artifactHash = await hashDirectory(artifactPath)
       const published = this.publisher
         ? await this.publisher.publishStaticDirectory({
@@ -385,10 +410,15 @@ export class BeeGameDeploymentManager {
     }
     if (!isInsideOrEqual(targetPath, siteRoot)) return undefined
     try {
-      const bytes = await readFile(targetPath)
+      const [resolvedSiteRoot, resolvedTargetPath] = await Promise.all([
+        realpath(siteRoot),
+        realpath(targetPath),
+      ])
+      if (!isInsideOrEqual(resolvedTargetPath, resolvedSiteRoot)) return undefined
+      const bytes = await readFile(resolvedTargetPath)
       return {
         body: new Blob([bytes]),
-        contentType: contentTypeForPath(targetPath),
+        contentType: contentTypeForPath(resolvedTargetPath),
       }
     } catch {
       return undefined
@@ -643,13 +673,13 @@ async function runDeploymentCommand(
 }
 
 function buildDeploymentEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') env[key] = value
-  }
+  const env = Object.fromEntries(SAFE_BUILD_ENV_KEYS.flatMap(key => {
+    const value = process.env[key]
+    return typeof value === 'string' ? [[key, value]] : []
+  }))
   return {
     ...env,
-    CI: env.CI || '1',
+    CI: '1',
     BEEGAME_DEPLOYMENT: '1',
   }
 }
@@ -674,6 +704,30 @@ async function createDeploymentFiles(outputDir: string): Promise<BeeGameDeployme
       text: async () => await readFile(file, 'utf8'),
     }
   })
+}
+
+async function validateDeploymentArtifact(artifactPath: string): Promise<void> {
+  const indexPath = join(artifactPath, 'index.html')
+  if (!existsSync(indexPath)) throw new Error('Deployment artifact has no index.html entrypoint')
+  const indexHtml = await readFile(indexPath, 'utf8')
+  if (!indexHtml.trim()) throw new Error('Deployment artifact index.html is empty')
+  const files = await listFiles(artifactPath)
+  if (files.length === 0) throw new Error('Deployment artifact is empty')
+  for (const file of files) {
+    const extension = extname(file).toLowerCase()
+    const bytes = await readFile(file)
+    if (bytes.byteLength === 0) throw new Error(`Deployment artifact contains an empty file: ${relative(artifactPath, file)}`)
+    if (extension === '.json') {
+      try {
+        JSON.parse(bytes.toString('utf8'))
+      } catch {
+        throw new Error(`Deployment artifact contains invalid JSON: ${relative(artifactPath, file)}`)
+      }
+    }
+    if (extension === '.glb' && bytes.subarray(0, 4).toString('ascii') !== 'glTF') {
+      throw new Error(`Deployment artifact contains an invalid GLB: ${relative(artifactPath, file)}`)
+    }
+  }
 }
 
 /**
@@ -749,6 +803,8 @@ async function listFiles(path: string): Promise<string[]> {
       files.push(...await listFiles(fullPath))
     } else if (entry.isFile()) {
       files.push(fullPath)
+    } else if (entry.isSymbolicLink()) {
+      throw new Error(`Deployment artifact contains a symbolic link: ${fullPath}`)
     }
   }
   return files.sort()

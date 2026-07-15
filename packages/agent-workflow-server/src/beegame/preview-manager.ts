@@ -84,6 +84,16 @@ type SupportedPreviewPlan = {
 const DEFAULT_PREVIEW_PORT_START = 63100
 const DEFAULT_HOST = '127.0.0.1'
 const VITE_PREVIEW_HOST_PATH = fileURLToPath(new URL('./vite-preview-host.ts', import.meta.url))
+const SAFE_PREVIEW_ENV_KEYS = [
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'LOGNAME',
+  'PATH',
+  'SHELL',
+  'TMPDIR',
+  'USER',
+] as const
 
 export class BeeGamePreviewManager {
   private readonly records = new Map<string, PreviewRecord>()
@@ -616,11 +626,10 @@ function sameWorkspace(a: string, b: string): boolean {
 }
 
 function processEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') env[key] = value
-  }
-  return env
+  return Object.fromEntries(SAFE_PREVIEW_ENV_KEYS.flatMap(key => {
+    const value = process.env[key]
+    return typeof value === 'string' ? [[key, value]] : []
+  }))
 }
 
 function findAvailablePort(start: number): Promise<number> {

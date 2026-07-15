@@ -20,10 +20,9 @@ import {
   type PendingUserReviewItem,
   type ProjectBaselineStatusPayload,
 } from '../services/api';
-import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from '../services/beeGameAdapter';
+import type { BeeGameBuildBrief } from '../services/beeGameAdapter';
 import { useChatStore } from './chatStore';
 import type { ProductReadinessView } from '../types/message';
-import { extractBootstrapClarification } from '../utils/bootstrapClarificationError';
 
 const normalizeProjectTimestamp = (project: Project): Project => {
   const ts = Number(project.created_at);
@@ -49,6 +48,21 @@ const upsertProject = (projects: Project[], project: Project): Project[] => {
 };
 
 const PROJECT_OPEN_TIMEOUT_MS = 10_000;
+const runtimeStateRequests = new Map<string, ReturnType<typeof api.getProjectRuntimeState>>();
+
+const getProjectRuntimeStateSingleFlight = (
+  projectId: string,
+): ReturnType<typeof api.getProjectRuntimeState> => {
+  const existing = runtimeStateRequests.get(projectId);
+  if (existing) return existing;
+  const request = api.getProjectRuntimeState(projectId).finally(() => {
+    if (runtimeStateRequests.get(projectId) === request) {
+      runtimeStateRequests.delete(projectId);
+    }
+  });
+  runtimeStateRequests.set(projectId, request);
+  return request;
+};
 
 const withProjectOpenTimeout = async (operation: Promise<unknown>): Promise<void> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -153,13 +167,6 @@ interface ProjectState {
    */
   clearActiveProject: () => void;
 
-  /**
-   * Atomic bootstrap: create project + enqueue first idea message.
-   * Required for starting a new project with an initial idea.
-   * Requirements: 3.7, Guide 4.0
-   */
-  bootstrapProject: (data: { idea: string; root_path?: string; title?: string; clarification?: Record<string, string>; language?: string }) => Promise<StartProjectResult>;
-
   bootstrapProjectFromBrief: (data: BeeGameBuildBrief) => Promise<StartProjectResult>;
 
   /**
@@ -248,7 +255,7 @@ export const useProjectStore = create<ProjectState>()(
       loadProjectRuntimeState: async (projectId) => {
         if (!projectId) return;
         try {
-          const runtimeState = await api.getProjectRuntimeState(projectId);
+          const runtimeState = await getProjectRuntimeStateSingleFlight(projectId);
           set({
             projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
             pendingReviews: runtimeState.pendingReviews,
@@ -341,82 +348,6 @@ export const useProjectStore = create<ProjectState>()(
           runtimeReadiness: null,
         });
         useChatStore.getState().clearMessages();
-      },
-
-      bootstrapProject: async (data) => {
-        try {
-          set({ isLoading: true });
-          const result = (await api.bootstrapProjectFromIdea(data)) as unknown as {
-            clarification_required?: boolean;
-            clarification_questions?: string[];
-            pending_slots?: string[];
-            project: Project & { project_id?: string };
-            pipeline?: { pipeline_id?: string; status?: string };
-            task_id: string;
-            status: string;
-            auto_start_queued?: boolean;
-            clarification_pending?: boolean;
-          };
-          const bootstrappedProject = normalizeApiProject(result.project);
-          const newProjectId = bootstrappedProject.id;
-          if (!newProjectId) {
-            set({ isLoading: false });
-            throw new Error('Bootstrap response missing project id');
-          }
-
-          set((state) => ({
-            projects: upsertProject(state.projects, bootstrappedProject),
-            activeProjectId: newProjectId,
-            projectStatus: null,
-            pendingReviews: [],
-            isLoading: false,
-          }));
-          const chatStore = useChatStore.getState();
-          const isBeeGameMode = isBeeGameAdapterEnabled();
-          const bootstrapTimestamp = Date.now();
-          chatStore.clearMessages();
-          chatStore.addMessage({
-            id: `bootstrap-user-${newProjectId}-${bootstrapTimestamp}`,
-            clientMessageId: `bootstrap-user-${newProjectId}`,
-            sender: 'user',
-            content: data.idea,
-            taskId: result.task_id,
-            timestamp: bootstrapTimestamp,
-            type: 'text',
-          });
-          chatStore.addMessage({
-            id: `bootstrap-system-${newProjectId}-${bootstrapTimestamp}`,
-            clientMessageId: `bootstrap-system-${newProjectId}`,
-            sender: 'system',
-            content: isBeeGameMode
-              ? 'BeeGame 正在准备可选方向。请选择一个方案后再进入实现。'
-              : '项目已创建，正在后台进行意图分析并启动 Pipeline，控制台会持续刷新状态。',
-            taskId: result.task_id,
-            timestamp: bootstrapTimestamp + 1,
-            type: 'system_status',
-          });
-          Promise.allSettled([
-            api.getProjects().then((rawProjects) => {
-              const projects = (rawProjects as unknown as Project[]).map(normalizeProjectTimestamp);
-              set((state) => ({
-                projects,
-                activeProjectId: projects.some((project) => project.id === newProjectId) ? newProjectId : state.activeProjectId,
-              }));
-            }),
-            get().loadProjectRuntimeState(newProjectId),
-          ]).catch((error) => console.error('Failed to refresh bootstrap project state:', error));
-
-          return { status: 'started', projectId: newProjectId };
-        } catch (error) {
-          const clarification = extractBootstrapClarification(error);
-          if (clarification) {
-            set({ isLoading: false });
-            return { status: 'clarification_required', analysis: clarification };
-          }
-          console.error('Failed to bootstrap project:', error);
-          set({ isLoading: false });
-          throw error;
-        }
       },
 
       bootstrapProjectFromBrief: async (data) => {

@@ -43,17 +43,26 @@ export function ResourcePackExplorer({
   onCreateFolder,
   labels = { upload: 'Upload', rename: 'Rename', delete: 'Delete', newFolder: 'New folder' },
 }: ResourcePackExplorerProps) {
-  const selectedNodeId = selectedElementId ? `file:${selectedElementId}` : undefined
   const nodesById = useMemo(() => {
     const nodes = new Map<string, ExplorerNode>()
     const visit = (node: ExplorerNode) => { nodes.set(node.id, node); node.children?.forEach(visit) }
     visit(tree)
     return nodes
   }, [tree])
+  const fileNodesByElementId = useMemo(() => {
+    const nodes = new Map<string, ExplorerNode>()
+    for (const node of nodesById.values()) {
+      if (node.kind === 'file' && node.element) nodes.set(node.element.id, node)
+    }
+    return nodes
+  }, [nodesById])
+  const selectedNodeId = selectedElementId
+    ? fileNodesByElementId.get(selectedElementId)?.id
+    : undefined
   const [contextNode, setContextNode] = useState<ExplorerNode | undefined>()
   const selectionAnchorIdRef = useRef<string | undefined>(undefined)
   const selectedIds = new Set(selectedElementIds)
-  const selectedElements = selectedElementIds.flatMap(id => nodesById.get(`file:${id}`)?.element ?? [])
+  const selectedElements = selectedElementIds.flatMap(id => fileNodesByElementId.get(id)?.element ?? [])
   const renderRow = (props: RowRendererProps<ExplorerNode>): ReactElement => (
     <ExplorerRow {...props} onFileClick={(element, event, node) => {
       const additive = event.metaKey || event.ctrlKey
@@ -67,7 +76,7 @@ export function ResourcePackExplorer({
           ? (selectedIds.has(element.id) ? selectedElementIds.filter(id => id !== element.id) : [...selectedElementIds, element.id])
           : [element.id]
       if (!event.shiftKey) selectionAnchorIdRef.current = node.id
-      const nextElements = next.flatMap(id => nodesById.get(`file:${id}`)?.element ?? [])
+      const nextElements = next.flatMap(id => fileNodesByElementId.get(id)?.element ?? [])
       onSelectionChange?.(nextElements)
       // A preview can only represent one file. Do not choose an arbitrary
       // active file while the user is editing a multi-selection.

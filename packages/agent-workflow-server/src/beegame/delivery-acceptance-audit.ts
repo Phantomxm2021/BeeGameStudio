@@ -2,10 +2,19 @@ import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'no
 import { isAbsolute, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
+import { hasObservedNativeAcceptanceReport } from './native-acceptance-evidence'
 
 const VALIDATION_REPORT_PATH = ['docs', 'acceptance', 'validation-report.json'] as const
 const ACCEPTANCE_CHECKLIST_PATH = ['docs', 'acceptance', 'gameplay-checklist.md'] as const
 const ACCEPTANCE_SKILL_CAPABILITY = 'skill:beegame-game-acceptance'
+const REQUIRED_PROJECT_DOCUMENTS = [
+  'docs/GDD.md',
+  'docs/TECHNICAL_DESIGN.md',
+  'docs/ART_DIRECTION.md',
+  'docs/UI_UX_SPEC.md',
+  'docs/AUDIO_DESIGN.md',
+  'docs/ASSET_PLAN.md',
+] as const
 
 export type PersistedDeliveryAcceptance = {
   allowed: boolean
@@ -27,6 +36,7 @@ type ChecklistEntry = {
  */
 export function evaluatePersistedDeliveryAcceptance(
   workspacePath: string,
+  provenance?: { dataRoot: string; sessionId: string },
 ): PersistedDeliveryAcceptance {
   const workspace = resolve(workspacePath)
   const reportPath = resolve(workspace, ...VALIDATION_REPORT_PATH)
@@ -44,6 +54,9 @@ export function evaluatePersistedDeliveryAcceptance(
 
   const issues: string[] = []
   issues.push(...auditReportFreshness(workspace, reportPath))
+  for (const document of REQUIRED_PROJECT_DOCUMENTS) {
+    if (!safeExistingPath(workspace, document)) issues.push(`Required approved project document is missing: ${document}.`)
+  }
   const status = stringValue(report.status)
   if (stringValue(report.validatorId) !== DELIVERY_VALIDATOR_AGENT_TYPES[0]) {
     issues.push(`validatorId must equal ${DELIVERY_VALIDATOR_AGENT_TYPES[0]}.`)
@@ -55,12 +68,18 @@ export function evaluatePersistedDeliveryAcceptance(
   if (!stringArray(report.verifiedCapabilities).includes(ACCEPTANCE_SKILL_CAPABILITY)) {
     issues.push(`verifiedCapabilities must include ${ACCEPTANCE_SKILL_CAPABILITY}.`)
   }
+  if (!provenance || !hasObservedNativeAcceptanceReport({ ...provenance, workspacePath: workspace, report })) {
+    issues.push('The validation report is not the terminal result of an observed native acceptance Validator call.')
+  }
 
   const checklist = readChecklist(workspace)
   issues.push(...checklist.issues)
   const requirements = recordArray(report.requirements)
   const playerPaths = recordArray(report.playerPaths)
   const findings = recordArray(report.findings)
+  if (typeof report.assetsRequired !== 'boolean') {
+    issues.push('assetsRequired must explicitly state whether the approved project requires an asset contract.')
+  }
   const evidenceIds = new Set<string>()
   const runtimeEvidenceIds = new Set<string>()
   auditReportedItems({
@@ -96,6 +115,9 @@ export function evaluatePersistedDeliveryAcceptance(
   }
 
   const assetAudit = auditAssetContract(workspace)
+  if (report.assetsRequired === true && !assetAudit.present) {
+    issues.push('The approved project requires assets/asset-manifest.json, but the manifest is missing.')
+  }
   if (assetAudit.present && !assetAudit.valid) {
     issues.push(...assetAudit.issues.map(issue => `Asset contract: ${issue}`))
   }
@@ -207,6 +229,12 @@ function auditReportedItems(input: {
         input.runtimeEvidenceIds,
         input.issues,
       )
+    }
+    if (
+      itemStatus === 'passed' &&
+      evidence.some(observation => stringValue(observation.result) !== 'passed')
+    ) {
+      input.issues.push(`${entry.id} is passed but contains non-passing evidence.`)
     }
     if (
       input.requireRuntimeEvidence &&

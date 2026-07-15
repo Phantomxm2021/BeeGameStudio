@@ -13,7 +13,6 @@ import { useToastContext } from './contexts/ToastContext';
 import { setToastErrorCallback, api } from './services/api';
 import { AUTHENTICATION_REQUIRED_EVENT, hasEnvAuthToken } from './services/apiClient';
 import { normalizeChatHistory } from './utils/chatHistory';
-import { buildBootstrapPayload } from './utils/bootstrapIdea';
 import type { StartProjectResult } from './types/project';
 import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
@@ -32,7 +31,6 @@ function App() {
     loadProjects,
     projects,
     activeProjectId,
-    bootstrapProject,
     bootstrapProjectFromBrief,
     setToastCallbacks,
     clearActiveProject,
@@ -153,16 +151,18 @@ function App() {
   }, [activeProjectId, activeProject, loadHistory]); // Read messages from the store at resolve time to avoid history-load races.
 
   const handleStartProject = async (
-    projectName: string,
-    clarification?: Record<string, string>,
+    _projectName: string,
+    _clarification?: Record<string, string>,
     brief?: BeeGameBuildBrief,
   ): Promise<StartProjectResult> => {
     try {
       if (brief) {
         return await bootstrapProjectFromBrief(brief);
       }
-      // Use the atomic bootstrap action from projectStore
-      return await bootstrapProject(buildBootstrapPayload(projectName, clarification, lang));
+      if (isBeeGameAdapterEnabled()) {
+        throw new Error('A confirmed production brief is required before project construction can start.');
+      }
+      throw new Error('This project runtime does not support starting without a confirmed production brief.');
     } catch (error) {
       console.error('Failed to start project:', error);
       showError(error instanceof Error ? error.message : '项目启动失败，请检查后端服务');

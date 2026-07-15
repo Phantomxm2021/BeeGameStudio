@@ -31,6 +31,7 @@ import type {
   BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
+import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -928,15 +929,6 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[3]).toContain('observable runtime loading')
       expect(submittedPrompts[3]).toContain('non-empty user-facing result')
       expect(submittedPrompts[3]).not.toContain('Existing project change request:')
-      await buildManager.sendWithDisplay(
-        buildSession.id,
-        JSON.stringify({ kind: 'game_idea', idea: 'direct build request' }),
-        { displayKind: 'direct_build', taskType: 'full_build' },
-      )
-      await waitFor(() => submittedPrompts.length >= 5)
-      await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
-      expect(submittedPrompts[4]).toContain('Confirmed build request:')
-      expect(submittedPrompts[4]).not.toContain('Idea intake contract:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -2365,6 +2357,14 @@ describe('beegame session routes', () => {
       })
       expect(forged.status).toBe(400)
       expect(await forged.json()).toEqual({ error: 'Internal turn fields are server-owned' })
+      expect(fake.runtimes).toHaveLength(0)
+
+      const directIdea = await app.request(`/api/beegame-sessions/${session.id}/idea`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'Skip the confirmed production brief' }),
+      })
+      expect(directIdea.status).toBe(410)
       expect(fake.runtimes).toHaveLength(0)
 
       const confirmed = await app.request(`/api/beegame-sessions/${session.id}/confirmed-brief`, {
@@ -4443,6 +4443,7 @@ describe('beegame session routes', () => {
         status: 'running',
         url: `/previews/${preview.sessionId}/`,
       }))
+      await writeAcceptedDeliveryReport(workspace, projectsRoot, preview.sessionId)
 
       const deployRes = await app.request(
         `/api/projects/${projectId}/deployments`,
@@ -6713,7 +6714,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('serves preview iframe requests without requiring an API authorization header', async () => {
+  test('requires the authenticated preview owner for iframe requests', async () => {
     const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-iframe-preview-'))
@@ -6739,6 +6740,8 @@ describe('beegame session routes', () => {
       currentUserResolver: request => (
         request.headers.get('authorization') === 'Bearer owner-token'
           ? { id: DEFAULT_LOCAL_USER_ID, role: 'owner' }
+          : request.headers.get('authorization') === 'Bearer other-token'
+            ? { id: 'other-user', role: 'owner' }
           : undefined
       ),
       previewRunner,
@@ -6770,10 +6773,18 @@ describe('beegame session routes', () => {
           body: JSON.stringify({ workspacePath: workspace }),
         },
       )
-      const iframeRes = await app.request(previewPath)
+      const anonymousIframeRes = await app.request(previewPath)
+      const otherUserIframeRes = await app.request(previewPath, {
+        headers: { authorization: 'Bearer other-token' },
+      })
+      const iframeRes = await app.request(previewPath, {
+        headers: { authorization: 'Bearer owner-token' },
+      })
       const iframeText = await iframeRes.text()
 
       expect(startRes.status).toBe(200)
+      expect(anonymousIframeRes.status).toBe(401)
+      expect(otherUserIframeRes.status).toBe(404)
       expect(iframeRes.status).toBe(200)
       expect(iframeText).toContain('iframe preview')
       expect(iframeText).toContain('beegame.preview.console')
@@ -6821,7 +6832,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
-      await writeAcceptedDeliveryReport(sessionWorkspace)
+      await writeAcceptedDeliveryReport(sessionWorkspace, projectsRoot, session.id)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST' },
@@ -6879,7 +6890,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
-      await writeAcceptedDeliveryReport(sessionWorkspace)
+      await writeAcceptedDeliveryReport(sessionWorkspace, projectsRoot, session.id)
       const firstRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST' },
@@ -6981,7 +6992,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
-      await writeAcceptedDeliveryReport(sessionWorkspace)
+      await writeAcceptedDeliveryReport(sessionWorkspace, projectsRoot, session.id)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST', headers: { authorization: 'Bearer user-route-token' } },
@@ -7072,7 +7083,7 @@ describe('beegame session routes', () => {
         join(deploySessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
-      await writeAcceptedDeliveryReport(deploySessionWorkspace)
+      await writeAcceptedDeliveryReport(deploySessionWorkspace, projectsRoot, session.id)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST', headers: { authorization: 'Bearer user-token' } },
@@ -8084,21 +8095,27 @@ describe('beegame session routes', () => {
   })
 })
 
-async function writeAcceptedDeliveryReport(workspace: string): Promise<void> {
+async function writeAcceptedDeliveryReport(
+  workspace: string,
+  dataRoot?: string,
+  sessionId?: string,
+): Promise<void> {
   const acceptanceDirectory = join(workspace, 'docs', 'acceptance')
   await mkdir(acceptanceDirectory, { recursive: true })
   await mkdir(join(workspace, 'tests'), { recursive: true })
   await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+  for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
+    await writeFile(join(workspace, 'docs', name), `# ${name}\n`)
+  }
   await writeFile(
     join(acceptanceDirectory, 'gameplay-checklist.md'),
     '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
   )
-  await writeFile(
-    join(acceptanceDirectory, 'validation-report.json'),
-    JSON.stringify({
+  const report = {
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Observed acceptance passed.',
+      assetsRequired: false,
       requirements: [{
         id: 'requirement-primary',
         status: 'passed',
@@ -8116,8 +8133,14 @@ async function writeAcceptedDeliveryReport(workspace: string): Promise<void> {
       }],
       findings: [],
       verifiedCapabilities: ['skill:beegame-game-acceptance'],
-    }),
+  }
+  await writeFile(
+    join(acceptanceDirectory, 'validation-report.json'),
+    JSON.stringify(report),
   )
+  if (dataRoot && sessionId) {
+    recordNativeAcceptanceReportForTest({ dataRoot, sessionId, workspacePath: workspace, report })
+  }
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {

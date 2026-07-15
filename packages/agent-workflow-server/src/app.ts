@@ -413,6 +413,12 @@ export function createAgentWorkflowApp(
   const handlePreviewProxy = async (c: Context) => {
     const sessionId = c.req.param('sessionId')
     if (!sessionId) return c.text('Preview not found', 404)
+    const user = options.currentUser ?? await authContext.resolveRequestUser(c.req.raw)
+    if (!user) return c.text('Unauthorized', 401)
+    const sessionMetadata = beeGameSessions.metadata(sessionId)
+    if (!sessionMetadata || sessionMetadata.userId !== user.id) {
+      return c.text('Preview not found', 404)
+    }
     const internalUrl = beeGamePreviews.internalUrl(sessionId)
     if (!internalUrl) return c.text('Preview not found', 404)
     return proxyBeeGamePreviewRequest(
@@ -4997,27 +5003,9 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
-    try {
-      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
-      const idea = typeof body.idea === 'string' ? body.idea.trim() : ''
-      if (!idea) return c.json({ error: 'Missing field: idea' }, 400)
-      return c.json(await beeGameSessions.sendWithDisplay(
-        c.req.param('id'),
-        JSON.stringify({ kind: 'game_idea', idea }, null, 2),
-        {
-          displayText: idea,
-          // Idea intake is handled before project creation by
-          // /api/beegame-intake/*. This legacy project endpoint is a direct
-          // build compatibility path and must never restart intake.
-          displayKind: 'direct_build',
-          taskType: 'full_build',
-          ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
-          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
-        },
-      ))
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 400)
-    }
+    return c.json({
+      error: 'Direct idea construction has been removed. Confirm an intake option and submit a production brief.',
+    }, 410)
   })
 
   app.post(`${basePath}/:id/confirmed-brief`, async c => {

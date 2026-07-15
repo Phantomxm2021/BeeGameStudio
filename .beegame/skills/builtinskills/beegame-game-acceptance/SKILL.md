@@ -43,6 +43,8 @@ Run one validator for one implementation revision. After a failed result, change
 
 After the final validation result, update checklist markers from that exact result first, then write `docs/acceptance/validation-report.json` last. Any subsequent project change makes the persisted report stale and requires validation of the affected behavior.
 
+The terminal report must include `assetsRequired: true|false`, derived from the approved documents. If it is true, the canonical asset manifest is mandatory; never make a missing manifest disappear by claiming the project is asset-free.
+
 ## Player Path
 
 For the target platform, verify the path a real player would take:

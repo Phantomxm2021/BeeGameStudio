@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJSONStorage } from 'zustand/middleware';
 
-const { bootstrapProjectFromIdea, getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProjects, openProject, chatActions } = vi.hoisted(() => ({
-    bootstrapProjectFromIdea: vi.fn(),
+const { getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProjects, openProject, chatActions } = vi.hoisted(() => ({
     getPendingUserReviews: vi.fn(),
     getProjectStatus: vi.fn(),
     getProjectRuntimeState: vi.fn(),
@@ -19,7 +18,6 @@ vi.mock('../services/api', async () => {
     return {
         ...actual,
         api: {
-            bootstrapProjectFromIdea,
             getPendingUserReviews,
             getProjectStatus,
             getProjectRuntimeState,
@@ -42,7 +40,6 @@ describe('projectStore pending review normalization', () => {
 
     beforeEach(() => {
         localStorage.clear();
-        bootstrapProjectFromIdea.mockReset();
         getPendingUserReviews.mockReset();
         getProjectStatus.mockReset();
         getProjectRuntimeState.mockReset();
@@ -93,142 +90,6 @@ describe('projectStore pending review normalization', () => {
             state: { activeProjectId: 'project_from_other_account' },
             version: 0,
         });
-    });
-
-    it('returns bootstrap clarification from a 409 response without creating an active project', async () => {
-        const showToastError = vi.fn();
-        bootstrapProjectFromIdea.mockRejectedValue(Object.assign(new Error('请求失败 (409)'), {
-            status: 409,
-            originalError: {
-                response: {
-                    status: 409,
-                    data: {
-                        detail: {
-                            error: {
-                                code: 'idea_intake_clarification_required',
-                                message: 'BeeGame requires clarification before creating a project.',
-                            },
-                            phase: 'idea_intake',
-                            agent: 'logos',
-                            clarification: {
-                                clarification_required: true,
-                                answered_slots: {
-                                    gameplay_direction: 'Classic Snake',
-                                },
-                                pending_slots: ['mvp_focus'],
-                                clarification_questions: ['What should the first playable prototype prove?'],
-                                clarification_suggestions: [
-                                    {
-                                        id: 'sample_survival_game',
-                                        label: 'Classic Survival Snake',
-                                        description: 'Grow longer, avoid collisions, and chase a higher score.',
-                                        clarification_patch: {
-                                            gameplay_direction: 'Sample survival game',
-                                            mvp_focus: 'Movement, collision, and score display',
-                                        },
-                                    },
-                                ],
-                            },
-                        },
-                    },
-                },
-            },
-        }));
-        useProjectStore.setState({ showToastError });
-
-        await expect(useProjectStore.getState().bootstrapProject({ idea: '做一个好玩的游戏' })).resolves.toEqual({
-            status: 'clarification_required',
-            analysis: expect.objectContaining({
-                clarification_required: true,
-                pending_slots: ['mvp_focus'],
-                clarification_questions: ['What should the first playable prototype prove?'],
-            }),
-        });
-
-        expect(showToastError).not.toHaveBeenCalled();
-        expect(useProjectStore.getState().activeProjectId).toBeNull();
-        expect(chatActions.clearMessages).not.toHaveBeenCalled();
-        expect(chatActions.addMessage).not.toHaveBeenCalled();
-    });
-
-    it('opens bootstrapped project before project list refresh completes', async () => {
-        let resolveProjects: (projects: unknown[]) => void = () => undefined;
-        bootstrapProjectFromIdea.mockResolvedValue({
-            clarification_required: false,
-            clarification_pending: true,
-            auto_start_queued: true,
-            project: {
-                id: 'proj_1',
-                project_id: 'proj_1',
-                name: 'Snake Web',
-                status: 'created',
-                created_at: Date.now(),
-            },
-            pipeline: {
-                pipeline_id: 'pipe_1',
-                project_id: 'proj_1',
-                status: 'running',
-            },
-            task_id: 'pipe_1',
-            status: 'running',
-        });
-        getProjects.mockReturnValue(new Promise((resolve) => {
-            resolveProjects = resolve;
-        }));
-        getProjectStatus.mockResolvedValue({ project_id: 'proj_1', next_action: 'running' });
-        getPendingUserReviews.mockResolvedValue({ items: [] });
-
-        const promise = useProjectStore.getState().bootstrapProject({ idea: '样例游戏构建想法' });
-        await vi.waitFor(() => expect(useProjectStore.getState().activeProjectId).toBe('proj_1'));
-
-        expect(useProjectStore.getState().projects).toEqual([
-            expect.objectContaining({ id: 'proj_1', name: 'Snake Web' }),
-        ]);
-        expect(useProjectStore.getState().isLoading).toBe(false);
-        expect(chatActions.addMessage).toHaveBeenCalledWith(expect.objectContaining({
-            sender: 'system',
-            content: expect.stringContaining('准备可选方向'),
-        }));
-
-        resolveProjects([{ id: 'proj_1', name: 'Snake Web', created_at: Date.now() }]);
-        await expect(promise).resolves.toEqual({ status: 'started', projectId: 'proj_1' });
-    });
-
-    it('passes selected clarification answers through bootstrap', async () => {
-        const clarification = {
-            platform: 'Web (Desktop)',
-            visual_style: '样例视觉风格',
-            gameplay_direction: '样例核心玩法',
-            input_mode: '键盘方向键',
-            mvp_focus: '基础移动、吃豆变长、碰撞检测',
-        };
-        bootstrapProjectFromIdea.mockResolvedValue({
-            clarification_required: false,
-            clarification_pending: true,
-            auto_start_queued: true,
-            project: {
-                id: 'proj_1',
-                project_id: 'proj_1',
-                name: '样例游戏',
-                status: 'created',
-                created_at: Date.now(),
-            },
-            pipeline: {
-                pipeline_id: 'pipe_1',
-                project_id: 'proj_1',
-                status: 'running',
-            },
-            task_id: 'pipe_1',
-            status: 'running',
-        });
-        getProjects.mockResolvedValue([{ id: 'proj_1', name: '样例游戏', created_at: Date.now() }]);
-        getProjectStatus.mockResolvedValue({ project_id: 'proj_1', next_action: 'running' });
-        getPendingUserReviews.mockResolvedValue({ items: [] });
-
-        await expect(useProjectStore.getState().bootstrapProject({ idea: '样例游戏', clarification })).resolves.toEqual({ status: 'started', projectId: 'proj_1' });
-
-        expect(bootstrapProjectFromIdea).toHaveBeenCalledWith({ idea: '样例游戏', clarification });
-        expect(useProjectStore.getState().activeProjectId).toBe('proj_1');
     });
 
     it('tracks project opening while switching projects', async () => {
@@ -304,6 +165,29 @@ describe('projectStore pending review normalization', () => {
 
         expect(getProjectRuntimeState).toHaveBeenCalledTimes(1);
         expect(getProjectRuntimeState).toHaveBeenCalledWith('proj_1');
+        expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
+        expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
+    });
+
+    it('coalesces concurrent runtime snapshot loads for the same project', async () => {
+        let resolveRequest!: (value: {
+            status: { project_id: string; phase: string; blocked: boolean };
+            pendingReviews: Array<{ gate_id: string }>;
+        }) => void;
+        getProjectRuntimeState.mockReturnValueOnce(new Promise((resolve) => {
+            resolveRequest = resolve;
+        }));
+
+        const first = useProjectStore.getState().loadProjectRuntimeState('proj_1');
+        const second = useProjectStore.getState().loadProjectRuntimeState('proj_1');
+        expect(getProjectRuntimeState).toHaveBeenCalledTimes(1);
+
+        resolveRequest({
+            status: { project_id: 'proj_1', phase: 'running', blocked: false },
+            pendingReviews: [{ gate_id: 'permission_1' }],
+        });
+        await Promise.all([first, second]);
+
         expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
         expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
     });

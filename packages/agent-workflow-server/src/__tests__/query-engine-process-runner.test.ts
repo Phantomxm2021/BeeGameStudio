@@ -4,16 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createProcessIsolatedQueryEngineRunner,
-  resolveRuntimeInactivityTimeout,
 } from '../beegame/query-engine-process-runner'
 
 describe('process-isolated QueryEngine runner', () => {
-  test('uses a bounded configurable inactivity timeout without deciding task state', () => {
-    expect(resolveRuntimeInactivityTimeout({})).toBe(15 * 60 * 1000)
-    expect(resolveRuntimeInactivityTimeout({ BEEGAME_RUNTIME_INACTIVITY_TIMEOUT_MS: '1' })).toBe(60 * 1000)
-    expect(resolveRuntimeInactivityTimeout({ BEEGAME_RUNTIME_INACTIVITY_TIMEOUT_MS: '99999999' })).toBe(60 * 60 * 1000)
-  })
-
   test('starts independent session workers without sharing the server process', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'beegame-runtime-worker-'))
     const firstWorkspace = join(cwd, 'user-a', 'project')

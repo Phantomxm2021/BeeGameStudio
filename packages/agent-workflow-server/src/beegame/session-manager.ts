@@ -29,6 +29,7 @@ import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import {
   createDeliveryValidationAgentDefinitions,
 } from './delivery-validation-agents'
+import { observeNativeAcceptanceToolCompletion } from './native-acceptance-evidence'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 
 export type BeeGameImageAttachment = {
@@ -1257,6 +1258,24 @@ export class BeeGameSessionManager {
     record.events.push(event)
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
+    try {
+      observeNativeAcceptanceToolCompletion({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      // Acceptance provenance is a deployment gate, never an Agent runtime
+      // controller. Failure to persist it must not interrupt Claude Code.
+      console.warn('[BeeGame] Failed to persist native acceptance evidence', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
     record.nextEventId += 1
     record.session.updatedAt = new Date()
     this.persistRuntimeSnapshot(record)
@@ -1824,7 +1843,7 @@ async function prepareBeeGamePromptInput(input: {
   const localizedInput = withSessionLanguageContract(`${requestText}${documentContext}`, input.language)
   const promptText = input.displayKind === 'initial_idea'
     ? withInitialIdeaContract(localizedInput)
-    : input.displayKind === 'confirmed_brief' || input.displayKind === 'direct_build'
+    : input.displayKind === 'confirmed_brief'
       ? withConfirmedBriefContract(localizedInput)
       : input.displayKind === 'asset_integration'
         ? withAssetIntegrationContract(localizedInput)

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
 import type { AgentWorkflowAppOptions } from '../app'
 import { createAgentWorkflowApp } from '../app'
+import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
 import {
   getCreditBalance,
   reserveCredits,
@@ -2401,17 +2402,19 @@ describe('agent workflow server routes', () => {
       await mkdir(join(projectRoot, 'docs', 'acceptance'), { recursive: true })
       await mkdir(join(projectRoot, 'tests'), { recursive: true })
       await writeFile(join(projectRoot, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+      for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
+        await writeFile(join(projectRoot, 'docs', name), `# ${name}\n`)
+      }
       await writeFile(
         join(projectRoot, 'docs', 'acceptance', 'gameplay-checklist.md'),
         '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
         'utf8',
       )
-      await writeFile(
-        join(projectRoot, 'docs', 'acceptance', 'validation-report.json'),
-        JSON.stringify({
+      const acceptanceReport = {
           validatorId: 'beegame-acceptance-validator',
           status: 'passed',
           summary: 'Observed acceptance passed.',
+          assetsRequired: false,
           requirements: [{
             id: 'requirement-primary',
             status: 'passed',
@@ -2429,7 +2432,10 @@ describe('agent workflow server routes', () => {
           }],
           findings: [],
           verifiedCapabilities: ['skill:beegame-game-acceptance'],
-        }),
+      }
+      await writeFile(
+        join(projectRoot, 'docs', 'acceptance', 'validation-report.json'),
+        JSON.stringify(acceptanceReport),
         'utf8',
       )
       const retentionApp = createAgentWorkflowApp({
@@ -2470,6 +2476,18 @@ describe('agent workflow server routes', () => {
         }),
       })
       expect(createRes.status).toBe(200)
+      const ensureSessionRes = await retentionApp.request(
+        '/api/projects/project_retention_one/session/ensure',
+        { method: 'POST' },
+      )
+      expect(ensureSessionRes.status).toBe(200)
+      const ensured = await ensureSessionRes.json()
+      recordNativeAcceptanceReportForTest({
+        dataRoot: workspace,
+        sessionId: ensured.session.id,
+        workspacePath: projectRoot,
+        report: acceptanceReport,
+      })
 
       for (let index = 0; index < 7; index += 1) {
         const deployRes = await retentionApp.request('/api/projects/project_retention_one/deployments', {

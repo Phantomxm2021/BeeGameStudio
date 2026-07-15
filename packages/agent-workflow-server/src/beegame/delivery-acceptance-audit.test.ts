@@ -3,19 +3,23 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
+import { recordNativeAcceptanceReportForTest } from './native-acceptance-evidence'
+
+const TEST_SESSION_ID = 'native-acceptance-test-session'
 
 describe('persisted delivery acceptance audit', () => {
   let workspace = ''
 
   afterEach(async () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
+    if (workspace) await rm(dataRootFor(workspace), { recursive: true, force: true })
   })
 
   test('accepts a report that covers the identified checklist with observable evidence', async () => {
     workspace = await createWorkspace()
     await writeAcceptance(workspace, validReport())
 
-    expect(evaluatePersistedDeliveryAcceptance(workspace)).toEqual({
+    expect(evaluate(workspace)).toEqual({
       allowed: true,
       outcome: 'passed',
       issues: [],
@@ -26,10 +30,22 @@ describe('persisted delivery acceptance audit', () => {
     workspace = await createWorkspace({ checked: false })
     await writeAcceptance(workspace, validReport())
 
-    const result = evaluatePersistedDeliveryAcceptance(workspace)
+    const result = evaluate(workspace)
 
     expect(result.allowed).toBe(false)
     expect(result.issues).toContain('path-primary is still unchecked in the acceptance checklist.')
+  })
+
+  test('rejects a hand-authored passing report without an observed native validator result', async () => {
+    workspace = await createWorkspace()
+    await writeFile(
+      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
+      JSON.stringify(validReport()),
+    )
+
+    expect(evaluate(workspace).issues).toContain(
+      'The validation report is not the terminal result of an observed native acceptance Validator call.',
+    )
   })
 
   test('rejects reports that omit a document-declared player path', async () => {
@@ -38,7 +54,7 @@ describe('persisted delivery acceptance audit', () => {
     report.playerPaths = []
     await writeAcceptance(workspace, report)
 
-    expect(evaluatePersistedDeliveryAcceptance(workspace).issues).toContain(
+    expect(evaluate(workspace).issues).toContain(
       'The report omits player path path-primary.',
     )
   })
@@ -59,7 +75,7 @@ describe('persisted delivery acceptance audit', () => {
     }]
     await writeAcceptance(workspace, report)
 
-    const issues = evaluatePersistedDeliveryAcceptance(workspace).issues
+    const issues = evaluate(workspace).issues
     expect(issues).toContain('path-primary runtime evidence is missing workingDirectory.')
     expect(issues).toContain('path-primary runtime evidence is missing action.')
     expect(issues).toContain('path-primary runtime evidence is missing assertion.')
@@ -73,7 +89,7 @@ describe('persisted delivery acceptance audit', () => {
     )
     await writeAcceptance(workspace, validReport())
 
-    const issues = evaluatePersistedDeliveryAcceptance(workspace).issues
+    const issues = evaluate(workspace).issues
     expect(issues).toContain(
       'Every acceptance checklist item must start with [requirement:ID] or [player-path:ID].',
     )
@@ -85,7 +101,7 @@ describe('persisted delivery acceptance audit', () => {
     await Bun.sleep(5)
     await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
 
-    const result = evaluatePersistedDeliveryAcceptance(workspace)
+    const result = evaluate(workspace)
 
     expect(result.allowed).toBe(false)
     expect(result.issues.some(issue =>
@@ -112,7 +128,7 @@ describe('persisted delivery acceptance audit', () => {
     }))
     await writeAcceptance(workspace, validReport())
 
-    expect(evaluatePersistedDeliveryAcceptance(workspace).issues).toContain(
+    expect(evaluate(workspace).issues).toContain(
       'Asset contract: required slot embedded-primary has no runtime_event_id present in the acceptance report.',
     )
   })
@@ -125,6 +141,9 @@ async function createWorkspace(options: { checked?: boolean } = {}): Promise<str
   await mkdir(join(root, 'tests'), { recursive: true })
   await writeFile(join(root, 'src', 'entry.ts'), 'export const ready = true\n')
   await writeFile(join(root, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+  for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
+    await writeFile(join(root, 'docs', name), `# ${name}\n`)
+  }
   const marker = options.checked === false ? ' ' : 'x'
   await writeFile(
     join(root, 'docs', 'acceptance', 'gameplay-checklist.md'),
@@ -142,6 +161,23 @@ async function writeAcceptance(workspace: string, report: unknown): Promise<void
     join(workspace, 'docs', 'acceptance', 'validation-report.json'),
     JSON.stringify(report),
   )
+  recordNativeAcceptanceReportForTest({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    report,
+  })
+}
+
+function evaluate(workspace: string) {
+  return evaluatePersistedDeliveryAcceptance(workspace, {
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+  })
+}
+
+function dataRootFor(workspace: string): string {
+  return `${workspace}-runtime-data`
 }
 
 function validReport(): Record<string, unknown> {
@@ -149,6 +185,7 @@ function validReport(): Record<string, unknown> {
     validatorId: 'beegame-acceptance-validator',
     status: 'passed',
     summary: 'Observed the declared behavior.',
+    assetsRequired: false,
     verifiedCapabilities: ['skill:beegame-game-acceptance'],
     requirements: [{
       id: 'req-primary',

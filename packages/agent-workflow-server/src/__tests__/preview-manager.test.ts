@@ -20,10 +20,12 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
     }))
 
     const originalNodeEnv = process.env.NODE_ENV
+    const originalSecret = process.env.BEEGAME_SKILLS_SERVICE_TOKEN
     const originalCwd = process.cwd()
     const captured: { command?: string[]; env?: Record<string, string> } = {}
     const processes: BeeGamePreviewProcess[] = []
     process.env.NODE_ENV = 'production'
+    process.env.BEEGAME_SKILLS_SERVICE_TOKEN = 'must-not-reach-project-preview'
     try {
       const manager = new BeeGamePreviewManager(
         (command, options) => {
@@ -42,10 +44,13 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
       process.chdir(originalCwd)
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV
       else process.env.NODE_ENV = originalNodeEnv
+      if (originalSecret === undefined) delete process.env.BEEGAME_SKILLS_SERVICE_TOKEN
+      else process.env.BEEGAME_SKILLS_SERVICE_TOKEN = originalSecret
     }
 
     expect(processes).toHaveLength(1)
     expect(captured.env?.NODE_ENV).toBe('development')
+    expect(captured.env?.BEEGAME_SKILLS_SERVICE_TOKEN).toBeUndefined()
     expect(captured.command?.[0]).toBe(process.execPath)
     expect(captured.command?.[1]).toEndWith('vite-preview-host.ts')
     expect(captured.command).toContain('--base')

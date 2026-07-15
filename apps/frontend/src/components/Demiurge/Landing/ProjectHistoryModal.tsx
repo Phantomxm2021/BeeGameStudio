@@ -177,7 +177,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                             </button>
                         </div>
 
-                        <div className="scroll-fade scroll-fade-8 relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
+                        <div className="scroll-fade scroll-fade-8 relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
                                 {isProjectListLoading ? (
                                     <ProjectHistoryListSkeleton />
                                 ) : projects.length === 0 ? (

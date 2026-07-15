@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -7,6 +7,7 @@ import {
   createSupabaseStorageDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
+import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
 
 describe('BeeGameDeploymentManager', () => {
   let root: string
@@ -24,8 +25,12 @@ describe('BeeGameDeploymentManager', () => {
 
   test('builds a package project and publishes static output', async () => {
     const commands: string[][] = []
+    let buildEnv: Record<string, string> | undefined
+    const originalSecret = process.env.BEEGAME_SKILLS_SERVICE_TOKEN
+    process.env.BEEGAME_SKILLS_SERVICE_TOKEN = 'must-not-reach-project-build'
     const runner: BeeGameDeploymentRunner = async (command, options) => {
       commands.push(command)
+      buildEnv = options.env
       await mkdir(join(options.cwd, 'dist'), { recursive: true })
       await writeFile(join(options.cwd, 'dist', 'index.html'), '<h1>Playable</h1>')
       return { exitCode: 0, stdout: 'built', stderr: '' }
@@ -44,12 +49,17 @@ describe('BeeGameDeploymentManager', () => {
       sessionId: 'beegame_test',
       projectId: 'project_test',
       workspacePath: workspace,
+    }).finally(() => {
+      if (originalSecret === undefined) delete process.env.BEEGAME_SKILLS_SERVICE_TOKEN
+      else process.env.BEEGAME_SKILLS_SERVICE_TOKEN = originalSecret
     })
 
     expect(deployment.status).toBe('succeeded')
     expect(deployment.url).toMatch(/^http:\/\/127\.0\.0\.1:3040\/deployments\/deploy_/)
     expect(deployment.buildCommand).toBe('npm run build -- --base=./')
     expect(commands).toEqual([['npm', 'run', 'build', '--', '--base=./']])
+    expect(buildEnv?.BEEGAME_DEPLOYMENT).toBe('1')
+    expect(buildEnv?.BEEGAME_SKILLS_SERVICE_TOKEN).toBeUndefined()
     expect(await readFile(join(deployment.artifactPath || '', 'index.html'), 'utf8'))
       .toContain('input instanceof Request')
   })
@@ -279,6 +289,9 @@ describe('BeeGameDeploymentManager', () => {
     await mkdir(join(workspace, 'tests'), { recursive: true })
     await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = true\n')
     await writeFile(join(workspace, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
+    for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
+      await writeFile(join(workspace, 'docs', name), `# ${name}\n`)
+    }
     await writeFile(
       join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
       [
@@ -287,12 +300,11 @@ describe('BeeGameDeploymentManager', () => {
         '',
       ].join('\n'),
     )
-    await writeFile(
-      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
-      JSON.stringify({
+    const report = {
         validatorId: 'beegame-acceptance-validator',
         status: 'passed',
         summary: 'Observed acceptance passed.',
+        assetsRequired: false,
         requirements: [{
           id: 'requirement-primary',
           status: 'passed',
@@ -315,8 +327,17 @@ describe('BeeGameDeploymentManager', () => {
         }],
         findings: [],
         verifiedCapabilities: ['skill:beegame-game-acceptance'],
-      }),
+      }
+    await writeFile(
+      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
+      JSON.stringify(report),
     )
+    recordNativeAcceptanceReportForTest({
+      dataRoot: root,
+      sessionId: 'delivery-gated-session',
+      workspacePath: workspace,
+      report,
+    })
 
     const accepted = await manager.deploy({
       sessionId: 'delivery-gated-session',
@@ -324,6 +345,73 @@ describe('BeeGameDeploymentManager', () => {
     })
     expect(accepted.status).toBe('succeeded')
     expect(builds).toBe(1)
+
+    const mutatingManager = new BeeGameDeploymentManager({
+      dataRoot: root,
+      requireAcceptedDelivery: true,
+      runner: async (_command, options) => {
+        await mkdir(join(options.cwd, 'dist'), { recursive: true })
+        await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Changed</main>')
+        await writeFile(join(options.cwd, 'src', 'entry.ts'), 'export const ready = false\n')
+        return { exitCode: 0, stdout: 'built and changed source', stderr: '' }
+      },
+    })
+    const changedDuringBuild = await mutatingManager.deploy({
+      sessionId: 'delivery-gated-session',
+      workspacePath: workspace,
+    })
+    expect(changedDuringBuild.status).toBe('failed')
+    expect(changedDuringBuild.message).toContain('Project source changed after acceptance')
+  })
+
+  test('rejects malformed self-identifying files in the built artifact', async () => {
+    const manager = new BeeGameDeploymentManager({
+      dataRoot: root,
+      runner: async (_command, options) => {
+        await mkdir(join(options.cwd, 'dist', 'assets'), { recursive: true })
+        await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Invalid asset</main>')
+        await writeFile(join(options.cwd, 'dist', 'assets', 'model.glb'), '<!doctype html>')
+        return { exitCode: 0, stdout: 'built', stderr: '' }
+      },
+    })
+    await writeFile(
+      join(workspace, 'package.json'),
+      JSON.stringify({ scripts: { build: 'vite build' } }),
+    )
+
+    const deployment = await manager.deploy({
+      sessionId: 'invalid-artifact-session',
+      workspacePath: workspace,
+    })
+
+    expect(deployment.status).toBe('failed')
+    expect(deployment.message).toContain('invalid GLB')
+  })
+
+  test('rejects symbolic links in deployment output', async () => {
+    const outside = join(root, 'private.txt')
+    await writeFile(outside, 'private')
+    const manager = new BeeGameDeploymentManager({
+      dataRoot: root,
+      runner: async (_command, options) => {
+        await mkdir(join(options.cwd, 'dist'), { recursive: true })
+        await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Symlink</main>')
+        await symlink(outside, join(options.cwd, 'dist', 'private.txt'))
+        return { exitCode: 0, stdout: 'built', stderr: '' }
+      },
+    })
+    await writeFile(
+      join(workspace, 'package.json'),
+      JSON.stringify({ scripts: { build: 'vite build' } }),
+    )
+
+    const deployment = await manager.deploy({
+      sessionId: 'symlink-artifact-session',
+      workspacePath: workspace,
+    })
+
+    expect(deployment.status).toBe('failed')
+    expect(deployment.message).toContain('symbolic link')
   })
 
   test('rejects static output outside the workspace', async () => {
