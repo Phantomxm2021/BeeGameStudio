@@ -382,6 +382,21 @@ export class BeeGameSessionManager {
       throw new Error('Workspace path must be absolute')
     }
     const cwd = resolve(input.workspacePath)
+    const existingLease = [...this.sessions.values()].find(record => (
+      record.session.cwd === cwd && record.session.status === 'running'
+    ))
+    if (existingLease) {
+      if (
+        input.projectId &&
+        existingLease.projectId === input.projectId &&
+        existingLease.userId === input.userId
+      ) {
+        return cloneSession(existingLease.session)
+      }
+      throw new Error(
+        `Workspace is already leased by active BeeGame session ${existingLease.session.id}`,
+      )
+    }
     mkdirSync(cwd, { recursive: true })
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
@@ -1998,6 +2013,12 @@ function deriveSnapshotPhaseName(
   if (events.some(event => event.type === 'turn.started' && !hasTurnEnded(events, event.turnId))) {
     return 'running'
   }
+  if (
+    events.some(event => event.type === 'session.started') &&
+    !events.some(event => event.type === 'turn.started')
+  ) {
+    return 'starting'
+  }
   return 'idle'
 }
 
@@ -2010,6 +2031,8 @@ function deriveSnapshotPhaseStatus(
   if (options.recoveredFromTranscript) return 'idle'
   if (latest.type === 'permission.requested') return 'waiting_approval'
   if (latest.type === 'turn.failed' || latest.type === 'session.failed') return 'failed'
+  if (latest.payload?.type === 'credit.reserve_failed') return 'failed'
+  if (deriveSnapshotPhaseName(events, options) === 'starting') return 'starting'
   if (deriveSnapshotPhaseName(events, options) === 'running') return 'running'
   return 'idle'
 }

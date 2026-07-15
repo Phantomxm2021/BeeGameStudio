@@ -40,6 +40,7 @@ const recordedAgentMessageOrder: string[] = [];
 export type WebSocketState =
   | 'connecting'    // Initial connection attempt
   | 'connected'     // Successfully connected
+  | 'reconnecting'  // Temporarily unavailable; polling will resume
   | 'disconnected'  // Disconnected (may retry)
   | 'failed';       // Failed after max retries
 
@@ -510,10 +511,11 @@ export const useWebSocket = ({
   useEffect(() => {
     if (isBeeGameAdapterEnabled()) {
       let cancelled = false;
+      let consecutiveFailures = 0;
+      let hasConnected = false;
       adapterLastEventIdRef.current = 0;
       adapterIdlePollsRef.current = 0;
-      setState('connected');
-      callbacksRef.current.onOpen?.();
+      setState('connecting');
 
       const schedulePoll = (delayMs: number) => {
         if (cancelled) return;
@@ -531,6 +533,8 @@ export const useWebSocket = ({
         }
         try {
           const result = await beeGameAdapter.pollMessages(projectId, adapterLastEventIdRef.current);
+          const recovered = consecutiveFailures > 0;
+          consecutiveFailures = 0;
           adapterLastEventIdRef.current = result.lastEventId;
           for (const message of result.messages) {
             callbacksRef.current.onMessage(message);
@@ -543,17 +547,22 @@ export const useWebSocket = ({
           const nextDelay = result.messages.length > 0
             ? 800
             : Math.min(5000, 1000 + adapterIdlePollsRef.current * 500);
+          if (!hasConnected || recovered) {
+            hasConnected = true;
+            setState('connected');
+            callbacksRef.current.onOpen?.();
+          }
           schedulePoll(nextDelay);
         } catch (error) {
           if (cancelled) return;
+          consecutiveFailures += 1;
           console.warn('[WebSocket] BeeGame adapter poll failed:', error);
-          if (adapterPollTimerRef.current) {
-            clearTimeout(adapterPollTimerRef.current);
-            adapterPollTimerRef.current = null;
+          setState('reconnecting');
+          if (consecutiveFailures === 3) {
+            callbacksRef.current.showToastError?.('BeeGame 连接暂时不可用，正在自动重连');
           }
-          setState('failed');
-          callbacksRef.current.onClose?.();
-          callbacksRef.current.showToastError?.('BeeGame 事件同步失败，请检查 dashboard 后端服务');
+          const retryDelay = Math.min(15_000, 500 * 2 ** Math.min(consecutiveFailures - 1, 5));
+          schedulePoll(retryDelay);
         }
       };
 

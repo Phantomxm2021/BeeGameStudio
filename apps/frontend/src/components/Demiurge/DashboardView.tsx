@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { LoaderCircle } from 'lucide-react';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
@@ -234,6 +235,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         () => projects.find((project) => project.id === projectId),
         [projectId, projects],
     );
+    const isProjectStarting = isBeeGameMode && (
+        String(projectStatus?.phase || '').toLowerCase() === 'starting' ||
+        (
+            !projectStatus &&
+            String(activeProject?.runtime_snapshot?.phase_name || '').toLowerCase() === 'starting'
+        )
+    );
     const savedRuntimeSnapshot = activeProject?.runtime_snapshot;
     const waitingApproval = useMemo(
         () => getWaitingApprovalState(projectRuntimeDisplay, reviewDisplayModels),
@@ -271,6 +279,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         if (isBeeGameMode) {
             const phase = String(projectStatus?.phase || '').toLowerCase();
             if (isOffline) return 'offline';
+            if (phase === 'starting' || isProjectStarting) return 'starting';
             if (phase === 'running') return 'running';
             if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
             if (phase === 'finished') return 'finished';
@@ -283,7 +292,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
             messages: displayMessages,
         });
-    }, [isBeeGameMode, projectStatus?.phase, isOffline, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages]);
+    }, [isBeeGameMode, projectStatus?.phase, isOffline, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
 
     const refreshPreviewStatus = async () => {
         await loadProjectRuntimeState(projectId);
@@ -531,7 +540,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
             {!isBeeGameMode ? (
                 <SideMenu
-                    status={currentStatus === 'offline' ? 'stopped' : currentStatus}
+                    status={currentStatus === 'offline'
+                        ? 'stopped'
+                        : currentStatus === 'starting'
+                            ? 'running'
+                            : currentStatus}
                     lang={lang}
                     isDark={isDark}
                     onToggleStatus={handleToggleStatus}
@@ -614,6 +627,27 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                     onCancel={() => resolveCreditQuote(false)}
                     onConfirm={() => resolveCreditQuote(true)}
                 />
+            ) : null}
+            {isProjectStarting ? (
+                <div
+                    className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black/95 px-6 backdrop-blur-2xl"
+                    role="status"
+                    aria-live="polite"
+                    aria-label={translateBeeGame('dashboard.starting.title')}
+                >
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(52,211,153,0.11),transparent_34%)]" />
+                    <div className="relative flex max-w-md flex-col items-center text-center">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
+                            <LoaderCircle className="h-6 w-6 animate-spin text-emerald-300" aria-hidden="true" />
+                        </div>
+                        <h2 className="type-title-2 mt-7 text-white">
+                            {translateBeeGame('dashboard.starting.title')}
+                        </h2>
+                        <p className="type-body mt-3 max-w-sm text-zinc-400">
+                            {translateBeeGame('dashboard.starting.description')}
+                        </p>
+                    </div>
+                </div>
             ) : null}
         </div>
     );

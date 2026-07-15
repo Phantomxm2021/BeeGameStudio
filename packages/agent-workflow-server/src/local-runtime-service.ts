@@ -1,4 +1,5 @@
 import { mkdir, realpath, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { DEFAULT_LOCAL_USER_ID } from './auth/user-context'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -89,8 +90,9 @@ export async function createManagedProjectWorkspacePath(
     }),
   )
   const userRoot = getUserDashboardDataRoot(defaultWorkspace, options.userId)
-  const projectSegment = normalizeProjectDirName(
-    options.projectName || options.projectId || 'beegame-project',
+  const projectSegment = createManagedProjectSegment(
+    options.projectName,
+    options.projectId,
   )
   const workspacePath = join(userRoot, projectSegment)
   await mkdir(workspacePath, { recursive: true })
@@ -138,6 +140,27 @@ function normalizeProjectDirName(value: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
   return normalized || 'beegame-project'
+}
+
+function createManagedProjectSegment(
+  projectName?: string,
+  projectId?: string,
+): string {
+  const normalizedProjectId = projectId?.trim()
+  if (!normalizedProjectId) {
+    return normalizeProjectDirName(projectName || 'beegame-project')
+  }
+
+  const suffix = createHash('sha256')
+    .update(normalizedProjectId)
+    .digest('hex')
+    .slice(0, 12)
+  const separator = '--'
+  const maxNameLength = 80 - separator.length - suffix.length
+  const name = normalizeProjectDirName(projectName || normalizedProjectId)
+    .slice(0, maxNameLength)
+    .replace(/[-_.]+$/g, '') || 'beegame-project'
+  return `${name}${separator}${suffix}`
 }
 
 function canonicalizeWorkspaceCandidate(

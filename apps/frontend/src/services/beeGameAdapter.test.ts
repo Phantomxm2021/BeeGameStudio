@@ -39,6 +39,37 @@ const makeLlmOptions = (first: Record<string, unknown> = makeLlmOption()) => [
   makeLlmOption({ id: 'mode_from_llm_3', title: 'Mode From LLM 3' }),
 ];
 
+const bootstrapResponse = (
+  init: RequestInit | undefined,
+  options: { sessionId: string; workspacePath: string },
+) => {
+  const request = JSON.parse(String(init?.body || '{}')) as {
+    project?: Record<string, unknown>;
+  };
+  const project = {
+    ...request.project,
+    root_path: options.workspacePath,
+    runtime_snapshot: { phase_name: 'starting', status: 'running' },
+  };
+  return jsonResponse({
+    project,
+    session: {
+      id: options.sessionId,
+      cwd: options.workspacePath,
+      status: 'running',
+      turnStatus: 'running',
+    },
+    binding: {
+      projectId: project.id,
+      sessionId: options.sessionId,
+      workspacePath: options.workspacePath,
+    },
+    task_id: options.sessionId,
+    status: 'starting',
+    pipeline: { pipeline_id: options.sessionId, status: 'starting' },
+  }, 202);
+};
+
 describe('beeGameAdapter prompt rules', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -499,31 +530,10 @@ describe('beeGameAdapter prompt rules', () => {
   it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/filesystem/default-workspace') {
-        return jsonResponse({ path: '/tmp/beegame-projects' });
-      }
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
-        return jsonResponse({
-          id: 'beegame_scoped',
-          cwd: body.workspacePath,
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_scoped/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_scoped',
-          cwd: '/tmp/beegame-projects/sample-web-game',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_scoped',
+          workspacePath: '/tmp/beegame-projects/llm-project',
         });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -569,11 +579,11 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const startCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
     ));
-    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
 
-    expect(startBody.workspacePath).toBe('/tmp/beegame-projects/llm-project');
+    expect(startBody.projectName).toBe('llm-project');
     expect(result.project.root_path).toBe('/tmp/beegame-projects/llm-project');
     expect(result.project.name).toBe('LLM Project');
     expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
@@ -582,28 +592,10 @@ describe('beeGameAdapter prompt rules', () => {
   it('uses the configured workspace root for new projects without replacing it with a project path', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
-        return jsonResponse({
-          id: 'beegame_custom_root',
-          cwd: body.workspacePath,
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_custom_root/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_custom_root',
-          cwd: '/tmp/custom-beegame-projects/arena-prototype',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_custom_root',
+          workspacePath: '/tmp/custom-beegame-projects/arena-prototype',
         });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -625,13 +617,8 @@ describe('beeGameAdapter prompt rules', () => {
       },
     });
 
-    const startCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    ));
-    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
     const settings = await getBeeGameWorkspaceSettings();
 
-    expect(startBody.workspacePath).toBe('/tmp/custom-beegame-projects/arena-prototype');
     expect(result.project.root_path).toBe('/tmp/custom-beegame-projects/arena-prototype');
     expect(settings.workspacePath).toBe('/tmp/custom-beegame-projects');
     expect(fetchMock).not.toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
@@ -640,14 +627,11 @@ describe('beeGameAdapter prompt rules', () => {
   it('sends a confirmed attachment GDD as the direct build source', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/filesystem/default-workspace') return jsonResponse({ path: '/tmp/beegame-projects' });
-      if (path === '/api/model-configs') return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
-        return jsonResponse({ id: 'beegame_gdd', cwd: body.workspacePath, status: 'running', turnStatus: 'idle' });
-      }
-      if (path === '/api/beegame-sessions/beegame_gdd/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({ id: 'beegame_gdd', cwd: '/tmp/beegame-projects/confirmed-gdd', status: 'running', turnStatus: 'running' });
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_gdd',
+          workspacePath: '/tmp/beegame-projects/confirmed-gdd',
+        });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -665,7 +649,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_gdd/confirmed-brief' && init?.method === 'POST'
+      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { brief?: Record<string, unknown> };
     expect(body.brief).toMatchObject({
@@ -680,31 +664,10 @@ describe('beeGameAdapter prompt rules', () => {
   it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/filesystem/default-workspace') {
-        return jsonResponse({ path: '/tmp/beegame-projects' });
-      }
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body || '{}')) as { workspacePath?: string };
-        return jsonResponse({
-          id: 'beegame_safe_path',
-          cwd: body.workspacePath,
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_safe_path/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_safe_path',
-          cwd: '/tmp/beegame-projects/movement-aim-trainer',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_safe_path',
+          workspacePath: '/tmp/beegame-projects/movement-aim-trainer',
         });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -726,12 +689,10 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const startCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions' && init?.method === 'POST'
+      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
     ));
-    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { workspacePath?: string };
-    expect(startBody.workspacePath).toBe('/tmp/beegame-projects/movement-aim-trainer');
-    expect(startBody.workspacePath).not.toContain('移动与瞄准训练');
-    expect(startBody.workspacePath).not.toContain('beegame-project-');
+    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
+    expect(startBody.projectName).toBe('movement-aim-trainer');
     expect(result.project.name).toBe('移动与瞄准训练');
   });
 
@@ -1578,27 +1539,10 @@ describe('beeGameAdapter prompt rules', () => {
   it('starts a BeeGame session with structured confirmed product input only', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_brief',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_brief/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_brief',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_brief',
+          workspacePath: '/tmp/beegame-projects/mode-from-llm',
         });
       }
       return jsonResponse({ error: 'not found' }, 404);
@@ -1622,8 +1566,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_brief/confirmed-brief' &&
-      init?.method === 'POST'
+      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as {
       brief?: Record<string, any>;
@@ -1693,21 +1636,11 @@ describe('beeGameAdapter prompt rules', () => {
   it('sends confirmed build input as structured product data without browser-owned agent policy', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_english_brief',
-          cwd: '/tmp/beegame-projects/english-game',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
+      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
+        return bootstrapResponse(init, {
+          sessionId: 'beegame_english_brief',
+          workspacePath: '/tmp/beegame-projects/snake-game',
         });
-      }
-      if (path === '/api/beegame-sessions/beegame_english_brief/confirmed-brief' && init?.method === 'POST') {
-        return jsonResponse({ ok: true });
       }
       return jsonResponse({ error: 'not found' }, 404);
     });
@@ -1731,8 +1664,7 @@ describe('beeGameAdapter prompt rules', () => {
     });
 
     const inputCall = fetchMock.mock.calls.find(([path, init]) => (
-      String(path) === '/api/beegame-sessions/beegame_english_brief/confirmed-brief' &&
-      init?.method === 'POST'
+      String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
     ));
     const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { brief?: Record<string, unknown> };
     const brief = body.brief || {};

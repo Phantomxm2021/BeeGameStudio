@@ -17,6 +17,7 @@ import {
 
 describe('supabaseAuthApi', () => {
   afterEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -297,6 +298,38 @@ describe('supabaseAuthApi', () => {
 
     await expect(refreshSupabaseSession()).resolves.toBeNull();
     expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
+  });
+
+  it('keeps the stored session and retries a transient refresh network failure', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    localStorage.setItem('beegame_supabase_session', JSON.stringify({
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000,
+      user: { id: 'user-1' },
+    }));
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(Response.json({
+        access_token: 'fresh-token',
+        refresh_token: 'fresh-refresh-token',
+        expires_in: 3600,
+        user: { id: 'user-1' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const refresh = refreshSupabaseSession();
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(refresh).resolves.toMatchObject({ accessToken: 'fresh-token' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(localStorage.getItem('beegame_supabase_session')).toContain('fresh-token');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts a Supabase OAuth redirect for third-party providers', async () => {

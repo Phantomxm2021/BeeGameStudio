@@ -367,6 +367,8 @@ export const useProjectStore = create<ProjectState>()(
           set((state) => ({
             projects: upsertProject(state.projects, bootstrappedProject),
             activeProjectId: newProjectId,
+            projectStatus: null,
+            pendingReviews: [],
             isLoading: false,
           }));
           const chatStore = useChatStore.getState();

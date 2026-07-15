@@ -339,10 +339,7 @@ export const beeGameAdapter = {
   }> {
     const title = getBriefDisplayTitle(data);
     const folderName = getBriefFolderName(data, title);
-    const requestedWorkspacePath = await resolveNewProjectClientWorkspacePath(data.root_path, folderName);
-    const project = createLocalProject(title, requestedWorkspacePath);
-    saveProjects(upsertProject(readProjects(), project));
-    await syncProjectMetadata(project);
+    const project = createLocalProject(title);
     const language = normalizeBeeGameLanguage(data.language, [
       data.idea,
       data.option.title,
@@ -350,26 +347,27 @@ export const beeGameAdapter = {
       data.option.gameplay,
       data.settings.notes ?? '',
     ].join('\n'));
-    const session = await startBeeGameSession({
-      workspacePath: requestedWorkspacePath,
+    const bootstrap = await postJson<{
+      project: Project;
+      session: BeeGameSession;
+      binding: ProjectSessionBinding;
+      task_id: string;
+      status: string;
+      pipeline: { pipeline_id: string; status: string };
+    }>('/api/projects/bootstrap', {
+      project,
       projectName: folderName,
-      projectId: project.id,
-      language,
-    });
-    const workspacePath = session.cwd;
-    const syncedProject = { ...project, root_path: workspacePath };
-    saveProjects(upsertProject(readProjects(), syncedProject));
-    await syncProjectMetadata(syncedProject);
-    saveBinding({ projectId: project.id, sessionId: session.id, workspacePath, language });
-    await postJson(`/api/beegame-sessions/${encodeURIComponent(session.id)}/confirmed-brief`, {
       brief: data,
       language,
     });
+    const syncedProject = bootstrap.project;
+    saveProjects(upsertProject(readProjects(), syncedProject));
+    saveBinding({ ...bootstrap.binding, language });
     return {
       project: syncedProject,
-      task_id: session.id,
-      status: 'running',
-      pipeline: { pipeline_id: session.id, status: 'running' },
+      task_id: bootstrap.task_id,
+      status: bootstrap.status,
+      pipeline: bootstrap.pipeline,
     };
   },
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, LoaderCircle, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
@@ -91,6 +91,10 @@ type IntakeCopy = {
         cancel: string;
         confirmGenerate: string;
         confirmBuild: string;
+    };
+    starting: {
+        title: string;
+        description: string;
     };
     errors: {
         missingPlatformModel: string;
@@ -192,6 +196,10 @@ const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
         cancel: translate('actions.cancel'),
         confirmGenerate: translate('actions.confirmGenerate'),
         confirmBuild: translate('actions.confirmBuild'),
+    },
+    starting: {
+        title: translate('starting.title'),
+        description: translate('starting.description'),
     },
     errors: {
         missingPlatformModel: translate('errors.missingPlatformModel'),
@@ -751,7 +759,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         () => buildProductionSettingOptions(intakeOptions),
         [intakeOptions],
     );
-    const shouldShowIntakeModal = (intakePhase !== 'idle' && intakePhase !== 'generating_options') || attachmentBuildPhase !== 'idle';
+    const shouldShowIntakeModal = (
+        intakePhase !== 'idle' &&
+        intakePhase !== 'generating_options' &&
+        intakePhase !== 'starting_build'
+    ) || attachmentBuildPhase !== 'idle';
     const modalTitle = attachmentBuildPhase !== 'idle'
         ? 'Review uploaded design'
         : intakePhase === 'options_ready'
@@ -1986,6 +1998,24 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                         onCancel={handleCancelBuildCredit}
                         onConfirm={handleConfirmBuildCredit}
                     />
+                ) : null}
+
+                {intakePhase === 'starting_build' ? (
+                    <div
+                        className="fixed inset-0 z-[300] flex items-center justify-center overflow-hidden bg-black/95 px-6 backdrop-blur-2xl"
+                        role="status"
+                        aria-live="polite"
+                        aria-label={intakeText.starting.title}
+                    >
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(52,211,153,0.11),transparent_34%)]" />
+                        <div className="relative flex max-w-md flex-col items-center text-center">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
+                                <LoaderCircle className="h-6 w-6 animate-spin text-emerald-300" aria-hidden="true" />
+                            </div>
+                            <h2 className="type-title-2 mt-7 text-white">{intakeText.starting.title}</h2>
+                            <p className="type-body mt-3 max-w-sm text-zinc-400">{intakeText.starting.description}</p>
+                        </div>
+                    </div>
                 ) : null}
 
                 {intakeError ? (

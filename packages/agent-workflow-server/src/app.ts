@@ -1110,6 +1110,110 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.post('/api/projects/bootstrap', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const projectForbidden = requirePermission(user, 'project.create')
+    if (projectForbidden) return c.json(projectForbidden, 403)
+    const agentForbidden = requirePermission(user, 'agent.send_message')
+    if (agentForbidden) return c.json(agentForbidden, 403)
+
+    const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+    const projectBody = isObject(body.project) ? body.project : {}
+    const brief = isObject(body.brief) ? body.brief : {}
+    const projectId = typeof projectBody.id === 'string' ? projectBody.id.trim() : ''
+    const projectName = typeof projectBody.name === 'string' ? projectBody.name.trim() : ''
+    const projectFolderName = typeof body.projectName === 'string' ? body.projectName.trim() : ''
+    const createdAt = Number(projectBody.created_at)
+    const idea = typeof brief.idea === 'string' ? brief.idea.trim() : ''
+    if (!projectId || !projectName || !Number.isFinite(createdAt) || !idea) {
+      return c.json({ error: 'Invalid project bootstrap payload' }, 400)
+    }
+
+    try {
+      const [workspacePath, modelConfigId] = await Promise.all([
+        createManagedProjectWorkspacePath({
+          defaultWorkspacePath: options.defaultWorkspacePath,
+          userId: user.id,
+          projectName: projectFolderName || projectName,
+          projectId,
+        }),
+        resolveDefaultModelConfigId(
+          c.req.raw,
+          user,
+          undefined,
+          (request, requestUser, id) => dashboardRepository.modelConfigExists(request, requestUser, id),
+          (request, requestUser) => dashboardRepository.listModelConfigs(request, requestUser),
+        ),
+      ])
+      if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
+
+      const project = await dashboardRepository.upsertProject(c.req.raw, user, {
+        id: projectId,
+        name: projectName,
+        root_path: workspacePath,
+        created_at: createdAt,
+        runtime_snapshot: {
+          phase_name: 'starting',
+          ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
+          updated_at: Date.now(),
+        },
+      })
+      const languageValue = body.language ?? brief.language
+      const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
+      const session = beeGameSessions.start({
+        workspacePath,
+        projectId,
+        ...(modelConfigId ? { modelConfigId } : {}),
+        ...(language ? { language } : {}),
+        userId: user.id,
+        ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        userDataRoot: getCurrentUserDataRoot(c.req.raw),
+      })
+      await dashboardRepository.upsertSessionMetadata(
+        c.req.raw,
+        user,
+        beeGameSessions.metadata(session.id),
+      )
+
+      void beeGameSessions.sendWithDisplay(
+        session.id,
+        buildConfirmedBriefPrompt(brief),
+        {
+          displayText: idea,
+          displayKind: 'confirmed_brief',
+          taskType: 'full_build',
+          ...(language ? { language } : {}),
+          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        },
+      ).catch(error => {
+        console.error(`[BeeGame] Project bootstrap turn failed for ${projectId}:`, error)
+      })
+
+      return c.json({
+        project,
+        session,
+        binding: createProjectSessionBinding(
+          projectId,
+          session.id,
+          workspacePath,
+          language,
+        ),
+        task_id: session.id,
+        status: 'starting',
+        pipeline: { pipeline_id: session.id, status: 'starting' },
+      }, 202)
+    } catch (err) {
+      if (err instanceof ProjectQuotaExceededError) {
+        return c.json({
+          error: err.message,
+          limit: err.limit,
+          projectCount: err.projectCount,
+        }, 429)
+      }
+      return tracedRouteError(c, 'project.bootstrap', err)
+    }
+  })
+
   app.patch('/api/projects/:id', async c => {
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'project.create')
     if (forbidden) return c.json(forbidden, 403)
@@ -2865,21 +2969,29 @@ async function generateBeeGameIntakeOptions(input: {
   try {
   const requestPayload = {
     model,
-    temperature: 0.7,
+    temperature: 0.4,
+    max_tokens: 8_192,
     response_format: { type: 'json_object' },
-    stream: true,
+    stream: false,
+    // Intake is a short, structured planning task. Explicitly disable reasoning
+    // for the OpenAI-compatible formats used by supported providers so a model's
+    // default thinking mode cannot consume the final JSON output budget.
+    thinking: { type: 'disabled' },
+    enable_thinking: false,
+    chat_template_kwargs: { thinking: false, enable_thinking: false },
     messages: [
       {
         role: 'system',
         content: [
           'You are BeeGame intake planner.',
-          'You may reason internally before answering, but the final response must contain only the requested JSON contract. Never place private reasoning or a thinking summary inside the final JSON.',
+          'Do not emit analysis, reasoning, thinking tags, or a thinking summary. Return the requested JSON object directly.',
           'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
           'Return only JSON with this schema: maturity, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
           'maturity must be one of vague, directional, concrete.',
           'Always return exactly 3 valid, meaningfully distinct game directions for the user to choose from, including when the submitted idea is already concrete.',
           'Do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty, and set recommended_next_step="choose_direction".',
-          'Each option must include id, title, projectFolderName, pitch, gameplay, coreGameplayHypothesis, playerFirstMinute, whyFitsIdea, playablePrototype, validationTarget, risk, experienceSnapshot, coreMechanic, firstBuild, validationGoal, fit, firstPlayableValidation, riskComplexity, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+          'Each option must include id, title, projectFolderName, gameplay, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+          'Keep each option concise. BeeGame derives the expanded planning fields after the user chooses a direction; do not duplicate the same explanation across multiple fields.',
           'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
           'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
           'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
@@ -2897,20 +3009,7 @@ async function generateBeeGameIntakeOptions(input: {
           'These selected production settings must fit the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
           'Choose production settings from the actual game direction and user constraints, not from a fixed menu order or default.',
           'Do not output Auto or placeholder values for recommended metadata.',
-          'coreGameplayHypothesis must state the playable assumption being tested, in the form "if players do X under Y pressure, Z fun/decision should emerge".',
-          'experienceSnapshot must let the user imagine what they will see and feel on screen when the first playable exists.',
-          'playerFirstMinute must describe exactly what the player does in the first 60 seconds.',
-          'whyFitsIdea must explain how this game mode preserves the user request and constraints.',
-          'playablePrototype must describe the concrete first playable slice for this mode, including scene/map, player actions, feedback, win/fail state, and what is intentionally deferred until planning.',
-          'validationTarget must describe what demand, fun, control feel, clarity, or risk this game mode validates.',
-          'coreMechanic must name the main repeatable interaction or decision, not a production task.',
-          'firstBuild must describe the first target for this direction in a concise way. It should help the user choose the game mode, not replace the later design documents.',
-          'validationGoal must describe what design assumption this playable validates.',
-          'risk must describe the largest gameplay or delivery risk in plain language.',
           'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
-          'fit must explain why this direction suits the user idea.',
-          'firstPlayableValidation must explain what the first playable build validates.',
-          'riskComplexity must explain the main delivery risk and complexity level.',
           'Avoid generic production strategy titles. Titles should name an actual game mode.',
           'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
           'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
@@ -2963,7 +3062,12 @@ async function generateBeeGameIntakeOptions(input: {
           { role: 'assistant', content: firstContent },
           {
             role: 'user',
-            content: 'The previous final response did not satisfy the required JSON contract. Keep any internal reasoning private and return only one complete corrected JSON object now.',
+            content: [
+              'The previous final response did not satisfy the required JSON contract.',
+              `Validation result: ${toErrorMessage(initialError)}`,
+              'Correct the invalid or missing options and return exactly 3 valid, meaningfully distinct options.',
+              'Return only one complete corrected JSON object now. Do not emit analysis, reasoning, thinking tags, or a thinking summary.',
+            ].join('\n'),
           },
         ],
       }),
@@ -3205,8 +3309,9 @@ function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis 
   const expectedOptionCount = 3
   if (normalized.length < expectedOptionCount) {
     const keys = Object.keys(parsed).join(', ') || 'none'
+    const reason = rejectedReasons.slice(0, expectedOptionCount).join('; ')
     throw new Error(
-      `Model intake response did not include enough valid options. Expected ${expectedOptionCount}, received ${normalized.length}. Parsed keys: ${keys}`,
+      `Model intake response did not include enough valid options. Expected ${expectedOptionCount}, received ${normalized.length} from ${directOptions.length} returned. Parsed keys: ${keys}${reason ? `. Rejected: ${reason}` : ''}`,
     )
   }
   return {
@@ -3850,6 +3955,27 @@ function deriveBeeGameRuntimeStatus(
       updatedAt,
       activeAgents: [],
       agentStatus: 'failed',
+    }
+  }
+  if (getBeeGamePayloadString(latest, 'type') === 'credit.reserve_failed') {
+    return {
+      phase: 'paused',
+      nextAction: latest?.text || 'BeeGame could not reserve credits for this build',
+      updatedAt,
+      activeAgents: [],
+      agentStatus: 'failed',
+    }
+  }
+  if (
+    events.some(event => event.type === 'session.started') &&
+    !events.some(event => event.type === 'turn.started')
+  ) {
+    return {
+      phase: 'starting',
+      nextAction: 'BeeGame is starting the project',
+      updatedAt,
+      activeAgents: ['beegame'],
+      agentStatus: 'starting',
     }
   }
   return {
@@ -4877,15 +5003,7 @@ function registerBeeGameSessionRoutes(
       const brief = isObject(body.brief) ? body.brief : body
       const idea = typeof brief.idea === 'string' ? brief.idea.trim() : ''
       if (!idea) return c.json({ error: 'Missing field: brief.idea' }, 400)
-      const prompt = JSON.stringify({
-        kind: 'confirmed_build_brief',
-        idea,
-        selected_option: isObject(brief.option) ? brief.option : null,
-        settings: isObject(brief.settings) ? brief.settings : null,
-        confirmed_gdd: brief.confirmedGdd ?? null,
-        build_source: brief.buildSource ?? null,
-        analysis_id: brief.analysisId ?? null,
-      }, null, 2)
+      const prompt = buildConfirmedBriefPrompt(brief)
       return c.json(await beeGameSessions.sendWithDisplay(c.req.param('id'), prompt, {
         displayText: idea,
         displayKind: 'confirmed_brief',
@@ -5231,6 +5349,18 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
       : {}),
     created_at: Number(body.created_at),
   }
+}
+
+function buildConfirmedBriefPrompt(brief: JsonObject): string {
+  return JSON.stringify({
+    kind: 'confirmed_build_brief',
+    idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
+    selected_option: isObject(brief.option) ? brief.option : null,
+    settings: isObject(brief.settings) ? brief.settings : null,
+    confirmed_gdd: brief.confirmedGdd ?? null,
+    build_source: brief.buildSource ?? null,
+    analysis_id: brief.analysisId ?? null,
+  }, null, 2)
 }
 
 async function readJson(request: Request, maxBytes?: number): Promise<JsonObject> {

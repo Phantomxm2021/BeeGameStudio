@@ -119,10 +119,13 @@ describe('useWebSocket with MessageValidator integration', () => {
   });
 
   describe('BeeGame adapter polling', () => {
-    it('closes the chat transport when adapter polling fails', async () => {
+    it('recovers adapter polling without closing the active chat transport', async () => {
       beeGameAdapterState.enabled = true;
-      beeGameAdapterMock.pollMessages.mockRejectedValue(new Error('Session not found'));
+      beeGameAdapterMock.pollMessages
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValue({ lastEventId: 0, messages: [] });
       const onClose = vi.fn();
+      const onOpen = vi.fn();
       const showToastError = vi.fn();
 
       const { result } = renderHook(() =>
@@ -130,15 +133,53 @@ describe('useWebSocket with MessageValidator integration', () => {
           projectId: 'project-1',
           onMessage: vi.fn(),
           onClose,
+          onOpen,
           showToastError,
         })
       );
 
       await waitFor(() => {
-        expect(result.current.state).toBe('failed');
-        expect(onClose).toHaveBeenCalled();
-        expect(showToastError).toHaveBeenCalledWith('BeeGame 事件同步失败，请检查 dashboard 后端服务');
+        expect(result.current.state).toBe('reconnecting');
       });
+      await waitFor(() => {
+        expect(result.current.state).toBe('connected');
+      }, { timeout: 2_000 });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      expect(showToastError).not.toHaveBeenCalled();
+    });
+
+    it('re-synchronizes project state after an established poll connection recovers', async () => {
+      beeGameAdapterState.enabled = true;
+      beeGameAdapterMock.pollMessages
+        .mockResolvedValueOnce({
+          lastEventId: 1,
+          messages: [{
+            type: 'token',
+            task_id: 'task-1',
+            sender: 'agent',
+            content: 'progress',
+          }],
+        })
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValue({ lastEventId: 1, messages: [] });
+      const onOpen = vi.fn();
+      const onClose = vi.fn();
+
+      const { result } = renderHook(() =>
+        useWebSocket({
+          projectId: 'project-1',
+          onMessage: vi.fn(),
+          onOpen,
+          onClose,
+        })
+      );
+
+      await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(result.current.state).toBe('reconnecting'), { timeout: 2_000 });
+      await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+      expect(result.current.state).toBe('connected');
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 

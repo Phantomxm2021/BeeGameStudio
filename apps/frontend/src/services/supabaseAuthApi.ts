@@ -454,13 +454,19 @@ export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession |
 
 async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | null> {
   if (isHttpOnlySessionsEnabled()) {
-    const response = await fetch(buildSameOriginApiUrl('/api/auth/session/refresh'), {
-      method: 'POST',
-      credentials: 'include',
-    });
+    const response = await fetchAuthRefreshWithRetry(
+      buildSameOriginApiUrl('/api/auth/session/refresh'),
+      {
+        method: 'POST',
+        credentials: 'include',
+      },
+    );
     if (!response.ok) {
-      httpOnlySessionUser = null;
-      return null;
+      if (isDefinitiveAuthenticationFailure(response.status)) {
+        httpOnlySessionUser = null;
+        return null;
+      }
+      throw new Error(`Secure session refresh is temporarily unavailable (${response.status})`);
     }
     const value = await response.json() as unknown;
     const session = toCookieSession(value);
@@ -471,19 +477,25 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
   if (!session?.refreshToken || !supabaseUrl || !anonKey) return null;
-  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/token?grant_type=refresh_token`, {
-    method: 'POST',
-    headers: {
-      apikey: anonKey,
-      'content-type': 'application/json',
+  const response = await fetchAuthRefreshWithRetry(
+    `${trimTrailingSlash(supabaseUrl)}/auth/v1/token?grant_type=refresh_token`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: anonKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        refresh_token: session.refreshToken,
+      }),
     },
-    body: JSON.stringify({
-      refresh_token: session.refreshToken,
-    }),
-  });
+  );
   if (!response.ok) {
-    clearSupabaseSession();
-    return null;
+    if (isDefinitiveAuthenticationFailure(response.status)) {
+      clearSupabaseSession();
+      return null;
+    }
+    throw new Error(`Supabase session refresh is temporarily unavailable (${response.status})`);
   }
   const refreshed = toSupabaseSession(await response.json());
   saveSupabaseSession({
@@ -494,6 +506,30 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
     },
   });
   return getStoredSupabaseSession();
+}
+
+async function fetchAuthRefreshWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+): Promise<Response> {
+  const retryDelays = [250, 750];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      lastError = error;
+      const delay = retryDelays[attempt];
+      if (delay === undefined) break;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
+function isDefinitiveAuthenticationFailure(status: number): boolean {
+  return status === 400 || status === 401 || status === 403;
 }
 
 export function clearSupabaseSession(): void {

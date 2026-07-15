@@ -1811,6 +1811,142 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('isolates same-name projects by their server-owned project ids', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: 'user@example.com', role: 'developer' },
+    })
+
+    try {
+      const create = (projectId: string) => app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          projectName: 'Shared Display Name',
+        }),
+      })
+      const firstResponse = await create('project-one')
+      const secondResponse = await create('project-two')
+
+      expect(firstResponse.status).toBe(200)
+      expect(secondResponse.status).toBe(200)
+      const first = await firstResponse.json()
+      const second = await secondResponse.json()
+      expect(first.cwd).not.toBe(second.cwd)
+      expect(first.cwd).toContain(`${join('users', 'user-example.com', 'shared-display-name')}--`)
+      expect(second.cwd).toContain(`${join('users', 'user-example.com', 'shared-display-name')}--`)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('bootstraps a project atomically and exposes the starting state before the build turn completes', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-bootstrap-'))
+    const fake = createFakeRunner()
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+      currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+    })
+
+    try {
+      const response = await app.request('/api/projects/bootstrap', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          project: {
+            id: 'project-atomic-bootstrap',
+            name: 'Atomic Bootstrap',
+            created_at: Date.now(),
+          },
+          projectName: 'atomic-bootstrap',
+          language: 'en',
+          brief: {
+            idea: 'A confirmed product brief',
+            option: { id: 'selected-option', title: 'Selected option' },
+            settings: { dimension: '3D' },
+          },
+        }),
+      })
+
+      expect(response.status).toBe(202)
+      const body = await response.json()
+      expect(body).toEqual(expect.objectContaining({
+        status: 'starting',
+        project: expect.objectContaining({
+          id: 'project-atomic-bootstrap',
+          root_path: expect.stringContaining('atomic-bootstrap--'),
+          runtime_snapshot: expect.objectContaining({ phase_name: 'starting' }),
+        }),
+        session: expect.objectContaining({
+          id: expect.stringContaining('beegame_'),
+          cwd: expect.stringContaining('atomic-bootstrap--'),
+        }),
+        binding: expect.objectContaining({ projectId: 'project-atomic-bootstrap' }),
+      }))
+
+      const projects = await (await app.request('/api/projects')).json()
+      expect(projects).toHaveLength(1)
+      expect(projects[0]).toEqual(expect.objectContaining({
+        id: 'project-atomic-bootstrap',
+        root_path: body.project.root_path,
+      }))
+      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      expect(String(fake.runtimes[0]?.submits[0]?.prompt ?? '')).toContain('confirmed_build_brief')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects concurrent BeeGame sessions that target one workspace', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const manager = new BeeGameSessionManager(createFakeRunner().runner, projectsRoot)
+
+    try {
+      const first = manager.start({
+        workspacePath: workspace,
+        userId: DEFAULT_LOCAL_USER_ID,
+      })
+
+      expect(() => manager.start({
+        workspacePath: workspace,
+        userId: DEFAULT_LOCAL_USER_ID,
+      })).toThrow(`Workspace is already leased by active BeeGame session ${first.id}`)
+
+      manager.stop(first.id)
+      expect(manager.start({
+        workspacePath: workspace,
+        userId: DEFAULT_LOCAL_USER_ID,
+      }).status).toBe('running')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('reuses the active workspace lease for an idempotent project start', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const manager = new BeeGameSessionManager(createFakeRunner().runner, projectsRoot)
+
+    try {
+      const input = {
+        workspacePath: workspace,
+        userId: DEFAULT_LOCAL_USER_ID,
+        projectId: 'project-idempotent-start',
+      }
+      const first = manager.start(input)
+      const retried = manager.start(input)
+
+      expect(retried.id).toBe(first.id)
+      expect(manager.list()).toHaveLength(1)
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rejects starting a BeeGame session directly in the default Projects root', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-projects-'))
     const fake = createFakeRunner()

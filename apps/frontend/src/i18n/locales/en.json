@@ -36,6 +36,10 @@
         "confirmGenerate": "Confirm generation",
         "confirmBuild": "Confirm build"
       },
+      "starting": {
+        "title": "Starting project",
+        "description": "Creating an isolated workspace and connecting the build session."
+      },
       "clarification": {
         "title": "Clarification",
         "freeformLabel": "Additional notes",
@@ -736,12 +740,17 @@
         "build": "Build Preview"
       },
       "turn": {
+        "starting": "Starting",
         "running": "Working",
         "waiting_approval": "Waiting for approval",
         "paused": "Needs attention",
         "offline": "Offline",
         "finished": "Ready for review",
         "idle": "Ready"
+      },
+      "starting": {
+        "title": "Starting your project",
+        "description": "Preparing an isolated workspace and build session. This will only take a moment."
       },
       "creditQuote": {
         "settlementNote": "Edits, continue requests, and asset integrations also use credits. Final billing is based on this turn’s actual token and tool usage, and unused credits are refunded automatically.",

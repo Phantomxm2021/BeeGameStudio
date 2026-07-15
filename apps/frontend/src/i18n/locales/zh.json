@@ -36,6 +36,10 @@
         "confirmGenerate": "确认生成",
         "confirmBuild": "确认构建"
       },
+      "starting": {
+        "title": "正在启动项目",
+        "description": "正在创建独立工作区并连接构建会话，很快就好。"
+      },
       "clarification": {
         "title": "需求补充",
         "freeformLabel": "补充说明",
@@ -736,12 +740,17 @@
         "build": "构建预览"
       },
       "turn": {
+        "starting": "正在启动",
         "running": "构建中",
         "waiting_approval": "等待确认",
         "paused": "需要处理",
         "offline": "离线",
         "finished": "待复核",
         "idle": "就绪"
+      },
+      "starting": {
+        "title": "正在启动项目",
+        "description": "正在准备独立工作区与构建会话，很快就好。"
       },
       "creditQuote": {
         "settlementNote": "修改、继续任务和资源集成也会计费；实际扣费以本轮 token 和工具使用为准，未使用部分自动退回。",

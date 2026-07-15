@@ -350,6 +350,21 @@ describe('DashboardView runtime loading', () => {
         expect(loadAgents).not.toHaveBeenCalled();
     });
 
+    it('covers the dashboard while the server is starting the project runtime', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'starting',
+            blocked: false,
+            approval_required: false,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const loadingCover = await screen.findByRole('status', { name: '正在启动项目' });
+        expect(loadingCover).toHaveClass('fixed', 'inset-0', 'z-[200]');
+        expect(loadingCover).toHaveTextContent('正在准备独立工作区与构建会话，很快就好。');
+    });
+
     it('does not expose internal reset controls through the production sidebar', async () => {
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 

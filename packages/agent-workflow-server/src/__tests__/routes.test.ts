@@ -2695,10 +2695,10 @@ describe('agent workflow server routes', () => {
       expect(systemPrompt).toContain('understand the game request before proposing game modes')
       expect(systemPrompt).toContain('title must be a game mode name')
       expect(systemPrompt).toContain('gameplay must explain the playable rules')
-      expect(systemPrompt).toContain('coreGameplayHypothesis')
-      expect(systemPrompt).toContain('whyFitsIdea')
-      expect(systemPrompt).toContain('playablePrototype')
-      expect(systemPrompt).toContain('validationTarget')
+      expect(systemPrompt).not.toContain('coreGameplayHypothesis must')
+      expect(systemPrompt).not.toContain('whyFitsIdea must')
+      expect(systemPrompt).not.toContain('playablePrototype must')
+      expect(systemPrompt).not.toContain('validationTarget must')
       expect(systemPrompt).toContain('game mode')
       expect(systemPrompt).toContain('target briefs')
       expect(systemPrompt).toContain('not full design documents')
@@ -2727,7 +2727,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('analyzes BeeGame intake from streamed model deltas', async () => {
+  test('handles streamed deltas when a provider ignores the non-streaming intake request', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2791,7 +2791,9 @@ describe('agent workflow server routes', () => {
       expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
         model: 'balanced-model',
         response_format: { type: 'json_object' },
-        stream: true,
+        stream: false,
+        thinking: { type: 'disabled' },
+        enable_thinking: false,
       }))
       expect(intake).toEqual(expect.objectContaining({
         maturity: 'concrete',
@@ -2875,10 +2877,16 @@ describe('agent workflow server routes', () => {
 
       expect(res.status).toBe(200)
       expect(requestBodies).toHaveLength(2)
-      expect(requestBodies[0]).not.toHaveProperty('enable_thinking')
+      expect(requestBodies[0]).toEqual(expect.objectContaining({
+        stream: false,
+        thinking: { type: 'disabled' },
+        enable_thinking: false,
+      }))
       expect(requestBodies[1]).toEqual(expect.objectContaining({
         model: 'balanced-model',
-        stream: true,
+        stream: false,
+        thinking: { type: 'disabled' },
+        enable_thinking: false,
         temperature: 0.2,
       }))
       const repairMessages = requestBodies[1]?.messages
@@ -3476,6 +3484,92 @@ describe('agent workflow server routes', () => {
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({ error: 'Intake model behavior is server-owned' })
       expect(modelRequestBody).toEqual({})
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('disables model thinking for server-owned intake generation', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    let modelRequestBody: Record<string, unknown> = {}
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      modelRequestBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ options: makeModelOptions('non_reasoning_mode') }) } }],
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'Generate selectable game directions' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(modelRequestBody.stream).toBe(false)
+      expect(modelRequestBody.max_tokens).toBe(8_192)
+      expect(modelRequestBody.thinking).toEqual({ type: 'disabled' })
+      expect(modelRequestBody.enable_thinking).toBe(false)
+      expect(modelRequestBody.chat_template_kwargs).toEqual({ thinking: false, enable_thinking: false })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('gives the finalization retry precise option validation feedback', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Primary LLM',
+        provider: 'openai-compatible',
+        baseUrl: 'https://llm.example.invalid/v1',
+        apiKey: 'sk-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const requestBodies: Array<Record<string, unknown>> = []
+    const invalidOptions = makeModelOptions('repair_mode').map((option, index) =>
+      index === 0 ? option : { ...option, recommendedStyle: 'unsupported-style' },
+    )
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      requestBodies.push(JSON.parse(String(init?.body || '{}')) as Record<string, unknown>)
+      const options = requestBodies.length === 1 ? invalidOptions : makeModelOptions('repaired_mode')
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ options }) } }] })
+    }) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'Generate selectable game directions' }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(requestBodies).toHaveLength(2)
+      const repairMessages = requestBodies[1]?.messages as Array<{ role?: string; content?: string }>
+      expect(repairMessages.at(-1)?.content).toContain('received 1 from 3 returned')
+      expect(repairMessages.at(-1)?.content).toContain('recommendedStyle')
+      expect(requestBodies[1]?.thinking).toEqual({ type: 'disabled' })
     } finally {
       globalThis.fetch = originalFetch
     }

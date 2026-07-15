@@ -1645,6 +1645,10 @@ describe('LandingView bootstrap submission', () => {
         expect(mockLoadCurrentUser).toHaveBeenCalledTimes(1);
         fireEvent.click(screen.getByRole('button', { name: '确认构建' }));
 
+        const startingCover = await screen.findByRole('status', { name: '正在启动项目' });
+        expect(startingCover).toHaveClass('fixed', 'inset-0', 'z-[300]');
+        expect(startingCover).toHaveTextContent('正在创建独立工作区并连接构建会话，很快就好。');
+        expect(screen.queryByRole('dialog', { name: '启动构建' })).not.toBeInTheDocument();
         await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
         const [, clarification, brief] = onStart.mock.calls[0];
         expect(clarification).toBeUndefined();
