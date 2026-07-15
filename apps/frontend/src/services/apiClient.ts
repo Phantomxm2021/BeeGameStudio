@@ -80,7 +80,6 @@ export const authenticatedFetch = (
     credentials: init.credentials ?? 'include',
     headers: await buildAuthHeadersAsync(init.headers, isTrustedApiRequest(nextInput)),
   });
-  if (retriedResponse.status === 401) notifyAuthenticationRequired();
   return retriedResponse;
 })();
 
@@ -122,6 +121,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error: AxiosError) => {
+    let authenticationIsDefinitivelyInvalid = false;
     if (
       error.response?.status === 401 &&
       (isHttpOnlySessionsEnabled() || getSupabaseAccessToken() || !getEnvAuthToken()) &&
@@ -132,11 +132,22 @@ apiClient.interceptors.response.use(
       if (refreshed) {
         markRetriedRequest(error.config);
         error.config.headers = error.config.headers ?? {};
-        error.config.headers.Authorization = `Bearer ${refreshed.accessToken}`;
+        // Cookie sessions deliberately never expose the access token. Do not
+        // synthesize an empty Authorization header: it would prevent the
+        // server from injecting the valid token recovered from the cookie.
+        if (refreshed.accessToken) {
+          error.config.headers.Authorization = `Bearer ${refreshed.accessToken}`;
+        }
         return apiClient.request(error.config);
       }
+      authenticationIsDefinitivelyInvalid = true;
+    } else if (
+      error.response?.status === 401 &&
+      (!error.config || !isRetriedRequest(error.config))
+    ) {
+      authenticationIsDefinitivelyInvalid = true;
     }
-    if (error.response?.status === 401) notifyAuthenticationRequired();
+    if (authenticationIsDefinitivelyInvalid) notifyAuthenticationRequired();
     const hideToast = getHeaderValue(error.config?.headers, 'Hide-Error-Toast') === 'true';
     const hideErrorLog = getHeaderValue(error.config?.headers, 'Hide-Error-Log') === 'true';
     if (!hideErrorLog) {

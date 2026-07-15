@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { evaluatePersistedDeliveryAcceptance } from './delivery-completion-gate'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -99,6 +100,7 @@ export type BeeGameDeploymentManagerOptions = {
   runner?: BeeGameDeploymentRunner
   outputCandidates?: string[]
   publisher?: BeeGameDeploymentPublisher
+  requireAcceptedDelivery?: boolean
 }
 
 type PackageManifest = {
@@ -127,6 +129,7 @@ export class BeeGameDeploymentManager {
   private readonly runner: BeeGameDeploymentRunner
   private readonly outputCandidates: string[]
   private readonly publisher?: BeeGameDeploymentPublisher
+  private readonly requireAcceptedDelivery: boolean
 
   constructor(options: BeeGameDeploymentManagerOptions) {
     this.deploymentsRoot = join(options.dataRoot, 'deployments')
@@ -135,6 +138,7 @@ export class BeeGameDeploymentManager {
     this.runner = options.runner ?? runDeploymentCommand
     this.outputCandidates = options.outputCandidates ?? DEFAULT_OUTPUT_CANDIDATES
     this.publisher = options.publisher
+    this.requireAcceptedDelivery = options.requireAcceptedDelivery ?? false
   }
 
   async list(sessionId?: string): Promise<BeeGameDeploymentRecord[]> {
@@ -236,6 +240,18 @@ export class BeeGameDeploymentManager {
     await this.saveRecord(record)
 
     try {
+      if (this.requireAcceptedDelivery) {
+        const acceptance = evaluatePersistedDeliveryAcceptance(workspacePath)
+        if (!acceptance.allowed || acceptance.outcome !== 'passed') {
+          record = this.fail(
+            record,
+            acceptance.issues[0] ??
+              'Deployment requires a passed native delivery acceptance report.',
+          )
+          await this.saveRecord(record)
+          return record
+        }
+      }
       const plan = createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)

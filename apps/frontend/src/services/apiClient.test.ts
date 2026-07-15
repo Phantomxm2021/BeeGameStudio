@@ -3,6 +3,7 @@ import { AxiosError } from 'axios';
 
 import {
   API_BASE_URL,
+  AUTHENTICATION_REQUIRED_EVENT,
   authenticatedFetch,
   buildAuthHeaders,
   buildUnauthorizedMessage,
@@ -175,6 +176,102 @@ describe('apiClient defaults', () => {
 
     const replayHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
     expect(replayHeaders.get('Authorization')).toBe('Bearer fresh-token');
+  });
+
+  it('does not log out globally when a refreshed request is still unauthorized', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('window', new EventTarget());
+    const authenticationRequired = vi.fn();
+    window.addEventListener(AUTHENTICATION_REQUIRED_EVENT, authenticationRequired);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session/refresh')) {
+        return Response.json({
+          authenticated: true,
+          expires_at: Date.now() + 3600_000,
+          user: { id: 'cookie-user' },
+        });
+      }
+      return new Response(JSON.stringify({ error: 'route-specific unauthorized' }), { status: 401 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await authenticatedFetch('/api/projects/project-1/preview');
+
+    expect(response.status).toBe(401);
+    expect(authenticationRequired).not.toHaveBeenCalled();
+    window.removeEventListener(AUTHENTICATION_REQUIRED_EVENT, authenticationRequired);
+  });
+
+  it('shares one cookie refresh across concurrent unauthorized requests', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    let refreshCalls = 0;
+    const attempts = new Map<string, number>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session/refresh')) {
+        refreshCalls += 1;
+        await Promise.resolve();
+        return Response.json({
+          authenticated: true,
+          expires_at: Date.now() + 3600_000,
+          user: { id: 'cookie-user' },
+        });
+      }
+      const count = attempts.get(url) ?? 0;
+      attempts.set(url, count + 1);
+      return count === 0
+        ? new Response(null, { status: 401 })
+        : Response.json({ ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const responses = await Promise.all([
+      authenticatedFetch('/api/projects/project-1/runtime-state'),
+      authenticatedFetch('/api/projects/project-1/preview'),
+    ]);
+
+    expect(responses.every(response => response.ok)).toBe(true);
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('retries Axios cookie requests without an empty authorization header', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      authenticated: true,
+      expires_at: Date.now() + 3600_000,
+      user: { id: 'cookie-user' },
+    })));
+    let attempts = 0;
+    const adapter = vi.fn(async config => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new AxiosError(
+          'Request failed with status code 401',
+          AxiosError.ERR_BAD_REQUEST,
+          config,
+          {},
+          {
+            config,
+            data: { message: 'expired' },
+            headers: {},
+            status: 401,
+            statusText: 'Unauthorized',
+          },
+        );
+      }
+      return {
+        config,
+        data: { ok: true },
+        headers: {},
+        status: 200,
+        statusText: 'OK',
+      };
+    });
+
+    await apiClient.get('/api/current-user', { adapter });
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(adapter.mock.calls[1]?.[0]?.headers?.Authorization).toBeUndefined();
   });
 
   it('does not overwrite an explicit authorization header', () => {

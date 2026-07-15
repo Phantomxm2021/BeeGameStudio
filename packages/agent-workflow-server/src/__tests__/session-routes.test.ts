@@ -37,6 +37,7 @@ function createApp(
     supabaseAnonKey: 'anon-key',
     fetchImpl,
     sessionStorePath,
+    isOriginAllowed: origin => origin === 'http://127.0.0.1:62173',
   })
   return app
 }
@@ -118,6 +119,23 @@ describe('HttpOnly session routes', () => {
     expect(logoutResponse.headers.get('set-cookie')).toContain('Max-Age=0')
   })
 
+  it('allows cookie refresh from a separately hosted trusted dashboard origin', async () => {
+    const app = createApp(supabaseFetch())
+    const sessionResponse = await app.request('/api/auth/session', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', 'content-type': 'application/json' },
+      body: JSON.stringify({ access_token: 'access-token', refresh_token: 'refresh-token' }),
+    })
+    const cookie = (sessionResponse.headers.get('set-cookie') ?? '').split(';', 1)[0]
+
+    const refreshResponse = await app.request('/api/auth/session/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://127.0.0.1:62173', cookie },
+    })
+
+    expect(refreshResponse.status).toBe(200)
+  })
+
   it('persists a session across route registration', async () => {
     const storePath = await createSessionStorePath()
     const firstApp = createApp(supabaseFetch(), storePath)
@@ -169,7 +187,7 @@ describe('HttpOnly session routes', () => {
       .toBe(401)
   })
 
-  it('ignores expired persisted records', async () => {
+  it('ignores records whose refresh-capable session lifetime has expired', async () => {
     const storePath = await createSessionStorePath()
     process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString('base64')
     const sessionId = 'expired-session-id'
@@ -177,6 +195,7 @@ describe('HttpOnly session routes', () => {
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
       expiresAt: Date.now() - 1,
+      sessionExpiresAt: Date.now() - 1,
       user: { id: 'user-1', role: 'viewer' },
     }
     await Bun.write(storePath, JSON.stringify({
@@ -189,6 +208,34 @@ describe('HttpOnly session routes', () => {
     })
 
     expect(response.status).toBe(401)
+  })
+
+  it('refreshes an expired access token while the cookie session remains valid', async () => {
+    const storePath = await createSessionStorePath()
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString('base64')
+    const sessionId = 'refreshable-expired-access-token'
+    const record = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1,
+      sessionExpiresAt: Date.now() + 60_000,
+      user: { id: 'user-1', role: 'viewer' },
+    }
+    await Bun.write(storePath, JSON.stringify({
+      [sessionId]: encryptSecret(JSON.stringify(record), 'auth:session'),
+    }))
+
+    const app = createApp(supabaseFetch(), storePath)
+    const cookie = `${SESSION_COOKIE_NAME}=${sessionId}`
+    expect((await app.request('/api/auth/session', { headers: { cookie } })).status).toBe(200)
+
+    const refreshResponse = await app.request('/api/auth/session/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', cookie },
+    })
+
+    expect(refreshResponse.status).toBe(200)
+    expect(await refreshResponse.json()).toMatchObject({ authenticated: true })
   })
 
   it('leaves legacy behavior untouched when the flag is disabled', async () => {

@@ -200,6 +200,42 @@ describe('BeeGame skills store', () => {
     )).rejects.toThrow()
   })
 
+  test('preserves nested reference documents across storage reload and materialization', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-nested-references-'))
+    const userId = 'reference-owner'
+    importUserSkill(userId, {
+      files: parseSkillZipPackage(createSkillZip({
+        'SKILL.md': [
+          '---',
+          'name: nested-references',
+          'description: Uses a nested reference document.',
+          '---',
+          '',
+          '# Nested references',
+        ].join('\n'),
+        'references/input/touch.md': '# Touch contract',
+      })),
+    }, { dataDir })
+
+    const reloaded = listUserSkills(userId, { dataDir })
+    expect(reloaded[0]?.files.map(file => file.path)).toEqual([
+      'references/input/touch.md',
+      'SKILL.md',
+    ])
+
+    materializeUserSkills(reloaded, { dataDir })
+    await expect(readFile(join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      'user-nested-references',
+      'references',
+      'input',
+      'touch.md',
+    ), 'utf8')).resolves.toContain('# Touch contract')
+  })
+
   test('materializes built-in skills into the isolated runtime config', async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-builtins-'))
     const sourceDir = join(dataDir, 'source-builtins')

@@ -204,6 +204,14 @@ export type BeeGameApprovedOutboundTargets = Partial<
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   signal: AbortSignal
+  /**
+   * Enables the native Claude Code delivery stop hook for this turn. The hook
+   * runs inside the same QueryEngine session; BeeGame does not schedule a
+   * second repair turn or maintain a parallel delivery state machine.
+   */
+  deliveryValidationRequired?: boolean
+  /** Validate an edit/continue turn only when it actually changed project files. */
+  deliveryValidationOnMutation?: boolean
   onMessage(message: DashboardSDKMessage): void
   requestPermission(
     request: DashboardPermissionRequest,
@@ -797,6 +805,9 @@ export class BeeGameSessionManager {
       creditReservation,
       creditPolicy,
       preparedPrompt.attachmentDirectory,
+      display?.displayKind === 'confirmed_brief' ||
+        display?.displayKind === 'direct_build',
+      display?.taskType === 'edit_turn' || display?.taskType === 'continue_turn',
     )
     return cloneSession(record.session)
     } catch (error) {
@@ -912,6 +923,8 @@ export class BeeGameSessionManager {
     creditReservation?: CreditReservation,
     creditPolicy?: BeeGameCreditTaskPolicy,
     attachmentDirectory?: string,
+    deliveryValidationRequired = false,
+    deliveryValidationOnMutation = false,
   ): Promise<void> {
     let shouldRefundReservation = Boolean(creditReservation)
     try {
@@ -939,7 +952,14 @@ export class BeeGameSessionManager {
       })
       record.runner = runner
       try {
-        await this.submitToRunner(record, runner, prompt, signal)
+        await this.submitToRunner(
+          record,
+          runner,
+          prompt,
+          signal,
+          deliveryValidationRequired,
+          deliveryValidationOnMutation,
+        )
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
           const hasFinalResult = hasNativeFinalResult(record.events, turnId)
@@ -1036,12 +1056,16 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
+    deliveryValidationRequired: boolean,
+    deliveryValidationOnMutation: boolean,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
     await runner.submit({
       prompt,
       signal,
+      deliveryValidationRequired,
+      deliveryValidationOnMutation,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
         if (isSDKExecutionError(message)) {

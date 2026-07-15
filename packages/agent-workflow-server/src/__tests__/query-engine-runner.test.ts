@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   closeBeeGameRuntimeDispatcher,
   createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
   ensureBeeGameMacroGlobals,
   mergeManagedAgentDefinitions,
+  resolveBeeGameSkillReadRoots,
   type MutableAppState,
   stopRunningLocalShellTasks,
 } from '../beegame/query-engine-runner'
@@ -24,12 +28,12 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
   })
 
-  test('allows read-only access to the materialized skill root without granting edit access', () => {
+  test('allows read-only access to runtime and trusted built-in skill roots without granting edit access', () => {
     const context = createBeeGameToolPermissionContext({
       mode: 'default',
       alwaysAllowRules: { session: ['Read(/existing/reference/**)'] },
       isBypassPermissionsModeAvailable: true,
-    }, '/runtime/skills')
+    }, ['/runtime/skills', '/platform/builtin-skills'])
 
     expect(context).toMatchObject({
       mode: 'acceptEdits',
@@ -37,11 +41,34 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         session: [
           'Read(/existing/reference/**)',
           'Read(/runtime/skills/**)',
+          'Read(/platform/builtin-skills/**)',
         ],
       },
       isBypassPermissionsModeAvailable: false,
     })
     expect(JSON.stringify(context)).not.toContain('Edit(/runtime/skills')
+    expect(JSON.stringify(context)).not.toContain('Edit(/platform/builtin-skills')
+  })
+
+  test('derives canonical skill roots from the current session environment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-skill-read-roots-'))
+    const configDir = join(root, 'user-runtime')
+    const runtimeSkillsDir = join(configDir, 'skills')
+    const builtinSkillsDir = join(root, 'builtin-skills')
+    await Promise.all([
+      mkdir(runtimeSkillsDir, { recursive: true }),
+      mkdir(builtinSkillsDir, { recursive: true }),
+    ])
+    try {
+      expect(await resolveBeeGameSkillReadRoots({
+        BEEGAME_CONFIG_DIR: configDir,
+      }, builtinSkillsDir)).toEqual([
+        await realpath(runtimeSkillsDir),
+        await realpath(builtinSkillsDir),
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test('injects managed validators while preserving unrelated project agents', () => {

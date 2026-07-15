@@ -25,7 +25,13 @@ export type SerializedQueryEngineStartInput = Omit<
 
 export type QueryEngineParentMessage =
   | { type: 'runtime.init'; input: SerializedQueryEngineStartInput }
-  | { type: 'turn.submit'; turnId: string; prompt: BeeGamePromptInput }
+  | {
+    type: 'turn.submit'
+    turnId: string
+    prompt: BeeGamePromptInput
+    deliveryValidationRequired?: boolean
+    deliveryValidationOnMutation?: boolean
+  }
   | { type: 'turn.stop'; turnId?: string }
   | {
     type: 'permission.resolve'

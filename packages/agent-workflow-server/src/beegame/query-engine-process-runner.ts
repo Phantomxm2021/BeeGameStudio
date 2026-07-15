@@ -111,7 +111,17 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
         finalize()
         originalReject(error)
       }
-      this.send({ type: 'turn.submit', turnId, prompt: input.prompt })
+      this.send({
+        type: 'turn.submit',
+        turnId,
+        prompt: input.prompt,
+        ...(input.deliveryValidationRequired
+          ? { deliveryValidationRequired: true }
+          : {}),
+        ...(input.deliveryValidationOnMutation
+          ? { deliveryValidationOnMutation: true }
+          : {}),
+      })
     })
   }
 

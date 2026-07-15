@@ -15,11 +15,14 @@ import { decryptSecret, encryptSecret } from '../security/secret-crypto'
 
 export const SESSION_COOKIE_NAME = 'beegame_session'
 const SESSION_RECORD_TYPE = 'auth:session'
+const SESSION_COOKIE_MAX_AGE_SECONDS = 28_800
+const SESSION_COOKIE_MAX_AGE_MS = SESSION_COOKIE_MAX_AGE_SECONDS * 1000
 
 type SessionRecord = {
   accessToken: string
   refreshToken: string
   expiresAt: number
+  sessionExpiresAt?: number
   user: BeeGameUserContext
 }
 
@@ -33,6 +36,7 @@ export type BeeGameSessionRouteOptions = {
   supabaseAnonKey?: string
   fetchImpl?: SessionFetch
   sessionStorePath?: string
+  isOriginAllowed?: (origin: string) => boolean
 }
 
 export type BeeGameSessionAuth = {
@@ -75,7 +79,9 @@ export function registerBeeGameSessionRoutes(
         persistRecords(sessionStorePath, records)
         return undefined
       }
-      if (record.expiresAt <= Date.now()) {
+      const sessionExpiresAt = record.sessionExpiresAt
+        ?? record.expiresAt + SESSION_COOKIE_MAX_AGE_MS
+      if (sessionExpiresAt <= Date.now()) {
         delete records[id]
         persistRecords(sessionStorePath, records)
         return undefined
@@ -118,18 +124,16 @@ export function registerBeeGameSessionRoutes(
     const user = toSessionUser(await userResponse.json())
     if (!user) return c.json({ error: 'Invalid Supabase user' }, 401)
     const expiresIn = readNumber(body, 'expires_in') ?? 3600
-    const id = saveRecord({
+    const now = Date.now()
+    const record: SessionRecord = {
       accessToken,
       refreshToken,
-      expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
+      expiresAt: now + Math.max(0, expiresIn - 30) * 1000,
+      sessionExpiresAt: now + SESSION_COOKIE_MAX_AGE_MS,
       user,
-    })
-    return new Response(JSON.stringify(sessionResponse({
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
-      user,
-    })), {
+    }
+    const id = saveRecord(record)
+    return new Response(JSON.stringify(sessionResponse(record)), {
       status: 200,
       headers: {
         'content-type': 'application/json',
@@ -139,7 +143,7 @@ export function registerBeeGameSessionRoutes(
   })
 
   app.post('/api/auth/session/refresh', async c => {
-    const csrfError = validateOrigin(c.req.raw)
+    const csrfError = validateOrigin(c.req.raw, options.isOriginAllowed)
     if (csrfError) return csrfError
     const current = getRecord(c.req.raw)
     if (!current || !supabaseUrl || !supabaseAnonKey) {
@@ -173,7 +177,7 @@ export function registerBeeGameSessionRoutes(
   })
 
   const logout = (request: Request): Response => {
-    const csrfError = validateOrigin(request)
+    const csrfError = validateOrigin(request, options.isOriginAllowed)
     if (csrfError) return csrfError
     const id = readCookie(request, SESSION_COOKIE_NAME)
     if (id) deleteRecord(sessionStorePath, id)
@@ -183,7 +187,12 @@ export function registerBeeGameSessionRoutes(
   app.delete('/api/auth/session/logout', c => logout(c.req.raw))
 
   return {
-    getAccessToken: request => getRecord(request)?.record.accessToken,
+    getAccessToken: request => {
+      const record = getRecord(request)?.record
+      return record && record.expiresAt > Date.now()
+        ? record.accessToken
+        : undefined
+    },
   }
 }
 
@@ -207,11 +216,18 @@ function toSessionUser(value: unknown): BeeGameUserContext | undefined {
   }
 }
 
-function validateOrigin(request: Request): Response | undefined {
+function validateOrigin(
+  request: Request,
+  isOriginAllowed?: (origin: string) => boolean,
+): Response | undefined {
   const origin = request.headers.get('origin')?.trim()
   if (!origin) return undefined
   try {
-    if (new URL(origin).origin !== new URL(request.url).origin) {
+    const normalizedOrigin = new URL(origin).origin
+    if (
+      normalizedOrigin !== new URL(request.url).origin &&
+      !isOriginAllowed?.(normalizedOrigin)
+    ) {
       return Response.json({ error: 'CSRF validation failed' }, { status: 403 })
     }
   } catch {
@@ -221,7 +237,7 @@ function validateOrigin(request: Request): Response | undefined {
 }
 
 function sessionCookie(id: string): string {
-  return `${SESSION_COOKIE_NAME}=${id}; Max-Age=28800; Secure; HttpOnly; SameSite=Lax; Path=/`
+  return `${SESSION_COOKIE_NAME}=${id}; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; Secure; HttpOnly; SameSite=Lax; Path=/`
 }
 
 function clearSessionResponse(status: number): Response {
@@ -322,5 +338,8 @@ function isValidSessionRecord(value: unknown): value is SessionRecord {
     typeof value.accessToken === 'string' && value.accessToken.length > 0 &&
     typeof value.refreshToken === 'string' && value.refreshToken.length > 0 &&
     typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt) &&
+    (value.sessionExpiresAt === undefined || (
+      typeof value.sessionExpiresAt === 'number' && Number.isFinite(value.sessionExpiresAt)
+    )) &&
     isRecord(value.user) && typeof value.user.id === 'string' && value.user.id.length > 0
 }

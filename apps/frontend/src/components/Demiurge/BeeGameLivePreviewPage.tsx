@@ -42,6 +42,7 @@ interface BeeGameLivePreviewPageProps {
     } | null;
     isSyncing: boolean;
     isInteractionLocked?: boolean;
+    isWorkspaceBusy?: boolean;
     buildReport?: BuildReportPayload | null;
     projectTarget?: string;
     deployments?: BeeGameDeploymentPayload[];
@@ -129,6 +130,7 @@ export function BeeGameLivePreviewPage({
     accountCreditBalance,
     isSyncing,
     isInteractionLocked = false,
+    isWorkspaceBusy = false,
     buildReport,
     projectTarget,
     deployments = [],
@@ -185,9 +187,9 @@ export function BeeGameLivePreviewPage({
             ? 'stopped'
             : getPreviewState(status, buildReport);
     const canShowPreview = previewState === 'live' && Boolean(previewUrl);
-    const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStartingPreview && !isStoppingPreview && !isInteractionLocked;
+    const canStartPreview = Boolean(onStartPreview) && !canShowPreview && !isStartingPreview && !isStoppingPreview && !isInteractionLocked && !isWorkspaceBusy;
     const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
-    const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked;
+    const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked && !isWorkspaceBusy;
     const buildErrorLogs = collectBuildErrorLogs(buildReport);
     const runtimeErrorLogs = previewConsoleEntries
         .filter(entry => entry.level === 'error' || entry.level === 'warn')
@@ -216,7 +218,7 @@ export function BeeGameLivePreviewPage({
         }
     };
     const handlePlay = async () => {
-        if (isInteractionLocked || isStartingPreview) return;
+        if (isInteractionLocked || isWorkspaceBusy || isStartingPreview) return;
         setStoppedPreviewUrl('');
         setStartingPreview(true);
         try {
@@ -226,12 +228,12 @@ export function BeeGameLivePreviewPage({
         }
     };
     const handleRestart = async () => {
-        if (isInteractionLocked) return;
+        if (isInteractionLocked || isWorkspaceBusy) return;
         setStoppedPreviewUrl('');
         await onRestartPreview?.();
     };
     const handleDeploy = async () => {
-        if (isInteractionLocked) return;
+        if (isInteractionLocked || isWorkspaceBusy) return;
         await onDeployProject?.();
     };
     const closeAccountSurfaces = () => {

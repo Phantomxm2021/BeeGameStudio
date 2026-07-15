@@ -273,6 +273,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             || phase === 'running'
             || phase === 'waiting_approval';
     }, [projectStatus?.next_action, projectStatus?.phase]);
+    const isProjectWorkspaceMutationLocked = isProjectInteractionLocked
+        || isProjectStarting
+        || isPipelineActive;
 
     // Derived state machine based on Requirements: 4.2
     const currentStatus = useMemo(() => {
@@ -299,7 +302,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     };
 
     const handleStartPreview = async () => {
-        if (!canManagePreview || isProjectInteractionLocked) return;
+        if (!canManagePreview || isProjectWorkspaceMutationLocked) return;
         try {
             await withProjectSyncTimeout(
                 api.startProjectPreview(projectId),
@@ -313,7 +316,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     };
 
     const handleRestartPreview = async () => {
-        if (!canManagePreview || isProjectInteractionLocked) return;
+        if (!canManagePreview || isProjectWorkspaceMutationLocked) return;
         try {
             await api.restartProjectPreview(projectId);
             setPreviewRefreshNonce(value => value + 1);
@@ -335,7 +338,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     };
 
     const handleDeployProject = async () => {
-        if (!canManageDeployment || isDeployingProject || isProjectInteractionLocked) return;
+        if (!canManageDeployment || isDeployingProject || isProjectWorkspaceMutationLocked) return;
         setDeployingProject(true);
         try {
             const deployment = await api.deployProject(projectId);
@@ -564,6 +567,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 accountCreditBalance={creditBalance}
                 isSyncing={isSyncing}
                 isInteractionLocked={isProjectInteractionLocked}
+                isWorkspaceBusy={isProjectWorkspaceMutationLocked}
                 buildReport={projectStatus?.build_report || null}
                 projectTarget={projectTargetLabel}
                 deployments={deploymentHistory}

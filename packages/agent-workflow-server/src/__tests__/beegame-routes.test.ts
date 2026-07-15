@@ -740,6 +740,25 @@ describe('beegame session routes', () => {
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-beegame-workspace-path')
   })
 
+  test('applies credentialed CORS to HttpOnly session refresh responses', async () => {
+    const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
+    process.env.BEEGAME_HTTPONLY_SESSIONS = '1'
+    try {
+      const app = createAgentWorkflowApp()
+      const response = await app.request('http://127.0.0.1:62174/api/auth/session/refresh', {
+        method: 'POST',
+        headers: { origin: 'http://127.0.0.1:62173' },
+      })
+
+      expect(response.status).toBe(401)
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:62173')
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true')
+    } finally {
+      if (originalFlag === undefined) delete process.env.BEEGAME_HTTPONLY_SESSIONS
+      else process.env.BEEGAME_HTTPONLY_SESSIONS = originalFlag
+    }
+  })
+
   test('rejects private model and MCP service targets without exposing the URL', async () => {
     const app = createAgentWorkflowApp()
     const privateTarget = 'http://127.0.0.1:43111/private?api_key=secret-value'
@@ -809,10 +828,14 @@ describe('beegame session routes', () => {
     const ideaWorkspace = await mkdtemp(join(tmpdir(), 'beegame-idea-policy-'))
     const buildWorkspace = await mkdtemp(join(tmpdir(), 'beegame-build-policy-'))
     const submittedPrompts: string[] = []
+    const deliveryValidationFlags: Array<boolean | undefined> = []
+    const mutationValidationFlags: Array<boolean | undefined> = []
     const manager = new BeeGameSessionManager({
       async start() {
         return {
           async submit(input) {
+            deliveryValidationFlags.push(input.deliveryValidationRequired)
+            mutationValidationFlags.push(input.deliveryValidationOnMutation)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -826,6 +849,8 @@ describe('beegame session routes', () => {
       async start() {
         return {
           async submit(input) {
+            deliveryValidationFlags.push(input.deliveryValidationRequired)
+            mutationValidationFlags.push(input.deliveryValidationOnMutation)
             submittedPrompts.push(typeof input.prompt === 'string'
               ? input.prompt
               : input.prompt.map(part => part.type === 'text' ? part.text : '').join('\n'))
@@ -845,6 +870,8 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[0]).toContain('Idea intake contract:')
       expect(submittedPrompts[0]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[0]).not.toContain('Game production planning contract:')
+      expect(deliveryValidationFlags[0]).toBe(false)
+      expect(mutationValidationFlags[0]).toBe(false)
       await expect(stat(join(ideaWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
 
       const buildSession = buildManager.start({ workspacePath: buildWorkspace, userId: DEFAULT_LOCAL_USER_ID })
@@ -873,6 +900,8 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[1]).not.toContain('Evidence-backed delivery contract:')
       expect(submittedPrompts[1]).not.toContain('Resource integration contract')
       expect(submittedPrompts[1]!.length).toBeLessThan(5_000)
+      expect(deliveryValidationFlags[1]).toBe(true)
+      expect(mutationValidationFlags[1]).toBe(false)
       await expect(stat(join(buildWorkspace, 'docs/production-brief.json'))).rejects.toThrow()
       await buildManager.sendWithDisplay(
         buildSession.id,
@@ -890,6 +919,8 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[2]).toContain('End with a non-empty user-facing result')
       expect(submittedPrompts[2]).not.toContain('Game production planning contract:')
       expect(submittedPrompts[2]).not.toContain('Evidence-backed delivery contract:')
+      expect(deliveryValidationFlags[2]).toBe(false)
+      expect(mutationValidationFlags[2]).toBe(true)
       await buildManager.sendWithDisplay(
         buildSession.id,
         JSON.stringify({
@@ -916,6 +947,8 @@ describe('beegame session routes', () => {
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
       expect(submittedPrompts[4]).toContain('Confirmed build request:')
       expect(submittedPrompts[4]).not.toContain('Idea intake contract:')
+      expect(deliveryValidationFlags[4]).toBe(true)
+      expect(mutationValidationFlags[4]).toBe(false)
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
       manager.stop(manager.list()[0]?.id ?? '')
@@ -4410,6 +4443,7 @@ describe('beegame session routes', () => {
           devDependencies: { vite: '^5.0.0' },
         }),
       )
+      await writeAcceptedDeliveryReport(workspace)
 
       const previewRes = await app.request(
         `/api/projects/${projectId}/preview`,
@@ -4468,6 +4502,60 @@ describe('beegame session routes', () => {
       expect(upload).toEqual(expect.objectContaining({
         path: 'public/assets/title-logo.png',
       }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('reports project preview startup as recoverably busy while an agent turn is active', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner([], 'wait_after_usage')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_preview_busy'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Project Preview Busy',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const ensureRes = await app.request(`/api/projects/${projectId}/session/ensure`, {
+        method: 'POST',
+      })
+      expect(ensureRes.status).toBe(200)
+      const ensured = await ensureRes.json()
+
+      const inputRes = await app.request(`/api/beegame-sessions/${ensured.session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Continue the project.' }),
+      })
+      expect(inputRes.status).toBe(200)
+      await waitFor(async () => {
+        const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+        const state = await stateRes.json()
+        return state.phase === 'running'
+      })
+
+      const previewRes = await app.request(`/api/projects/${projectId}/preview`, {
+        method: 'POST',
+      })
+
+      expect(previewRes.status).toBe(409)
+      expect(await previewRes.json()).toEqual({
+        code: 'project_workspace_busy',
+        error: 'Project workspace cannot be changed while an agent turn is active',
+        recoverable: true,
+      })
+      await app.request(`/api/beegame-sessions/${ensured.session.id}/stop`, { method: 'POST' })
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -6745,6 +6833,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
+      await writeAcceptedDeliveryReport(sessionWorkspace)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST' },
@@ -6802,6 +6891,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
+      await writeAcceptedDeliveryReport(sessionWorkspace)
       const firstRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST' },
@@ -6903,6 +6993,7 @@ describe('beegame session routes', () => {
         join(sessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
+      await writeAcceptedDeliveryReport(sessionWorkspace)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST', headers: { authorization: 'Bearer user-route-token' } },
@@ -6993,6 +7084,7 @@ describe('beegame session routes', () => {
         join(deploySessionWorkspace, 'package.json'),
         JSON.stringify({ scripts: { build: 'vite build' } }),
       )
+      await writeAcceptedDeliveryReport(deploySessionWorkspace)
       const deployRes = await app.request(
         `/api/beegame-sessions/${session.id}/deployments`,
         { method: 'POST', headers: { authorization: 'Bearer user-token' } },
@@ -8003,6 +8095,31 @@ describe('beegame session routes', () => {
     }
   })
 })
+
+async function writeAcceptedDeliveryReport(workspace: string): Promise<void> {
+  const acceptanceDirectory = join(workspace, 'docs', 'acceptance')
+  await mkdir(acceptanceDirectory, { recursive: true })
+  await writeFile(
+    join(acceptanceDirectory, 'validation-report.json'),
+    JSON.stringify({
+      validatorId: 'beegame-acceptance-validator',
+      status: 'passed',
+      summary: 'Observed acceptance passed.',
+      requirements: [{
+        id: 'requirement-primary',
+        status: 'passed',
+        evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+      }],
+      playerPaths: [{
+        id: 'path-primary',
+        status: 'passed',
+        evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+      }],
+      findings: [],
+      verifiedCapabilities: ['skill:beegame-game-acceptance'],
+    }),
+  )
+}
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   const startedAt = Date.now()

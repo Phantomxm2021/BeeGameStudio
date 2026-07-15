@@ -249,6 +249,61 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.url).toBe('')
   })
 
+  test('requires passed native acceptance when the production delivery gate is enabled', async () => {
+    let builds = 0
+    const manager = new BeeGameDeploymentManager({
+      dataRoot: root,
+      requireAcceptedDelivery: true,
+      runner: async (_command, options) => {
+        builds += 1
+        await mkdir(join(options.cwd, 'dist'), { recursive: true })
+        await writeFile(join(options.cwd, 'dist', 'index.html'), '<main>Accepted</main>')
+        return { exitCode: 0, stdout: 'built', stderr: '' }
+      },
+    })
+    await writeFile(
+      join(workspace, 'package.json'),
+      JSON.stringify({ scripts: { build: 'vite build' } }),
+    )
+
+    const rejected = await manager.deploy({
+      sessionId: 'delivery-gated-session',
+      workspacePath: workspace,
+    })
+    expect(rejected.status).toBe('failed')
+    expect(rejected.message).toContain('validation-report.json')
+    expect(builds).toBe(0)
+
+    await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
+    await writeFile(
+      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
+      JSON.stringify({
+        validatorId: 'beegame-acceptance-validator',
+        status: 'passed',
+        summary: 'Observed acceptance passed.',
+        requirements: [{
+          id: 'requirement-primary',
+          status: 'passed',
+          evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+        }],
+        playerPaths: [{
+          id: 'path-primary',
+          status: 'passed',
+          evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+        }],
+        findings: [],
+        verifiedCapabilities: ['skill:beegame-game-acceptance'],
+      }),
+    )
+
+    const accepted = await manager.deploy({
+      sessionId: 'delivery-gated-session',
+      workspacePath: workspace,
+    })
+    expect(accepted.status).toBe('succeeded')
+    expect(builds).toBe(1)
+  })
+
   test('rejects static output outside the workspace', async () => {
     const outside = join(root, 'outside-dist')
     const manager = new BeeGameDeploymentManager({

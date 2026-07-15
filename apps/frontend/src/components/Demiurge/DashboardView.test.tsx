@@ -757,6 +757,22 @@ describe('DashboardView runtime loading', () => {
         expect(stopTask).not.toHaveBeenCalled();
     });
 
+    it('does not start a workspace-mutating preview while the agent pipeline is active', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'finished',
+            next_action: 'running',
+            build_report: null,
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        const playButton = screen.getByRole('button', { name: '播放预览' });
+        expect(playButton).toBeDisabled();
+        fireEvent.click(playButton);
+        expect(apiMocks.startProjectPreview).not.toHaveBeenCalled();
+    });
+
     it('shows immediate feedback and prevents duplicate starts while the preview is starting', async () => {
         const user = userEvent.setup();
         let resolveStartPreview: (() => void) | undefined;

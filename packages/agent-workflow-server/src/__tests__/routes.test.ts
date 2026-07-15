@@ -2398,6 +2398,28 @@ describe('agent workflow server routes', () => {
         JSON.stringify({ scripts: { build: 'build-static' } }),
         'utf8',
       )
+      await mkdir(join(projectRoot, 'docs', 'acceptance'), { recursive: true })
+      await writeFile(
+        join(projectRoot, 'docs', 'acceptance', 'validation-report.json'),
+        JSON.stringify({
+          validatorId: 'beegame-acceptance-validator',
+          status: 'passed',
+          summary: 'Observed acceptance passed.',
+          requirements: [{
+            id: 'requirement-primary',
+            status: 'passed',
+            evidence: [{ kind: 'test', source: 'tests/acceptance.test.ts', detail: 'Passed.' }],
+          }],
+          playerPaths: [{
+            id: 'path-primary',
+            status: 'passed',
+            evidence: [{ kind: 'runtime', source: 'path-primary', detail: 'Observed.' }],
+          }],
+          findings: [],
+          verifiedCapabilities: ['skill:beegame-game-acceptance'],
+        }),
+        'utf8',
+      )
       const retentionApp = createAgentWorkflowApp({
         defaultWorkspacePath: workspace,
         currentUser: testOwner,

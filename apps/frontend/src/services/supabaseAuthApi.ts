@@ -462,7 +462,10 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
       },
     );
     if (!response.ok) {
-      if (isDefinitiveAuthenticationFailure(response.status)) {
+      // This same-origin endpoint owns the HttpOnly session. Only its explicit
+      // 401 means the refresh credential is gone or invalid. A 400/403 can be
+      // a request/CSRF configuration error and must not sign the whole UI out.
+      if (response.status === 401) {
         httpOnlySessionUser = null;
         return null;
       }

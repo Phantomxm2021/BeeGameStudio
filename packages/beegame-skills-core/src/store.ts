@@ -445,16 +445,29 @@ function readStoredSkillFiles(skillDir: string): BeeGameSkillFile[] {
   }
   const referencesDir = join(filesRoot, 'references')
   if (existsSync(referencesDir)) {
-    for (const entry of readdirSync(referencesDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
-      const relativePath = `references/${entry.name}`
+    files.push(...readStoredReferenceFiles(referencesDir, 'references'))
+  }
+  return normalizeSkillFiles(files).sort((left, right) => left.path.localeCompare(right.path))
+}
+
+function readStoredReferenceFiles(
+  directory: string,
+  relativeDirectory: string,
+): BeeGameSkillFile[] {
+  const files: BeeGameSkillFile[] = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name)
+    const relativePath = `${relativeDirectory}/${entry.name}`
+    if (entry.isDirectory()) {
+      files.push(...readStoredReferenceFiles(entryPath, relativePath))
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
       files.push({
         path: relativePath,
-        content: readFileSync(join(referencesDir, entry.name), 'utf8').trim(),
+        content: readFileSync(entryPath, 'utf8').trim(),
       })
     }
   }
-  return normalizeSkillFiles(files).sort((left, right) => left.path.localeCompare(right.path))
+  return files
 }
 
 function writeUserSkill(

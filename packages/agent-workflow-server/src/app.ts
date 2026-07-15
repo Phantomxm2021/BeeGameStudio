@@ -283,6 +283,16 @@ export function createAgentWorkflowApp(
     }
     return tracedRouteError(c, c.req.path, error, 500)
   })
+  // Credentialed browser clients may host the dashboard and runtime on
+  // separate origins. Register CORS before every API route, including the
+  // HttpOnly session endpoints, so successful refresh responses are readable.
+  app.use('/api/*', cors({
+    origin: resolveApiCorsOrigin,
+    credentials: true,
+    // Deliberately omit allowHeaders: Hono reflects the browser's requested
+    // headers after the origin has passed the explicit trusted-origin policy.
+    allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  }))
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
     ...options.outboundTargetPolicyOptions,
     allowedHosts: options.outboundTargetPolicyOptions?.allowedHosts ?? readAllowedOutboundHosts(),
@@ -320,6 +330,7 @@ export function createAgentWorkflowApp(
   const configuredUserResolver = createConfiguredUserResolver()
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
     sessionStorePath: options.sessionStorePath,
+    isOriginAllowed: origin => Boolean(resolveApiCorsOrigin(origin)),
   })
   const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
   const requestUserResolver = sessionAuth
@@ -388,6 +399,7 @@ export function createAgentWorkflowApp(
     publisher: options.deploymentPublisher ??
       createSupabaseStorageDeploymentPublisherFromEnv(),
     publicBaseUrl: process.env.BEEGAME_DEPLOYMENT_PUBLIC_BASE_URL,
+    requireAcceptedDelivery: true,
   })
   app.get('/deployments/*', async c => {
     const deployedFile = await beeGameDeployments.readPublicFile(c.req.path)
@@ -412,15 +424,6 @@ export function createAgentWorkflowApp(
   }
   app.all('/previews/:sessionId', handlePreviewProxy)
   app.all('/previews/:sessionId/*', handlePreviewProxy)
-  app.use('/api/*', cors({
-    origin: resolveApiCorsOrigin,
-    credentials: true,
-    // Deliberately omit allowHeaders: Hono reflects the browser's requested
-    // headers during preflight. Combined with the explicit trusted-origin
-    // policy above, this avoids a brittle duplicated list of client-internal
-    // headers while preserving credentialed CORS boundaries.
-    allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  }))
   registerBeeGameBillingPublicRoutes(app, {
     billingConfig,
     dashboardRepository,
@@ -1419,7 +1422,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(snapshot)
     } catch (err) {
-      return tracedRouteError(c, 'project.preview.start', err)
+      return projectWorkspaceMutationRouteError(c, 'project.preview.start', err)
     }
   })
 
@@ -1454,7 +1457,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(snapshot)
     } catch (err) {
-      return tracedRouteError(c, 'project.preview.restart', err)
+      return projectWorkspaceMutationRouteError(c, 'project.preview.restart', err)
     }
   })
 
@@ -3758,10 +3761,34 @@ function createProjectSessionBinding(
   }
 }
 
+class ProjectWorkspaceBusyError extends Error {
+  readonly code = 'project_workspace_busy'
+
+  constructor() {
+    super('Project workspace cannot be changed while an agent turn is active')
+    this.name = 'ProjectWorkspaceBusyError'
+  }
+}
+
 function assertProjectWorkspaceMutationIdle(session: BeeGameSession): void {
   if (session.turnStatus !== 'idle') {
-    throw new Error('Project workspace cannot be changed while an agent turn is active')
+    throw new ProjectWorkspaceBusyError()
   }
+}
+
+function projectWorkspaceMutationRouteError(
+  c: Context,
+  route: string,
+  error: unknown,
+): Response {
+  if (error instanceof ProjectWorkspaceBusyError) {
+    return c.json({
+      code: error.code,
+      error: error.message,
+      recoverable: true,
+    }, 409)
+  }
+  return tracedRouteError(c, route, error)
 }
 
 async function getProjectRuntimeEvents(input: {
