@@ -51,6 +51,8 @@ describe('BeeGame local dev launcher helpers', () => {
         SUPABASE_SERVICE_ROLE_KEY: 'generic-service-secret',
         BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
         BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
+        NO_PROXY: '127.0.0.1',
+        no_proxy: 'localhost',
       },
       ports: {
         runtime: 41174,
@@ -76,6 +78,8 @@ describe('BeeGame local dev launcher helpers', () => {
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
+      NO_PROXY: '127.0.0.1,project.supabase.co',
+      no_proxy: 'localhost,project.supabase.co',
     })
     expect(runtime?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(runtime?.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
@@ -92,16 +96,22 @@ describe('BeeGame local dev launcher helpers', () => {
       BEEGAME_BILLING_HOST: '127.0.0.1',
       BEEGAME_BILLING_PORT: '41175',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
+      NO_PROXY: '127.0.0.1,project.supabase.co',
+      no_proxy: 'localhost,project.supabase.co',
     })
     expect(skills?.env).toMatchObject({
       BEEGAME_SKILLS_HOST: '127.0.0.1',
       BEEGAME_SKILLS_PORT: '41176',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
+      NO_PROXY: '127.0.0.1,project.supabase.co',
+      no_proxy: 'localhost,project.supabase.co',
     })
     expect(resources?.env).toMatchObject({
       BEEGAME_RESOURCE_HOST: '127.0.0.1',
       BEEGAME_RESOURCE_PORT: '41177',
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
+      NO_PROXY: '127.0.0.1,project.supabase.co',
+      no_proxy: 'localhost,project.supabase.co',
     })
     expect(frontend?.env.BEEGAME_RESOURCE_SERVICE_TOKEN).toBeUndefined()
   })

@@ -3,6 +3,7 @@ import {
   createSupabaseDashboardStoreFromEnv,
   SupabaseDashboardStore,
 } from '../supabase-dashboard-store'
+import { encryptSecret } from '../security/secret-crypto'
 
 describe('SupabaseDashboardStore', () => {
   const originalFetch = globalThis.fetch
@@ -256,10 +257,48 @@ describe('SupabaseDashboardStore', () => {
     })
     expect(store).toBeDefined()
 
-    await store?.withAuthToken('user-token').listReadablePublicModelConfigs()
+    await store?.withAuthToken('user-token').listPublicModelConfigs('owner-user')
 
     expect(calls).toEqual([
-      'https://vite-project.supabase.co/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
+      'https://vite-project.supabase.co/rest/v1/beegame_model_configs?owner_id=eq.owner-user&select=*&order=created_at.asc',
+    ])
+  })
+
+  test('loads an RLS-visible model config as a decrypted runtime environment', async () => {
+    const encrypted = encryptSecret('sk-runtime-secret', 'model-config:api-key')
+    const calls: string[] = []
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+      fetchImpl: (async (input: Parameters<typeof fetch>[0]) => {
+        calls.push(String(input))
+        return Response.json([{
+          id: 'llm_platform_default',
+          owner_id: 'platform-owner',
+          name: 'Platform Default',
+          provider: 'openai-compatible',
+          base_url: 'https://llm.example/v1',
+          api_key_ciphertext: encrypted,
+          models: { fast: 'fast-model', balanced: 'balanced-model' },
+          is_default: true,
+          created_at: '2026-07-17T00:00:00.000Z',
+          updated_at: '2026-07-17T00:00:00.000Z',
+        }])
+      }) as unknown as typeof fetch,
+    })
+
+    await expect(
+      store.loadRlsVisibleModelRuntimeEnv('llm_platform_default'),
+    ).resolves.toEqual({
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_BASE_URL: 'https://llm.example/v1',
+      OPENAI_API_KEY: 'sk-runtime-secret',
+      OPENAI_DEFAULT_HAIKU_MODEL: 'fast-model',
+      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+    })
+    expect(calls).toEqual([
+      'https://project.supabase.co/rest/v1/beegame_model_configs?id=eq.llm_platform_default&select=*&limit=1',
     ])
   })
 

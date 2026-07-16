@@ -582,7 +582,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('lists Supabase RLS-readable model configs without requiring an app-level owner scope', async () => {
+  test('lists only model configs owned by the resolved platform config owner', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: Array<{ url: string; body?: unknown }> = []
     const repository = new DashboardRepository({
@@ -639,6 +639,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     const user = {
       id: 'developer-user',
       role: 'developer' as const,
+      modelConfigOwnerId: 'platform-owner',
     }
     const request = new Request('http://beegame.test/api/model-configs', {
       headers: { authorization: 'Bearer user-token' },
@@ -652,10 +653,8 @@ describe('DashboardRepository Supabase boundaries', () => {
         'llm_platform_default',
       )
 
-      expect(calls[0]?.url).toContain('/rest/v1/beegame_model_configs?select=*')
-      expect(calls[0]?.url).not.toContain('owner_id=')
-      expect(calls[1]?.url).toContain('/rest/v1/beegame_model_configs?id=eq.llm_platform_default')
-      expect(calls[1]?.url).not.toContain('owner_id=')
+      expect(calls[0]?.url).toContain('/rest/v1/beegame_model_configs?owner_id=eq.platform-owner')
+      expect(calls[1]?.url).toContain('/rest/v1/beegame_model_configs?owner_id=eq.platform-owner&id=eq.llm_platform_default')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -730,7 +729,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('returns an empty list when Supabase RLS exposes no model configs', async () => {
+  test('falls back to RLS-visible configs for legacy non-admin contexts without a config owner', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: string[] = []
     const repository = new DashboardRepository({

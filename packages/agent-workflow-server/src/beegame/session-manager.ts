@@ -159,7 +159,21 @@ export type BeeGameRuntimeSnapshot = {
   usage: {
     prompt_tokens: number
     completion_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
     total_tokens: number
+  }
+  turnDiagnostics?: {
+    turnId: string
+    agentCalls: number
+    taskOutputCalls: number
+    usage: {
+      prompt_tokens: number
+      completion_tokens: number
+      cache_read_tokens: number
+      cache_creation_tokens: number
+      total_tokens: number
+    }
   }
 }
 
@@ -1935,6 +1949,7 @@ function deriveRuntimeSnapshotFromEvents(
 ): BeeGameRuntimeSnapshot {
   const usage = getLatestRuntimeUsage(events)
   const latest = events.at(-1)
+  const turnDiagnostics = deriveLatestTurnDiagnostics(events)
   return {
     sessionId,
     workspacePath,
@@ -1943,6 +1958,7 @@ function deriveRuntimeSnapshotFromEvents(
     phaseStatus: deriveSnapshotPhaseStatus(events, options),
     updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
     usage,
+    ...(turnDiagnostics ? { turnDiagnostics } : {}),
   }
 }
 
@@ -2005,20 +2021,17 @@ function hasNativeFinalResult(
   ))
 }
 
-function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
-  const assistantUsage = sumAssistantMessageUsage(events)
-  if (assistantUsage.total_tokens > 0) return assistantUsage
-
-  for (const event of [...events].reverse()) {
-    if (event.type !== 'result') continue
-    const usage = getUsageFromEventPayload(event.payload)
-    if (usage.total_tokens > 0) return usage
+export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
+  const turnIds = new Set(events.map(event => event.turnId).filter((value): value is string => Boolean(value)))
+  const total = emptyRuntimeUsage()
+  for (const turnId of turnIds) {
+    addRuntimeUsage(total, getRuntimeUsageForTurn(events, turnId))
   }
-  return {
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
+  const eventsWithoutTurn = events.filter(event => !event.turnId)
+  if (eventsWithoutTurn.length > 0) {
+    addRuntimeUsage(total, getRuntimeUsageForTurn(eventsWithoutTurn))
   }
+  return total
 }
 
 export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
@@ -2031,13 +2044,60 @@ export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntime
   return [...usageByMessage.values()].reduce<BeeGameRuntimeSnapshot['usage']>((total, usage) => {
     total.prompt_tokens += usage.prompt_tokens
     total.completion_tokens += usage.completion_tokens
+    total.cache_read_tokens += usage.cache_read_tokens
+    total.cache_creation_tokens += usage.cache_creation_tokens
     total.total_tokens += usage.total_tokens
     return total
-  }, {
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-  })
+  }, emptyRuntimeUsage())
+}
+
+function getRuntimeUsageForTurn(
+  events: BeeGameEvent[],
+  turnId?: string,
+): BeeGameRuntimeSnapshot['usage'] {
+  const scopedEvents = turnId
+    ? events.filter(event => event.turnId === turnId)
+    : events
+  const modelUsage = emptyRuntimeUsage()
+  let hasModelUsage = false
+  for (const event of scopedEvents) {
+    if (event.type !== 'result') continue
+    const usage = getModelUsageFromEventPayload(event.payload)
+    if (!usage) continue
+    hasModelUsage = true
+    addRuntimeUsage(modelUsage, usage)
+  }
+  if (hasModelUsage) return modelUsage
+
+  const resultUsage = emptyRuntimeUsage()
+  let hasResultUsage = false
+  for (const event of scopedEvents) {
+    if (event.type !== 'result') continue
+    const usage = getUsageFromEventPayload(event.payload)
+    if (usage.total_tokens <= 0) continue
+    hasResultUsage = true
+    addRuntimeUsage(resultUsage, usage)
+  }
+  if (hasResultUsage) return resultUsage
+  return sumAssistantMessageUsage(scopedEvents)
+}
+
+function deriveLatestTurnDiagnostics(
+  events: BeeGameEvent[],
+): BeeGameRuntimeSnapshot['turnDiagnostics'] | undefined {
+  const turnId = [...events].reverse().find(event => event.turnId)?.turnId
+  if (!turnId) return undefined
+  const turnEvents = events.filter(event => event.turnId === turnId)
+  const countTool = (toolName: string) => turnEvents.filter(event => (
+    event.type === 'tool.started' &&
+    getDashboardPayloadString(event.payload, 'toolName') === toolName
+  )).length
+  return {
+    turnId,
+    agentCalls: countTool('Agent'),
+    taskOutputCalls: countTool('TaskOutput'),
+    usage: getRuntimeUsageForTurn(turnEvents),
+  }
 }
 
 function getAssistantUsageIdentity(event: BeeGameEvent): string {
@@ -2059,11 +2119,7 @@ function getUsageFromEventPayload(
 ): BeeGameRuntimeSnapshot['usage'] {
   const usage = getUsageRecord(payload)
   if (!usage) {
-    return {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    }
+    return emptyRuntimeUsage()
   }
   const promptTokens = normalizeFiniteNumber(
     usage.input_tokens ?? usage.prompt_tokens,
@@ -2078,8 +2134,68 @@ function getUsageFromEventPayload(
   return {
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
+    cache_read_tokens: normalizeFiniteNumber(
+      usage.cache_read_input_tokens ?? usage.cache_read_tokens,
+    ),
+    cache_creation_tokens: normalizeFiniteNumber(
+      usage.cache_creation_input_tokens ?? usage.cache_creation_tokens,
+    ),
     total_tokens: totalTokens,
   }
+}
+
+function getModelUsageFromEventPayload(
+  payload: DashboardSDKMessage | undefined,
+): BeeGameRuntimeSnapshot['usage'] | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const modelUsage = payload.modelUsage
+  if (!modelUsage || typeof modelUsage !== 'object' || Array.isArray(modelUsage)) return null
+  const total = emptyRuntimeUsage()
+  let found = false
+  for (const value of Object.values(modelUsage)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const usage = value as Record<string, unknown>
+    const promptTokens = normalizeFiniteNumber(usage.inputTokens ?? usage.input_tokens)
+    const completionTokens = normalizeFiniteNumber(usage.outputTokens ?? usage.output_tokens)
+    const cacheReadTokens = normalizeFiniteNumber(
+      usage.cacheReadInputTokens ?? usage.cache_read_input_tokens,
+    )
+    const cacheCreationTokens = normalizeFiniteNumber(
+      usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens,
+    )
+    const totalTokens = promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens
+    if (totalTokens <= 0) continue
+    found = true
+    addRuntimeUsage(total, {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      total_tokens: totalTokens,
+    })
+  }
+  return found ? total : null
+}
+
+function emptyRuntimeUsage(): BeeGameRuntimeSnapshot['usage'] {
+  return {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    total_tokens: 0,
+  }
+}
+
+function addRuntimeUsage(
+  target: BeeGameRuntimeSnapshot['usage'],
+  value: BeeGameRuntimeSnapshot['usage'],
+): void {
+  target.prompt_tokens += value.prompt_tokens
+  target.completion_tokens += value.completion_tokens
+  target.cache_read_tokens += value.cache_read_tokens
+  target.cache_creation_tokens += value.cache_creation_tokens
+  target.total_tokens += value.total_tokens
 }
 
 function getUsageRecord(
@@ -2129,7 +2245,34 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
     usage: {
       prompt_tokens: Number(usage.prompt_tokens ?? 0),
       completion_tokens: Number(usage.completion_tokens ?? 0),
+      cache_read_tokens: Number(usage.cache_read_tokens ?? 0),
+      cache_creation_tokens: Number(usage.cache_creation_tokens ?? 0),
       total_tokens: Number(usage.total_tokens ?? 0),
+    },
+    ...(record.turnDiagnostics && typeof record.turnDiagnostics === 'object' && !Array.isArray(record.turnDiagnostics)
+      ? normalizeTurnDiagnostics(record.turnDiagnostics as Record<string, unknown>)
+      : {}),
+  }
+}
+
+function normalizeTurnDiagnostics(
+  value: Record<string, unknown>,
+): Pick<BeeGameRuntimeSnapshot, 'turnDiagnostics'> {
+  const usage = value.usage && typeof value.usage === 'object' && !Array.isArray(value.usage)
+    ? value.usage as Record<string, unknown>
+    : {}
+  return {
+    turnDiagnostics: {
+      turnId: String(value.turnId || ''),
+      agentCalls: Number(value.agentCalls ?? 0),
+      taskOutputCalls: Number(value.taskOutputCalls ?? 0),
+      usage: {
+        prompt_tokens: Number(usage.prompt_tokens ?? 0),
+        completion_tokens: Number(usage.completion_tokens ?? 0),
+        cache_read_tokens: Number(usage.cache_read_tokens ?? 0),
+        cache_creation_tokens: Number(usage.cache_creation_tokens ?? 0),
+        total_tokens: Number(usage.total_tokens ?? 0),
+      },
     },
   }
 }

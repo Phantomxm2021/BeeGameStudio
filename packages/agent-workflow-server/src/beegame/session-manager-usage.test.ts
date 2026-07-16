@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  getLatestRuntimeUsage,
   sumAssistantMessageUsage,
   type BeeGameEvent,
 } from './session-manager'
@@ -15,6 +16,8 @@ describe('BeeGame assistant usage aggregation', () => {
     expect(sumAssistantMessageUsage(events)).toEqual({
       prompt_tokens: 20_000,
       completion_tokens: 3_001,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
       total_tokens: 23_001,
     })
   })
@@ -29,7 +32,36 @@ describe('BeeGame assistant usage aggregation', () => {
     expect(sumAssistantMessageUsage(events)).toEqual({
       prompt_tokens: 60,
       completion_tokens: 21,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
       total_tokens: 81,
+    })
+  })
+
+  test('prefers final SDK model usage and aggregates every turn', () => {
+    const events = [
+      assistantUsageEvent(1, 'turn-1', 'visible-1', 10, 5),
+      resultModelUsageEvent(2, 'turn-1', {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 300,
+        cacheCreationInputTokens: 40,
+      }),
+      assistantUsageEvent(3, 'turn-2', 'visible-2', 12, 6),
+      resultModelUsageEvent(4, 'turn-2', {
+        inputTokens: 200,
+        outputTokens: 30,
+        cacheReadInputTokens: 400,
+        cacheCreationInputTokens: 50,
+      }),
+    ]
+
+    expect(getLatestRuntimeUsage(events)).toEqual({
+      prompt_tokens: 300,
+      completion_tokens: 50,
+      cache_read_tokens: 700,
+      cache_creation_tokens: 90,
+      total_tokens: 1_140,
     })
   })
 })
@@ -55,6 +87,32 @@ function assistantUsageEvent(
           input_tokens: inputTokens,
           output_tokens: outputTokens,
         },
+      },
+    },
+    createdAt: new Date(0),
+  } as BeeGameEvent
+}
+
+function resultModelUsageEvent(
+  id: number,
+  turnId: string,
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadInputTokens: number
+    cacheCreationInputTokens: number
+  },
+): BeeGameEvent {
+  return {
+    id,
+    sessionId: 'session-1',
+    turnId,
+    type: 'result',
+    text: 'done',
+    payload: {
+      type: 'result',
+      modelUsage: {
+        model: usage,
       },
     },
     createdAt: new Date(0),

@@ -403,7 +403,8 @@ export class SupabaseDashboardStore {
     return rows.map(rowToPublicModelConfig)
   }
 
-  async listReadablePublicModelConfigs(): Promise<PublicModelConfig[]> {
+  /** Compatibility path for users whose deployed auth RPC predates modelConfigOwnerId. */
+  async listRlsVisiblePublicModelConfigs(): Promise<PublicModelConfig[]> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
       '/rest/v1/beegame_model_configs?select=*&order=created_at.asc',
     )
@@ -417,11 +418,32 @@ export class SupabaseDashboardStore {
     return rows.length > 0
   }
 
-  async hasReadableModelConfig(id: string): Promise<boolean> {
+  async hasRlsVisibleModelConfig(id: string): Promise<boolean> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
       `/rest/v1/beegame_model_configs?id=eq.${q(id)}&select=id&limit=1`,
     )
     return rows.length > 0
+  }
+
+  async loadRlsVisibleModelRuntimeEnv(
+    id: string,
+  ): Promise<Record<string, string>> {
+    const rows = await this.rest<SupabaseModelConfigRow[]>(
+      `/rest/v1/beegame_model_configs?id=eq.${q(id)}&select=*&limit=1`,
+    )
+    const row = rows[0]
+    if (!row) {
+      throw new Error(
+        `Selected model config is not visible to the authenticated runtime (${id})`,
+      )
+    }
+    const env = modelConfigRowToRuntimeEnv(row)
+    if (Object.keys(env).length === 0) {
+      throw new Error(
+        `Selected model config uses an unsupported provider (${row.provider || 'empty'})`,
+      )
+    }
+    return env
   }
 
   async createModelConfig(
@@ -1576,6 +1598,61 @@ function rowToPublicModelConfig(
     isDefault: row.is_default,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
+  }
+}
+
+function modelConfigRowToRuntimeEnv(
+  row: SupabaseModelConfigRow,
+): Record<string, string> {
+  const apiKey = row.api_key_ciphertext
+    ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
+    : ''
+  const models = toModelMap(row.models)
+  const modelEnv = (values: Record<string, string | null | undefined>) =>
+    Object.fromEntries(
+      Object.entries(values).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1]),
+      ),
+    )
+
+  switch (row.provider) {
+    case 'anthropic-compatible':
+      return modelEnv({
+        ANTHROPIC_BASE_URL: row.base_url,
+        ANTHROPIC_AUTH_TOKEN: apiKey,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: models.fast,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: models.balanced,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: models.strong,
+      })
+    case 'openai-compatible':
+      return modelEnv({
+        CLAUDE_CODE_USE_OPENAI: '1',
+        OPENAI_BASE_URL: row.base_url,
+        OPENAI_API_KEY: apiKey,
+        OPENAI_DEFAULT_HAIKU_MODEL: models.fast,
+        OPENAI_DEFAULT_SONNET_MODEL: models.balanced,
+        OPENAI_DEFAULT_OPUS_MODEL: models.strong,
+      })
+    case 'gemini':
+      return modelEnv({
+        CLAUDE_CODE_USE_GEMINI: '1',
+        GEMINI_BASE_URL: row.base_url,
+        GEMINI_API_KEY: apiKey,
+        GEMINI_DEFAULT_HAIKU_MODEL: models.fast,
+        GEMINI_DEFAULT_SONNET_MODEL: models.balanced,
+        GEMINI_DEFAULT_OPUS_MODEL: models.strong,
+      })
+    case 'grok':
+      return modelEnv({
+        CLAUDE_CODE_USE_GROK: '1',
+        GROK_BASE_URL: row.base_url,
+        GROK_API_KEY: apiKey,
+        GROK_DEFAULT_HAIKU_MODEL: models.fast,
+        GROK_DEFAULT_SONNET_MODEL: models.balanced,
+        GROK_DEFAULT_OPUS_MODEL: models.strong,
+      })
+    default:
+      return {}
   }
 }
 

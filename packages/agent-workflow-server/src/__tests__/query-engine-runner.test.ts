@@ -281,6 +281,30 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(calls[0]?.init).toMatchObject({ redirect: 'error' })
   })
 
+  test('uses native TLS only for an approved trusted development proxy target', async () => {
+    const target: ApprovedOutboundTarget = {
+      url: new URL('https://provider.runtime.test/v1'),
+      addresses: ['198.18.0.220'],
+      trustedDevelopmentProxy: true,
+      lookup: (_hostname, _options, callback) => callback(null, '198.18.0.220', 4),
+    }
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const wrapped = createBeeGamePinnedFetch((async (input, init) => {
+      calls.push({ url: String(input), init })
+      return new Response('{}')
+    }) as typeof fetch, { ANTHROPIC_BASE_URL: target })
+
+    await wrapped('https://provider.runtime.test/v1/messages')
+    await expect(
+      wrapped('https://other.runtime.test/v1/messages'),
+    ).rejects.toThrow('Outbound URL is not permitted')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' })
+    expect(
+      (calls[0]?.init as RequestInit & { dispatcher?: unknown }).dispatcher,
+    ).toBeUndefined()
+  })
+
   test('installs MACRO globals before loading root CLI modules', () => {
     const target = globalThis as typeof globalThis & { MACRO?: Record<string, string> }
     const previous = target.MACRO

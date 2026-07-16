@@ -158,8 +158,9 @@ function buildBillingEnv(
   baseEnv: Record<string, string | undefined>,
   ports: BeeGameDevPorts,
 ): Record<string, string> {
+  const serviceEnv = withDirectSupabaseConnection(baseEnv)
   return compactEnv({
-    ...baseEnv,
+    ...serviceEnv,
     BEEGAME_BILLING_MODE: 'server',
     BEEGAME_BILLING_HOST: '127.0.0.1',
     BEEGAME_BILLING_PORT: String(ports.billing),
@@ -170,8 +171,9 @@ function buildSkillsEnv(
   baseEnv: Record<string, string | undefined>,
   ports: BeeGameDevPorts,
 ): Record<string, string> {
+  const serviceEnv = withDirectSupabaseConnection(baseEnv)
   return compactEnv({
-    ...baseEnv,
+    ...serviceEnv,
     BEEGAME_SKILLS_HOST: '127.0.0.1',
     BEEGAME_SKILLS_PORT: String(ports.skills),
   })
@@ -181,8 +183,9 @@ function buildResourceEnv(
   baseEnv: Record<string, string | undefined>,
   ports: BeeGameDevPorts,
 ): Record<string, string> {
+  const serviceEnv = withDirectSupabaseConnection(baseEnv)
   return compactEnv({
-    ...baseEnv,
+    ...serviceEnv,
     BEEGAME_RESOURCE_HOST: '127.0.0.1',
     BEEGAME_RESOURCE_PORT: String(ports.resources),
     BEEGAME_RESOURCE_SERVICE_TOKEN:
@@ -195,8 +198,11 @@ function buildRuntimeEnv(input: {
   ports: BeeGameDevPorts
   workspacePath: string
 }): Record<string, string> {
+  const serviceEnv = withDirectSupabaseConnection(
+    omitFrontendAndRuntimeForbiddenEnv(input.baseEnv),
+  )
   return compactEnv({
-    ...omitFrontendAndRuntimeForbiddenEnv(input.baseEnv),
+    ...serviceEnv,
     NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
@@ -208,6 +214,49 @@ function buildRuntimeEnv(input: {
     BEEGAME_RESOURCE_SERVICE_TOKEN:
       input.baseEnv.BEEGAME_RESOURCE_SERVICE_TOKEN || LOCAL_RESOURCE_SELECTION_TOKEN,
   })
+}
+
+/**
+ * Local development often uses a general-purpose HTTPS proxy for model
+ * providers. Supabase is the platform control plane and must retain its own
+ * end-to-end TLS identity instead of being sent through that proxy.
+ */
+function withDirectSupabaseConnection(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const rawUrl =
+    env.BEEGAME_SUPABASE_URL ??
+    env.SUPABASE_URL ??
+    env.VITE_SUPABASE_URL
+  if (!rawUrl) return env
+
+  let hostname: string
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return env
+    hostname = url.hostname
+  } catch {
+    return env
+  }
+  if (!hostname) return env
+
+  return {
+    ...env,
+    NO_PROXY: appendNoProxyHost(env.NO_PROXY, hostname),
+    no_proxy: appendNoProxyHost(env.no_proxy, hostname),
+  }
+}
+
+function appendNoProxyHost(
+  value: string | undefined,
+  hostname: string,
+): string {
+  const entries = (value ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+  if (!entries.includes(hostname)) entries.push(hostname)
+  return entries.join(',')
 }
 
 function buildFrontendEnv(input: {

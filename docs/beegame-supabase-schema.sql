@@ -720,6 +720,8 @@ as $$
       'skills.manage',
       'runtime_settings.manage',
       'secrets.manage',
+      'credits.admin',
+      'lifecycle.admin',
       'audit.read'
     ]
     when 'developer' then array[

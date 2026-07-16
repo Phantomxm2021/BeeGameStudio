@@ -88,6 +88,8 @@ interface SettingsMenuProps {
     canManageModelConfig?: boolean;
     canManageInvitations?: boolean;
     canReadAudit?: boolean;
+    canManageLifecycle?: boolean;
+    canManageCredits?: boolean;
 }
 
 type SettingsSection = 'personal' | 'skills' | 'platform';
@@ -139,6 +141,8 @@ export function SettingsMenu({
     canManageModelConfig,
     canManageInvitations,
     canReadAudit,
+    canManageLifecycle,
+    canManageCredits,
 }: SettingsMenuProps) {
     const { i18n } = useTranslation('settings');
     const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
@@ -165,13 +169,17 @@ export function SettingsMenu({
     const effectiveCanManageModelConfig = canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
     const effectiveCanManageInvitations = canManageInvitations ?? canOpenPlatformSettings;
     const effectiveCanReadAudit = canReadAudit ?? (canOpenPlatformSettings && hasPermission('audit.read'));
+    const effectiveCanManageLifecycle = canManageLifecycle ?? (canOpenPlatformSettings && hasPermission('lifecycle.admin'));
+    const effectiveCanManageCredits = canManageCredits ?? (canOpenPlatformSettings && hasPermission('credits.admin'));
     const hasPlatformSettings = effectiveCanManageWorkspace ||
         effectiveCanManageSecrets ||
         effectiveCanManageRuntimeSettings ||
         effectiveCanManageMcp ||
         effectiveCanManageModelConfig ||
         effectiveCanManageInvitations ||
-        effectiveCanReadAudit;
+        effectiveCanReadAudit ||
+        effectiveCanManageLifecycle ||
+        effectiveCanManageCredits;
     const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
     const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
     const [name, setName] = useState('');
@@ -350,7 +358,7 @@ export function SettingsMenu({
                     }
                 });
         }
-        if (effectiveCanReadAudit) {
+        if (effectiveCanManageLifecycle) {
             void getProjectLifecycleOverview()
                 .then((overview) => {
                     if (cancelled) return;
@@ -363,6 +371,8 @@ export function SettingsMenu({
                         setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.unavailable);
                     }
                 });
+        }
+        if (effectiveCanManageCredits) {
             void getCreditAuditLedger()
                 .then((ledger) => {
                     if (cancelled) return;
@@ -402,6 +412,8 @@ export function SettingsMenu({
         effectiveCanManageSkills,
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
+        effectiveCanManageCredits,
+        effectiveCanManageLifecycle,
         effectiveCanManageRuntimeSettings,
         effectiveCanManageSecrets,
         effectiveCanManageWorkspace,
@@ -450,7 +462,7 @@ export function SettingsMenu({
             setApiKey('');
             return true;
         } catch (error) {
-            setStatus(error instanceof Error ? error.message : text.modelSaveFailed);
+            setStatus(formatModelConfigError(error, text));
             return false;
         } finally {
             setIsSaving(false);
@@ -834,8 +846,8 @@ export function SettingsMenu({
             ...(effectiveCanManageRuntimeSettings ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }] : []),
             ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
             ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
-            ...(effectiveCanReadAudit ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
-            ...(effectiveCanReadAudit ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
+            ...(effectiveCanManageLifecycle ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }] : []),
+            ...(effectiveCanManageCredits ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
         ];
     }, [
         effectiveCanManageWorkspace,
@@ -843,6 +855,8 @@ export function SettingsMenu({
         effectiveCanManageMcp,
         effectiveCanManageModelConfig,
         effectiveCanManageInvitations,
+        effectiveCanManageCredits,
+        effectiveCanManageLifecycle,
         effectiveCanManageRuntimeSettings,
         effectiveCanReadAudit,
         adminCopy.deployment,
@@ -1298,7 +1312,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
 
-                                {activeSection === 'platform' && activeTab === 'projects' && effectiveCanReadAudit ? (
+                                {activeSection === 'platform' && activeTab === 'projects' && effectiveCanManageLifecycle ? (
                                     <ProjectLifecyclePanel
                                         overview={projectLifecycleOverview}
                                         status={projectLifecycleStatus}
@@ -1310,7 +1324,7 @@ export function SettingsMenu({
                                     />
                                 ) : null}
 
-                                {activeSection === 'platform' && activeTab === 'credit' && effectiveCanReadAudit ? (
+                                {activeSection === 'platform' && activeTab === 'credit' && effectiveCanManageCredits ? (
                                     <CreditAuditPanel
                                         ledger={creditAuditLedger}
                                         status={creditAuditStatus}
@@ -1497,6 +1511,24 @@ export function SettingsMenu({
                     </div>
                 </div>
     );
+}
+
+function formatModelConfigError(error: unknown, text: Record<string, any>): string {
+    if (!(error instanceof Error)) return text.modelSaveFailed;
+    const apiError = error as Error & { code?: string; hostname?: string };
+    const messages: Record<string, unknown> = {
+        outbound_invalid_url: text.modelOutboundInvalidUrl,
+        outbound_unsupported_protocol: text.modelOutboundHttpsRequired,
+        outbound_embedded_credentials: text.modelOutboundCredentials,
+        outbound_host_not_allowed: text.modelOutboundHostNotAllowed,
+        outbound_port_not_allowed: text.modelOutboundPortNotAllowed,
+        outbound_dns_unresolved: text.modelOutboundDnsUnresolved,
+        outbound_address_not_public: text.modelOutboundAddressNotPublic,
+    };
+    const template = apiError.code ? messages[apiError.code] : undefined;
+    return typeof template === 'string'
+        ? template.replace('{host}', apiError.hostname || '')
+        : error.message;
 }
 
 function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null {

@@ -99,17 +99,26 @@ function deserializeStartInput(input: SerializedQueryEngineStartInput) {
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
         key,
-        createApprovedTarget(target.url, target.addresses),
+        createApprovedTarget(
+          target.url,
+          target.addresses,
+          target.trustedDevelopmentProxy,
+        ),
       ]),
     ) as BeeGameApprovedOutboundTargets,
   }
 }
 
-function createApprovedTarget(url: string, addresses: string[]): ApprovedOutboundTarget {
+function createApprovedTarget(
+  url: string,
+  addresses: string[],
+  trustedDevelopmentProxy?: true,
+): ApprovedOutboundTarget {
   const parsed = new URL(url)
   return {
     url: parsed,
     addresses,
+    ...(trustedDevelopmentProxy ? { trustedDevelopmentProxy } : {}),
     lookup(hostname, _options, callback) {
       if (hostname !== parsed.hostname || addresses.length === 0) {
         callback(new Error('Outbound URL is not permitted'), '', 4)

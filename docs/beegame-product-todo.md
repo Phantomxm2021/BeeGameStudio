@@ -153,9 +153,9 @@ work, not individual generated game fixes.
       metadata.
     - `/api/admin/projects/lifecycle` exposes quota usage, project root paths,
       runtime snapshot status, storage mode, and recent deletion cleanup
-      outcomes behind `audit.read`.
+      outcomes behind `lifecycle.admin`.
     - Settings > Platform > Project exposes the lifecycle overview to
-      audit-capable operators.
+      lifecycle administrators.
   - Acceptance:
     - Deleting a project removes the expected physical and cloud artifacts.
     - Storage growth is bounded by documented quota and retention rules.
@@ -174,7 +174,8 @@ work, not individual generated game fixes.
       management permissions still cannot see Platform settings.
     - Route-level checks were audited against the UI capability props for
       `model_config.manage`, `secrets.manage`, `runtime_settings.manage`,
-      `mcp.manage`, `workspace.manage`, and `audit.read`.
+      `mcp.manage`, `workspace.manage`, `credits.admin`, `lifecycle.admin`, and
+      `audit.read`.
     - Invitation management was confirmed as platform owner-only through
       Supabase RPCs guarded by `beegame_is_platform_owner()`.
   - Acceptance:
@@ -188,9 +189,9 @@ work, not individual generated game fixes.
     enabling automation.
   - Completed:
     - `/api/admin/projects/retention/plan` returns a dry-run retention plan
-      behind `audit.read`.
+      behind `lifecycle.admin`.
     - `/api/admin/projects/retention/run` applies local deployment retention
-      behind `audit.read` and writes a `project.retention_run` audit event.
+      behind `lifecycle.admin` and writes a `project.retention_run` audit event.
     - Local deployment retention keeps the latest successful deployment plus the
       last 5 rollback candidates per project/session group, and deletes older
       local deployment artifacts only under BeeGame's deployment data root.

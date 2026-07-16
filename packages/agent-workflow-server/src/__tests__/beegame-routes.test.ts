@@ -14,7 +14,10 @@ import {
   createAgentWorkflowApp as createAgentWorkflowAppBase,
   type AgentWorkflowAppOptions,
 } from '../app'
-import { DEFAULT_LOCAL_USER_ID } from '../auth/user-context'
+import {
+  BeeGameAuthUnavailableError,
+  DEFAULT_LOCAL_USER_ID,
+} from '../auth/user-context'
 import { listCreditLedger, reserveCredits } from '../credit-store'
 import type {
   BeeGameSessionRunner,
@@ -763,6 +766,24 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('returns 503 instead of 401 when the authentication provider is unavailable', async () => {
+    const app = createAgentWorkflowApp({
+      currentUserResolver: async () => {
+        throw new BeeGameAuthUnavailableError()
+      },
+    })
+
+    const response = await app.request('/api/current-user', {
+      headers: { authorization: 'Bearer temporarily-unverifiable-token' },
+    })
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({
+      error: 'Authentication unavailable',
+      message: 'Authentication service is temporarily unavailable',
+    })
+  })
+
   test('rejects private model and MCP service targets without exposing the URL', async () => {
     const app = createAgentWorkflowApp()
     const privateTarget = 'http://127.0.0.1:43111/private?api_key=secret-value'
@@ -789,9 +810,43 @@ describe('beegame session routes', () => {
     })
 
     expect(modelResponse.status).toBe(400)
-    expect(await modelResponse.json()).toEqual({ error: 'Outbound URL is not permitted' })
+    expect(await modelResponse.json()).toEqual({
+      error: 'Outbound URL is not permitted',
+      code: 'outbound_unsupported_protocol',
+      message: 'Model provider URLs must use HTTPS.',
+      hostname: '127.0.0.1',
+    })
     expect(mcpResponse.status).toBe(400)
     expect(await mcpResponse.json()).toEqual({ error: 'Outbound URL is not permitted' })
+  })
+
+  test('explains when a model provider host is outside the deployment allowlist', async () => {
+    const app = createAgentWorkflowApp({
+      outboundTargetPolicyOptions: {
+        allowedHosts: ['approved-provider.example.test'],
+        resolve4: async () => ['93.184.216.34'],
+        resolve6: async () => [],
+      },
+    })
+    const response = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Unapproved provider',
+        provider: 'openai-compatible',
+        baseUrl: 'https://unapproved-provider.example.test/v1',
+        apiKey: 'sk-test',
+        models: { balanced: 'test' },
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'Outbound URL is not permitted',
+      code: 'outbound_host_not_allowed',
+      message: 'Outbound host "unapproved-provider.example.test" is not approved by this deployment.',
+      hostname: 'unapproved-provider.example.test',
+    })
   })
 
   test('does not start a session from a persisted private model endpoint', async () => {
@@ -2373,6 +2428,9 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
       expect(submitted).toContain('beegame-acceptance-validator')
+      expect(submitted).toContain('do not poll TaskOutput or read its output file')
+      expect(submitted).toContain('yield that response so the native task notification can resume this same session')
+      expect(submitted).toContain('Do not launch another Validator for the same unchanged revision')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
     } finally {
@@ -2387,7 +2445,13 @@ describe('beegame session routes', () => {
     const fake = createFakeRunner([
       {
         type: 'assistant',
-        message: { content: [{ type: 'text', text: 'Built with usage.' }] },
+        message: {
+          content: [
+            { type: 'text', text: 'Built with usage.' },
+            { type: 'tool_use', id: 'agent-call', name: 'Agent', input: {} },
+            { type: 'tool_use', id: 'task-output-call', name: 'TaskOutput', input: {} },
+          ],
+        },
       },
       {
         type: 'result',
@@ -2396,6 +2460,14 @@ describe('beegame session routes', () => {
           input_tokens: 20_000,
           output_tokens: 3_001,
           total_tokens: 23_001,
+        },
+        modelUsage: {
+          'runtime-model': {
+            inputTokens: 30_000,
+            outputTokens: 4_000,
+            cacheReadInputTokens: 5_000,
+            cacheCreationInputTokens: 1_000,
+          },
         },
       },
     ])
@@ -2435,8 +2507,8 @@ describe('beegame session routes', () => {
 
       const creditsRes = await app.request('/api/credits')
       expect(await creditsRes.json()).toEqual(expect.objectContaining({
-        balanceCredits: 297,
-        consumedCredits: 3,
+        balanceCredits: 296,
+        consumedCredits: 4,
         reservedCredits: 0,
       }))
       const ledgerRes = await app.request('/api/credits/ledger')
@@ -2459,13 +2531,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 3,
-          weightedTokens: 23_001,
+          credits: 4,
+          weightedTokens: 40_000,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 47,
+          credits: 46,
           weightedTokens: undefined,
           projectId: session.id,
         },
@@ -2485,17 +2557,41 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 3,
-          weightedTokens: 23_001,
+          credits: 4,
+          weightedTokens: 40_000,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 47,
+          credits: 46,
           weightedTokens: undefined,
           projectId: session.id,
         },
       ])
+      const snapshotRes = await app.request(
+        `/api/beegame-sessions/${session.id}/runtime-snapshot`,
+      )
+      expect(snapshotRes.status).toBe(200)
+      expect(await snapshotRes.json()).toEqual(expect.objectContaining({
+        usage: {
+          prompt_tokens: 30_000,
+          completion_tokens: 4_000,
+          cache_read_tokens: 5_000,
+          cache_creation_tokens: 1_000,
+          total_tokens: 40_000,
+        },
+        turnDiagnostics: expect.objectContaining({
+          agentCalls: 1,
+          taskOutputCalls: 1,
+          usage: {
+            prompt_tokens: 30_000,
+            completion_tokens: 4_000,
+            cache_read_tokens: 5_000,
+            cache_creation_tokens: 1_000,
+            total_tokens: 40_000,
+          },
+        }),
+      }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

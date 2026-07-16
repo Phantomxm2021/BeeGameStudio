@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createSupabaseRuntimeEnvClientFromEnv } from '../supabase-runtime-env-client'
+import { encryptSecret } from '../security/secret-crypto'
 
 describe('SupabaseRuntimeEnvClient', () => {
   const originalFetch = globalThis.fetch
@@ -10,6 +11,8 @@ describe('SupabaseRuntimeEnvClient', () => {
     BEEGAME_SUPABASE_ANON_KEY: process.env.BEEGAME_SUPABASE_ANON_KEY,
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
     VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+    BEEGAME_CONFIG_ENCRYPTION_KEY: process.env.BEEGAME_CONFIG_ENCRYPTION_KEY,
+    BEEGAME_ALLOW_PLAINTEXT_SECRETS: process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS,
   }
 
   afterEach(() => {
@@ -64,6 +67,31 @@ describe('SupabaseRuntimeEnvClient', () => {
     expect(calls[0].body).toEqual({
       p_user_id: '00000000-0000-0000-0000-000000000001',
       p_data_dir: '/workspace',
+    })
+  })
+
+  test('decrypts model credentials returned by the runtime env RPC', async () => {
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64')
+    delete process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS
+    process.env.VITE_SUPABASE_URL = 'https://vite-project.supabase.co'
+    process.env.VITE_SUPABASE_ANON_KEY = 'vite-anon-key'
+    const encrypted = encryptSecret('sk-runtime-secret', 'model-config:api-key')
+
+    globalThis.fetch = (async () => Response.json({
+      OPENAI_API_KEY: encrypted,
+      OPENAI_BASE_URL: 'https://llm.example/v1',
+      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+    })) as unknown as typeof fetch
+
+    const client = createSupabaseRuntimeEnvClientFromEnv()
+    await expect(client?.loadRuntimeEnv({
+      userId: '00000000-0000-0000-0000-000000000001',
+      dataDir: '/workspace',
+      authToken: 'user-token',
+    })).resolves.toEqual({
+      OPENAI_API_KEY: 'sk-runtime-secret',
+      OPENAI_BASE_URL: 'https://llm.example/v1',
+      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
     })
   })
 })

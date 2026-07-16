@@ -2,6 +2,7 @@ import type {
   BeeGameUserContext,
   BeeGameUserResolver,
 } from './user-context'
+import { BeeGameAuthUnavailableError } from './user-context'
 
 export type BeeGameAuthContextOptions = {
   currentUser?: BeeGameUserContext
@@ -54,8 +55,8 @@ async function resolveUserWithTimeout(
   try {
     return await Promise.race([
       user,
-      new Promise<undefined>(resolve => {
-        timer = setTimeout(() => resolve(undefined), timeoutMs)
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new BeeGameAuthUnavailableError()), timeoutMs)
       }),
     ])
   } finally {

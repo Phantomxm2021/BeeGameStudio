@@ -159,10 +159,18 @@ apiClient.interceptors.response.use(
     }
 
     let errorMessage = '请求失败，请稍后重试';
+    let errorCode: string | undefined;
+    let errorHostname: string | undefined;
     if (error.response) {
       const { status, data } = error.response;
-      const responseData = data as Partial<ApiErrorEnvelope> & { detail?: string };
-      const backendMessage = responseData?.message || responseData?.detail;
+      const responseData = data as Partial<ApiErrorEnvelope> & {
+        detail?: string;
+        error?: string;
+        hostname?: string;
+      };
+      errorCode = typeof responseData?.code === 'string' ? responseData.code : undefined;
+      errorHostname = typeof responseData?.hostname === 'string' ? responseData.hostname : undefined;
+      const backendMessage = responseData?.message || responseData?.detail || responseData?.error;
       switch (status) {
         case 400:
           errorMessage = backendMessage || '请求参数错误';
@@ -195,9 +203,16 @@ apiClient.interceptors.response.use(
       showToastError(errorMessage);
     }
 
-    const enhancedError = new Error(errorMessage) as Error & { originalError?: AxiosError; status?: number };
+    const enhancedError = new Error(errorMessage) as Error & {
+      originalError?: AxiosError;
+      status?: number;
+      code?: string;
+      hostname?: string;
+    };
     enhancedError.originalError = error;
     enhancedError.status = error.response?.status;
+    enhancedError.code = errorCode;
+    enhancedError.hostname = errorHostname;
     return Promise.reject(enhancedError);
   },
 );

@@ -41,6 +41,13 @@ export type BeeGameUserResolver = (
   request: Request,
 ) => BeeGameUserContext | undefined | Promise<BeeGameUserContext | undefined>
 
+export class BeeGameAuthUnavailableError extends Error {
+  constructor(message = 'Authentication service is temporarily unavailable') {
+    super(message)
+    this.name = 'BeeGameAuthUnavailableError'
+  }
+}
+
 type BeeGameFetch = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
@@ -59,19 +66,17 @@ export function hasBeeGamePermission(
   user: BeeGameUserContext,
   permission: BeeGamePermission,
 ): boolean {
-  if (user.permissions?.length) {
-    return user.permissions.includes(permission)
-  }
-  return getRolePermissions(user.role).has(permission)
+  return getRolePermissions(user.role).has(permission) ||
+    Boolean(user.permissions?.includes(permission))
 }
 
 export function listBeeGamePermissions(
   user: BeeGameUserContext,
 ): BeeGamePermission[] {
-  if (user.permissions?.length) {
-    return [...new Set(user.permissions.filter(isBeeGamePermission))]
-  }
-  return [...getRolePermissions(user.role)]
+  return [...new Set([
+    ...getRolePermissions(user.role),
+    ...(user.permissions ?? []).filter(isBeeGamePermission),
+  ])]
 }
 
 export function createEnvTokenUserResolver(
@@ -92,6 +97,7 @@ export function createSupabaseUserResolver(
     url?: string
     apiKey?: string
     fetchImpl?: BeeGameFetch
+    cacheTtlMs?: number
   } = {},
 ): BeeGameUserResolver | undefined {
   const baseUrl = trimString(
@@ -108,10 +114,35 @@ export function createSupabaseUserResolver(
   )
   if (!baseUrl || !apiKey) return undefined
   const fetchImpl = options.fetchImpl ?? fetch
+  const cacheTtlMs = normalizeAuthCacheTtlMs(options.cacheTtlMs)
+  const resolvedUsers = new Map<string, { expiresAt: number; user: BeeGameUserContext }>()
+  const pendingUsers = new Map<string, Promise<BeeGameUserContext | undefined>>()
   return async request => {
     const token = getBearerToken(request)
     if (!token) return undefined
-    return await fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
+    const tokenKey = createHash('sha256').update(token).digest('hex')
+    const cached = resolvedUsers.get(tokenKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.user
+    if (cached) resolvedUsers.delete(tokenKey)
+
+    const pending = pendingUsers.get(tokenKey)
+    if (pending) return await pending
+
+    const resolution = fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
+      .then(user => {
+        if (user && cacheTtlMs > 0) {
+          resolvedUsers.set(tokenKey, {
+            user,
+            expiresAt: Date.now() + cacheTtlMs,
+          })
+        }
+        return user
+      })
+      .finally(() => {
+        pendingUsers.delete(tokenKey)
+      })
+    pendingUsers.set(tokenKey, resolution)
+    return await resolution
   }
 }
 
@@ -160,8 +191,10 @@ async function fetchSupabaseUserContext(
     token,
     fetchImpl,
   )
-  if (!response) return undefined
-  if (!response.ok) return undefined
+  if (response.status === 401 || response.status === 403) return undefined
+  if (!response.ok) {
+    throw new BeeGameAuthUnavailableError()
+  }
   return toSupabaseUserContext(await response.json())
 }
 
@@ -170,7 +203,7 @@ async function fetchSupabaseUserContextResponse(
   apiKey: string,
   token: string,
   fetchImpl: BeeGameFetch,
-): Promise<Response | undefined> {
+): Promise<Response> {
   try {
     return await fetchImpl(
       joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
@@ -185,8 +218,16 @@ async function fetchSupabaseUserContextResponse(
       },
     )
   } catch {
-    return undefined
+    throw new BeeGameAuthUnavailableError()
   }
+}
+
+function normalizeAuthCacheTtlMs(value: number | undefined): number {
+  const configured = value ?? Number.parseInt(
+    process.env.BEEGAME_AUTH_CONTEXT_CACHE_TTL_MS ?? '',
+    10,
+  )
+  return Number.isFinite(configured) && configured >= 0 ? configured : 15_000
 }
 
 function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
@@ -402,3 +443,4 @@ const OWNER_PERMISSIONS = new Set<BeeGamePermission>([
 const ALL_PERMISSIONS = new Set<BeeGamePermission>([
   ...OWNER_PERMISSIONS,
 ])
+import { createHash } from 'node:crypto'

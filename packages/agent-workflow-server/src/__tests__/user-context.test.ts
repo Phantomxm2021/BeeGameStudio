@@ -1,16 +1,34 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  BeeGameAuthUnavailableError,
   createConfiguredUserResolver,
   createEnvTokenUserResolver,
   createSupabaseUserResolver,
   getBearerToken,
   hasBeeGamePermission,
+  listBeeGamePermissions,
 } from '../auth/user-context'
 
 describe('BeeGame user context', () => {
   test('allows developers to delete their own project after route ownership validation', () => {
     expect(hasBeeGamePermission({ id: 'developer-1', role: 'developer' }, 'project.delete')).toBe(true)
     expect(hasBeeGamePermission({ id: 'viewer-1', role: 'viewer' }, 'project.delete')).toBe(false)
+  })
+
+  test('combines role permissions with explicit grants from an older database contract', () => {
+    const owner = {
+      id: 'owner-1',
+      role: 'owner' as const,
+      permissions: ['audit.read' as const],
+    }
+
+    expect(hasBeeGamePermission(owner, 'credits.admin')).toBe(true)
+    expect(hasBeeGamePermission(owner, 'lifecycle.admin')).toBe(true)
+    expect(listBeeGamePermissions(owner)).toEqual(expect.arrayContaining([
+      'audit.read',
+      'credits.admin',
+      'lifecycle.admin',
+    ]))
   })
 
   test('extracts bearer tokens from authorization headers', () => {
@@ -93,7 +111,7 @@ describe('BeeGame user context', () => {
     ).toBeUndefined()
   })
 
-  test('treats Supabase user context fetch failures as unresolved auth', async () => {
+  test('reports Supabase user context transport failures as unavailable auth', async () => {
     const resolver = createSupabaseUserResolver({
       url: 'https://project.supabase.co',
       apiKey: 'anon-key',
@@ -108,7 +126,33 @@ describe('BeeGame user context', () => {
           headers: { authorization: 'Bearer tls-failure-token' },
         }),
       ),
-    ).resolves.toBeUndefined()
+    ).rejects.toBeInstanceOf(BeeGameAuthUnavailableError)
+  })
+
+  test('shares one Supabase context lookup across concurrent requests for the same token', async () => {
+    let calls = 0
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      cacheTtlMs: 1_000,
+      fetchImpl: async () => {
+        calls += 1
+        await Promise.resolve()
+        return Response.json({ id: 'owner-user', role: 'owner' })
+      },
+    })
+    const request = () => new Request('https://beegame.test/api/current-user', {
+      headers: { authorization: 'Bearer shared-token' },
+    })
+
+    const [first, second] = await Promise.all([
+      resolver?.(request()),
+      resolver?.(request()),
+    ])
+
+    expect(calls).toBe(1)
+    expect(first).toEqual({ id: 'owner-user', role: 'owner' })
+    expect(second).toEqual(first)
   })
 
   test('does not fall back to raw Supabase auth user when the BeeGame context RPC rejects access', async () => {

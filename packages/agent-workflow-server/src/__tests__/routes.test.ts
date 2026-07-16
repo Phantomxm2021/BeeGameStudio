@@ -7,6 +7,9 @@ import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
 import type { AgentWorkflowAppOptions } from '../app'
 import { createAgentWorkflowApp } from '../app'
 import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
+import type {
+  BeeGameModelRuntimeHost,
+} from '../beegame/model-runtime-host'
 import {
   getCreditBalance,
   reserveCredits,
@@ -18,6 +21,76 @@ describe('agent workflow server routes', () => {
   const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   let testRoot = ''
   let app: ReturnType<typeof createAgentWorkflowApp>
+
+  const createTestModelRuntimeHost = (): BeeGameModelRuntimeHost => ({
+    async generate(input) {
+      const baseUrl = input.runtimeEnv.OPENAI_BASE_URL ??
+        input.runtimeEnv.ANTHROPIC_BASE_URL
+      const apiKey = input.runtimeEnv.OPENAI_API_KEY ??
+        input.runtimeEnv.ANTHROPIC_AUTH_TOKEN
+      const model = input.runtimeEnv.OPENAI_DEFAULT_SONNET_MODEL ??
+        input.runtimeEnv.ANTHROPIC_DEFAULT_SONNET_MODEL
+      if (!baseUrl || !apiKey || !model) {
+        throw new Error('Test model runtime is incomplete')
+      }
+      const anthropic = Boolean(input.runtimeEnv.ANTHROPIC_BASE_URL)
+      const response = await globalThis.fetch(
+        `${baseUrl.replace(/\/$/, '')}${anthropic ? '/v1/messages' : '/chat/completions'}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+            ...(anthropic ? { 'anthropic-version': '2023-06-01' } : {}),
+          },
+          body: JSON.stringify(anthropic
+            ? {
+                model,
+                system: input.systemPrompt,
+                messages: input.messages,
+                max_tokens: input.maxTokens,
+                temperature: input.temperature,
+              }
+            : {
+                model,
+                messages: [
+                  { role: 'system', content: input.systemPrompt },
+                  ...input.messages,
+                ],
+                max_tokens: input.maxTokens,
+                temperature: input.temperature,
+                response_format: { type: 'json_object' },
+                stream: false,
+                thinking: { type: 'disabled' },
+                enable_thinking: false,
+              }),
+        },
+      )
+      if (!response.ok) throw new Error(`Model runtime request failed: ${response.status}`)
+      if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        const text = await response.text()
+        return text
+          .split('\n')
+          .filter(line => line.startsWith('data:') && !line.includes('[DONE]'))
+          .flatMap(line => {
+            const event = JSON.parse(line.slice(5).trim()) as {
+              choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
+            }
+            return event.choices?.map(choice =>
+              choice.delta?.content ?? choice.message?.content ?? '',
+            ) ?? []
+          })
+          .join('')
+      }
+      const payload = await response.json() as {
+        content?: Array<{ type?: string; text?: string }>
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      return anthropic
+        ? payload.content?.filter(block => block.type === 'text').map(block => block.text ?? '').join('') ?? ''
+        : payload.choices?.[0]?.message?.content ?? ''
+    },
+  })
 
   const loopbackOutboundTargetResolver: NonNullable<AgentWorkflowAppOptions['outboundTargetResolver']> = async value => ({
     url: new URL(value),
@@ -32,6 +105,7 @@ describe('agent workflow server routes', () => {
     app = createAgentWorkflowApp({
       defaultWorkspacePath: testRoot,
       currentUser: testOwner,
+      modelRuntimeHost: createTestModelRuntimeHost(),
       skillsConfig: false,
       outboundTargetPolicyOptions: {
         resolve4: async () => ['93.184.216.34'],
@@ -2021,7 +2095,10 @@ describe('agent workflow server routes', () => {
   test('tests and discovers running HTTP MCP servers', async () => {
     const originalFetch = globalThis.fetch
     let usedPinnedDispatcher = false
-    globalThis.fetch = (async (url, init) => {
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const requestUrl = String(url)
       if (
         init?.method === 'POST' &&
@@ -2278,7 +2355,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('returns project lifecycle admin overview only to audit readers', async () => {
+  test('returns project lifecycle admin overview only to lifecycle administrators', async () => {
     const originalLimit = process.env.BEEGAME_MAX_PROJECTS_PER_USER
     try {
       process.env.BEEGAME_MAX_PROJECTS_PER_USER = '2'
@@ -2378,7 +2455,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('plans and runs deployment retention only for audit readers', async () => {
+  test('plans and runs deployment retention only for lifecycle administrators', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-retention-'))
     try {
       const forbiddenApp = createAgentWorkflowApp({
@@ -2770,6 +2847,83 @@ describe('agent workflow server routes', () => {
     }
   })
 
+  test('uses an Anthropic-compatible default model for BeeGame intake', async () => {
+    const createRes = await app.request('/api/model-configs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Anthropic-compatible LLM',
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://anthropic.example.invalid/api',
+        apiKey: 'anthropic-dashboard-secret',
+        models: { balanced: 'balanced-model' },
+        isDefault: true,
+      }),
+    })
+    expect(createRes.status).toBe(200)
+
+    const originalFetch = globalThis.fetch
+    const fetchCalls: Array<{
+      url: string
+      headers: Headers
+      body: Record<string, unknown>
+    }> = []
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      fetchCalls.push({
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      })
+      return Response.json({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            maturity: 'directional',
+            needs_clarification: false,
+            detected_constraints: [],
+            recommended_next_step: 'choose_direction',
+            options: makeModelOptions('anthropic_mode'),
+          }),
+        }],
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      const res = await app.request('/api/beegame-intake/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'Anthropic-compatible idea', language: 'zh' }),
+      })
+
+      expect(res.status).toBe(200)
+      const intake = await res.json()
+      expect(intake.options).toHaveLength(3)
+      expect(intake.options[0]).toEqual(expect.objectContaining({
+        id: 'anthropic_mode',
+      }))
+      expect(fetchCalls).toHaveLength(1)
+      expect(fetchCalls[0]?.url).toBe(
+        'https://anthropic.example.invalid/api/v1/messages',
+      )
+      expect(fetchCalls[0]?.headers.get('authorization')).toBe(
+        'Bearer anthropic-dashboard-secret',
+      )
+      expect(fetchCalls[0]?.headers.get('anthropic-version')).toBe('2023-06-01')
+      expect(fetchCalls[0]?.body).toEqual(expect.objectContaining({
+        model: 'balanced-model',
+        system: expect.stringContaining('BeeGame intake planner'),
+        messages: [{ role: 'user', content: 'Game idea: Anthropic-compatible idea' }],
+      }))
+      expect(fetchCalls[0]?.body).not.toHaveProperty('response_format')
+      expect(fetchCalls[0]?.body).not.toHaveProperty('thinking')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('handles streamed deltas when a provider ignores the non-streaming intake request', async () => {
     const createRes = await app.request('/api/model-configs', {
       method: 'POST',
@@ -2807,9 +2961,6 @@ describe('agent workflow server routes', () => {
     ].join('\n')
 
     const originalFetch = globalThis.fetch
-    const originalDebug = process.env.BEEGAME_INTAKE_STREAM_DEBUG
-    const originalLogPath = process.env.BEEGAME_INTAKE_STREAM_LOG_PATH
-    const streamLogPath = join(testRoot, 'intake-stream-debug.jsonl')
     const fetchCalls: Array<{ body: unknown }> = []
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       fetchCalls.push({
@@ -2821,8 +2972,6 @@ describe('agent workflow server routes', () => {
     }) as unknown as typeof fetch
 
     try {
-      process.env.BEEGAME_INTAKE_STREAM_DEBUG = '1'
-      process.env.BEEGAME_INTAKE_STREAM_LOG_PATH = streamLogPath
       const res = await app.request('/api/beegame-intake/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -2850,23 +2999,8 @@ describe('agent workflow server routes', () => {
         title: 'Streamed Mode',
         gameplay: 'The player completes streamed gameplay rules.',
       }))
-      const streamLog = await readFile(streamLogPath, 'utf8')
-      expect(streamLog).toContain('"event":"raw_chunk"')
-      expect(streamLog).toContain('"event":"content_delta"')
-      expect(streamLog).toContain('"event":"complete"')
-      expect(streamLog).toContain('Streamed Mode')
     } finally {
       globalThis.fetch = originalFetch
-      if (originalDebug === undefined) {
-        delete process.env.BEEGAME_INTAKE_STREAM_DEBUG
-      } else {
-        process.env.BEEGAME_INTAKE_STREAM_DEBUG = originalDebug
-      }
-      if (originalLogPath === undefined) {
-        delete process.env.BEEGAME_INTAKE_STREAM_LOG_PATH
-      } else {
-        process.env.BEEGAME_INTAKE_STREAM_LOG_PATH = originalLogPath
-      }
     }
   })
 
@@ -3058,8 +3192,7 @@ describe('agent workflow server routes', () => {
 
       expect(res.status).toBe(400)
       const body = await res.json()
-      expect(body.error).toContain('平台默认模型认证失败（401）')
-      expect(body.error).toContain('重新保存有效 API Key')
+      expect(body.error).toBe('Model runtime request failed: 401')
       const ledgerAfterRes = await app.request('/api/credits/ledger')
       const ledgerAfter = await ledgerAfterRes.json()
       expect(ledgerAfter.slice(ledgerBefore.length).map((entry: {
@@ -3077,7 +3210,7 @@ describe('agent workflow server routes', () => {
     }
   })
 
-  test('loads Supabase runtime env from frontend env names during BeeGame intake', async () => {
+  test('loads the RLS-visible platform model for a legacy non-admin context during BeeGame intake', async () => {
     const originalEnv = {
       BEEGAME_SUPABASE_URL: process.env.BEEGAME_SUPABASE_URL,
       SUPABASE_URL: process.env.SUPABASE_URL,
@@ -3181,6 +3314,7 @@ describe('agent workflow server routes', () => {
 
       const supabaseApp = createAgentWorkflowApp({
         defaultWorkspacePath: testRoot,
+        modelRuntimeHost: createTestModelRuntimeHost(),
         outboundTargetPolicyOptions: {
           resolve4: async () => ['93.184.216.34'],
           resolve6: async () => ['2606:2800:220:1:248:1893:25c8:1946'],
@@ -3208,6 +3342,10 @@ describe('agent workflow server routes', () => {
       expect(res.status).toBe(200)
       expect(calls.some(call =>
         call.url === 'https://vite-project.supabase.co/rest/v1/rpc/beegame_runtime_env'
+      )).toBe(true)
+      expect(calls.some(call =>
+        call.url.includes('/beegame_model_configs?select=*') &&
+          !call.url.includes('owner_id=')
       )).toBe(true)
       expect(calls.some(call =>
         call.url === 'https://llm.example.invalid/v1/chat/completions'
@@ -3568,7 +3706,6 @@ describe('agent workflow server routes', () => {
       expect(modelRequestBody.max_tokens).toBe(8_192)
       expect(modelRequestBody.thinking).toEqual({ type: 'disabled' })
       expect(modelRequestBody.enable_thinking).toBe(false)
-      expect(modelRequestBody.chat_template_kwargs).toEqual({ thinking: false, enable_thinking: false })
     } finally {
       globalThis.fetch = originalFetch
     }

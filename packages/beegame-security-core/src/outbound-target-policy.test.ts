@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createPinnedUndiciDispatcher,
+  inspectOutboundTarget,
   resolveApprovedOutboundTarget,
 } from './outbound-target-policy'
 
@@ -110,11 +111,33 @@ describe('resolveApprovedOutboundTarget', () => {
       allowTrustedDevelopmentProxy: true,
     })
     expect(target?.addresses).toEqual(['198.18.0.212'])
+    expect(target?.trustedDevelopmentProxy).toBe(true)
 
     await expect(resolveApprovedOutboundTarget('https://provider.example.test/v1', {
       resolve4: async () => ['198.18.0.212'],
       resolve6: async () => [],
       allowTrustedDevelopmentProxy: true,
     })).resolves.toBeNull()
+  })
+
+  test('reports why an outbound target was rejected without exposing resolved addresses', async () => {
+    await expect(inspectOutboundTarget('https://blocked.example.test/v1', {
+      ...publicResolvers,
+      allowedHosts: ['allowed.example.test'],
+    })).resolves.toEqual({
+      approved: false,
+      code: 'host_not_allowed',
+      hostname: 'blocked.example.test',
+    })
+
+    await expect(inspectOutboundTarget('https://allowed.example.test/v1', {
+      resolve4: async () => ['198.18.0.220'],
+      resolve6: async () => [],
+      allowedHosts: ['allowed.example.test'],
+    })).resolves.toEqual({
+      approved: false,
+      code: 'address_not_public',
+      hostname: 'allowed.example.test',
+    })
   })
 })

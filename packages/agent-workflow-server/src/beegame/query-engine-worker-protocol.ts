@@ -10,7 +10,11 @@ export type SerializedQueryEngineStartInput = Omit<
   BeeGameSessionRunnerStartInput,
   'approvedOutboundTargets'
 > & {
-  approvedOutboundTargets: Record<string, { url: string; addresses: string[] }>
+  approvedOutboundTargets: Record<string, {
+    url: string
+    addresses: string[]
+    trustedDevelopmentProxy?: true
+  }>
 }
 
 export type QueryEngineParentMessage =

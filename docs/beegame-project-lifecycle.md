@@ -147,7 +147,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   "$BEEGAME_URL/api/admin/projects/retention/run"
 ```
 
-Both endpoints require an account with `audit.read`.
+Lifecycle overview and retention endpoints require an account with
+`lifecycle.admin`.
 
 ## Current Gaps
 

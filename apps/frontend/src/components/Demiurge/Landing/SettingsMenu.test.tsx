@@ -668,8 +668,8 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByText('已用 0 / 100')).toBeInTheDocument();
     });
 
-    it('shows credit audit details only for audit readers', async () => {
-        const { unmount } = renderSettings({ canReadAudit: true });
+    it('shows credit administration only for credit administrators', async () => {
+        const { unmount } = renderSettings({ canManageCredits: true });
 
         await openPlatformSettingsTab('信用');
 
@@ -692,6 +692,7 @@ describe('SettingsMenu model settings', () => {
             canManageSkills: false,
             canManageModelConfig: false,
             canReadAudit: false,
+            canManageCredits: false,
         });
 
         expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
@@ -699,8 +700,8 @@ describe('SettingsMenu model settings', () => {
         expect(getCreditAuditLedger).not.toHaveBeenCalled();
     });
 
-    it('shows project lifecycle quota and cleanup details only for audit readers', async () => {
-        renderSettings({ canReadAudit: true });
+    it('shows project lifecycle controls only for lifecycle administrators', async () => {
+        renderSettings({ canManageLifecycle: true });
 
         await openPlatformSettingsTab('项目');
 
@@ -1126,6 +1127,23 @@ describe('SettingsMenu model settings', () => {
             isDefault: true,
         }));
         expect(screen.queryByText('模型配置已保存')).not.toBeInTheDocument();
+    });
+
+    it('shows the specific outbound policy reason when a model provider cannot be saved', async () => {
+        const error = Object.assign(new Error('Outbound URL is not permitted'), {
+            code: 'outbound_host_not_allowed',
+            hostname: 'provider.example.com',
+        });
+        createModelConfig.mockRejectedValue(error);
+
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        await userEvent.type(screen.getByLabelText('Base URL'), 'https://provider.example.com/v1');
+        await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
+        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'model-balanced');
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+        expect(await screen.findByText('模型服务域名 provider.example.com 尚未获得当前部署授权。')).toBeInTheDocument();
     });
 
     it('keeps a saved API key visible as a preview and updates the existing model without retyping it', async () => {

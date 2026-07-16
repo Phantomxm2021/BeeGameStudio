@@ -1,4 +1,16 @@
+import {
+  decryptSecret,
+  isSecretEnvelope,
+} from './security/secret-crypto'
+
 type BeeGameFetch = typeof fetch
+
+const MODEL_SECRET_ENV_KEYS = new Set([
+  'ANTHROPIC_AUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
+  'GROK_API_KEY',
+])
 
 export type SupabaseRuntimeEnvClientOptions = {
   url?: string
@@ -97,7 +109,10 @@ function normalizeRuntimeEnv(value: unknown): Record<string, string> {
   if (!isRecord(payload)) return {}
   const env: Record<string, string> = {}
   for (const [key, raw] of Object.entries(payload)) {
-    if (typeof raw === 'string') env[key] = raw
+    if (typeof raw !== 'string') continue
+    env[key] = MODEL_SECRET_ENV_KEYS.has(key) && isSecretEnvelope(raw)
+      ? decryptSecret(raw, 'model-config:api-key')
+      : raw
   }
   return env
 }

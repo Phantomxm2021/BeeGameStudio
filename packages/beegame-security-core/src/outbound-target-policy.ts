@@ -22,27 +22,61 @@ export type OutboundTargetPolicyOptions = {
 export type ApprovedOutboundTarget = {
   url: URL
   addresses: string[]
+  /** Development-only marker for an explicitly allowlisted transparent proxy. */
+  trustedDevelopmentProxy?: true
   lookup: (hostname: string, options: unknown, callback: LookupCallback) => void
 }
+
+export type OutboundTargetRejectionCode =
+  | 'invalid_url'
+  | 'unsupported_protocol'
+  | 'embedded_credentials'
+  | 'host_not_allowed'
+  | 'port_not_allowed'
+  | 'dns_unresolved'
+  | 'address_not_public'
+
+export type OutboundTargetInspection =
+  | { approved: true; target: ApprovedOutboundTarget }
+  | {
+      approved: false
+      code: OutboundTargetRejectionCode
+      hostname?: string
+    }
 
 export async function resolveApprovedOutboundTarget(
   value: string,
   options: OutboundTargetPolicyOptions = {},
 ): Promise<ApprovedOutboundTarget | null> {
+  const inspection = await inspectOutboundTarget(value, options)
+  return inspection.approved ? inspection.target : null
+}
+
+export async function inspectOutboundTarget(
+  value: string,
+  options: OutboundTargetPolicyOptions = {},
+): Promise<OutboundTargetInspection> {
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    return null
+    return { approved: false, code: 'invalid_url' }
   }
 
   const allowHttp = options.allowHttp ?? process.env.BEEGAME_ALLOW_INSECURE_OUTBOUND_HTTP === '1'
-  if (!isAllowedProtocol(url, allowHttp) || url.username || url.password || !isAllowedHostAndPort(url, options.allowedHosts)) {
-    return null
+  const hostname = normalizeHostname(url.hostname)
+  if (!isAllowedProtocol(url, allowHttp)) {
+    return { approved: false, code: 'unsupported_protocol', ...(hostname ? { hostname } : {}) }
+  }
+  if (url.username || url.password) {
+    return { approved: false, code: 'embedded_credentials', ...(hostname ? { hostname } : {}) }
+  }
+  const hostAndPortRejection = getHostAndPortRejection(url, options.allowedHosts)
+  if (hostAndPortRejection) {
+    return { approved: false, code: hostAndPortRejection, ...(hostname ? { hostname } : {}) }
   }
 
-  const hostname = normalizeHostname(url.hostname)
-  if (!hostname) return null
+  if (!hostname) return { approved: false, code: 'invalid_url' }
 
   const addresses = isIP(hostname)
     ? [hostname]
@@ -55,17 +89,27 @@ export async function resolveApprovedOutboundTarget(
     options.allowTrustedDevelopmentProxy === true &&
     isExplicitlyAllowedHostname(url, options.allowedHosts) &&
     isIP(hostname) === 0
-  if (!addresses.length || addresses.some(address =>
+  if (!addresses.length) {
+    return { approved: false, code: 'dns_unresolved', hostname }
+  }
+  if (addresses.some(address =>
     isIP(address) === 0 ||
     (isBlockedAddress(address) && !(allowTrustedDevelopmentProxy && isTrustedDevelopmentProxyAddress(address))),
   )) {
-    return null
+    return { approved: false, code: 'address_not_public', hostname }
   }
 
   return {
-    url,
-    addresses,
-    lookup: createPinnedLookup(hostname, addresses),
+    approved: true,
+    target: {
+      url,
+      addresses,
+      ...(allowTrustedDevelopmentProxy &&
+      addresses.some(isTrustedDevelopmentProxyAddress)
+        ? { trustedDevelopmentProxy: true as const }
+        : {}),
+      lookup: createPinnedLookup(hostname, addresses),
+    },
   }
 }
 
@@ -85,14 +129,21 @@ function isAllowedProtocol(url: URL, allowHttp: boolean): boolean {
   return url.protocol === 'https:' || (allowHttp && url.protocol === 'http:')
 }
 
-function isAllowedHostAndPort(url: URL, allowedHosts: Iterable<string> | undefined): boolean {
+function getHostAndPortRejection(
+  url: URL,
+  allowedHosts: Iterable<string> | undefined,
+): 'host_not_allowed' | 'port_not_allowed' | null {
   const hostname = normalizeHostname(url.hostname)
   const port = url.port || (url.protocol === 'https:' ? '443' : '80')
   const entries = allowedHosts
     ? [...allowedHosts].map(entry => entry.trim().toLowerCase()).filter(Boolean)
     : []
-  if (entries.length && !entries.includes(hostname) && !entries.includes(`${hostname}:${port}`)) return false
+  if (entries.length && !entries.includes(hostname) && !entries.includes(`${hostname}:${port}`)) {
+    return 'host_not_allowed'
+  }
   return port === '443' || port === '80' || entries.includes(`${hostname}:${port}`)
+    ? null
+    : 'port_not_allowed'
 }
 
 function isExplicitlyAllowedHostname(url: URL, allowedHosts: Iterable<string> | undefined): boolean {

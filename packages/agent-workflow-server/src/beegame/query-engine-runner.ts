@@ -786,22 +786,28 @@ export function createBeeGamePinnedFetch(
 ): PinnedRuntimeFetch {
   const dispatchers = new Map<string, ReturnType<typeof createPinnedUndiciDispatcher>>()
   for (const target of Object.values(approvedOutboundTargets)) {
-    if (!dispatchers.has(target.url.origin)) {
+    if (!target.trustedDevelopmentProxy && !dispatchers.has(target.url.origin)) {
       dispatchers.set(target.url.origin, createPinnedUndiciDispatcher(target))
     }
   }
+  const approvedOrigins = new Map(
+    Object.values(approvedOutboundTargets).map(target => [target.url.origin, target]),
+  )
 
   const pinnedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const requestUrl = getFetchRequestUrl(input)
     const protocol = getFetchRequestProtocol(requestUrl)
     const origin = getFetchRequestOrigin(input)
+    const approvedTarget = origin ? approvedOrigins.get(origin) : undefined
     const dispatcher = origin ? dispatchers.get(origin) : undefined
-    if ((protocol === 'http:' || protocol === 'https:') && !dispatcher) {
+    if ((protocol === 'http:' || protocol === 'https:') && !approvedTarget) {
       throw new Error('Outbound URL is not permitted')
     }
     return dispatcher
       ? baseFetch(input, { ...init, redirect: 'error', dispatcher } as RequestInit)
-      : baseFetch(input, init)
+      : approvedTarget
+        ? baseFetch(input, { ...init, redirect: 'error' })
+        : baseFetch(input, init)
   }) as PinnedRuntimeFetch
   pinnedFetch.close = async () => {
     await Promise.all([...dispatchers.values()].map(closeBeeGameRuntimeDispatcher))

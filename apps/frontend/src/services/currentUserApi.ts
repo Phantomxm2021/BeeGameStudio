@@ -23,6 +23,8 @@ export type BeeGamePermission =
   | 'resources.manage'
   | 'runtime_settings.manage'
   | 'secrets.manage'
+  | 'credits.admin'
+  | 'lifecycle.admin'
   | 'audit.read';
 
 export type BeeGameCurrentUser = {

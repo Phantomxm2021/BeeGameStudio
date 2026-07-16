@@ -526,7 +526,10 @@ export class DashboardRepository {
   async listModelConfigs(request: Request, user: BeeGameUserContext) {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      return supabase.listReadablePublicModelConfigs()
+      const ownerId = this.getReadModelConfigOwnerId(user)
+      return ownerId
+        ? supabase.listPublicModelConfigs(ownerId)
+        : supabase.listRlsVisiblePublicModelConfigs()
     }
     return listModelConfigs(user.id)
   }
@@ -578,7 +581,10 @@ export class DashboardRepository {
   ): Promise<boolean> {
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
-      return supabase.hasReadableModelConfig(id)
+      const ownerId = this.getReadModelConfigOwnerId(user)
+      return ownerId
+        ? supabase.hasModelConfig(ownerId, id)
+        : supabase.hasRlsVisibleModelConfig(id)
     }
     return listModelConfigs(user.id).some(config => config.id === id)
   }
@@ -1016,6 +1022,10 @@ export class DashboardRepository {
         authToken: this.requireAuthToken(authToken),
         ...(modelConfigId ? { modelConfigId } : {}),
       })
+      const modelEnv = modelConfigId
+        ? await this.supabaseForAuthToken(authToken)
+            .loadRlsVisibleModelRuntimeEnv(modelConfigId)
+        : {}
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
@@ -1024,6 +1034,7 @@ export class DashboardRepository {
       const hostIsolationEnv = mapRuntimeSettingsToEnv({}, { dataDir })
       return {
         ...env,
+        ...modelEnv,
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
         CLAUDE_CONFIG_DIR: hostIsolationEnv.CLAUDE_CONFIG_DIR,
         BEEGAME_PROJECT_CONFIG_DIR_NAME:
@@ -1157,6 +1168,12 @@ export class DashboardRepository {
 
   private getManageModelConfigOwnerId(user: BeeGameUserContext): string {
     return user.modelConfigOwnerId ?? user.id
+  }
+
+  private getReadModelConfigOwnerId(
+    user: BeeGameUserContext,
+  ): string | undefined {
+    return user.modelConfigOwnerId ?? (user.role === 'owner' ? user.id : undefined)
   }
 }
 

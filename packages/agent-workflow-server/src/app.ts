@@ -1,9 +1,8 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
@@ -12,6 +11,7 @@ import {
 import {
   BeeGameSessionManager,
   deleteSessionArtifactsFromTranscript,
+  getLatestRuntimeUsage,
   readSessionTranscriptFromDisk,
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
@@ -22,6 +22,10 @@ import {
   type BeeGameSessionLanguage,
   type BeeGameSessionRunner,
 } from './beegame/session-manager'
+import {
+  createProcessIsolatedModelRuntimeHost,
+  type BeeGameModelRuntimeHost,
+} from './beegame/model-runtime-host'
 import {
   parseAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
@@ -91,6 +95,7 @@ import {
   type BeeGamePermission,
   type BeeGameUserContext,
   type BeeGameUserResolver,
+  BeeGameAuthUnavailableError,
   DEFAULT_LOCAL_USER_ID,
   createConfiguredUserResolver,
   getBearerToken,
@@ -139,8 +144,9 @@ import {
   type BeeGameSkillsConfig,
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
-  createPinnedUndiciDispatcher,
+  inspectOutboundTarget,
   resolveApprovedOutboundTarget,
+  type OutboundTargetInspection,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import { validateSecretStorageAtStartup } from './security/secret-crypto'
@@ -240,6 +246,7 @@ type BeeGameAttachmentBuildJob = {
 
 export type AgentWorkflowAppOptions = {
   sessionRunner?: BeeGameSessionRunner
+  modelRuntimeHost?: BeeGameModelRuntimeHost
   previewRunner?: BeeGamePreviewRunner
   previewPortAllocator?: BeeGamePreviewPortAllocator
   previewReadinessProbe?: BeeGamePreviewReadinessProbe
@@ -303,9 +310,26 @@ export function createAgentWorkflowApp(
       (process.env.NODE_ENV !== 'production' && process.env.BEEGAME_ALLOW_TRUSTED_DEVELOPMENT_OUTBOUND_PROXY === '1'),
   }
   const resolveOutboundTarget = options.outboundTargetResolver ?? resolveApprovedOutboundTarget
+  const modelRuntimeHost = options.modelRuntimeHost ??
+    createProcessIsolatedModelRuntimeHost({
+      outboundTargetPolicyOptions,
+      resolveOutboundTarget,
+    })
+  const inspectPermittedOutboundUrl = async (value: unknown): Promise<OutboundTargetInspection | null> => {
+    if (value === undefined || value === '') return null
+    if (typeof value !== 'string') {
+      return { approved: false, code: 'invalid_url' }
+    }
+    if (options.outboundTargetResolver) {
+      const target = await options.outboundTargetResolver(value, outboundTargetPolicyOptions)
+      return target
+        ? { approved: true, target }
+        : { approved: false, code: 'address_not_public', hostname: safeUrlHost(value) || undefined }
+    }
+    return inspectOutboundTarget(value, outboundTargetPolicyOptions)
+  }
   const hasPermittedOutboundUrl = async (value: unknown): Promise<boolean> =>
-    value === undefined || value === '' ||
-    (typeof value === 'string' && Boolean(await resolveOutboundTarget(value, outboundTargetPolicyOptions)))
+    (await inspectPermittedOutboundUrl(value))?.approved !== false
   const assertPermittedOutboundUrl = async (value: string): Promise<void> => {
     if (!await hasPermittedOutboundUrl(value)) throw new Error('Outbound URL is not permitted')
   }
@@ -451,7 +475,18 @@ export function createAgentWorkflowApp(
       await next()
       return
     }
-    const user = await authContext.resolveRequestUser(c.req.raw)
+    let user: BeeGameUserContext | undefined
+    try {
+      user = await authContext.resolveRequestUser(c.req.raw)
+    } catch (error) {
+      if (error instanceof BeeGameAuthUnavailableError) {
+        return c.json({
+          error: 'Authentication unavailable',
+          message: 'Authentication service is temporarily unavailable',
+        }, 503)
+      }
+      throw error
+    }
     if (!user) {
       return c.json({
         error: 'Unauthorized',
@@ -675,8 +710,9 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     const error = requireFields(body, ['name', 'provider', 'apiKey', 'models'])
     if (error) return c.json({ error }, 400)
-    if (!await hasPermittedOutboundUrl(body.baseUrl)) {
-      return c.json({ error: 'Outbound URL is not permitted' }, 400)
+    const outboundInspection = await inspectPermittedOutboundUrl(body.baseUrl)
+    if (outboundInspection && !outboundInspection.approved) {
+      return c.json(toOutboundTargetError(outboundInspection), 400)
     }
 
     const created = await dashboardRepository.createModelConfig(c.req.raw, user, {
@@ -708,8 +744,9 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     try {
       const body = await readJson(c.req.raw)
-      if (!await hasPermittedOutboundUrl(body.baseUrl)) {
-        return c.json({ error: 'Outbound URL is not permitted' }, 400)
+      const outboundInspection = await inspectPermittedOutboundUrl(body.baseUrl)
+      if (outboundInspection && !outboundInspection.approved) {
+        return c.json(toOutboundTargetError(outboundInspection), 400)
       }
       const updated = await dashboardRepository.updateModelConfig(c.req.raw, user, c.req.param('id'), {
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
@@ -2115,8 +2152,7 @@ export function createAgentWorkflowApp(
         modelConfigId,
         ownerId: user.id,
         runtimeEnv,
-        outboundTargetPolicyOptions,
-        resolveOutboundTarget,
+        modelRuntimeHost,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -2194,8 +2230,8 @@ export function createAgentWorkflowApp(
           getRequestAuthToken(request),
           modelConfigId,
         ),
-        outboundTargetPolicyOptions,
-        resolveOutboundTarget,
+        cwd: getCurrentUserDataRoot(request),
+        modelRuntimeHost,
       })
       await dashboardRepository.settleCreditReservation(request, user, {
         reservationId: reservation.id,
@@ -2894,21 +2930,11 @@ async function generateBeeGameAttachmentAnalysis(input: {
   modelConfigId?: string
   ownerId: string
   runtimeEnv?: Record<string, string>
-  outboundTargetPolicyOptions: OutboundTargetPolicyOptions
-  resolveOutboundTarget: typeof resolveApprovedOutboundTarget
+  modelRuntimeHost: BeeGameModelRuntimeHost
 }): Promise<AttachmentBuildAnalysis> {
   const configId = input.modelConfigId ?? listModelConfigs(input.ownerId).find(config => config.isDefault)?.id
   const runtime = configId ? mapModelConfigToRuntime(configId) : undefined
   const env = { ...(runtime?.env ?? {}), ...(input.runtimeEnv ?? {}) }
-  const baseUrl = env.OPENAI_BASE_URL
-  const apiKey = env.OPENAI_API_KEY
-  const model = env.OPENAI_DEFAULT_SONNET_MODEL ?? env.OPENAI_DEFAULT_OPUS_MODEL ?? env.OPENAI_DEFAULT_HAIKU_MODEL
-  if (!baseUrl || !apiKey || !model) throw new Error('Attachment analysis requires an OpenAI-compatible model config')
-  const approvedTarget = await input.resolveOutboundTarget(baseUrl, input.outboundTargetPolicyOptions)
-  if (!approvedTarget) throw new Error('Outbound URL is not permitted')
-  const dispatcher = createPinnedUndiciDispatcher(approvedTarget)
-
-  try {
   const sourceType = input.attachments.some(item => item.type === 'image')
     ? input.attachments.some(item => item.type === 'file') ? 'mixed' : 'image'
     : 'gdd'
@@ -2935,33 +2961,25 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const imageParts = input.attachments
     .filter((item): item is BeeGameImageAttachment => item.type === 'image')
     .map(item => ({
-      type: 'image_url',
-      image_url: { url: `data:${item.mediaType};base64,${item.data}` },
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: item.mediaType,
+        data: item.data,
+      },
     }))
-  const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: `You are the BeeGame attachment design analyst. Return JSON only. Use ${input.language || 'the user language'} for natural-language values while keeping property names in English.`,
-        },
-        { role: 'user', content: [{ type: 'text', text }, ...imageParts] },
-      ],
-    }),
-    redirect: 'error',
-    dispatcher,
-  } as RequestInit)
-  if (!response.ok) throw new Error(`Attachment analysis model request failed: ${response.status}`)
-  const payload = (await response.json()) as JsonObject
-  const choices = Array.isArray(payload.choices) ? payload.choices : []
-  const firstChoice = isObject(choices[0]) ? choices[0] : undefined
-  const message = firstChoice && isObject(firstChoice.message) ? firstChoice.message : undefined
-  const rawContent = message ? extractMessageContentText(message) : ''
+  const rawContent = await input.modelRuntimeHost.generate({
+    cwd: input.workspace,
+    runtimeEnv: env,
+    systemPrompt: `You are the BeeGame attachment design analyst. Return JSON only. Use ${input.language || 'the user language'} for natural-language values while keeping property names in English.`,
+    messages: [{
+      role: 'user',
+      content: [{ type: 'text', text }, ...imageParts],
+    }],
+    temperature: 0.2,
+    maxTokens: 8_192,
+    querySource: 'beegame_attachment_analysis',
+  })
   if (!rawContent) throw new Error('Attachment analysis model returned empty content')
   let parsed: unknown
   try {
@@ -2972,9 +2990,6 @@ async function generateBeeGameAttachmentAnalysis(input: {
   const analysis = parseAttachmentBuildAnalysis({ ...(isObject(parsed) ? parsed : {}), analysisId: `attachment_analysis_${randomUUID().replaceAll('-', '')}` })
   if (analysis.sourceType !== sourceType) throw new Error('Attachment analysis source type did not match uploaded attachments')
   return analysis
-  } finally {
-    if (typeof dispatcher.close === 'function') await dispatcher.close()
-  }
 }
 
 async function generateBeeGameIntakeOptions(input: {
@@ -2983,8 +2998,8 @@ async function generateBeeGameIntakeOptions(input: {
   ownerId: string
   modelConfigId?: string
   runtimeEnv?: Record<string, string>
-  outboundTargetPolicyOptions: OutboundTargetPolicyOptions
-  resolveOutboundTarget: typeof resolveApprovedOutboundTarget
+  cwd: string
+  modelRuntimeHost: BeeGameModelRuntimeHost
 }): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
@@ -2998,36 +3013,7 @@ async function generateBeeGameIntakeOptions(input: {
     ...(runtime?.env ?? {}),
     ...(input.runtimeEnv ?? {}),
   }
-  const baseUrl = env.OPENAI_BASE_URL
-  const apiKey = env.OPENAI_API_KEY
-  const model =
-    env.OPENAI_DEFAULT_SONNET_MODEL ??
-    env.OPENAI_DEFAULT_OPUS_MODEL ??
-    env.OPENAI_DEFAULT_HAIKU_MODEL
-  if (!baseUrl || !apiKey || !model) {
-    throw new Error('BeeGame intake currently requires an OpenAI-compatible model config')
-  }
-  const approvedTarget = await input.resolveOutboundTarget(baseUrl, input.outboundTargetPolicyOptions)
-  if (!approvedTarget) throw new Error('Outbound URL is not permitted')
-  const dispatcher = createPinnedUndiciDispatcher(approvedTarget)
-
-  try {
-  const requestPayload = {
-    model,
-    temperature: 0.4,
-    max_tokens: 8_192,
-    response_format: { type: 'json_object' },
-    stream: false,
-    // Intake is a short, structured planning task. Explicitly disable reasoning
-    // for the OpenAI-compatible formats used by supported providers so a model's
-    // default thinking mode cannot consume the final JSON output budget.
-    thinking: { type: 'disabled' },
-    enable_thinking: false,
-    chat_template_kwargs: { thinking: false, enable_thinking: false },
-    messages: [
-      {
-        role: 'system',
-        content: [
+  const systemPrompt = [
           'You are BeeGame intake planner.',
           'Do not emit analysis, reasoning, thinking tags, or a thinking summary. Return the requested JSON object directly.',
           'First understand the game request before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
@@ -3062,73 +3048,44 @@ async function generateBeeGameIntakeOptions(input: {
           input.language
             ? `Use this selected UI language for every user-facing natural-language JSON value: ${input.language}. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.`
             : 'Keep the response language aligned with the user idea. Keep JSON property names in English. Keep code, commands, file paths, package names, API identifiers, and unavoidable technical names unchanged.',
-        ].join('\n'),
-      },
-      {
-        role: 'user',
-        content: `Game idea: ${input.idea}`,
-      },
-    ],
-  }
-  const response = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(requestPayload),
-    redirect: 'error',
-    dispatcher,
-  } as RequestInit)
-  if (!response.ok) {
-    throw new Error(
-      await describeModelIntakeFailure(response, {
-        baseUrl,
-        model,
-        language: input.language,
-      }),
-    )
-  }
-  const firstContent = await readBeeGameIntakeResponseContent(response)
+        ].join('\n')
+  const requestMessages = [{
+    role: 'user',
+    content: `Game idea: ${input.idea}`,
+  }] satisfies Array<{ role: 'user'; content: string }>
+  const firstContent = await input.modelRuntimeHost.generate({
+    cwd: input.cwd,
+    runtimeEnv: env,
+    systemPrompt,
+    messages: requestMessages,
+    temperature: 0.4,
+    maxTokens: 8_192,
+    querySource: 'beegame_idea_intake',
+  })
   try {
     return parseBeeGameIntakeContent(firstContent)
   } catch (initialError) {
-    const repairResponse = await fetch(joinApiPath(baseUrl, '/chat/completions'), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        ...requestPayload,
-        temperature: 0.2,
-        messages: [
-          ...requestPayload.messages,
-          { role: 'assistant', content: firstContent },
-          {
-            role: 'user',
-            content: [
-              'The previous final response did not satisfy the required JSON contract.',
-              `Validation result: ${toErrorMessage(initialError)}`,
-              'Correct the invalid or missing options and return exactly 3 valid, meaningfully distinct options.',
-              'Return only one complete corrected JSON object now. Do not emit analysis, reasoning, thinking tags, or a thinking summary.',
-            ].join('\n'),
-          },
-        ],
-      }),
-      redirect: 'error',
-      dispatcher,
-    } as RequestInit)
-    if (!repairResponse.ok) {
-      throw new Error(
-        `${toErrorMessage(initialError)} Finalization retry failed: ${await describeModelIntakeFailure(repairResponse, {
-          baseUrl,
-          model,
-          language: input.language,
-        })}`,
-      )
-    }
-    const repairedContent = await readBeeGameIntakeResponseContent(repairResponse)
+    const repairedContent = await input.modelRuntimeHost.generate({
+      cwd: input.cwd,
+      runtimeEnv: env,
+      systemPrompt,
+      temperature: 0.2,
+      messages: [
+        ...requestMessages,
+        { role: 'assistant', content: firstContent },
+        {
+          role: 'user',
+          content: [
+            'The previous final response did not satisfy the required JSON contract.',
+            `Validation result: ${toErrorMessage(initialError)}`,
+            'Correct the invalid or missing options and return exactly 3 valid, meaningfully distinct options.',
+            'Return only one complete corrected JSON object now. Do not emit analysis, reasoning, thinking tags, or a thinking summary.',
+          ].join('\n'),
+        },
+      ],
+      maxTokens: 8_192,
+      querySource: 'beegame_idea_intake_repair',
+    })
     try {
       return parseBeeGameIntakeContent(repairedContent)
     } catch (repairError) {
@@ -3137,26 +3094,6 @@ async function generateBeeGameIntakeOptions(input: {
       )
     }
   }
-  } finally {
-    if (typeof dispatcher.close === 'function') await dispatcher.close()
-  }
-}
-
-async function readBeeGameIntakeResponseContent(response: Response): Promise<string> {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.toLowerCase().includes('text/event-stream')) {
-    const content = await readOpenAiCompatibleStreamContent(response)
-    logBeeGameIntakeStreamDebug('complete', {
-      contentLength: content.length,
-      contentPreview: previewForLog(content, 4000),
-    })
-    return content
-  }
-  const payload = (await response.json()) as JsonObject
-  const choices = Array.isArray(payload.choices) ? payload.choices : []
-  const firstChoice = isObject(choices[0]) ? choices[0] : undefined
-  const message = firstChoice && isObject(firstChoice.message) ? firstChoice.message : undefined
-  return message ? extractMessageContentText(message) : ''
 }
 
 function parseBeeGameIntakeContent(content: string): BeeGameIntakeAnalysis {
@@ -3165,162 +3102,12 @@ function parseBeeGameIntakeContent(content: string): BeeGameIntakeAnalysis {
   })
 }
 
-async function readOpenAiCompatibleStreamContent(response: Response): Promise<string> {
-  if (!response.body) return ''
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  const startedAt = Date.now()
-  let buffer = ''
-  let content = ''
-  let done = false
-  let rawChunkCount = 0
-  let eventCount = 0
-  let contentChunkCount = 0
-
-  const processEvent = (eventText: string) => {
-    const data = eventText
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.slice('data:'.length).trim())
-      .join('\n')
-    if (!data) return
-    eventCount += 1
-    if (data === '[DONE]') {
-      logBeeGameIntakeStreamDebug('event_done', {
-        eventCount,
-        elapsedMs: Date.now() - startedAt,
-        accumulatedContentLength: content.length,
-      })
-      done = true
-      return
-    }
-    logBeeGameIntakeStreamDebug('event_data', {
-      eventCount,
-      dataLength: data.length,
-      dataPreview: previewForLog(data, 2000),
-    })
-    let event: JsonObject
-    try {
-      event = JSON.parse(data) as JsonObject
-    } catch {
-      throw new Error('Model intake stream chunk was not valid JSON')
-    }
-    const choices = Array.isArray(event.choices) ? event.choices : []
-    for (const choice of choices) {
-      if (!isObject(choice)) continue
-      const delta = isObject(choice.delta) ? choice.delta : undefined
-      const message = isObject(choice.message) ? choice.message : undefined
-      const deltaContent = delta ? extractMessageContentText(delta) : ''
-      const messageContent = message ? extractMessageContentText(message) : ''
-      const nextContent = deltaContent || messageContent
-      if (nextContent) {
-        contentChunkCount += 1
-        content += nextContent
-        logBeeGameIntakeStreamDebug('content_delta', {
-          contentChunkCount,
-          deltaLength: nextContent.length,
-          accumulatedContentLength: content.length,
-          deltaPreview: previewForLog(nextContent, 1200),
-        })
-      }
-    }
-  }
-
-  while (!done) {
-    const next = await reader.read()
-    if (next.done) break
-    const decoded = normalizeSseNewlines(decoder.decode(next.value, { stream: true }))
-    rawChunkCount += 1
-    logBeeGameIntakeStreamDebug('raw_chunk', {
-      rawChunkCount,
-      elapsedMs: Date.now() - startedAt,
-      chunkLength: decoded.length,
-      chunkPreview: previewForLog(decoded, 2000),
-    })
-    buffer += decoded
-    let eventEnd = buffer.indexOf('\n\n')
-    while (eventEnd >= 0) {
-      processEvent(buffer.slice(0, eventEnd))
-      buffer = buffer.slice(eventEnd + 2)
-      eventEnd = buffer.indexOf('\n\n')
-    }
-  }
-  buffer += normalizeSseNewlines(decoder.decode())
-  if (buffer.trim()) processEvent(buffer)
-  return content
-}
-
-function normalizeSseNewlines(value: string): string {
-  return value.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
-}
-
-function logBeeGameIntakeStreamDebug(event: string, details: JsonObject): void {
-  if (process.env.BEEGAME_INTAKE_STREAM_DEBUG !== '1') return
-  const entry = {
-    timestamp: new Date().toISOString(),
-    event,
-    details,
-  }
-  const logPath = process.env.BEEGAME_INTAKE_STREAM_LOG_PATH || resolve('beegame-intake-stream-debug.jsonl')
-  try {
-    mkdirSync(dirname(logPath), { recursive: true })
-    appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf8')
-  } catch (err) {
-    console.warn('[beegame-intake-stream] failed_to_write_log_file', {
-      logPath,
-      error: toErrorMessage(err),
-    })
-  }
-}
-
-function previewForLog(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]`
-}
-
-async function describeModelIntakeFailure(
-  response: Response,
-  input: {
-    baseUrl: string
-    model: string
-    language?: string
-  },
-): Promise<string> {
-  const upstreamMessage = await readShortResponseText(response)
-  const host = safeUrlHost(input.baseUrl)
-  const context = [
-    host ? `provider=${host}` : '',
-    input.model ? `model=${input.model}` : '',
-  ].filter(Boolean).join(', ')
-  const suffix = context ? ` (${context})` : ''
-  const detail = upstreamMessage ? ` Upstream response: ${upstreamMessage}` : ''
-  if (response.status === 401 || response.status === 403) {
-    return isZhLanguage(input.language)
-      ? `平台默认模型认证失败（${response.status}）。请让管理员在系统设置的平台模型中重新保存有效 API Key。${suffix}${detail}`
-      : `Platform default model authentication failed (${response.status}). Ask an administrator to re-save a valid API key in platform model settings.${suffix}${detail}`
-  }
-  return isZhLanguage(input.language)
-    ? `模型 intake 请求失败：${response.status}。请检查平台模型 Base URL、Model 和供应商服务状态。${suffix}${detail}`
-    : `Model intake request failed: ${response.status}. Check the platform model base URL, model, and provider status.${suffix}${detail}`
-}
-
-async function readShortResponseText(response: Response): Promise<string> {
-  const text = (await response.text().catch(() => '')).trim()
-  if (!text) return ''
-  return text.replace(/\s+/g, ' ').slice(0, 240)
-}
-
 function safeUrlHost(value: string): string {
   try {
     return new URL(value).host
   } catch {
     return ''
   }
-}
-
-function isZhLanguage(value: string | undefined): boolean {
-  return Boolean(value && value.toLowerCase().startsWith('zh'))
 }
 
 function parseBeeGameIntakeAnalysis(payload: JsonObject): BeeGameIntakeAnalysis {
@@ -3601,10 +3388,6 @@ function extractFirstBalancedJsonObject(text: string): string | undefined {
     }
   }
   return undefined
-}
-
-function joinApiPath(baseUrl: string, path: string): string {
-  return `${baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl}${path}`
 }
 
 async function getOwnedProjectMetadata(
@@ -4109,7 +3892,8 @@ function deriveBeeGameContextVisibility(
   events: BeeGameEvent[],
   snapshot?: BeeGameRuntimeSnapshot,
 ): JsonObject | null {
-  const usage = getLatestBeeGameTokenUsage(events) ?? snapshot?.usage
+  const eventUsage = getLatestRuntimeUsage(events)
+  const usage = eventUsage.total_tokens > 0 ? eventUsage : snapshot?.usage
   if (!usage) return null
   const toolUseCount = events.filter(event => event.type.startsWith('tool.')).length
   return {
@@ -4133,38 +3917,6 @@ function deriveBeeGameContextVisibility(
       toolUseCount,
     },
   }
-}
-
-function getLatestBeeGameTokenUsage(events: BeeGameEvent[]): {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-} | null {
-  for (const event of [...events].reverse()) {
-    const usage = getBeeGameUsageFromPayload(event.payload)
-    if (usage) return usage
-  }
-  return null
-}
-
-function getBeeGameUsageFromPayload(payload: unknown): {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-} | null {
-  if (!isObject(payload)) return null
-  const usage = isObject(payload.usage) ? payload.usage : undefined
-  if (!usage) return null
-  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens) || 0
-  const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens) || 0
-  const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens
-  return totalTokens > 0
-    ? {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens,
-      }
-    : null
 }
 
 function previewSnapshotToProjectBuildReport(preview: BeeGamePreviewSnapshot): JsonObject | null {
@@ -5484,9 +5236,9 @@ function buildConfirmedBriefPrompt(
     'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and docs/ASSET_PLAN.md after the product and presentation requirements are defined; (4) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
     'Together these documents must define the player-visible loop from launch through progress, win/fail and restart; controls for every selected input method; rules, state transitions and edge cases; presentation and asset requirements; a feasible technical design that traces each required behavior to an implementation responsibility; and observable acceptance paths with concrete actions and expected outcomes.',
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
-    'Pass the canonical confirmed brief and selected document language to the native beegame-document-reviewer subagent. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first.',
+    'Pass the canonical confirmed brief and selected document language to one native beegame-document-reviewer subagent for the current document revision. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first. If the native Agent tool reports that this reviewer is running asynchronously and will notify you when it finishes, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session.',
     '',
-    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, ask one native beegame-acceptance-validator subagent to independently run the project-native checks and observable player paths, and wait for its terminal result before claiming delivery. Do not change project files while that Validator is running. If it fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
+    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, ask one native beegame-acceptance-validator subagent for that exact workspace revision to independently run the project-native checks and observable player paths. Do not change project files while that Validator is running. If the native Agent tool reports that this Validator is running asynchronously and will notify you when it finishes, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session. Do not launch another Validator for the same unchanged revision. If validation fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
     '',
     'Confirmed brief:',
     confirmedBrief,
@@ -5614,6 +5366,28 @@ async function validateMcpServerBody(
 function readAllowedOutboundHosts(): string[] {
   const value = process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS
   return value ? value.split(',').map(host => host.trim()).filter(Boolean) : []
+}
+
+function toOutboundTargetError(
+  inspection: Extract<OutboundTargetInspection, { approved: false }>,
+): { error: string; code: string; message: string; hostname?: string } {
+  const hostname = inspection.hostname
+  const target = hostname ? ` "${hostname}"` : ''
+  const messages: Record<typeof inspection.code, string> = {
+    invalid_url: 'Enter a valid absolute model provider URL.',
+    unsupported_protocol: 'Model provider URLs must use HTTPS.',
+    embedded_credentials: 'Model provider URLs cannot contain embedded credentials.',
+    host_not_allowed: `Outbound host${target} is not approved by this deployment.`,
+    port_not_allowed: `Outbound host${target} uses a port that is not approved by this deployment.`,
+    dns_unresolved: `Outbound host${target} could not be resolved.`,
+    address_not_public: `Outbound host${target} did not resolve to a permitted public address.`,
+  }
+  return {
+    error: 'Outbound URL is not permitted',
+    code: `outbound_${inspection.code}`,
+    message: messages[inspection.code],
+    ...(hostname ? { hostname } : {}),
+  }
 }
 
 function toMcpServerInput(body: JsonObject) {

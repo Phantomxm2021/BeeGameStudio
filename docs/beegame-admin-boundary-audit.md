@@ -18,7 +18,9 @@ permission where the product supports delegated administration.
   - runtime settings: `runtime_settings.manage`
   - MCP servers: `mcp.manage`
   - model configuration: `model_config.manage`
-  - credit audit, manual grants, and project lifecycle: `audit.read`
+  - audit and billing event visibility: `audit.read`
+  - credit pack and grant administration: `credits.admin`
+  - project lifecycle and retention administration: `lifecycle.admin`
   - invitation management: platform owner only
 - Frontend coverage includes a non-owner account with management permissions and
   asserts that the Platform settings tab is not shown.
@@ -28,9 +30,8 @@ permission where the product supports delegated administration.
 | Surface | UI capability | Server or data authority |
 | --- | --- | --- |
 | Audit events | `audit.read` | `GET /api/audit-events` requires `audit.read`. |
-| Credit ledger | `audit.read` | `GET /api/admin/credits/ledger` requires `audit.read`. |
-| Manual/provider credit grants | `audit.read` | `POST /api/admin/credits/grants` requires `audit.read`; Supabase grants are additionally restricted by `beegame_admin_grant_credits()` using `beegame_is_platform_owner()`. |
-| Project lifecycle overview | `audit.read` | `GET /api/admin/projects/lifecycle` requires `audit.read`. |
+| Credit ledger and credit packs | `credits.admin` | Credit ledger, credit packs, and manual grants require `credits.admin`; Supabase grants are additionally restricted by `beegame_admin_grant_credits()` using `beegame_is_platform_owner()`. |
+| Project lifecycle and retention | `lifecycle.admin` | Lifecycle overview and retention operations require `lifecycle.admin`. |
 | Model configuration writes | `model_config.manage` | `POST/PATCH/DELETE /api/model-configs` require `model_config.manage`. |
 | Model configuration reads | platform owner UI | `GET /api/model-configs` is readable by authenticated runtime context so normal project flows can resolve active model settings. Mutations remain permission-gated. |
 | Web tool secrets | `secrets.manage` | `GET/PUT /api/web-tools` require `secrets.manage`. |
@@ -49,9 +50,8 @@ permission where the product supports delegated administration.
 - Invitation management is not a delegated permission today. It is platform
   owner-only by design and backed by Supabase owner checks rather than an app
   server route.
-- Credit and project lifecycle operator views are consistently grouped under
-  `audit.read`, matching their audit/operations role rather than normal project
-  authoring permissions.
+- Credit and project lifecycle controls use distinct administration
+  capabilities. `audit.read` alone does not expose mutation-capable panels.
 
 ## Residual Risk
 

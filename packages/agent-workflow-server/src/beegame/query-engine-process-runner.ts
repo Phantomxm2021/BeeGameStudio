@@ -193,13 +193,19 @@ function serializeStartInput(
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
         key,
-        { url: target.url.toString(), addresses: [...target.addresses] },
+        {
+          url: target.url.toString(),
+          addresses: [...target.addresses],
+          ...(target.trustedDevelopmentProxy
+            ? { trustedDevelopmentProxy: true as const }
+            : {}),
+        },
       ]),
     ),
   }
 }
 
-function getWorkerBaseEnvironment(): Record<string, string> {
+export function getWorkerBaseEnvironment(): Record<string, string> {
   return Object.fromEntries(
     SAFE_INHERITED_ENV.flatMap(key => {
       const value = process.env[key]
