@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -252,9 +253,80 @@ describe('BeeGame skills store', () => {
     materializeBuiltinSkills({ dataDir }, sourceDir)
 
     await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', 'builtinskills', 'acceptance', 'SKILL.md'),
+      join(dataDir, '.runtime', 'app', 'skills', 'acceptance', 'SKILL.md'),
       'utf8',
     )).resolves.toContain('# Acceptance')
+    await expect(readFile(
+      join(dataDir, '.runtime', 'app', 'skills', '.beegame-builtins.json'),
+      'utf8',
+    )).resolves.toContain('"acceptance"')
+    expect(existsSync(join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      'builtinskills',
+    ))).toBe(false)
+  })
+
+  test('preserves user skills and removes only stale built-in projections', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-projection-'))
+    const sourceDir = join(dataDir, 'source-builtins')
+    await mkdir(join(sourceDir, 'first'), { recursive: true })
+    await writeFile(join(sourceDir, 'first', 'SKILL.md'), [
+      '---',
+      'name: first',
+      'description: First built-in.',
+      '---',
+    ].join('\n'), 'utf8')
+    const userSkillDir = join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      'user-custom',
+    )
+    await mkdir(userSkillDir, { recursive: true })
+    await writeFile(join(userSkillDir, 'SKILL.md'), 'user skill', 'utf8')
+
+    materializeBuiltinSkills({ dataDir }, sourceDir)
+    await rm(join(sourceDir, 'first'), { recursive: true, force: true })
+    await mkdir(join(sourceDir, 'second'), { recursive: true })
+    await writeFile(join(sourceDir, 'second', 'SKILL.md'), [
+      '---',
+      'name: second',
+      'description: Second built-in.',
+      '---',
+    ].join('\n'), 'utf8')
+    await writeFile(join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      '.beegame-builtins.json',
+    ), JSON.stringify({
+      version: 1,
+      skills: ['first', 'user-custom', '../outside'],
+    }), 'utf8')
+    materializeBuiltinSkills({ dataDir }, sourceDir)
+
+    expect(existsSync(join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      'first',
+    ))).toBe(false)
+    await expect(readFile(join(
+      dataDir,
+      '.runtime',
+      'app',
+      'skills',
+      'second',
+      'SKILL.md',
+    ), 'utf8')).resolves.toContain('Second built-in')
+    await expect(readFile(join(userSkillDir, 'SKILL.md'), 'utf8'))
+      .resolves.toBe('user skill')
   })
 })
 

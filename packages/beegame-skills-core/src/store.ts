@@ -25,6 +25,8 @@ const STORE_FILE = 'user-skills.json'
 const SKILL_METADATA_FILE = 'skill.json'
 const BUILTIN_SKILLS_DIR = 'builtinskills'
 const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
+const RUNTIME_BUILTINS_MANIFEST = '.beegame-builtins.json'
+const RUNTIME_BUILTIN_MARKER = '.beegame-builtin'
 const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
 const MAX_FILE_COUNT = 128
@@ -94,26 +96,97 @@ export function materializeBuiltinSkills(
   options: LocalBeeGameSkillsStoreOptions = {},
   sourceDir = getDefaultBeeGameBuiltinSkillsDir(),
 ): void {
-  const targetDir = join(
+  const runtimeSkillsDir = join(
     options.dataDir ?? getDefaultBeeGameSkillsStoreDir(),
     RUNTIME_SKILLS_DIR,
-    BUILTIN_SKILLS_DIR,
   )
-  if (resolve(sourceDir) === resolve(targetDir)) return
   if (!existsSync(sourceDir)) {
     throw new BeeGameSkillValidationError(
       `BeeGame built-in skills directory is unavailable: ${sourceDir}`,
     )
   }
 
-  const temporaryDir = `${targetDir}.${randomUUID()}.tmp`
-  mkdirSync(dirname(targetDir), { recursive: true })
+  mkdirSync(runtimeSkillsDir, { recursive: true })
+  const skillNames = readdirSync(sourceDir, { withFileTypes: true })
+    .filter(entry =>
+      entry.isDirectory() &&
+      existsSync(join(sourceDir, entry.name, 'SKILL.md'))
+    )
+    .map(entry => entry.name)
+    .sort()
+  if (skillNames.length === 0) {
+    throw new BeeGameSkillValidationError(
+      `BeeGame built-in skills directory contains no skills: ${sourceDir}`,
+    )
+  }
+
+  const previousSkillNames = readRuntimeBuiltinSkillNames(runtimeSkillsDir)
+  for (const skillName of skillNames) {
+    const sourceSkillDir = join(sourceDir, skillName)
+    const targetSkillDir = join(runtimeSkillsDir, skillName)
+    if (resolve(sourceSkillDir) === resolve(targetSkillDir)) continue
+    const temporaryDir = `${targetSkillDir}.${randomUUID()}.tmp`
+    try {
+      cpSync(sourceSkillDir, temporaryDir, { recursive: true })
+      writeFileSync(join(temporaryDir, RUNTIME_BUILTIN_MARKER), '', 'utf8')
+      rmSync(targetSkillDir, { recursive: true, force: true })
+      renameSync(temporaryDir, targetSkillDir)
+    } finally {
+      rmSync(temporaryDir, { recursive: true, force: true })
+    }
+  }
+
+  const desiredSkillNames = new Set(skillNames)
+  for (const skillName of previousSkillNames) {
+    const staleSkillDir = join(runtimeSkillsDir, skillName)
+    if (
+      !desiredSkillNames.has(skillName) &&
+      existsSync(join(staleSkillDir, RUNTIME_BUILTIN_MARKER))
+    ) rmSync(staleSkillDir, { recursive: true, force: true })
+  }
+  writeRuntimeBuiltinSkillNames(runtimeSkillsDir, skillNames)
+  rmSync(join(runtimeSkillsDir, BUILTIN_SKILLS_DIR), {
+    recursive: true,
+    force: true,
+  })
+}
+
+function readRuntimeBuiltinSkillNames(runtimeSkillsDir: string): string[] {
   try {
-    cpSync(sourceDir, temporaryDir, { recursive: true })
-    rmSync(targetDir, { recursive: true, force: true })
-    renameSync(temporaryDir, targetDir)
+    const parsed = JSON.parse(readFileSync(
+      join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST),
+      'utf8',
+    )) as unknown
+    if (!isRecord(parsed) || !Array.isArray(parsed.skills)) return []
+    return parsed.skills.filter((value): value is string => {
+      if (typeof value !== 'string' || !value || value === '.' || value === '..') {
+        return false
+      }
+      return basename(value) === value
+    })
+  } catch {
+    return []
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function writeRuntimeBuiltinSkillNames(
+  runtimeSkillsDir: string,
+  skillNames: string[],
+): void {
+  const path = join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST)
+  const temporaryPath = `${path}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify({
+      version: 1,
+      skills: skillNames,
+    }, null, 2)}\n`, 'utf8')
+    renameSync(temporaryPath, path)
   } finally {
-    rmSync(temporaryDir, { recursive: true, force: true })
+    rmSync(temporaryPath, { force: true })
   }
 }
 

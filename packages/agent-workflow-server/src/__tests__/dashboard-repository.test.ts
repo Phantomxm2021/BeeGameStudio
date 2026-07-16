@@ -216,7 +216,6 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(
           env.CLAUDE_CONFIG_DIR,
           'skills',
-          'builtinskills',
           'beegame-game-acceptance',
           'SKILL.md',
         ),
