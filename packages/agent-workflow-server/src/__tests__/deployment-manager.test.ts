@@ -301,33 +301,12 @@ describe('BeeGameDeploymentManager', () => {
       ].join('\n'),
     )
     const report = {
-        validatorId: 'beegame-acceptance-validator',
-        status: 'passed',
-        summary: 'Observed acceptance passed.',
-        assetsRequired: false,
-        requirements: [{
-          id: 'requirement-primary',
-          status: 'passed',
-          evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
-        }],
-        playerPaths: [{
-          id: 'path-primary',
-          status: 'passed',
-          evidence: [{
-            kind: 'runtime',
-            id: 'evidence-path-primary',
-            source: 'path-primary',
-            result: 'passed',
-            workingDirectory: '.',
-            action: 'Run the project-native acceptance path.',
-            assertion: 'The declared outcome is observable.',
-            artifact: 'tests/acceptance.test.ts',
-            detail: 'Observed.',
-          }],
-        }],
-        findings: [],
-        verifiedCapabilities: ['skill:beegame-game-acceptance'],
-      }
+      validatorId: 'beegame-acceptance-validator',
+      status: 'passed',
+      summary: 'Observed acceptance passed.',
+      evidence: passingNativeAcceptanceEvidence(),
+      findings: [],
+    }
     await writeFile(
       join(workspace, 'docs', 'acceptance', 'validation-report.json'),
       JSON.stringify(report),
@@ -363,6 +342,17 @@ describe('BeeGameDeploymentManager', () => {
     expect(changedDuringBuild.status).toBe('failed')
     expect(changedDuringBuild.message).toContain('Project source changed after acceptance')
   })
+
+  function passingNativeAcceptanceEvidence() {
+    return [
+      { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
+      { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build passed.' },
+      { kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Assertions passed.' },
+      { kind: 'runtime', source: 'path-primary', result: 'passed', detail: 'The player path was observed.' },
+      { kind: 'asset', source: 'project assets', result: 'passed', detail: 'Runtime asset references were verified.' },
+      { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance skill was used.' },
+    ]
+  }
 
   test('rejects malformed self-identifying files in the built artifact', async () => {
     const manager = new BeeGameDeploymentManager({

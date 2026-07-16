@@ -5486,7 +5486,7 @@ function buildConfirmedBriefPrompt(
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
     'Pass the canonical confirmed brief and selected document language to the native beegame-document-reviewer subagent. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first.',
     '',
-    'Plan and implement the project with applicable native Skills. Before claiming delivery, ask the native beegame-acceptance-validator subagent to independently run the project-native checks and observable player paths. If it fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
+    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, ask one native beegame-acceptance-validator subagent to independently run the project-native checks and observable player paths, and wait for its terminal result before claiming delivery. Do not change project files while that Validator is running. If it fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
     '',
     'Confirmed brief:',
     confirmedBrief,

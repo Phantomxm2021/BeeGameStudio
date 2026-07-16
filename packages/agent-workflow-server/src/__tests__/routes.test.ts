@@ -2411,27 +2411,18 @@ describe('agent workflow server routes', () => {
         'utf8',
       )
       const acceptanceReport = {
-          validatorId: 'beegame-acceptance-validator',
-          status: 'passed',
-          summary: 'Observed acceptance passed.',
-          assetsRequired: false,
-          requirements: [{
-            id: 'requirement-primary',
-            status: 'passed',
-            evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
-          }],
-          playerPaths: [{
-            id: 'path-primary',
-            status: 'passed',
-            evidence: [{
-              id: 'evidence-path-primary', kind: 'runtime', source: 'path-primary', result: 'passed',
-              workingDirectory: '.', action: 'Run the native player path.',
-              assertion: 'The declared outcome is observable.', artifact: 'tests/acceptance.test.ts',
-              detail: 'Observed.',
-            }],
-          }],
-          findings: [],
-          verifiedCapabilities: ['skill:beegame-game-acceptance'],
+        validatorId: 'beegame-acceptance-validator',
+        status: 'passed',
+        summary: 'Observed acceptance passed.',
+        evidence: [
+          { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
+          { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build passed.' },
+          { kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Assertions passed.' },
+          { kind: 'runtime', source: 'path-primary', result: 'passed', detail: 'The player path was observed.' },
+          { kind: 'asset', source: 'project assets', result: 'passed', detail: 'Runtime asset references were verified.' },
+          { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance skill was used.' },
+        ],
+        findings: [],
       }
       await writeFile(
         join(projectRoot, 'docs', 'acceptance', 'validation-report.json'),

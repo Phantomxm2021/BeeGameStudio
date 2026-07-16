@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
 import {
   getObservedNativeAcceptance,
-  observeNativeAcceptanceToolCompletion,
+  observeNativeAcceptanceToolEvent,
   recordNativeAcceptanceReportForTest,
 } from './native-acceptance-evidence'
 
@@ -28,6 +28,83 @@ describe('native delivery acceptance gate', () => {
       outcome: 'passed',
       issues: [],
     })
+  })
+
+  test('binds acceptance to the revision observed when the validator starts', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const payload = {
+      toolName: 'Agent',
+      toolUseID: 'validator-on-old-revision',
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload,
+      createdAt: new Date(),
+    })
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: { ...payload, output: JSON.stringify(passingReport()) },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('stale')
+  })
+
+  test('rejects a passing claim without complete native evidence', async () => {
+    workspace = await createWorkspace()
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: {
+        validatorId: 'beegame-acceptance-validator',
+        status: 'passed',
+        summary: 'Source inspection looked plausible.',
+        evidence: [],
+        findings: [],
+      },
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+  })
+
+  test('does not accept a completion that has no matching native dispatch', async () => {
+    workspace = await createWorkspace()
+    observeNativeAcceptanceToolEvent({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'Agent',
+        toolUseID: 'unobserved-validator',
+        input: { subagent_type: 'beegame-acceptance-validator' },
+        output: JSON.stringify(passingReport()),
+      },
+      createdAt: new Date(),
+    })
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
   })
 
   test('rejects a workspace without an observed native validator result', async () => {
@@ -82,7 +159,7 @@ describe('native delivery acceptance gate', () => {
 
   test('does not accept prose-wrapped or malformed Agent output as terminal evidence', async () => {
     workspace = await createWorkspace()
-    observeNativeAcceptanceToolCompletion({
+    observeNativeAcceptanceToolEvent({
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
@@ -105,7 +182,7 @@ describe('native delivery acceptance gate', () => {
 
   test('does not accept an assistant completion claim as native validator evidence', async () => {
     workspace = await createWorkspace()
-    observeNativeAcceptanceToolCompletion({
+    observeNativeAcceptanceToolEvent({
       dataRoot: dataRootFor(workspace),
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
@@ -152,14 +229,38 @@ function record(
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
     workspacePath: workspace,
-    report: {
-      validatorId: 'beegame-acceptance-validator',
-      status,
-      summary,
-      evidence: [],
-      findings: [],
-    },
+    report: status === 'passed'
+      ? passingReport(summary)
+      : {
+          validatorId: 'beegame-acceptance-validator',
+          status,
+          summary,
+          evidence: [{
+            kind: 'runtime',
+            source: 'project-native acceptance path',
+            result: status,
+            detail: summary,
+          }],
+          findings: [{ source: 'project-native acceptance path', detail: summary }],
+        },
   })
+}
+
+function passingReport(summary = 'Observed every documented player path.'): object {
+  return {
+    validatorId: 'beegame-acceptance-validator',
+    status: 'passed',
+    summary,
+    evidence: [
+      { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
+      { kind: 'build', source: 'project build', result: 'passed', detail: 'The native build completed successfully.' },
+      { kind: 'test', source: 'project tests', result: 'passed', detail: 'Project-native assertions passed.' },
+      { kind: 'runtime', source: 'player paths', result: 'passed', detail: 'Every required player path was observed.' },
+      { kind: 'asset', source: 'packaged assets', result: 'passed', detail: 'Required assets loaded from the packaged result.' },
+      { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The native acceptance Skill was invoked.' },
+    ],
+    findings: [],
+  }
 }
 
 function evaluate(workspace: string) {

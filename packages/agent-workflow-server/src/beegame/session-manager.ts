@@ -26,7 +26,7 @@ import {
   type BeeGameCreditTaskType,
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
-import { observeNativeAcceptanceToolCompletion } from './native-acceptance-evidence'
+import { observeNativeAcceptanceToolEvent } from './native-acceptance-evidence'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 
 export type BeeGameImageAttachment = {
@@ -1253,7 +1253,7 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
     try {
-      observeNativeAcceptanceToolCompletion({
+      observeNativeAcceptanceToolEvent({
         dataRoot: this.dashboardDataRoot,
         sessionId: record.session.id,
         workspacePath: record.session.cwd,

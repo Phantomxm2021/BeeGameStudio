@@ -4084,7 +4084,7 @@ describe('beegame session routes', () => {
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Observed the approved player path on the current revision.',
-      evidence: [],
+      evidence: passingNativeAcceptanceEvidence(),
       findings: [],
     }
     const fake = createFakeRunner([
@@ -8295,24 +8295,8 @@ async function writeAcceptedDeliveryReport(
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',
       summary: 'Observed acceptance passed.',
-      assetsRequired: false,
-      requirements: [{
-        id: 'requirement-primary',
-        status: 'passed',
-        evidence: [{ id: 'evidence-requirement-primary', kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Passed.' }],
-      }],
-      playerPaths: [{
-        id: 'path-primary',
-        status: 'passed',
-        evidence: [{
-          id: 'evidence-path-primary', kind: 'runtime', source: 'path-primary', result: 'passed',
-          workingDirectory: '.', action: 'Run the native player path.',
-          assertion: 'The declared outcome is observable.', artifact: 'tests/acceptance.test.ts',
-          detail: 'Observed.',
-        }],
-      }],
+      evidence: passingNativeAcceptanceEvidence(),
       findings: [],
-      verifiedCapabilities: ['skill:beegame-game-acceptance'],
   }
   await writeFile(
     join(acceptanceDirectory, 'validation-report.json'),
@@ -8321,6 +8305,17 @@ async function writeAcceptedDeliveryReport(
   if (dataRoot && sessionId) {
     recordNativeAcceptanceReportForTest({ dataRoot, sessionId, workspacePath: workspace, report })
   }
+}
+
+function passingNativeAcceptanceEvidence() {
+  return [
+    { kind: 'document', source: 'docs/', result: 'passed', detail: 'Approved documents were reviewed.' },
+    { kind: 'build', source: 'project build', result: 'passed', detail: 'The project-native build passed.' },
+    { kind: 'test', source: 'tests/acceptance.test.ts', result: 'passed', detail: 'Project-native assertions passed.' },
+    { kind: 'runtime', source: 'path-primary', result: 'passed', detail: 'The required player path was observed.' },
+    { kind: 'asset', source: 'packaged assets', result: 'passed', detail: 'Required assets loaded at runtime.' },
+    { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance Skill was invoked.' },
+  ]
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {

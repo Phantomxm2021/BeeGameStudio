@@ -3,20 +3,82 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
 
-export type NativeAcceptanceEvidence = {
-  version: 2
+type NativeAcceptanceResult = 'passed' | 'failed' | 'blocked'
+type NativeAcceptanceEvidenceKind =
+  | 'document'
+  | 'build'
+  | 'test'
+  | 'runtime'
+  | 'asset'
+  | 'skill'
+
+type NativeAcceptanceReportEvidence = {
+  kind: NativeAcceptanceEvidenceKind
+  source: string
+  result: NativeAcceptanceResult
+  detail: string
+}
+
+type NativeAcceptanceReportFinding = {
+  source: string
+  detail: string
+}
+
+type NativeAcceptanceReport = {
+  validatorId: string
+  status: NativeAcceptanceResult
+  summary: string
+  evidence: NativeAcceptanceReportEvidence[]
+  findings: NativeAcceptanceReportFinding[]
+}
+
+type NativeAcceptanceDispatch = {
+  version: 3
+  kind: 'dispatch'
   sessionId: string
   turnId?: string
   toolUseID: string
   validatorId: string
-  status: 'passed' | 'failed' | 'blocked'
-  summary: string
-  reportDigest: string
   workspaceDigest: string
   createdAt: string
 }
 
-export function observeNativeAcceptanceToolCompletion(input: {
+export type NativeAcceptanceEvidence = {
+  version: 3
+  kind: 'result'
+  sessionId: string
+  turnId?: string
+  toolUseID: string
+  validatorId: string
+  status: NativeAcceptanceResult
+  summary: string
+  reportDigest: string
+  workspaceDigest: string
+  evidence: NativeAcceptanceReportEvidence[]
+  findings: NativeAcceptanceReportFinding[]
+  createdAt: string
+}
+
+type NativeAcceptanceObservation =
+  | NativeAcceptanceDispatch
+  | NativeAcceptanceEvidence
+
+const REQUIRED_PASSING_EVIDENCE = new Set<NativeAcceptanceEvidenceKind>([
+  'document',
+  'build',
+  'test',
+  'runtime',
+  'asset',
+  'skill',
+])
+
+/**
+ * Passively records native Validator dispatch and completion events. The
+ * workspace revision is frozen when the Agent tool starts, never when its
+ * result happens to arrive. This prevents a validator running against an old
+ * snapshot from accepting files that changed while it was in flight.
+ */
+export function observeNativeAcceptanceToolEvent(input: {
   dataRoot: string
   sessionId: string
   workspacePath: string
@@ -25,34 +87,57 @@ export function observeNativeAcceptanceToolCompletion(input: {
   payload?: unknown
   createdAt: Date
 }): void {
-  if (input.eventType !== 'tool.completed' || !isRecord(input.payload)) return
+  if (!isRecord(input.payload)) return
   if (stringValue(input.payload.toolName) !== 'Agent') return
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
   const validatorId = stringValue(toolInput.subagent_type)
   if (validatorId !== DELIVERY_VALIDATOR_AGENT_TYPES[0]) return
-  const report = parseTerminalJsonObject(stringValue(input.payload.output))
-  if (!report || stringValue(report.validatorId) !== validatorId) return
-  const status = stringValue(report.status)
-  if (status !== 'passed' && status !== 'failed' && status !== 'blocked') return
-  const summary = stringValue(report.summary)
-  if (!summary) return
   const toolUseID = stringValue(input.payload.toolUseID)
   if (!toolUseID) return
-  const evidence: NativeAcceptanceEvidence = {
-    version: 2,
+
+  if (input.eventType === 'tool.started') {
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 3,
+      kind: 'dispatch',
+      sessionId: input.sessionId,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      toolUseID,
+      validatorId,
+      workspaceDigest: digestWorkspace(input.workspacePath),
+      createdAt: input.createdAt.toISOString(),
+    })
+    return
+  }
+  if (input.eventType !== 'tool.completed') return
+
+  const dispatch = readObservations(input.dataRoot, input.sessionId)
+    .findLast(observation =>
+      observation.kind === 'dispatch' &&
+      observation.toolUseID === toolUseID &&
+      observation.validatorId === validatorId
+    )
+  if (!dispatch || dispatch.kind !== 'dispatch') return
+
+  const report = parseNativeAcceptanceReport(
+    stringValue(input.payload.output),
+    validatorId,
+  )
+  if (!report) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 3,
+    kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
     validatorId,
-    status,
-    summary,
+    status: report.status,
+    summary: report.summary,
     reportDigest: digestJson(report),
-    workspaceDigest: digestWorkspace(input.workspacePath),
+    workspaceDigest: dispatch.workspaceDigest,
+    evidence: report.evidence,
+    findings: report.findings,
     createdAt: input.createdAt.toISOString(),
-  }
-  const path = evidencePath(input.dataRoot, input.sessionId)
-  mkdirSync(dirname(path), { recursive: true })
-  appendFileSync(path, `${JSON.stringify(evidence)}\n`, 'utf8')
+  })
 }
 
 export function getObservedNativeAcceptance(input: {
@@ -63,24 +148,12 @@ export function getObservedNativeAcceptance(input: {
   | { state: 'missing' }
   | { state: 'stale'; evidence: NativeAcceptanceEvidence }
   | { state: 'current'; evidence: NativeAcceptanceEvidence } {
-  const path = evidencePath(input.dataRoot, input.sessionId)
-  if (!existsSync(path)) return { state: 'missing' }
   const workspaceDigest = digestWorkspace(input.workspacePath)
-  const observations: NativeAcceptanceEvidence[] = readFileSync(path, 'utf8')
-    .split('\n')
-    .flatMap((line): NativeAcceptanceEvidence[] => {
-    if (!line.trim()) return []
-    try {
-      const evidence = JSON.parse(line) as NativeAcceptanceEvidence
-      return evidence.version === 2 && evidence.sessionId === input.sessionId &&
-        evidence.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0]
-        ? [evidence]
-        : []
-    } catch {
-      return []
-    }
-  })
-  const latest = observations.at(-1)
+  const latest = readObservations(input.dataRoot, input.sessionId)
+    .filter((observation): observation is NativeAcceptanceEvidence =>
+      observation.kind === 'result'
+    )
+    .at(-1)
   if (!latest) return { state: 'missing' }
   return latest.workspaceDigest === workspaceDigest
     ? { state: 'current', evidence: latest }
@@ -93,17 +166,26 @@ export function recordNativeAcceptanceReportForTest(input: {
   workspacePath: string
   report: unknown
 }): void {
-  observeNativeAcceptanceToolCompletion({
+  const toolUseID = 'test-validator-tool-use'
+  const base = {
     dataRoot: input.dataRoot,
     sessionId: input.sessionId,
     workspacePath: input.workspacePath,
-    eventType: 'tool.completed',
     payload: {
       toolName: 'Agent',
-      toolUseID: 'test-validator-tool-use',
+      toolUseID,
       input: { subagent_type: DELIVERY_VALIDATOR_AGENT_TYPES[0] },
-      output: JSON.stringify(input.report),
     },
+  }
+  observeNativeAcceptanceToolEvent({
+    ...base,
+    eventType: 'tool.started',
+    createdAt: new Date(),
+  })
+  observeNativeAcceptanceToolEvent({
+    ...base,
+    eventType: 'tool.completed',
+    payload: { ...base.payload, output: JSON.stringify(input.report) },
     createdAt: new Date(),
   })
 }
@@ -134,6 +216,103 @@ export function digestWorkspace(workspacePath: string): string {
     hash.update(readFileSync(file))
   }
   return hash.digest('hex')
+}
+
+function parseNativeAcceptanceReport(
+  text: string,
+  validatorId: string,
+): NativeAcceptanceReport | undefined {
+  const report = parseTerminalJsonObject(text)
+  if (!report || stringValue(report.validatorId) !== validatorId) return undefined
+  const status = stringValue(report.status)
+  if (status !== 'passed' && status !== 'failed' && status !== 'blocked') {
+    return undefined
+  }
+  const summary = stringValue(report.summary)
+  if (!summary || !Array.isArray(report.evidence) || !Array.isArray(report.findings)) {
+    return undefined
+  }
+  const evidence = report.evidence.flatMap(parseReportEvidence)
+  const findings = report.findings.flatMap(parseReportFinding)
+  if (evidence.length !== report.evidence.length || findings.length !== report.findings.length) {
+    return undefined
+  }
+
+  if (status === 'passed') {
+    if (findings.length > 0 || evidence.some(item => item.result !== 'passed')) {
+      return undefined
+    }
+    const kinds = new Set(evidence.map(item => item.kind))
+    if ([...REQUIRED_PASSING_EVIDENCE].some(kind => !kinds.has(kind))) {
+      return undefined
+    }
+  } else {
+    if (findings.length === 0 || !evidence.some(item => item.result === status)) {
+      return undefined
+    }
+  }
+  return { validatorId, status, summary, evidence, findings }
+}
+
+function parseReportEvidence(value: unknown): NativeAcceptanceReportEvidence[] {
+  if (!isRecord(value)) return []
+  const kind = stringValue(value.kind)
+  const result = stringValue(value.result)
+  const source = stringValue(value.source)
+  const detail = stringValue(value.detail)
+  if (
+    !isNativeAcceptanceEvidenceKind(kind) ||
+    (result !== 'passed' && result !== 'failed' && result !== 'blocked') ||
+    !source ||
+    !detail
+  ) return []
+  return [{ kind, result, source, detail }]
+}
+
+function parseReportFinding(value: unknown): NativeAcceptanceReportFinding[] {
+  if (!isRecord(value)) return []
+  const source = stringValue(value.source)
+  const detail = stringValue(value.detail)
+  return source && detail ? [{ source, detail }] : []
+}
+
+function isNativeAcceptanceEvidenceKind(
+  value: string,
+): value is NativeAcceptanceEvidenceKind {
+  return REQUIRED_PASSING_EVIDENCE.has(value as NativeAcceptanceEvidenceKind)
+}
+
+function readObservations(
+  dataRoot: string,
+  sessionId: string,
+): NativeAcceptanceObservation[] {
+  const path = evidencePath(dataRoot, sessionId)
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .flatMap((line): NativeAcceptanceObservation[] => {
+      if (!line.trim()) return []
+      try {
+        const observation = JSON.parse(line) as NativeAcceptanceObservation
+        return observation.version === 3 && observation.sessionId === sessionId &&
+          observation.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
+          (observation.kind === 'dispatch' || observation.kind === 'result')
+          ? [observation]
+          : []
+      } catch {
+        return []
+      }
+    })
+}
+
+function appendObservation(
+  dataRoot: string,
+  sessionId: string,
+  observation: NativeAcceptanceObservation,
+): void {
+  const path = evidencePath(dataRoot, sessionId)
+  mkdirSync(dirname(path), { recursive: true })
+  appendFileSync(path, `${JSON.stringify(observation)}\n`, 'utf8')
 }
 
 function evidencePath(dataRoot: string, sessionId: string): string {
