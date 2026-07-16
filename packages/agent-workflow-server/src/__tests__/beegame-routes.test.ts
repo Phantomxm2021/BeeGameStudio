@@ -4138,6 +4138,105 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('records a native acceptance result from the real background TaskOutput lifecycle', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-background-data-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-background-project-'))
+    await writeFile(join(workspace, 'game.txt'), 'current revision')
+    const report = {
+      validatorId: 'beegame-acceptance-validator',
+      status: 'passed',
+      summary: 'Observed the approved player path in the background task.',
+      evidence: passingNativeAcceptanceEvidence(),
+      findings: [],
+    }
+    const taskOutput = [
+      '<retrieval_status>success</retrieval_status>',
+      '<task_id>validator-task-1</task_id>',
+      '<task_type>local_agent</task_type>',
+      '<status>completed</status>',
+      '<output>',
+      JSON.stringify(report),
+      '</output>',
+    ].join('\n')
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'tool_native_background_acceptance',
+            name: 'Agent',
+            input: {
+              subagent_type: 'beegame-acceptance-validator',
+              prompt: 'Independently validate the current workspace.',
+              run_in_background: true,
+            },
+          }],
+        },
+      },
+      {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'validator-task-1',
+        tool_use_id: 'tool_native_background_acceptance',
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool_native_background_acceptance',
+            content: 'Agent launched successfully.',
+          }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'tool_native_background_output',
+            name: 'TaskOutput',
+            input: { task_id: 'validator-task-1', block: true },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool_native_background_output',
+            content: taskOutput,
+          }],
+        },
+      },
+      { type: 'result', result: 'Validation completed.' },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, dataRoot)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Validate the completed project.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.completed'))
+
+      expect(getObservedNativeAcceptance({
+        dataRoot,
+        sessionId: session.id,
+        workspacePath: workspace,
+      })).toEqual({
+        state: 'current',
+        evidence: expect.objectContaining({
+          status: 'passed',
+          summary: report.summary,
+          toolUseID: 'tool_native_background_acceptance',
+        }),
+      })
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('persists SDK event text and payloads without rewriting them', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const legacyTitle = ['Clau', 'de'].join('')

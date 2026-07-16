@@ -63,6 +63,69 @@ describe('native delivery acceptance gate', () => {
     }).state).toBe('stale')
   })
 
+  test('captures an exact terminal result from the native background task lifecycle', async () => {
+    workspace = await createWorkspace()
+    recordBackgroundResult(workspace, passingReport())
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
+  test('binds a background result to the revision at its original Agent dispatch', async () => {
+    workspace = await createWorkspace()
+    const pending = startBackgroundValidator(workspace)
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
+    completeBackgroundValidator(workspace, pending, passingReport())
+
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('stale')
+  })
+
+  test('ignores TaskOutput without an observed native background task link', async () => {
+    workspace = await createWorkspace()
+    observeNativeAcceptanceToolEvent({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'TaskOutput',
+        toolUseID: 'unlinked-task-output',
+        input: { task_id: 'unknown-task' },
+        output: nativeTaskOutput(passingReport()),
+      },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+  })
+
+  test('rejects prose-wrapped JSON inside a native TaskOutput envelope', async () => {
+    workspace = await createWorkspace()
+    const pending = startBackgroundValidator(workspace)
+    completeBackgroundValidator(
+      workspace,
+      pending,
+      `Validation complete. ${JSON.stringify(passingReport())}`,
+    )
+
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+  })
+
   test('rejects a passing claim without complete native evidence', async () => {
     workspace = await createWorkspace()
     recordNativeAcceptanceReportForTest({
@@ -244,6 +307,77 @@ function record(
           findings: [{ source: 'project-native acceptance path', detail: summary }],
         },
   })
+}
+
+function startBackgroundValidator(workspace: string): {
+  taskId: string
+  toolUseID: string
+} {
+  const taskId = 'native-validator-task'
+  const toolUseID = 'native-validator-agent-tool'
+  observeNativeAcceptanceToolEvent({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    eventType: 'tool.started',
+    payload: {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    },
+    createdAt: new Date(),
+  })
+  observeNativeAcceptanceToolEvent({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    eventType: 'system.status',
+    payload: {
+      type: 'system',
+      subtype: 'task_started',
+      task_id: taskId,
+      tool_use_id: toolUseID,
+    },
+    createdAt: new Date(),
+  })
+  return { taskId, toolUseID }
+}
+
+function completeBackgroundValidator(
+  workspace: string,
+  pending: { taskId: string; toolUseID: string },
+  report: unknown,
+): void {
+  observeNativeAcceptanceToolEvent({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    eventType: 'tool.completed',
+    payload: {
+      toolName: 'TaskOutput',
+      toolUseID: `${pending.toolUseID}-output`,
+      input: { task_id: pending.taskId, block: true },
+      output: nativeTaskOutput(report),
+    },
+    createdAt: new Date(),
+  })
+}
+
+function recordBackgroundResult(workspace: string, report: unknown): void {
+  completeBackgroundValidator(workspace, startBackgroundValidator(workspace), report)
+}
+
+function nativeTaskOutput(report: unknown): string {
+  const output = typeof report === 'string' ? report : JSON.stringify(report)
+  return [
+    '<retrieval_status>success</retrieval_status>',
+    '<task_id>native-validator-task</task_id>',
+    '<task_type>local_agent</task_type>',
+    '<status>completed</status>',
+    '<output>',
+    output,
+    '</output>',
+  ].join('\n')
 }
 
 function passingReport(summary = 'Observed every documented player path.'): object {
