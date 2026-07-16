@@ -2125,6 +2125,8 @@ type BeeGameIntakeJobPoll =
 
 const BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS = 1500;
 const BEEGAME_INTAKE_JOB_MAX_POLLS = 240;
+const BEEGAME_INTAKE_JOB_MAX_RETRY_INTERVAL_MS = 10_000;
+const BEEGAME_INTAKE_JOB_RECOVERABLE_STATUSES = new Set([408, 429, 502, 503, 504]);
 
 function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdeaIntakeRequest {
   const language = data.language
@@ -2151,8 +2153,28 @@ async function runIdeaIntakeJob(requestBody: BeeGameIdeaIntakeRequest): Promise<
   });
   if (createResponse.status === 404) return undefined;
   const created = await readResponse<BeeGameIntakeJobCreated>(createResponse);
+  let retryIntervalMs = BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS;
+  const deadlineAt = Date.now() + (
+    BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS * BEEGAME_INTAKE_JOB_MAX_POLLS
+  );
   for (let index = 0; index < BEEGAME_INTAKE_JOB_MAX_POLLS; index += 1) {
-    const poll = await getJson<BeeGameIntakeJobPoll>(`/api/beegame-intake/jobs/${encodeURIComponent(created.jobId)}`);
+    if (Date.now() >= deadlineAt) break;
+    let response: Response;
+    try {
+      response = await authenticatedFetch(`/api/beegame-intake/jobs/${encodeURIComponent(created.jobId)}`);
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      await sleep(Math.min(retryIntervalMs, Math.max(0, deadlineAt - Date.now())));
+      retryIntervalMs = Math.min(retryIntervalMs * 2, BEEGAME_INTAKE_JOB_MAX_RETRY_INTERVAL_MS);
+      continue;
+    }
+    if (BEEGAME_INTAKE_JOB_RECOVERABLE_STATUSES.has(response.status)) {
+      await sleep(Math.min(retryIntervalMs, Math.max(0, deadlineAt - Date.now())));
+      retryIntervalMs = Math.min(retryIntervalMs * 2, BEEGAME_INTAKE_JOB_MAX_RETRY_INTERVAL_MS);
+      continue;
+    }
+    const poll = await readResponse<BeeGameIntakeJobPoll>(response);
+    retryIntervalMs = BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS;
     if (poll.status === 'completed') return poll.result;
     if (poll.status === 'failed') throw new Error(poll.error || 'BeeGame intake failed');
     await sleep(BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS);

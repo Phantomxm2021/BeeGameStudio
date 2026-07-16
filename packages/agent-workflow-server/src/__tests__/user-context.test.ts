@@ -129,6 +129,39 @@ describe('BeeGame user context', () => {
     ).rejects.toBeInstanceOf(BeeGameAuthUnavailableError)
   })
 
+  test('aborts a stalled Supabase lookup and does not reuse the failed pending resolution', async () => {
+    let calls = 0
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      resolveTimeoutMs: 10,
+      fetchImpl: async (_url, init) => {
+        calls += 1
+        if (calls > 1) {
+          return Response.json({ id: 'recovered-user', role: 'developer' })
+        }
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'))
+          }, { once: true })
+        })
+      },
+    })
+    const request = () => new Request('https://beegame.test/api/current-user', {
+      headers: { authorization: 'Bearer recoverable-token' },
+    })
+
+    await expect(resolver?.(request())).rejects.toMatchObject({
+      name: 'BeeGameAuthUnavailableError',
+      reason: 'timeout',
+    })
+    await expect(resolver?.(request())).resolves.toEqual({
+      id: 'recovered-user',
+      role: 'developer',
+    })
+    expect(calls).toBe(2)
+  })
+
   test('shares one Supabase context lookup across concurrent requests for the same token', async () => {
     let calls = 0
     const resolver = createSupabaseUserResolver({

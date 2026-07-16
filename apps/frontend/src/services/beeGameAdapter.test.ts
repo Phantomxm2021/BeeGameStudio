@@ -351,6 +351,55 @@ describe('beeGameAdapter prompt rules', () => {
     });
   });
 
+  it('keeps polling the same intake job when authentication is temporarily unavailable', async () => {
+    vi.useFakeTimers();
+    try {
+      let pollAttempts = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
+          return jsonResponse({ jobId: 'intake_job_recoverable', status: 'running' }, 202);
+        }
+        if (path === '/api/beegame-intake/jobs/intake_job_recoverable') {
+          pollAttempts += 1;
+          if (pollAttempts === 1) {
+            return jsonResponse({
+              error: 'Authentication unavailable',
+              message: 'Authentication service is temporarily unavailable',
+            }, 503);
+          }
+          return jsonResponse({
+            status: 'completed',
+            result: {
+              maturity: 'directional',
+              needsClarification: false,
+              detectedConstraints: [],
+              recommendedNextStep: 'choose_direction',
+              options: makeLlmOptions(),
+            },
+          });
+        }
+        return jsonResponse({ error: 'unexpected request' }, 500);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const intakePromise = beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
+      await vi.advanceTimersByTimeAsync(1500);
+      await expect(intakePromise).resolves.toEqual(expect.objectContaining({
+        options: expect.arrayContaining([
+          expect.objectContaining({ id: 'mode_from_llm' }),
+        ]),
+      }));
+
+      expect(fetchMock.mock.calls.filter(([input, init]) => (
+        String(input) === '/api/beegame-intake/jobs' && init?.method === 'POST'
+      ))).toHaveLength(1);
+      expect(pollAttempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps intake model behavior out of the browser request', async () => {
     const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

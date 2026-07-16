@@ -42,7 +42,10 @@ export type BeeGameUserResolver = (
 ) => BeeGameUserContext | undefined | Promise<BeeGameUserContext | undefined>
 
 export class BeeGameAuthUnavailableError extends Error {
-  constructor(message = 'Authentication service is temporarily unavailable') {
+  constructor(
+    message = 'Authentication service is temporarily unavailable',
+    readonly reason: 'timeout' | 'network' | 'upstream' = 'upstream',
+  ) {
     super(message)
     this.name = 'BeeGameAuthUnavailableError'
   }
@@ -98,6 +101,7 @@ export function createSupabaseUserResolver(
     apiKey?: string
     fetchImpl?: BeeGameFetch
     cacheTtlMs?: number
+    resolveTimeoutMs?: number
   } = {},
 ): BeeGameUserResolver | undefined {
   const baseUrl = trimString(
@@ -115,6 +119,7 @@ export function createSupabaseUserResolver(
   if (!baseUrl || !apiKey) return undefined
   const fetchImpl = options.fetchImpl ?? fetch
   const cacheTtlMs = normalizeAuthCacheTtlMs(options.cacheTtlMs)
+  const resolveTimeoutMs = normalizeAuthResolveTimeoutMs(options.resolveTimeoutMs)
   const resolvedUsers = new Map<string, { expiresAt: number; user: BeeGameUserContext }>()
   const pendingUsers = new Map<string, Promise<BeeGameUserContext | undefined>>()
   return async request => {
@@ -128,7 +133,13 @@ export function createSupabaseUserResolver(
     const pending = pendingUsers.get(tokenKey)
     if (pending) return await pending
 
-    const resolution = fetchSupabaseUserContext(baseUrl, apiKey, token, fetchImpl)
+    const resolution = fetchSupabaseUserContext(
+      baseUrl,
+      apiKey,
+      token,
+      fetchImpl,
+      resolveTimeoutMs,
+    )
       .then(user => {
         if (user && cacheTtlMs > 0) {
           resolvedUsers.set(tokenKey, {
@@ -184,12 +195,14 @@ async function fetchSupabaseUserContext(
   apiKey: string,
   token: string,
   fetchImpl: BeeGameFetch,
+  resolveTimeoutMs: number,
 ): Promise<BeeGameUserContext | undefined> {
   const response = await fetchSupabaseUserContextResponse(
     baseUrl,
     apiKey,
     token,
     fetchImpl,
+    resolveTimeoutMs,
   )
   if (response.status === 401 || response.status === 403) return undefined
   if (!response.ok) {
@@ -203,7 +216,12 @@ async function fetchSupabaseUserContextResponse(
   apiKey: string,
   token: string,
   fetchImpl: BeeGameFetch,
+  resolveTimeoutMs: number,
 ): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = resolveTimeoutMs > 0
+    ? setTimeout(() => controller.abort(), resolveTimeoutMs)
+    : undefined
   try {
     return await fetchImpl(
       joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
@@ -215,10 +233,16 @@ async function fetchSupabaseUserContextResponse(
           'content-type': 'application/json',
         },
         body: '{}',
+        signal: controller.signal,
       },
     )
-  } catch {
-    throw new BeeGameAuthUnavailableError()
+  } catch (error) {
+    throw new BeeGameAuthUnavailableError(
+      undefined,
+      controller.signal.aborted ? 'timeout' : 'network',
+    )
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
 }
 
@@ -228,6 +252,14 @@ function normalizeAuthCacheTtlMs(value: number | undefined): number {
     10,
   )
   return Number.isFinite(configured) && configured >= 0 ? configured : 15_000
+}
+
+function normalizeAuthResolveTimeoutMs(value: number | undefined): number {
+  const configured = value ?? Number.parseInt(
+    process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS ?? '',
+    10,
+  )
+  return Number.isFinite(configured) && configured >= 0 ? configured : 3_000
 }
 
 function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {
