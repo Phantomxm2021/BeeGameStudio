@@ -112,6 +112,9 @@ export interface Message {
   /** Artifact ID associated with this message (optional, used for artifact preview) */
   artifactId?: string;
 
+  /** Workspace-relative path from structured file tool input */
+  artifactPath?: string;
+
   /** Explicit render directive from backend metadata */
   renderHint?: RenderHint;
 
@@ -228,6 +231,9 @@ export interface WebSocketMessage {
 
   /** Structured tool card output summary */
   tool_output?: string;
+
+  /** Workspace-relative path from structured file tool input */
+  artifact_path?: string;
 
   /** Whether this tool event represents a subagent */
   is_subagent_tool?: boolean;

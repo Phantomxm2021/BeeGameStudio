@@ -219,6 +219,8 @@ export const BeeGameCollaborationFeed = memo(({
 }: BeeGameCollaborationFeedProps) => {
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const text = useBeeGameText(lang);
+    const hasThinkingEntry = entries.some((entry) => entry.kind === 'thinking');
+    const showRuntimeActivity = projectStatus?.phase === 'running' && !hasThinkingEntry;
 
     return (
         <>
@@ -278,6 +280,25 @@ export const BeeGameCollaborationFeed = memo(({
                     </MessageScrollerItem>
                 )
             ))}
+            {showRuntimeActivity ? (
+                <MessageScrollerItem
+                    messageId="beegame-runtime-activity"
+                    className="relative z-10 mb-4 pl-12"
+                >
+                    <ThinkingStatusCard
+                        message={{
+                            id: 'beegame-runtime-activity',
+                            sender: 'system',
+                            content: text.thinkingActive,
+                            timestamp: Date.now(),
+                            type: 'thought',
+                            taskKind: 'assistant_thinking',
+                        }}
+                        text={text}
+                        isRunning
+                    />
+                </MessageScrollerItem>
+            ) : null}
         </>
     );
 });

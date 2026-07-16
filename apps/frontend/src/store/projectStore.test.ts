@@ -110,6 +110,8 @@ describe('projectStore pending review normalization', () => {
 
         expect(useProjectStore.getState().isOpeningProject).toBe(false);
         expect(useProjectStore.getState().activeProjectId).toBe('proj_new');
+        expect(useProjectStore.getState().projectStatus).toBeNull();
+        expect(useProjectStore.getState().pendingReviews).toEqual([]);
         expect(chatActions.clearMessages).toHaveBeenCalled();
     });
 
@@ -190,6 +192,28 @@ describe('projectStore pending review normalization', () => {
 
         expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
         expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
+    });
+
+    it('does not let a stale runtime response overwrite the newly active project', async () => {
+        let resolveRequest!: (value: {
+            status: { project_id: string; phase: string; blocked: boolean };
+            pendingReviews: Array<{ gate_id: string }>;
+        }) => void;
+        useProjectStore.setState({ activeProjectId: 'proj_1' });
+        getProjectRuntimeState.mockReturnValueOnce(new Promise((resolve) => {
+            resolveRequest = resolve;
+        }));
+
+        const request = useProjectStore.getState().loadProjectRuntimeState('proj_1');
+        useProjectStore.setState({ activeProjectId: 'proj_2', projectStatus: null, pendingReviews: [] });
+        resolveRequest({
+            status: { project_id: 'proj_1', phase: 'running', blocked: false },
+            pendingReviews: [{ gate_id: 'stale_permission' }],
+        });
+        await request;
+
+        expect(useProjectStore.getState().projectStatus).toBeNull();
+        expect(useProjectStore.getState().pendingReviews).toEqual([]);
     });
 
     it('stores api-normalized pending review payloads with compact pipeline fields', async () => {

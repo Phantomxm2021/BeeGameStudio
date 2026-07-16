@@ -51,6 +51,7 @@ import {
   materializeBuiltinSkills,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
+import { materializeBeeGameNativeAgents } from './beegame/delivery-validation-agents'
 import {
   BeeGameProjectMetadataStore,
   getBeeGameProjectDatabasePath,
@@ -1001,6 +1002,7 @@ export class DashboardRepository {
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
     materializeBuiltinSkills({ dataDir })
+    materializeBeeGameNativeAgents(dataDir)
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
       if (!client) {
@@ -1016,7 +1018,17 @@ export class DashboardRepository {
       })
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
-      return env
+      // Supabase owns logical runtime configuration (provider credentials and
+      // platform feature flags). The runtime host owns physical isolation. Do
+      // not allow an RPC payload to select another user's Claude config root.
+      const hostIsolationEnv = mapRuntimeSettingsToEnv({}, { dataDir })
+      return {
+        ...env,
+        BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
+        CLAUDE_CONFIG_DIR: hostIsolationEnv.CLAUDE_CONFIG_DIR,
+        BEEGAME_PROJECT_CONFIG_DIR_NAME:
+          hostIsolationEnv.BEEGAME_PROJECT_CONFIG_DIR_NAME,
+      }
     }
     if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)
     return {

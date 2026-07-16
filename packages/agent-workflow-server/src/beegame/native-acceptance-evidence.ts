@@ -3,12 +3,14 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
 
-type NativeAcceptanceEvidence = {
-  version: 1
+export type NativeAcceptanceEvidence = {
+  version: 2
   sessionId: string
   turnId?: string
   toolUseID: string
   validatorId: string
+  status: 'passed' | 'failed' | 'blocked'
+  summary: string
   reportDigest: string
   workspaceDigest: string
   createdAt: string
@@ -28,16 +30,22 @@ export function observeNativeAcceptanceToolCompletion(input: {
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
   const validatorId = stringValue(toolInput.subagent_type)
   if (validatorId !== DELIVERY_VALIDATOR_AGENT_TYPES[0]) return
-  const report = parseFirstJsonObject(stringValue(input.payload.output))
+  const report = parseTerminalJsonObject(stringValue(input.payload.output))
   if (!report || stringValue(report.validatorId) !== validatorId) return
+  const status = stringValue(report.status)
+  if (status !== 'passed' && status !== 'failed' && status !== 'blocked') return
+  const summary = stringValue(report.summary)
+  if (!summary) return
   const toolUseID = stringValue(input.payload.toolUseID)
   if (!toolUseID) return
   const evidence: NativeAcceptanceEvidence = {
-    version: 1,
+    version: 2,
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
     validatorId,
+    status,
+    summary,
     reportDigest: digestJson(report),
     workspaceDigest: digestWorkspace(input.workspacePath),
     createdAt: input.createdAt.toISOString(),
@@ -47,28 +55,36 @@ export function observeNativeAcceptanceToolCompletion(input: {
   appendFileSync(path, `${JSON.stringify(evidence)}\n`, 'utf8')
 }
 
-export function hasObservedNativeAcceptanceReport(input: {
+export function getObservedNativeAcceptance(input: {
   dataRoot: string
   sessionId: string
   workspacePath: string
-  report: unknown
-}): boolean {
-  if (!isRecord(input.report)) return false
+}):
+  | { state: 'missing' }
+  | { state: 'stale'; evidence: NativeAcceptanceEvidence }
+  | { state: 'current'; evidence: NativeAcceptanceEvidence } {
   const path = evidencePath(input.dataRoot, input.sessionId)
-  if (!existsSync(path)) return false
-  const digest = digestJson(input.report)
+  if (!existsSync(path)) return { state: 'missing' }
   const workspaceDigest = digestWorkspace(input.workspacePath)
-  return readFileSync(path, 'utf8').split('\n').some(line => {
-    if (!line.trim()) return false
+  const observations: NativeAcceptanceEvidence[] = readFileSync(path, 'utf8')
+    .split('\n')
+    .flatMap((line): NativeAcceptanceEvidence[] => {
+    if (!line.trim()) return []
     try {
       const evidence = JSON.parse(line) as NativeAcceptanceEvidence
-      return evidence.version === 1 && evidence.sessionId === input.sessionId &&
-        evidence.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] && evidence.reportDigest === digest
-        && evidence.workspaceDigest === workspaceDigest
+      return evidence.version === 2 && evidence.sessionId === input.sessionId &&
+        evidence.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0]
+        ? [evidence]
+        : []
     } catch {
-      return false
+      return []
     }
   })
+  const latest = observations.at(-1)
+  if (!latest) return { state: 'missing' }
+  return latest.workspaceDigest === workspaceDigest
+    ? { state: 'current', evidence: latest }
+    : { state: 'stale', evidence: latest }
 }
 
 export function recordNativeAcceptanceReportForTest(input: {
@@ -104,10 +120,11 @@ export function digestWorkspace(workspacePath: string): string {
       if (entry.isDirectory() && ignored.has(entry.name)) continue
       const path = join(directory, entry.name)
       if (entry.isDirectory()) visit(path)
-      else if (entry.isFile() && ![
-        'docs/acceptance/gameplay-checklist.md',
-        'docs/acceptance/validation-report.json',
-      ].includes(relative(workspace, path).split('\\').join('/'))) files.push(path)
+      else if (
+        entry.isFile() &&
+        relative(workspace, path).split('\\').join('/') !==
+          'docs/acceptance/validation-report.json'
+      ) files.push(path)
     }
   }
   visit(workspace)
@@ -135,34 +152,15 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-function parseFirstJsonObject(text: string): Record<string, unknown> | undefined {
-  const start = text.indexOf('{')
-  if (start < 0) return undefined
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let index = start; index < text.length; index += 1) {
-    const char = text[index]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (char === '\\') escaped = true
-      else if (char === '"') inString = false
-      continue
-    }
-    if (char === '"') inString = true
-    else if (char === '{') depth += 1
-    else if (char === '}') {
-      depth -= 1
-      if (depth !== 0) continue
-      try {
-        const parsed = JSON.parse(text.slice(start, index + 1)) as unknown
-        return isRecord(parsed) ? parsed : undefined
-      } catch {
-        return undefined
-      }
-    }
+function parseTerminalJsonObject(text: string): Record<string, unknown> | undefined {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
   }
-  return undefined
 }
 
 function stringValue(value: unknown): string {

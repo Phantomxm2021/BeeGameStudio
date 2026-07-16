@@ -358,7 +358,6 @@ export const useChat = ({
             message.message_id
           );
           setCurrentSender(message.sender);
-          setIsLoading(false);
         }
         break;
 
@@ -578,6 +577,7 @@ export const useChat = ({
             toolDetail: message.tool_detail,
             toolOutput: message.tool_output,
             artifactId: message.artifact_id,
+            artifactPath: message.artifact_path,
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_start', message);
@@ -611,6 +611,7 @@ export const useChat = ({
             toolDetail: message.tool_detail,
             toolOutput: message.tool_output || outputSummary,
             artifactId: message.artifact_id,
+            artifactPath: message.artifact_path,
             isSubagentTool: message.is_subagent_tool,
           });
           refs.onTaskEvent?.('tool_end', message);
@@ -765,10 +766,26 @@ export const useChat = ({
    */
   const handleWebSocketClose = useCallback(() => {
     console.log('[useChat] WebSocket closed');
-    // Important: reset processing states on close to allow fresh sync on reconnect
-    setIsLoading(false);
+    // A transport disconnect does not mean the server-owned Claude Code turn
+    // stopped. Keep the runtime lock until the authoritative runtime snapshot
+    // or a terminal status event says otherwise.
     setIsStreaming(false);
   }, [setIsStreaming]);
+
+  useEffect(() => {
+    if (!projectStatus || projectStatus.project_id !== projectId) return;
+    const phase = String(projectStatus.phase || '').toLowerCase();
+    if (phase === 'running' || phase === 'starting') {
+      setIsLoading(true);
+      setCanContinue(false);
+      setCurrentTaskId((current) => current || projectId);
+      return;
+    }
+    if (phase === 'idle' || phase === 'finished' || phase === 'stopped') {
+      setIsLoading(false);
+      setCurrentTaskId(null);
+    }
+  }, [projectId, projectStatus]);
 
 
   // Initialize WebSocket connection

@@ -4,10 +4,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   closeBeeGameRuntimeDispatcher,
+  createNativeNotificationQueue,
+  createNativeSdkEventQueue,
   createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
+  assertRequiredBeeGameNativeAgents,
   ensureBeeGameMacroGlobals,
-  mergeManagedAgentDefinitions,
+  drainNativeBackgroundNotifications,
+  getBeeGameResponseLanguageInstruction,
+  hasRunningNativeBackgroundTasks,
   resolveBeeGameSkillReadRoots,
   type MutableAppState,
   stopRunningLocalShellTasks,
@@ -15,6 +20,141 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('maps the session language to a response-only native system preference', () => {
+    expect(getBeeGameResponseLanguageInstruction('zh')).toBe(
+      'Respond to the user in Simplified Chinese. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.',
+    )
+    expect(getBeeGameResponseLanguageInstruction('fr')).toContain('French')
+    expect(getBeeGameResponseLanguageInstruction()).toBeUndefined()
+  })
+
+  test('drains only main-session native task notifications without interpreting their result', () => {
+    const queued = [
+      { value: '<task-notification>first</task-notification>', mode: 'task-notification' },
+      { value: 'user input', mode: 'prompt' },
+      { value: '<task-notification>subagent</task-notification>', mode: 'task-notification', agentId: 'agent-1' },
+      { value: '<task-notification>second</task-notification>', mode: 'task-notification' },
+    ]
+    const queue = createNativeNotificationQueue({
+      dequeueAllMatching(predicate: (command: (typeof queued)[number]) => boolean) {
+        const selected = queued.filter(predicate)
+        for (const command of selected) queued.splice(queued.indexOf(command), 1)
+        return selected
+      },
+    })
+
+    expect(queue.takeMainThreadTaskNotifications().map(command => command.value)).toEqual([
+      '<task-notification>first</task-notification>',
+      '<task-notification>second</task-notification>',
+    ])
+    expect(queued).toEqual([
+      { value: 'user input', mode: 'prompt' },
+      { value: '<task-notification>subagent</task-notification>', mode: 'task-notification', agentId: 'agent-1' },
+    ])
+  })
+
+  test('forwards Claude native background SDK events without reconstructing them', () => {
+    const nativeEvents = [
+      { type: 'system', subtype: 'task_started', task_id: 'agent-1' },
+      { type: 'system', subtype: 'task_notification', task_id: 'agent-1', status: 'completed' },
+    ]
+    const queue = createNativeSdkEventQueue({
+      drainSdkEvents: () => nativeEvents.splice(0),
+    })
+
+    expect(queue.drain()).toEqual([
+      { type: 'system', subtype: 'task_started', task_id: 'agent-1' },
+      { type: 'system', subtype: 'task_notification', task_id: 'agent-1', status: 'completed' },
+    ])
+    expect(queue.drain()).toEqual([])
+  })
+
+  test('waits for native background work but excludes foreground tasks and long-lived teammates', () => {
+    expect(hasRunningNativeBackgroundTasks({
+      tasks: {
+        reviewer: { type: 'local_agent', status: 'running', isBackgrounded: true },
+      },
+    })).toBe(true)
+    expect(hasRunningNativeBackgroundTasks({
+      tasks: {
+        foreground: { type: 'local_agent', status: 'running', isBackgrounded: false },
+        teammate: { type: 'in_process_teammate', status: 'running' },
+        completed: { type: 'local_agent', status: 'completed', isBackgrounded: true },
+      },
+    })).toBe(false)
+  })
+
+  test('continues the same native session when a background notification arrives later', async () => {
+    const controller = new AbortController()
+    const queued: Array<{ value: string; mode: string; uuid?: string }> = []
+    const processed: string[] = []
+    let running = true
+    let waits = 0
+    let progressFlushes = 0
+
+    await drainNativeBackgroundNotifications({
+      signal: controller.signal,
+      takeNotifications: () => queued.splice(0),
+      hasRunningTasks: () => running,
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
+      flushProgress: () => {
+        progressFlushes += 1
+      },
+      waitForProgress: async () => {
+        waits += 1
+        running = false
+        queued.push({
+          value: '<task-notification>review complete</task-notification>',
+          mode: 'task-notification',
+          uuid: 'notification-1',
+        })
+      },
+    })
+
+    expect(waits).toBe(1)
+    expect(progressFlushes).toBeGreaterThanOrEqual(2)
+    expect(processed).toEqual([
+      '<task-notification>review complete</task-notification>',
+    ])
+  })
+
+  test('preserves native notification order and stops without processing followers after abort', async () => {
+    const controller = new AbortController()
+    const processed: string[] = []
+
+    await drainNativeBackgroundNotifications({
+      signal: controller.signal,
+      takeNotifications: () => [
+        { value: 'first', mode: 'task-notification' },
+        { value: 'second', mode: 'task-notification' },
+      ],
+      hasRunningTasks: () => true,
+      runNotification: async command => {
+        processed.push(String(command.value))
+        controller.abort()
+      },
+      waitForProgress: async () => {},
+    })
+
+    expect(processed).toEqual(['first'])
+  })
+
+  test('fails before a Claude turn when required native delivery agents were not discovered', () => {
+    expect(() => assertRequiredBeeGameNativeAgents([
+      { agentType: 'general-purpose' },
+      { agentType: 'beegame-document-reviewer' },
+    ])).toThrow(
+      'BeeGame native runtime capability is unavailable: beegame-acceptance-validator',
+    )
+
+    expect(() => assertRequiredBeeGameNativeAgents([
+      { agentType: 'beegame-document-reviewer' },
+      { agentType: 'beegame-acceptance-validator' },
+    ])).not.toThrow()
+  })
 
   test('uses Claude Code native accept-edits mode without enabling bypass permissions', () => {
     expect(createBeeGameToolPermissionContext({
@@ -69,59 +209,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
-  })
-
-  test('injects managed validators while preserving unrelated project agents', () => {
-    const projectAgent = { agentType: 'project-helper', source: 'project' }
-    const staleManagedAgent = { agentType: 'beegame-acceptance-validator', source: 'project' }
-    const managedAgent = {
-      agentType: 'beegame-acceptance-validator',
-      source: 'policySettings' as const,
-      whenToUse: 'validate delivery',
-      getSystemPrompt: () => 'validate',
-    }
-
-    const merged = mergeManagedAgentDefinitions({
-      activeAgents: [projectAgent, staleManagedAgent],
-      allAgents: [projectAgent, staleManagedAgent],
-      allowedAgentTypes: ['project-helper'],
-    }, [managedAgent])
-
-    expect(merged.activeAgents).toEqual([projectAgent, managedAgent])
-    expect(merged.allAgents).toEqual([projectAgent, managedAgent])
-    expect(merged.allowedAgentTypes).toEqual(['project-helper', 'beegame-acceptance-validator'])
-    expect((merged.activeAgents as Array<Record<string, unknown>>)[1]).toMatchObject({
-      source: 'policySettings',
-    })
-  })
-
-  test('preserves BeeGame skill read rules when native sub-agents scope their tools', () => {
-    const projectAgent = {
-      agentType: 'project-helper',
-      source: 'project',
-      tools: ['Read', 'Glob'],
-    }
-    const managedAgent = {
-      agentType: 'beegame-acceptance-validator',
-      source: 'policySettings' as const,
-      whenToUse: 'validate delivery',
-      tools: ['Read', 'Bash'],
-      getSystemPrompt: () => 'validate',
-    }
-
-    const merged = mergeManagedAgentDefinitions({
-      activeAgents: [projectAgent],
-      allAgents: [projectAgent],
-    }, [managedAgent], ['Read(/runtime/skills/**)'])
-
-    for (const agent of merged.activeAgents as Array<Record<string, unknown>>) {
-      expect(agent.tools).toEqual(expect.arrayContaining(['Read(/runtime/skills/**)']))
-    }
-    expect((merged.activeAgents as Array<Record<string, unknown>>)[0]?.tools).toEqual([
-      'Read',
-      'Glob',
-      'Read(/runtime/skills/**)',
-    ])
   })
 
   test('closes runtime dispatchers across supported Undici lifecycle shapes', async () => {

@@ -238,6 +238,74 @@ describe('HttpOnly session routes', () => {
     expect(await refreshResponse.json()).toMatchObject({ authenticated: true })
   })
 
+  it('preserves the cookie session when the auth provider refresh is temporarily unavailable', async () => {
+    let refreshUnavailable = false
+    const app = createApp(async input => {
+      if (String(input).includes('/token?grant_type=refresh_token')) {
+        return refreshUnavailable
+          ? new Response('upstream unavailable', { status: 503 })
+          : Response.json({ access_token: 'refreshed-access-token', expires_in: 3600 })
+      }
+      return Response.json({ id: 'user-1', email: 'user@example.com' })
+    })
+    const sessionResponse = await app.request('/api/auth/session', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', 'content-type': 'application/json' },
+      body: JSON.stringify({ access_token: 'access-token', refresh_token: 'refresh-token' }),
+    })
+    const cookie = (sessionResponse.headers.get('set-cookie') ?? '').split(';', 1)[0]
+    refreshUnavailable = true
+
+    const refreshResponse = await app.request('/api/auth/session/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', cookie },
+    })
+
+    expect(refreshResponse.status).toBe(503)
+    expect((await app.request('/api/auth/session', { headers: { cookie } })).status).toBe(200)
+  })
+
+  it('coalesces concurrent refreshes so a rotated refresh token is consumed once', async () => {
+    let refreshCalls = 0
+    let releaseRefresh: (() => void) | undefined
+    const refreshGate = new Promise<void>(resolve => {
+      releaseRefresh = resolve
+    })
+    const app = createApp(async input => {
+      if (String(input).includes('/token?grant_type=refresh_token')) {
+        refreshCalls += 1
+        await refreshGate
+        return Response.json({
+          access_token: 'refreshed-access-token',
+          refresh_token: 'rotated-refresh-token',
+          expires_in: 3600,
+        })
+      }
+      return Response.json({ id: 'user-1', email: 'user@example.com' })
+    })
+    const sessionResponse = await app.request('/api/auth/session', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', 'content-type': 'application/json' },
+      body: JSON.stringify({ access_token: 'access-token', refresh_token: 'refresh-token' }),
+    })
+    const cookie = (sessionResponse.headers.get('set-cookie') ?? '').split(';', 1)[0]
+
+    const first = app.request('/api/auth/session/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', cookie },
+    })
+    const second = app.request('/api/auth/session/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', cookie },
+    })
+    await Promise.resolve()
+    releaseRefresh?.()
+    const responses = await Promise.all([first, second])
+
+    expect(responses.map(response => response.status)).toEqual([200, 200])
+    expect(refreshCalls).toBe(1)
+  })
+
   it('leaves legacy behavior untouched when the flag is disabled', async () => {
     process.env.BEEGAME_HTTPONLY_SESSIONS = '0'
     const app = new Hono()

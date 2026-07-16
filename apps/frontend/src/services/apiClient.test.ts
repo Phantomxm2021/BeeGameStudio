@@ -6,6 +6,7 @@ import {
   AUTHENTICATION_REQUIRED_EVENT,
   authenticatedFetch,
   buildAuthHeaders,
+  buildApiUrlWithBase,
   buildUnauthorizedMessage,
 } from './apiClient';
 import apiClient from './apiClient';
@@ -23,6 +24,15 @@ describe('apiClient defaults', () => {
 
   it('uses same-origin requests by default', () => {
     expect(API_BASE_URL).toBe('');
+  });
+
+  it('keeps iframe preview paths on the configured API origin', () => {
+    expect(buildApiUrlWithBase('/previews/session-1/', 'http://127.0.0.1:62174'))
+      .toBe('http://127.0.0.1:62174/previews/session-1/');
+    expect(buildApiUrlWithBase('/previews/session-1/', ''))
+      .toBe('/previews/session-1/');
+    expect(buildApiUrlWithBase('https://preview.example/session-1/', 'http://127.0.0.1:62174'))
+      .toBe('https://preview.example/session-1/');
   });
 
   it('adds the dev/offline bearer token to fetch requests outside production', async () => {

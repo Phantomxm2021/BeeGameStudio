@@ -120,6 +120,11 @@ export interface ProjectBaselineStatusPayload {
   approval_required?: boolean;
   next_action?: string;
   review_status?: ReviewStatusPayload | null;
+  acceptance?: {
+    status: 'not_run' | 'passed' | 'failed' | 'blocked' | 'stale';
+    summary?: string;
+    validated_at?: string;
+  };
   last_resume_task_id?: string;
   last_resume_failure?: Record<string, unknown> | null;
   last_resume_failure_stage?: string | null;
@@ -914,20 +919,6 @@ export const api = {
     isBeeGameAdapterEnabled()
       ? beeGameAdapter.createProject(data)
       : apiClient.post('/api/projects', data),
-
-  /**
-   * 基于 idea 原子创建项目并触发首条执行
-   * @param data - idea 与可选字段
-   * @returns { project, task_id, status }
-   */
-  bootstrapProjectFromIdea: (data: { idea: string; root_path?: string; title?: string; termination_node?: string; clarification?: Record<string, string>; language?: string }) =>
-    isBeeGameAdapterEnabled()
-      ? beeGameAdapter.bootstrapProjectFromIdea(data)
-      : apiClient.post('/api/projects/bootstrap-from-idea', data, {
-        headers: {
-          'Hide-Error-Toast': 'true',
-        },
-      }),
 
   bootstrapProjectFromBrief: (data: Parameters<typeof beeGameAdapter.bootstrapProjectFromBrief>[0]) =>
     isBeeGameAdapterEnabled()

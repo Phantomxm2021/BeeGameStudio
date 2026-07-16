@@ -41,6 +41,7 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
+import { getObservedNativeAcceptance } from './beegame/native-acceptance-evidence'
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
@@ -97,6 +98,7 @@ import {
   listBeeGamePermissions,
 } from './auth/user-context'
 import { createBeeGameAuthContext } from './auth/auth-context'
+import { createPreviewCapabilityManager } from './auth/preview-capability'
 import { registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes } from './auth/session-routes'
 import {
   DashboardRepository,
@@ -332,6 +334,8 @@ export function createAgentWorkflowApp(
     sessionStorePath: options.sessionStorePath,
     isOriginAllowed: origin => Boolean(resolveApiCorsOrigin(origin)),
   })
+  const getRequestAuthToken = (request: Request): string | undefined =>
+    getBearerToken(request) ?? sessionAuth?.getAccessToken(request)
   const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
   const requestUserResolver = sessionAuth
     ? async (request: Request) => {
@@ -348,6 +352,7 @@ export function createAgentWorkflowApp(
     currentUser: options.currentUser,
     currentUserResolver: requestUserResolver,
   })
+  const previewCapabilities = createPreviewCapabilityManager()
   const getCurrentUser = authContext.getCurrentUser
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
@@ -413,10 +418,17 @@ export function createAgentWorkflowApp(
   const handlePreviewProxy = async (c: Context) => {
     const sessionId = c.req.param('sessionId')
     if (!sessionId) return c.text('Preview not found', 404)
-    const user = options.currentUser ?? await authContext.resolveRequestUser(c.req.raw)
-    if (!user) return c.text('Unauthorized', 401)
     const sessionMetadata = beeGameSessions.metadata(sessionId)
-    if (!sessionMetadata || sessionMetadata.userId !== user.id) {
+    if (!sessionMetadata) return c.text('Preview not found', 404)
+    const user = options.currentUser ?? await authContext.resolveRequestUser(c.req.raw)
+    const capability = previewCapabilities.verifyRequest(c.req.raw, sessionId)
+    const sandboxedSubresource = previewCapabilities.allowsSandboxedSubresource(
+      c.req.raw,
+      sessionId,
+    )
+    const authenticatedUserId = user?.id ?? capability?.userId
+    if (!authenticatedUserId && !sandboxedSubresource) return c.text('Unauthorized', 401)
+    if (authenticatedUserId && sessionMetadata.userId !== authenticatedUserId) {
       return c.text('Preview not found', 404)
     }
     const internalUrl = beeGamePreviews.internalUrl(sessionId)
@@ -633,7 +645,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     return c.json(await beeGameSessions.retryPendingCreditOperations(
       user.id,
-      getBearerToken(c.req.raw),
+      getRequestAuthToken(c.req.raw),
     ))
   })
 
@@ -1175,7 +1187,7 @@ export function createAgentWorkflowApp(
         ...(modelConfigId ? { modelConfigId } : {}),
         ...(language ? { language } : {}),
         userId: user.id,
-        ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        ...(getRequestAuthToken(c.req.raw) ? { authToken: getRequestAuthToken(c.req.raw) } : {}),
         userDataRoot: getCurrentUserDataRoot(c.req.raw),
       })
       await dashboardRepository.upsertSessionMetadata(
@@ -1186,13 +1198,13 @@ export function createAgentWorkflowApp(
 
       void beeGameSessions.sendWithDisplay(
         session.id,
-        buildConfirmedBriefPrompt(brief),
+        buildConfirmedBriefPrompt(brief, language),
         {
           displayText: idea,
           displayKind: 'confirmed_brief',
           taskType: 'full_build',
           ...(language ? { language } : {}),
-          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+          ...(getRequestAuthToken(c.req.raw) ? { authToken: getRequestAuthToken(c.req.raw) } : {}),
         },
       ).catch(error => {
         console.error(`[BeeGame] Project bootstrap turn failed for ${projectId}:`, error)
@@ -1391,6 +1403,11 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      c.header('set-cookie', previewCapabilities.issueCookie(
+        c.req.raw,
+        sessionRef.sessionId,
+        user.id,
+      ))
       return c.json(beeGamePreviews.status(sessionRef.sessionId, sessionRef.workspacePath))
     } catch (err) {
       return tracedRouteError(c, 'project.preview', err)
@@ -1426,6 +1443,11 @@ export function createAgentWorkflowApp(
         beeGameSessions.metadata(ensured.session.id),
         snapshot,
       )
+      c.header('set-cookie', previewCapabilities.issueCookie(
+        c.req.raw,
+        ensured.session.id,
+        user.id,
+      ))
       return c.json(snapshot)
     } catch (err) {
       return projectWorkspaceMutationRouteError(c, 'project.preview.start', err)
@@ -1461,6 +1483,11 @@ export function createAgentWorkflowApp(
         beeGameSessions.metadata(ensured.session.id),
         snapshot,
       )
+      c.header('set-cookie', previewCapabilities.issueCookie(
+        c.req.raw,
+        ensured.session.id,
+        user.id,
+      ))
       return c.json(snapshot)
     } catch (err) {
       return projectWorkspaceMutationRouteError(c, 'project.preview.restart', err)
@@ -1484,6 +1511,7 @@ export function createAgentWorkflowApp(
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
       const snapshot = beeGamePreviews.stop(sessionRef.sessionId, sessionRef.workspacePath)
+      previewCapabilities.revokeSession(sessionRef.sessionId)
       await dashboardRepository.upsertPreviewSnapshot(
         c.req.raw,
         user,
@@ -1551,8 +1579,8 @@ export function createAgentWorkflowApp(
         userId: user.id,
         projectId: project.id,
         workspacePath: ensured.binding.workspacePath,
-        ...(getBearerToken(c.req.raw)
-          ? { authToken: getBearerToken(c.req.raw) }
+        ...(getRequestAuthToken(c.req.raw)
+          ? { authToken: getRequestAuthToken(c.req.raw) }
           : {}),
       })
       const persisted = await dashboardRepository.upsertDeploymentRecord(
@@ -2077,7 +2105,7 @@ export function createAgentWorkflowApp(
       const runtimeEnv = await dashboardRepository.getRuntimeEnv(
         getCurrentUserDataRoot(request),
         user.id,
-        getBearerToken(request),
+        getRequestAuthToken(request),
         modelConfigId,
       )
       const analysis = await generateBeeGameAttachmentAnalysis({
@@ -2163,7 +2191,7 @@ export function createAgentWorkflowApp(
         runtimeEnv: await dashboardRepository.getRuntimeEnv(
           getCurrentUserDataRoot(request),
           user.id,
-          getBearerToken(request),
+          getRequestAuthToken(request),
           modelConfigId,
         ),
         outboundTargetPolicyOptions,
@@ -2354,6 +2382,7 @@ export function createAgentWorkflowApp(
       defaultWorkspacePath: options.defaultWorkspacePath,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
+      getAuthToken: getRequestAuthToken,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
@@ -2377,6 +2406,9 @@ export function createAgentWorkflowApp(
           metadata,
           snapshot,
         ),
+      issuePreviewCookie: (request, sessionId, userId) =>
+        previewCapabilities.issueCookie(request, sessionId, userId),
+      revokePreviewCapability: sessionId => previewCapabilities.revokeSession(sessionId),
       listDeploymentRecords: (request, sessionId) =>
         dashboardRepository.listDeploymentRecords(
           request,
@@ -2435,6 +2467,7 @@ export function createAgentWorkflowApp(
       defaultWorkspacePath: options.defaultWorkspacePath,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
+      getAuthToken: getRequestAuthToken,
       getUserDataRoot: getCurrentUserDataRoot,
       appendAuditEvent: (request, input) =>
         dashboardRepository.appendAuditEvent(request, getCurrentUser(request), input),
@@ -2458,6 +2491,9 @@ export function createAgentWorkflowApp(
           metadata,
           snapshot,
         ),
+      issuePreviewCookie: (request, sessionId, userId) =>
+        previewCapabilities.issueCookie(request, sessionId, userId),
+      revokePreviewCapability: sessionId => previewCapabilities.revokeSession(sessionId),
       persistAssetManifest: (request, metadata, manifest) =>
         dashboardRepository.upsertAssetManifest(
           request,
@@ -3707,6 +3743,13 @@ async function getBeeGameProjectRuntimeState(input: {
   })
   const assetManifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
     .catch(() => ({ version: 1 as const, slots: [], project_target: undefined }))
+  const acceptance = input.dashboardDataRoot
+    ? toProjectAcceptanceState(getObservedNativeAcceptance({
+        dataRoot: input.dashboardDataRoot,
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+      }))
+    : { status: 'not_run' }
   return {
     project_id: input.project.id,
     phase: runtime.phase,
@@ -3720,6 +3763,7 @@ async function getBeeGameProjectRuntimeState(input: {
     project_target: assetManifest.project_target ?? null,
     build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
     review_status: null,
+    acceptance,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
     pending_permissions: pending.map(pendingBeeGamePermissionToJson),
   }
@@ -3860,8 +3904,27 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     project_target: null,
     build_report: null,
     review_status: null,
+    acceptance: { status: 'not_run' },
     model_config_id: null,
     pending_permissions: [],
+  }
+}
+
+function toProjectAcceptanceState(
+  observation: ReturnType<typeof getObservedNativeAcceptance>,
+): JsonObject {
+  if (observation.state === 'missing') return { status: 'not_run' }
+  if (observation.state === 'stale') {
+    return {
+      status: 'stale',
+      summary: observation.evidence.summary,
+      validated_at: observation.evidence.createdAt,
+    }
+  }
+  return {
+    status: observation.evidence.status,
+    summary: observation.evidence.summary,
+    validated_at: observation.evidence.createdAt,
   }
 }
 
@@ -3957,9 +4020,9 @@ function deriveBeeGameRuntimeStatus(
   if (pending.length > 0) {
     return {
       phase: 'waiting_approval',
-      nextAction: 'Review BeeGame permission request',
+      nextAction: 'Review Claude Code permission request',
       updatedAt,
-      activeAgents: ['beegame'],
+      activeAgents: ['claude-code'],
       agentStatus: 'waiting',
     }
   }
@@ -3975,9 +4038,9 @@ function deriveBeeGameRuntimeStatus(
         }
       : {
           phase: 'running',
-          nextAction: 'BeeGame is processing',
+          nextAction: 'Claude Code is processing',
           updatedAt,
-          activeAgents: ['beegame'],
+          activeAgents: ['claude-code'],
           agentStatus: 'working',
         }
   }
@@ -4005,9 +4068,9 @@ function deriveBeeGameRuntimeStatus(
   ) {
     return {
       phase: 'starting',
-      nextAction: 'BeeGame is starting the project',
+      nextAction: 'Claude Code session is starting',
       updatedAt,
-      activeAgents: ['beegame'],
+      activeAgents: ['claude-code'],
       agentStatus: 'starting',
     }
   }
@@ -4027,7 +4090,6 @@ function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
         event.type === 'turn.completed' ||
         event.type === 'turn.empty' ||
         event.type === 'turn.failed' ||
-        event.type === 'result' ||
         event.type === 'session.stopped' ||
         event.type === 'session.failed'
       )
@@ -4291,6 +4353,7 @@ function registerBeeGameSessionRoutes(
     defaultWorkspacePath?: string
     assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
     getCurrentUser: (request?: Request) => BeeGameUserContext
+    getAuthToken: (request: Request) => string | undefined
     getUserDataRoot: (request?: Request) => string
     appendAuditEvent: (
       request: Request,
@@ -4310,6 +4373,12 @@ function registerBeeGameSessionRoutes(
       metadata: ReturnType<BeeGameSessionManager['metadata']>,
       snapshot: BeeGamePreviewSnapshot,
     ) => Promise<void>
+    issuePreviewCookie: (
+      request: Request,
+      sessionId: string,
+      userId: string,
+    ) => string
+    revokePreviewCapability: (sessionId: string) => void
     listDeploymentRecords?: (
       request: Request,
       sessionId: string,
@@ -4436,8 +4505,8 @@ function registerBeeGameSessionRoutes(
             ? { language: body.language }
             : {}),
           userId: currentUser.id,
-          ...(getBearerToken(c.req.raw)
-            ? { authToken: getBearerToken(c.req.raw) }
+          ...(options.getAuthToken(c.req.raw)
+            ? { authToken: options.getAuthToken(c.req.raw) }
             : {}),
           userDataRoot: options.getUserDataRoot(c.req.raw),
         })
@@ -4492,6 +4561,10 @@ function registerBeeGameSessionRoutes(
     }
     try {
       const after = Number.parseInt(c.req.query('after') || '0', 10)
+      beeGameSessions.updateAuthToken(
+        c.req.param('id'),
+        options.getAuthToken(c.req.raw),
+      )
       return c.json(beeGameSessions.events(c.req.param('id'), after))
     } catch (err) {
       const workspacePath = getWorkspacePathHint(
@@ -4766,7 +4839,13 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         getWorkspacePathHint(c.req.query('workspacePath'), body),
       )
-      return c.json(beeGamePreviews.status(c.req.param('id'), workspacePath))
+      const sessionId = c.req.param('id')
+      c.header('set-cookie', options.issuePreviewCookie(
+        c.req.raw,
+        sessionId,
+        options.getCurrentUser(c.req.raw).id,
+      ))
+      return c.json(beeGamePreviews.status(sessionId, workspacePath))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -4800,6 +4879,11 @@ function registerBeeGameSessionRoutes(
         beeGameSessions.metadata(c.req.param('id')),
         snapshot,
       )
+      c.header('set-cookie', options.issuePreviewCookie(
+        c.req.raw,
+        c.req.param('id'),
+        options.getCurrentUser(c.req.raw).id,
+      ))
       return c.json(snapshot)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -4834,6 +4918,11 @@ function registerBeeGameSessionRoutes(
         beeGameSessions.metadata(c.req.param('id')),
         snapshot,
       )
+      c.header('set-cookie', options.issuePreviewCookie(
+        c.req.raw,
+        c.req.param('id'),
+        options.getCurrentUser(c.req.raw).id,
+      ))
       return c.json(snapshot)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -4852,6 +4941,7 @@ function registerBeeGameSessionRoutes(
         c.req.query('workspacePath'),
       )
       const snapshot = beeGamePreviews.stop(c.req.param('id'), workspacePath)
+      options.revokePreviewCapability(c.req.param('id'))
       await options.persistPreviewSnapshot(
         c.req.raw,
         beeGameSessions.metadata(c.req.param('id')),
@@ -4903,8 +4993,8 @@ function registerBeeGameSessionRoutes(
           userId: currentUser.id,
           ...(metadata?.projectId ? { projectId: metadata.projectId } : {}),
           workspacePath,
-          ...(getBearerToken(c.req.raw)
-            ? { authToken: getBearerToken(c.req.raw) }
+          ...(options.getAuthToken(c.req.raw)
+            ? { authToken: options.getAuthToken(c.req.raw) }
             : {}),
         })
         const persisted = await options.persistDeploymentRecord?.(
@@ -4987,8 +5077,8 @@ function registerBeeGameSessionRoutes(
           ...(isBeeGameSessionLanguage(body.language)
             ? { language: body.language }
             : {}),
-          ...(getBearerToken(c.req.raw)
-            ? { authToken: getBearerToken(c.req.raw) }
+          ...(options.getAuthToken(c.req.raw)
+            ? { authToken: options.getAuthToken(c.req.raw) }
             : {}),
         }),
       )
@@ -5018,13 +5108,15 @@ function registerBeeGameSessionRoutes(
       const brief = isObject(body.brief) ? body.brief : body
       const idea = typeof brief.idea === 'string' ? brief.idea.trim() : ''
       if (!idea) return c.json({ error: 'Missing field: brief.idea' }, 400)
-      const prompt = buildConfirmedBriefPrompt(brief)
+      const languageValue = body.language ?? brief.language
+      const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
+      const prompt = buildConfirmedBriefPrompt(brief, language)
       return c.json(await beeGameSessions.sendWithDisplay(c.req.param('id'), prompt, {
         displayText: idea,
         displayKind: 'confirmed_brief',
         taskType: 'full_build',
-        ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
-        ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+        ...(language ? { language } : {}),
+        ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
       }))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -5045,7 +5137,7 @@ function registerBeeGameSessionRoutes(
         {
           taskType: 'continue_turn',
           language,
-          ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+          ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
         },
       ))
     } catch (err) {
@@ -5088,7 +5180,7 @@ function registerBeeGameSessionRoutes(
             displayKind: 'asset_integration',
             taskType: 'asset_integration',
             language,
-            ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+            ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
           },
         ))
       }
@@ -5115,7 +5207,7 @@ function registerBeeGameSessionRoutes(
             displayKind: 'build_error_repair',
             taskType: 'edit_turn',
             language,
-            ...(getBearerToken(c.req.raw) ? { authToken: getBearerToken(c.req.raw) } : {}),
+            ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
           },
         ))
       }
@@ -5366,16 +5458,72 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
   }
 }
 
-function buildConfirmedBriefPrompt(brief: JsonObject): string {
-  return JSON.stringify({
+function buildConfirmedBriefPrompt(
+  brief: JsonObject,
+  language?: BeeGameSessionLanguage,
+): string {
+  const confirmedBrief = JSON.stringify({
     kind: 'confirmed_build_brief',
+    document_language: language ?? null,
     idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
-    selected_option: isObject(brief.option) ? brief.option : null,
+    selected_option: toCanonicalConfirmedOption(brief.option),
     settings: isObject(brief.settings) ? brief.settings : null,
     confirmed_gdd: brief.confirmedGdd ?? null,
     build_source: brief.buildSource ?? null,
     analysis_id: brief.analysisId ?? null,
   }, null, 2)
+  return [
+    'Build and deliver the confirmed game project below.',
+    '',
+    language
+      ? `Write all human-readable project documentation and user-facing game text in ${getDocumentLanguageName(language)}. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.`
+      : 'Write project documentation in the language used by the confirmed user brief. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
+    '',
+    'Use the confirmed brief as the source of truth. Preserve every explicit user choice and constraint; do not silently replace the selected platform, engine, dimension, genre, visual style, input methods, or scope.',
+    'Before implementation, create the complete project documentation baseline in this same native Claude Code task. Write each document to its canonical path as soon as it is ready so progress and review remain observable; do not hold completed documents for one final batch.',
+    'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and docs/ASSET_PLAN.md after the product and presentation requirements are defined; (4) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
+    'Together these documents must define the player-visible loop from launch through progress, win/fail and restart; controls for every selected input method; rules, state transitions and edge cases; presentation and asset requirements; a feasible technical design that traces each required behavior to an implementation responsibility; and observable acceptance paths with concrete actions and expected outcomes.',
+    'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
+    'Pass the canonical confirmed brief and selected document language to the native beegame-document-reviewer subagent. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first.',
+    '',
+    'Plan and implement the project with applicable native Skills. Before claiming delivery, ask the native beegame-acceptance-validator subagent to independently run the project-native checks and observable player paths. If it fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
+    '',
+    'Confirmed brief:',
+    confirmedBrief,
+  ].join('\n')
+}
+
+function toCanonicalConfirmedOption(value: unknown): JsonObject | null {
+  if (!isObject(value)) return null
+  const gameplay = typeof value.gameplay === 'string' ? value.gameplay.trim() : ''
+  const pitch = typeof value.pitch === 'string' ? value.pitch.trim() : ''
+  return {
+    ...(typeof value.id === 'string' && value.id.trim() ? { id: value.id.trim() } : {}),
+    ...(typeof value.title === 'string' && value.title.trim()
+      ? { title: value.title.trim() }
+      : {}),
+    ...(pitch && pitch !== gameplay ? { pitch } : {}),
+    ...(gameplay ? { gameplay } : {}),
+    ...(typeof value.scope === 'string' && value.scope.trim()
+      ? { scope: value.scope.trim() }
+      : {}),
+  }
+}
+
+function getDocumentLanguageName(language: BeeGameSessionLanguage): string {
+  const names: Record<BeeGameSessionLanguage, string> = {
+    en: 'English',
+    zh: 'Simplified Chinese',
+    'zh-TW': 'Traditional Chinese',
+    ja: 'Japanese',
+    ko: 'Korean',
+    fr: 'French',
+    de: 'German',
+    es: 'Spanish',
+    it: 'Italian',
+    pt: 'Portuguese',
+  }
+  return names[language]
 }
 
 async function readJson(request: Request, maxBytes?: number): Promise<JsonObject> {
@@ -5515,7 +5663,12 @@ function isBeeGameSessionLanguage(
     value === 'zh' ||
     value === 'zh-TW' ||
     value === 'ja' ||
-    value === 'ko'
+    value === 'ko' ||
+    value === 'fr' ||
+    value === 'de' ||
+    value === 'es' ||
+    value === 'it' ||
+    value === 'pt'
 }
 
 function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string {

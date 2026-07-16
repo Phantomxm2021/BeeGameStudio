@@ -72,6 +72,28 @@ describe('ArtifactsPanel', () => {
         expect(onDownload).toHaveBeenCalledWith('art_1', 'GDD.md');
     });
 
+    it('shows dependency-ordered document progress before files are all available', () => {
+        render(
+            <ArtifactsPanel
+                artifacts={[]}
+                isLoading={false}
+                reviewStatuses={{}}
+                documentProgress={[
+                    { path: 'docs/GDD.md', name: 'GDD', stage: 1, status: 'ready' },
+                    { path: 'docs/ART_DIRECTION.md', name: 'Art Direction', stage: 2, status: 'writing' },
+                    { path: 'docs/TECHNICAL_DESIGN.md', name: 'Technical Design', stage: 3, status: 'pending' },
+                ]}
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+            />
+        );
+
+        expect(screen.getByRole('region', { name: 'Project documents' })).toBeInTheDocument();
+        expect(screen.getByText('1/3')).toBeInTheDocument();
+        expect(screen.getByText('Writing')).toBeInTheDocument();
+        expect(screen.queryByText('No artifacts yet')).not.toBeInTheDocument();
+    });
+
     it('falls back to id when artifact_id is absent', async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();

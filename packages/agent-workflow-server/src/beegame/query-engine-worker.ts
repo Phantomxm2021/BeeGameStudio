@@ -93,6 +93,7 @@ function deserializeStartInput(input: SerializedQueryEngineStartInput) {
   return {
     sessionId: input.sessionId,
     ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+    ...(input.language ? { language: input.language } : {}),
     cwd: input.cwd,
     env: input.env,
     approvedOutboundTargets: Object.fromEntries(
@@ -101,20 +102,6 @@ function deserializeStartInput(input: SerializedQueryEngineStartInput) {
         createApprovedTarget(target.url, target.addresses),
       ]),
     ) as BeeGameApprovedOutboundTargets,
-    ...(input.agentDefinitions
-      ? {
-          agentDefinitions: input.agentDefinitions.map(agent => ({
-            agentType: agent.agentType,
-            whenToUse: agent.whenToUse,
-            ...(agent.tools ? { tools: agent.tools } : {}),
-            ...(agent.disallowedTools ? { disallowedTools: agent.disallowedTools } : {}),
-            source: agent.source,
-            ...(agent.permissionMode ? { permissionMode: agent.permissionMode } : {}),
-            getSystemPrompt: () => agent.systemPrompt,
-            ...(agent.maxTurns ? { maxTurns: agent.maxTurns } : {}),
-          })),
-        }
-      : {}),
   }
 }
 

@@ -493,10 +493,10 @@ describe('beeGameAdapter prompt rules', () => {
     ));
     vi.stubGlobal('fetch', fetchMock);
 
-    await beeGameAdapter.runIdeaIntake({ idea: '做一个样例游戏', language: 'zh' });
+    await beeGameAdapter.runIdeaIntake({ idea: 'Créer un jeu exemple', language: 'fr-FR' });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
-    expect(requestBody).toEqual({ idea: '做一个样例游戏', language: 'zh', clientRequestId: expect.any(String) });
+    expect(requestBody).toEqual({ idea: 'Créer un jeu exemple', language: 'fr', clientRequestId: expect.any(String) });
   });
 
   it('rejects structured clarification responses without intake options', async () => {
@@ -2556,6 +2556,7 @@ describe('beeGameAdapter prompt rules', () => {
       tool_detail: 'Target: sample-game/src/main.ts',
     }));
     expect(polled.messages[3].content).toContain('Target: sample-game/src/main.ts');
+    expect(polled.messages[3].artifact_path).toBe('sample-game/src/main.ts');
   });
 
   it('formats Agent tool events as subagent cards', async () => {

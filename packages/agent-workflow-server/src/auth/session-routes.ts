@@ -31,6 +31,11 @@ type SessionFetch = (
   init?: Parameters<typeof fetch>[1],
 ) => Promise<Response>
 
+type SessionRefreshOutcome =
+  | { status: 'ok'; record: SessionRecord }
+  | { status: 'invalid' }
+  | { status: 'unavailable' }
+
 export type BeeGameSessionRouteOptions = {
   supabaseUrl?: string
   supabaseAnonKey?: string
@@ -65,6 +70,7 @@ export function registerBeeGameSessionRoutes(
   ).trim()
   const fetchImpl = options.fetchImpl ?? fetch
   const sessionStorePath = resolveSessionStorePath(options.sessionStorePath)
+  const pendingRefreshes = new Map<string, Promise<SessionRefreshOutcome>>()
 
   const getRecord = (request: Request): { id: string; record: SessionRecord } | undefined => {
     const id = readCookie(request, SESSION_COOKIE_NAME)
@@ -149,31 +155,55 @@ export function registerBeeGameSessionRoutes(
     if (!current || !supabaseUrl || !supabaseAnonKey) {
       return c.json({ error: 'Session unavailable' }, 401)
     }
-    const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: {
-        apikey: supabaseAnonKey,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ refresh_token: current.record.refreshToken }),
-    })
-    if (!response.ok) {
-      deleteRecord(sessionStorePath, current.id)
-      return clearSessionResponse(401)
+    let refresh = pendingRefreshes.get(current.id)
+    if (!refresh) {
+      refresh = (async (): Promise<SessionRefreshOutcome> => {
+        try {
+          const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: {
+              apikey: supabaseAnonKey,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ refresh_token: current.record.refreshToken }),
+          })
+          if (!response.ok) {
+            if ([400, 401, 403].includes(response.status)) {
+              deleteRecord(sessionStorePath, current.id)
+              return { status: 'invalid' }
+            }
+            return { status: 'unavailable' }
+          }
+          const value = await response.json() as Record<string, unknown>
+          const accessToken = readString(value, 'access_token')
+          if (!accessToken) {
+            deleteRecord(sessionStorePath, current.id)
+            return { status: 'invalid' }
+          }
+          const refreshToken = readString(value, 'refresh_token') ?? current.record.refreshToken
+          const expiresIn = readNumber(value, 'expires_in') ?? 3600
+          const record: SessionRecord = {
+            ...current.record,
+            accessToken,
+            refreshToken,
+            expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
+          }
+          saveRecord(record, current.id)
+          return { status: 'ok', record }
+        } catch {
+          return { status: 'unavailable' }
+        }
+      })().finally(() => {
+        pendingRefreshes.delete(current.id)
+      })
+      pendingRefreshes.set(current.id, refresh)
     }
-    const value = await response.json() as Record<string, unknown>
-    const accessToken = readString(value, 'access_token')
-    const refreshToken = readString(value, 'refresh_token') ?? current.record.refreshToken
-    if (!accessToken) return clearSessionResponse(401)
-    const expiresIn = readNumber(value, 'expires_in') ?? 3600
-    const record: SessionRecord = {
-      ...current.record,
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + Math.max(0, expiresIn - 30) * 1000,
+    const outcome = await refresh
+    if (outcome.status === 'invalid') return clearSessionResponse(401)
+    if (outcome.status === 'unavailable') {
+      return c.json({ error: 'Session refresh temporarily unavailable' }, 503)
     }
-    saveRecord(record, current.id)
-    return c.json(sessionResponse(record))
+    return c.json(sessionResponse(outcome.record))
   })
 
   const logout = (request: Request): Response => {

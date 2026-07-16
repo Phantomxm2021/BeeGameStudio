@@ -3,11 +3,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
-import { recordNativeAcceptanceReportForTest } from './native-acceptance-evidence'
+import {
+  getObservedNativeAcceptance,
+  observeNativeAcceptanceToolCompletion,
+  recordNativeAcceptanceReportForTest,
+} from './native-acceptance-evidence'
 
 const TEST_SESSION_ID = 'native-acceptance-test-session'
 
-describe('persisted delivery acceptance audit', () => {
+describe('native delivery acceptance gate', () => {
   let workspace = ''
 
   afterEach(async () => {
@@ -15,9 +19,9 @@ describe('persisted delivery acceptance audit', () => {
     if (workspace) await rm(dataRootFor(workspace), { recursive: true, force: true })
   })
 
-  test('accepts a report that covers the identified checklist with observable evidence', async () => {
+  test('accepts a native passing result for the exact workspace revision', async () => {
     workspace = await createWorkspace()
-    await writeAcceptance(workspace, validReport())
+    record(workspace, 'passed', 'Observed the documented player paths.')
 
     expect(evaluate(workspace)).toEqual({
       allowed: true,
@@ -26,146 +30,135 @@ describe('persisted delivery acceptance audit', () => {
     })
   })
 
-  test('rejects unchecked checklist items even when the report claims passed', async () => {
-    workspace = await createWorkspace({ checked: false })
-    await writeAcceptance(workspace, validReport())
+  test('rejects a workspace without an observed native validator result', async () => {
+    workspace = await createWorkspace()
 
-    const result = evaluate(workspace)
-
-    expect(result.allowed).toBe(false)
-    expect(result.issues).toContain('path-primary is still unchecked in the acceptance checklist.')
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['Deployment requires an observed native acceptance Validator result.'],
+    })
   })
 
-  test('rejects a hand-authored passing report without an observed native validator result', async () => {
+  test('passes through the native failed or blocked terminal outcome', async () => {
+    workspace = await createWorkspace()
+    record(workspace, 'failed', 'The documented restart path failed.')
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The documented restart path failed.'],
+    })
+
+    record(workspace, 'blocked', 'A required device is unavailable.')
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'blocked',
+      issues: ['A required device is unavailable.'],
+    })
+  })
+
+  test('invalidates acceptance when implementation or approved documents change', async () => {
+    workspace = await createWorkspace()
+    record(workspace, 'passed', 'Accepted current revision.')
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Changed requirement\n')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The project changed after native acceptance; validate the current revision before deployment.'],
+    })
+  })
+
+  test('does not inspect or require BeeGame-specific checklist schemas', async () => {
     workspace = await createWorkspace()
     await writeFile(
-      join(workspace, 'docs', 'acceptance', 'validation-report.json'),
-      JSON.stringify(validReport()),
+      join(workspace, 'docs', 'acceptance.md'),
+      '# Project-native acceptance\n\nThe player can finish and restart a run.\n',
     )
+    record(workspace, 'passed', 'The native validator observed the documented flow.')
 
-    expect(evaluate(workspace).issues).toContain(
-      'The validation report is not the terminal result of an observed native acceptance Validator call.',
-    )
+    expect(evaluate(workspace).allowed).toBe(true)
   })
 
-  test('rejects reports that omit a document-declared player path', async () => {
+  test('does not accept prose-wrapped or malformed Agent output as terminal evidence', async () => {
     workspace = await createWorkspace()
-    const report = validReport()
-    report.playerPaths = []
-    await writeAcceptance(workspace, report)
+    observeNativeAcceptanceToolCompletion({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'Agent',
+        toolUseID: 'validator-prose-output',
+        input: { subagent_type: 'beegame-acceptance-validator' },
+        output: 'Looks good. {"validatorId":"beegame-acceptance-validator","status":"passed","summary":"claimed"}',
+      },
+      createdAt: new Date(),
+    })
 
-    expect(evaluate(workspace).issues).toContain(
-      'The report omits player path path-primary.',
-    )
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
   })
 
-  test('rejects runtime claims without an observable action and assertion', async () => {
+  test('does not accept an assistant completion claim as native validator evidence', async () => {
     workspace = await createWorkspace()
-    const report = validReport()
-    report.playerPaths = [{
-      id: 'path-primary',
-      status: 'passed',
-      evidence: [{
-        id: 'evidence-path-primary',
-        kind: 'runtime',
-        source: 'path-primary',
-        result: 'passed',
-        detail: 'Claimed success without an observation contract.',
-      }],
-    }]
-    await writeAcceptance(workspace, report)
+    observeNativeAcceptanceToolCompletion({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'assistant.message',
+      payload: {
+        type: 'assistant',
+        text: JSON.stringify({
+          validatorId: 'beegame-acceptance-validator',
+          status: 'passed',
+          summary: 'The implementation agent claimed delivery was complete.',
+        }),
+      },
+      createdAt: new Date(),
+    })
 
-    const issues = evaluate(workspace).issues
-    expect(issues).toContain('path-primary runtime evidence is missing workingDirectory.')
-    expect(issues).toContain('path-primary runtime evidence is missing action.')
-    expect(issues).toContain('path-primary runtime evidence is missing assertion.')
-  })
-
-  test('requires structural acceptance ids instead of inferring behavior from prose', async () => {
-    workspace = await createWorkspace()
-    await writeFile(
-      join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
-      '- [x] A prose-only acceptance item\n',
-    )
-    await writeAcceptance(workspace, validReport())
-
-    const issues = evaluate(workspace).issues
-    expect(issues).toContain(
-      'Every acceptance checklist item must start with [requirement:ID] or [player-path:ID].',
-    )
-  })
-
-  test('rejects a report after the implementation changes', async () => {
-    workspace = await createWorkspace()
-    await writeAcceptance(workspace, validReport())
-    await Bun.sleep(5)
-    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
-
-    const result = evaluate(workspace)
-
-    expect(result.allowed).toBe(false)
-    expect(result.issues.some(issue =>
-      issue.includes('validation report is stale') && issue.includes('src/entry.ts'),
-    )).toBe(true)
-  })
-
-  test('requires asset runtime events to reference observed acceptance evidence', async () => {
-    workspace = await createWorkspace()
-    await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 1,
-      project_target: { asset_format_capabilities: [] },
-      slots: [{
-        id: 'embedded-primary',
-        delivery_mode: 'embedded',
-        status: 'integrated',
-        target: { path: 'src/entry.ts' },
-        integration_evidence: {
-          references: ['src/entry.ts'],
-          runtime_event_ids: ['unobserved-evidence'],
-        },
-      }],
-    }))
-    await writeAcceptance(workspace, validReport())
-
-    expect(evaluate(workspace).issues).toContain(
-      'Asset contract: required slot embedded-primary has no runtime_event_id present in the acceptance report.',
-    )
+    expect(getObservedNativeAcceptance({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['Deployment requires an observed native acceptance Validator result.'],
+    })
   })
 })
 
-async function createWorkspace(options: { checked?: boolean } = {}): Promise<string> {
+async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'beegame-delivery-audit-'))
-  await mkdir(join(root, 'docs', 'acceptance'), { recursive: true })
+  await mkdir(join(root, 'docs'), { recursive: true })
   await mkdir(join(root, 'src'), { recursive: true })
-  await mkdir(join(root, 'tests'), { recursive: true })
+  await writeFile(join(root, 'docs', 'GDD.md'), '# Approved game\n')
   await writeFile(join(root, 'src', 'entry.ts'), 'export const ready = true\n')
-  await writeFile(join(root, 'tests', 'acceptance.test.ts'), 'export const observed = true\n')
-  for (const name of ['GDD.md', 'TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md']) {
-    await writeFile(join(root, 'docs', name), `# ${name}\n`)
-  }
-  const marker = options.checked === false ? ' ' : 'x'
-  await writeFile(
-    join(root, 'docs', 'acceptance', 'gameplay-checklist.md'),
-    [
-      `- [${marker}] [requirement:req-primary] Primary behavior is implemented`,
-      `- [${marker}] [player-path:path-primary] Player can complete the primary loop`,
-      '',
-    ].join('\n'),
-  )
   return root
 }
 
-async function writeAcceptance(workspace: string, report: unknown): Promise<void> {
-  await writeFile(
-    join(workspace, 'docs', 'acceptance', 'validation-report.json'),
-    JSON.stringify(report),
-  )
+function record(
+  workspace: string,
+  status: 'passed' | 'failed' | 'blocked',
+  summary: string,
+): void {
   recordNativeAcceptanceReportForTest({
     dataRoot: dataRootFor(workspace),
     sessionId: TEST_SESSION_ID,
     workspacePath: workspace,
-    report,
+    report: {
+      validatorId: 'beegame-acceptance-validator',
+      status,
+      summary,
+      evidence: [],
+      findings: [],
+    },
   })
 }
 
@@ -178,41 +171,4 @@ function evaluate(workspace: string) {
 
 function dataRootFor(workspace: string): string {
   return `${workspace}-runtime-data`
-}
-
-function validReport(): Record<string, unknown> {
-  return {
-    validatorId: 'beegame-acceptance-validator',
-    status: 'passed',
-    summary: 'Observed the declared behavior.',
-    assetsRequired: false,
-    verifiedCapabilities: ['skill:beegame-game-acceptance'],
-    requirements: [{
-      id: 'req-primary',
-      status: 'passed',
-      evidence: [{
-        id: 'evidence-implementation-primary',
-        kind: 'implementation',
-        source: 'src/entry.ts',
-        result: 'passed',
-        detail: 'Implementation exists and is wired.',
-      }],
-    }],
-    playerPaths: [{
-      id: 'path-primary',
-      status: 'passed',
-      evidence: [{
-        id: 'evidence-path-primary',
-        kind: 'runtime',
-        source: 'path-primary',
-        result: 'passed',
-        workingDirectory: '.',
-        action: 'Run the project-native acceptance test and exercise the primary loop.',
-        assertion: 'The observable outcome matches the approved checklist.',
-        artifact: 'tests/acceptance.test.ts',
-        detail: 'The player path reached its declared outcome.',
-      }],
-    }],
-    findings: [],
-  }
 }

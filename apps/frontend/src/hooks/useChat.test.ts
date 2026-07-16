@@ -1,7 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let latestWebSocketOptions: { onMessage?: (message: any) => void; onOpen?: () => void | Promise<void> } = {};
+let latestWebSocketOptions: {
+  onMessage?: (message: any) => void;
+  onOpen?: () => void | Promise<void>;
+  onClose?: () => void;
+} = {};
 const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock, systemStoreState } = vi.hoisted(() => {
   const state = {
     pendingReviews: [] as any[],
@@ -337,6 +341,31 @@ describe('useChat clarification gate handling', () => {
       expect(result.current.isLoading).toBe(true);
     });
     expect(result.current.currentTaskId).toBe('proj_1');
+  });
+
+  it('keeps the composer locked across intermediate assistant messages and transport reconnects', async () => {
+    projectStoreState.projectStatus = {
+      project_id: 'proj_1',
+      phase: 'running',
+      blocked: false,
+    };
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'agent_message',
+        task_id: 'turn_1',
+        message_id: 'assistant_intermediate',
+        project_id: 'proj_1',
+        sender: 'agent',
+        content: 'I am continuing with the implementation.',
+      });
+      latestWebSocketOptions.onClose?.();
+    });
+
+    expect(result.current.isLoading).toBe(true);
   });
 
   it('does not trigger project-wide polling for every tool-start event', async () => {

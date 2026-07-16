@@ -482,6 +482,13 @@ describe('DashboardView runtime loading', () => {
     });
 
     it('moves header metrics into the selected project hover hint and removes BeeGame branding chrome', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            acceptance: {
+                status: 'passed',
+                summary: 'Native validator observed the current revision.',
+            },
+        };
         render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
         await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
@@ -502,6 +509,8 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByText('Web')).toBeInTheDocument();
         expect(screen.getByText('消耗')).toBeInTheDocument();
         expect(screen.getByText('Agent 状态')).toBeInTheDocument();
+        expect(screen.getByText('交付验收')).toBeInTheDocument();
+        expect(screen.getByText('已通过')).toBeInTheDocument();
     });
 
     it('shows the sync state as an icon with text in the live preview header', async () => {
@@ -734,8 +743,29 @@ describe('DashboardView runtime loading', () => {
             );
         });
 
+        const observedPreviewSources: string[] = [];
+        const previewSurface = screen.getByTestId('beegame-preview-surface');
+        const observer = new MutationObserver((records) => {
+            records.forEach((record) => {
+                record.addedNodes.forEach((node) => {
+                    if (!(node instanceof HTMLElement)) return;
+                    if (node.matches('iframe[src]')) {
+                        observedPreviewSources.push(node.getAttribute('src') || '');
+                    }
+                    node.querySelectorAll('iframe[src]').forEach((frameNode) => {
+                        observedPreviewSources.push(frameNode.getAttribute('src') || '');
+                    });
+                });
+            });
+        });
+        observer.observe(previewSurface, { childList: true, subtree: true });
         await user.click(screen.getByRole('button', { name: '停止预览' }));
         await waitFor(() => expect(apiMocks.stopProjectPreview).toHaveBeenCalledWith('proj_1'));
+        await waitFor(() => expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument());
+        observer.disconnect();
+        expect(observedPreviewSources).not.toContain(
+            'http://127.0.0.1:5178/?__beegame_preview_refresh=2',
+        );
         expect(stopTask).not.toHaveBeenCalled();
     });
 

@@ -8,19 +8,9 @@ import type {
 
 export type SerializedQueryEngineStartInput = Omit<
   BeeGameSessionRunnerStartInput,
-  'approvedOutboundTargets' | 'agentDefinitions'
+  'approvedOutboundTargets'
 > & {
   approvedOutboundTargets: Record<string, { url: string; addresses: string[] }>
-  agentDefinitions?: Array<{
-    agentType: string
-    whenToUse: string
-    tools?: string[]
-    disallowedTools?: string[]
-    source: string
-    permissionMode?: 'plan'
-    systemPrompt: string
-    maxTurns?: number
-  }>
 }
 
 export type QueryEngineParentMessage =

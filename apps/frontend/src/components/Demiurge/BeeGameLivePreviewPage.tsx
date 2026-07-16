@@ -16,6 +16,7 @@ import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../service
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { clearSupabaseSession } from '../../services/supabaseAuthApi';
+import { buildApiUrl } from '../../services/apiClient';
 
 type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
@@ -45,6 +46,10 @@ interface BeeGameLivePreviewPageProps {
     isWorkspaceBusy?: boolean;
     buildReport?: BuildReportPayload | null;
     projectTarget?: string;
+    acceptance?: {
+        status: 'not_run' | 'passed' | 'failed' | 'blocked' | 'stale';
+        summary?: string;
+    };
     deployments?: BeeGameDeploymentPayload[];
     previewRefreshNonce?: number;
     onStartPreview?: () => void | Promise<void>;
@@ -62,7 +67,7 @@ interface BeeGameLivePreviewPageProps {
 const normalizeUrl = (url?: string): string => {
     const value = String(url || '').trim();
     if (!value) return '';
-    return value;
+    return value.startsWith('/') ? buildApiUrl(value) : value;
 };
 
 const getPreviewSessionId = (url?: string): string => {
@@ -133,6 +138,7 @@ export function BeeGameLivePreviewPage({
     isWorkspaceBusy = false,
     buildReport,
     projectTarget,
+    acceptance,
     deployments = [],
     previewRefreshNonce = 0,
     onStartPreview,
@@ -349,6 +355,12 @@ export function BeeGameLivePreviewPage({
                                 </>
                             ) : null}
                             <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
+                            {acceptance ? (
+                                <ProjectHintRow
+                                    label={lang === 'zh' ? '交付验收' : lang === 'zh-TW' ? '交付驗收' : 'Acceptance'}
+                                    value={acceptanceStatusLabel(acceptance.status, lang)}
+                                />
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -827,6 +839,19 @@ function formatDeploymentTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString();
+}
+
+function acceptanceStatusLabel(
+    status: NonNullable<BeeGameLivePreviewPageProps['acceptance']>['status'],
+    lang: Language,
+): string {
+    if (lang === 'zh') {
+        return ({ not_run: '未验收', passed: '已通过', failed: '未通过', blocked: '受阻', stale: '需重新验收' })[status];
+    }
+    if (lang === 'zh-TW') {
+        return ({ not_run: '未驗收', passed: '已通過', failed: '未通過', blocked: '受阻', stale: '需重新驗收' })[status];
+    }
+    return ({ not_run: 'Not run', passed: 'Passed', failed: 'Failed', blocked: 'Blocked', stale: 'Revalidation required' })[status];
 }
 
 function ProjectHintRow({ label, value }: { label: string; value: string }) {

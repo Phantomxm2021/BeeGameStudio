@@ -8,9 +8,14 @@ import {
   type ApprovedOutboundTarget,
 } from '@bee-game-studio/security-core'
 import { getDefaultBeeGameBuiltinSkillsDir } from '@bee-game-studio/beegame-skills-core/store'
+import {
+  DELIVERY_VALIDATOR_AGENT_TYPE,
+  DOCUMENT_REVIEWER_AGENT_TYPE,
+} from './delivery-validation-agents'
 import type {
   BeeGameApprovedOutboundTargets,
   BeeGamePromptInput,
+  BeeGameSessionLanguage,
   BeeGameSessionRunner,
   BeeGameSessionRunnerStartInput,
   BeeGameSessionRuntime,
@@ -21,9 +26,28 @@ import type {
 type DynamicModule = Record<string, unknown>
 
 type QueryEngineLike = {
-  submitMessage(prompt: BeeGamePromptInput): AsyncGenerator<DashboardSDKMessage, void, unknown>
+  submitMessage(
+    prompt: BeeGamePromptInput,
+    options?: { uuid?: string; isMeta?: boolean },
+  ): AsyncGenerator<DashboardSDKMessage, void, unknown>
   interrupt(): void
   resetAbortController(): void
+}
+
+type NativeQueuedCommand = {
+  value: BeeGamePromptInput
+  mode: string
+  agentId?: string
+  uuid?: string
+  isMeta?: boolean
+}
+
+type NativeNotificationQueue = {
+  takeMainThreadTaskNotifications(): NativeQueuedCommand[]
+}
+
+type NativeSdkEventQueue = {
+  drain(): DashboardSDKMessage[]
 }
 
 type QueryEngineConstructor = new (
@@ -55,6 +79,50 @@ type PermissionDecision = {
   decisionReason?: Record<string, unknown>
   toolUseID?: string
   updatedInput?: Record<string, unknown>
+}
+
+export const REQUIRED_BEEGAME_NATIVE_AGENT_TYPES = [
+  DOCUMENT_REVIEWER_AGENT_TYPE,
+  DELIVERY_VALIDATOR_AGENT_TYPE,
+] as const
+
+const RESPONSE_LANGUAGE_NAMES: Record<BeeGameSessionLanguage, string> = {
+  en: 'English',
+  zh: 'Simplified Chinese',
+  'zh-TW': 'Traditional Chinese',
+  ja: 'Japanese',
+  ko: 'Korean',
+  fr: 'French',
+  de: 'German',
+  es: 'Spanish',
+  it: 'Italian',
+  pt: 'Portuguese',
+}
+
+export function getBeeGameResponseLanguageInstruction(
+  language?: BeeGameSessionLanguage,
+): string | undefined {
+  if (!language) return undefined
+  return `Respond to the user in ${RESPONSE_LANGUAGE_NAMES[language]}. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.`
+}
+
+export function assertRequiredBeeGameNativeAgents(
+  activeAgents: Record<string, unknown>[],
+): void {
+  const discovered = new Set(activeAgents.flatMap(agent => {
+    const agentType = agent.agentType
+    return typeof agentType === 'string' && agentType.trim()
+      ? [agentType.trim()]
+      : []
+  }))
+  const missing = REQUIRED_BEEGAME_NATIVE_AGENT_TYPES.filter(
+    agentType => !discovered.has(agentType),
+  )
+  if (missing.length > 0) {
+    throw new Error(
+      `BeeGame native runtime capability is unavailable: ${missing.join(', ')}`,
+    )
+  }
 }
 
 const DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW = '120000'
@@ -132,6 +200,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private appState: MutableAppState | null = null
   private currentSubmitInput: BeeGameSessionSubmitInput | null = null
   private activateNativeSession: (() => void) | null = null
+  private notificationQueue: NativeNotificationQueue | null = null
+  private sdkEventQueue: NativeSdkEventQueue | null = null
 
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
@@ -152,16 +222,13 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           return
         }
 
-        engine.resetAbortController()
         const abort = () => {
           engine.interrupt()
         }
         input.signal.addEventListener('abort', abort, { once: true })
         try {
-          for await (const message of engine.submitMessage(input.prompt)) {
-            input.onMessage(message)
-            if (input.signal.aborted) break
-          }
+          await this.runNativeTurn(engine, input.prompt, input)
+          await this.drainNativeBackgroundTasks(engine, input)
         } finally {
           input.signal.removeEventListener('abort', abort)
           this.currentSubmitInput = null
@@ -172,9 +239,59 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
 
   stop(): void {
     this.engine?.interrupt()
-    void stopRunningLocalShellTasks(this.appState, updater => {
+    void stopRunningNativeBackgroundTasks(this.appState, updater => {
       if (!this.appState) throw new Error('App state was not initialized')
       this.appState = updater(this.appState)
+    })
+  }
+
+  private async runNativeTurn(
+    engine: QueryEngineLike,
+    prompt: BeeGamePromptInput,
+    input: BeeGameSessionSubmitInput,
+    options?: { uuid?: string; isMeta?: boolean },
+  ): Promise<void> {
+    if (input.signal.aborted) return
+    this.activateNativeSession?.()
+    engine.resetAbortController()
+    for await (const message of engine.submitMessage(prompt, options)) {
+      input.onMessage(message)
+      if (input.signal.aborted) break
+    }
+  }
+
+  /**
+   * QueryEngine owns the conversation, while Claude Code's TUI/print entrypoints
+   * own the outer loop that waits for background tasks and feeds their native
+   * task-notifications back into that conversation. BeeGame embeds QueryEngine
+   * directly, so it must provide the same transport loop here. It deliberately
+   * does not inspect notification contents or make workflow decisions.
+   */
+  private async drainNativeBackgroundTasks(
+    engine: QueryEngineLike,
+    input: BeeGameSessionSubmitInput,
+  ): Promise<void> {
+    await drainNativeBackgroundNotifications({
+      signal: input.signal,
+      takeNotifications: () =>
+        this.notificationQueue?.takeMainThreadTaskNotifications() ?? [],
+      hasRunningTasks: () => hasRunningNativeBackgroundTasks(this.appState),
+      flushProgress: () => {
+        for (const event of this.sdkEventQueue?.drain() ?? []) {
+          input.onMessage(event)
+        }
+      },
+      runNotification: notification => this.runNativeTurn(
+        engine,
+        notification.value,
+        input,
+        {
+          ...(notification.uuid ? { uuid: notification.uuid } : {}),
+          ...(notification.isMeta !== undefined
+            ? { isMeta: notification.isMeta }
+            : {}),
+        },
+      ),
     })
   }
 
@@ -195,6 +312,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       configModule,
       permissionsModule,
       conversationRecoveryModule,
+      messageQueueModule,
+      sdkEventQueueModule,
     ] = await Promise.all([
       loadRootModule('QueryEngine.js'),
       loadRootModule('Tool.js'),
@@ -207,7 +326,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       loadRootModule('utils/config.js'),
       loadRootModule('utils/permissions/permissions.js'),
       loadRootModule('utils/conversationRecovery.js'),
+      loadRootModule('utils/messageQueueManager.js'),
+      loadRootModule('utils/sdkEventQueue.js'),
     ])
+
+    this.notificationQueue = createNativeNotificationQueue(messageQueueModule)
+    this.sdkEventQueue = createNativeSdkEventQueue(sdkEventQueueModule)
 
     call(configModule, 'enableConfigs')
     enableBeeGameRuntimeCompaction(configModule)
@@ -240,22 +364,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
     ])
-    const inheritedSessionRules = arrayOfStrings(
-      getField<Record<string, unknown>>(
-        permissionContext,
-        'alwaysAllowRules',
-        {},
-      ).session,
-    )
-    const agentDefinitions = mergeManagedAgentDefinitions(
-      discoveredAgentDefinitions,
-      this.input.agentDefinitions ?? [],
-      inheritedSessionRules,
-    )
-
     const appState = {
       ...(call(stateModule, 'getDefaultAppState') as MutableAppState),
-      agentDefinitions,
+      agentDefinitions: discoveredAgentDefinitions,
       toolPermissionContext: permissionContext,
     }
     this.appState = appState
@@ -332,10 +443,11 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       maxBytes: number,
     ) => unknown>(cacheModule, 'FileStateCache')
     const activeAgents = getField<Record<string, unknown>[]>(
-      agentDefinitions,
+      discoveredAgentDefinitions,
       'activeAgents',
       [],
     )
+    assertRequiredBeeGameNativeAgents(activeAgents)
     const resumedConversation = await loadInitialMessagesForResume(
       conversationRecoveryModule,
       this.input.resumeSessionId,
@@ -367,56 +479,17 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
+      ...(getBeeGameResponseLanguageInstruction(this.input.language)
+        ? {
+            appendSystemPrompt: getBeeGameResponseLanguageInstruction(
+              this.input.language,
+            ),
+          }
+        : {}),
     })
 
     return this.engine
   }
-}
-
-export function mergeManagedAgentDefinitions(
-  discovered: unknown,
-  managed: BeeGameSessionRunnerStartInput['agentDefinitions'],
-  inheritedSessionRules: string[] = [],
-): Record<string, unknown> {
-  const current = isRecord(discovered) ? discovered : {}
-  const active = arrayOfRecords(current.activeAgents)
-  const all = arrayOfRecords(current.allAgents)
-  const managedByType = new Map((managed ?? []).map(agent => [agent.agentType, agent]))
-  const allowedAgentTypes = Array.isArray(current.allowedAgentTypes)
-    ? current.allowedAgentTypes.filter((item): item is string => typeof item === 'string')
-    : undefined
-  const inheritSessionRules = (agent: Record<string, unknown>): Record<string, unknown> => {
-    if (inheritedSessionRules.length === 0) return agent
-    const tools = arrayOfStrings(agent.tools)
-    return {
-      ...agent,
-      tools: [...new Set([...tools, ...inheritedSessionRules])],
-    }
-  }
-  const retainUnmanaged = (agents: Record<string, unknown>[]) => agents
-    .filter(agent => typeof agent.agentType !== 'string' || !managedByType.has(agent.agentType))
-    .map(inheritSessionRules)
-  const inheritedManaged = [...managedByType.values()].map(agent =>
-    inheritSessionRules(agent as unknown as Record<string, unknown>),
-  )
-  return {
-    ...current,
-    activeAgents: [...retainUnmanaged(active), ...inheritedManaged],
-    allAgents: [...retainUnmanaged(all), ...inheritedManaged],
-    ...(allowedAgentTypes
-      ? { allowedAgentTypes: [...new Set([...allowedAgentTypes, ...managedByType.keys()])] }
-      : {}),
-  }
-}
-
-function arrayOfStrings(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : []
-}
-
-function arrayOfRecords(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter(isRecord) : []
 }
 
 export function ensureBeeGameMacroGlobals(): void {
@@ -440,6 +513,130 @@ export async function stopRunningLocalShellTasks(
   const killTask = killTaskFn ?? await loadKillShellTask()
   for (const taskId of taskIds) {
     killTask(taskId, setAppState)
+  }
+  return taskIds
+}
+
+export function hasRunningNativeBackgroundTasks(
+  appState: MutableAppState | null,
+): boolean {
+  const tasks = appState?.tasks
+  if (!tasks || typeof tasks !== 'object') return false
+  return Object.values(tasks).some(task => {
+    if (!isRecord(task)) return false
+    if (task.status !== 'running' && task.status !== 'pending') return false
+    if (task.isBackgrounded === false) return false
+    // Claude Code intentionally keeps teammates alive for the whole session;
+    // its own headless queue loop excludes them for the same reason.
+    return task.type !== 'in_process_teammate'
+  })
+}
+
+export function createNativeNotificationQueue(
+  messageQueueModule: DynamicModule,
+): NativeNotificationQueue {
+  const dequeueAllMatching = messageQueueModule.dequeueAllMatching
+  if (typeof dequeueAllMatching !== 'function') {
+    throw new Error('Missing function export: dequeueAllMatching')
+  }
+  return {
+    takeMainThreadTaskNotifications() {
+      return (dequeueAllMatching((command: NativeQueuedCommand) =>
+        command.agentId === undefined && command.mode === 'task-notification'
+      ) as NativeQueuedCommand[])
+    },
+  }
+}
+
+export function createNativeSdkEventQueue(
+  sdkEventQueueModule: DynamicModule,
+): NativeSdkEventQueue {
+  const drainSdkEvents = sdkEventQueueModule.drainSdkEvents
+  if (typeof drainSdkEvents !== 'function') {
+    throw new Error('Missing function export: drainSdkEvents')
+  }
+  return {
+    drain: () => drainSdkEvents() as DashboardSDKMessage[],
+  }
+}
+
+export async function drainNativeBackgroundNotifications({
+  signal,
+  takeNotifications,
+  hasRunningTasks,
+  runNotification,
+  flushProgress = () => {},
+  waitForProgress = waitForNativeBackgroundProgress,
+}: {
+  signal: AbortSignal
+  takeNotifications(): NativeQueuedCommand[]
+  hasRunningTasks(): boolean
+  runNotification(command: NativeQueuedCommand): Promise<void>
+  flushProgress?(): void
+  waitForProgress?(signal: AbortSignal): Promise<void>
+}): Promise<void> {
+  while (!signal.aborted) {
+    flushProgress()
+    const notifications = takeNotifications()
+    if (notifications.length > 0) {
+      for (const notification of notifications) {
+        await runNotification(notification)
+        if (signal.aborted) return
+      }
+      continue
+    }
+    if (!hasRunningTasks()) {
+      flushProgress()
+      return
+    }
+    await waitForProgress(signal)
+  }
+}
+
+async function waitForNativeBackgroundProgress(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  await new Promise<void>(resolveWait => {
+    const timer = setTimeout(finish, 100)
+    const onAbort = () => finish()
+    function finish() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      resolveWait()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function stopRunningNativeBackgroundTasks(
+  appState: MutableAppState | null,
+  setAppState: SetMutableAppState,
+): Promise<string[]> {
+  const tasks = appState?.tasks
+  if (!tasks || typeof tasks !== 'object') return []
+  const taskIds = Object.entries(tasks)
+    .filter(([, task]) => {
+      if (!isRecord(task)) return false
+      return task.status === 'running' || task.status === 'pending'
+    })
+    .map(([taskId]) => taskId)
+  if (taskIds.length === 0) return []
+
+  const stopTaskModule = await loadRootModule('tasks/stopTask.js')
+  let currentState = appState
+  for (const taskId of taskIds) {
+    try {
+      await callAsync(stopTaskModule, 'stopTask', taskId, {
+        getAppState: () => currentState,
+        setAppState: (updater: (prev: MutableAppState) => MutableAppState) => {
+          if (!currentState) return
+          currentState = updater(currentState)
+          setAppState(() => currentState as MutableAppState)
+        },
+      })
+    } catch {
+      // A task can finish between collection and cancellation. Native task
+      // state remains authoritative; stopping the rest must continue.
+    }
   }
   return taskIds
 }

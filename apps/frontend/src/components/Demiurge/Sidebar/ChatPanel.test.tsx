@@ -337,6 +337,24 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByText('Thinking...')).toHaveClass('shimmer', 'text-muted-foreground');
     });
 
+    it('shows runtime activity after entering a running task even before a thinking event arrives', () => {
+        renderChatPanel({
+            actionReview: undefined,
+            pendingReviews: [],
+            variant: 'beegame',
+            messages: [],
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+                next_action: 'Claude Code is processing',
+            } as any,
+        });
+
+        expect(screen.getByTestId('beegame-thinking-message-beegame-runtime-activity')).toBeInTheDocument();
+        expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    });
+
     it('renders BeeGame messages as a compact feed with tools after their message', async () => {
         const user = userEvent.setup();
         const onEditMessage = vi.fn();

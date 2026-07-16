@@ -6,6 +6,7 @@ import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, ty
 import type { ChatAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
+import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/documentProgress';
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
 import type { WaitingApprovalState } from '../../utils/waitingApproval';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../viewModels/displayModels';
@@ -147,6 +148,17 @@ export function RightSidebar({
     const uiText = useBeeGameText(lang);
     const isComposerLocked = isLoading || isRuntimeBusy;
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
+    const documentProgress = useMemo(
+        () => deriveDocumentProgress(messages, artifacts),
+        [artifacts, messages],
+    );
+    const documentEventRevision = useMemo(
+        () => messages
+            .filter(message => isBaselineDocumentPath(message.artifactPath))
+            .map(message => `${message.id}:${message.toolStatus || ''}:${message.timestamp}`)
+            .join('|'),
+        [messages],
+    );
 
     useEffect(() => {
         setAssetManifest(null);
@@ -397,11 +409,9 @@ export function RightSidebar({
                     setIsArtifactsLoading(false);
                 }
             };
-            fetchData();
-            const interval = setInterval(fetchData, 5000);
-            return () => clearInterval(interval);
+            void fetchData();
         }
-    }, [activeTab, projectId, artifacts.length, variant]);
+    }, [activeTab, projectId, variant, documentEventRevision]);
 
     useEffect(() => {
         if (activeTab === 'assets') {
@@ -464,7 +474,9 @@ export function RightSidebar({
                             >
                                 {tabLabel(tab)}
                                 {variant === 'beegame' && tab === 'artifacts' ? (
-                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{artifacts.length}</span>
+                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">
+                                            {documentProgress.filter(item => item.status === 'ready').length}/{documentProgress.length}
+                                        </span>
                                     ) : null}
                                     {variant === 'beegame' && tab === 'assets' && assetManifest?.slots.length ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.slots.length}</span>
@@ -540,6 +552,7 @@ export function RightSidebar({
                                 onPreview={handlePreviewArtifact}
                                 onDownload={handleDownloadArtifact}
                                 canExportProject={canExportProject}
+                                documentProgress={variant === 'beegame' ? documentProgress : undefined}
                                 lang={lang}
                             />
                         ) : (

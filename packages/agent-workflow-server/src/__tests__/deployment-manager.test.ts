@@ -281,7 +281,7 @@ describe('BeeGameDeploymentManager', () => {
       workspacePath: workspace,
     })
     expect(rejected.status).toBe('failed')
-    expect(rejected.message).toContain('validation-report.json')
+    expect(rejected.message).toContain('native acceptance Validator result')
     expect(builds).toBe(0)
 
     await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })

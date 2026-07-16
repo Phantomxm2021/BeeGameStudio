@@ -1,8 +1,10 @@
 import { memo } from 'react';
-import { FileArchive, FileText, Eye, Download } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Circle, Download, Eye, FileArchive, FileText, LoaderCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
+import type { DocumentProgressItem } from '../../../utils/documentProgress';
+import { normalizeDocumentPath } from '../../../utils/documentProgress';
 
 interface ArtifactsPanelProps {
     artifacts: any[];
@@ -11,6 +13,7 @@ interface ArtifactsPanelProps {
     onPreview: (id: string, name: string) => void;
     onDownload: (id: string, name: string) => void;
     canExportProject?: boolean;
+    documentProgress?: DocumentProgressItem[];
     lang?: Language;
 }
 
@@ -20,10 +23,11 @@ export const ArtifactsPanel = memo(({
     onPreview, 
     onDownload,
     canExportProject = true,
+    documentProgress,
     lang = 'en',
 }: ArtifactsPanelProps) => {
     const text = useBeeGameText(lang);
-    if (isLoading && artifacts.length === 0) {
+    if (isLoading && artifacts.length === 0 && !documentProgress) {
         return (
             <div className="h-full overflow-y-auto px-6 py-5" aria-label={text.loadingArtifacts}>
                 <div className="overflow-hidden border-y border-zinc-200 dark:border-zinc-800">
@@ -48,7 +52,7 @@ export const ArtifactsPanel = memo(({
         );
     }
 
-    if (artifacts.length === 0) {
+    if (artifacts.length === 0 && !documentProgress) {
         return (
             <div className="flex flex-col items-center justify-center py-20 italic space-y-4 text-zinc-500 dark:text-zinc-400 opacity-70">
                 <FileText className="w-12 h-12" />
@@ -57,8 +61,73 @@ export const ArtifactsPanel = memo(({
         );
     }
 
+    const baselineArtifactIds = new Set(
+        (documentProgress || [])
+            .map(item => item.artifact?.artifact_id || item.artifact?.id)
+            .filter(Boolean),
+    );
+    const baselinePaths = new Set((documentProgress || []).map(item => item.path));
+    const additionalArtifacts = artifacts.filter((artifact) => {
+        const artifactId = artifact?.artifact_id || artifact?.id;
+        if (artifactId && baselineArtifactIds.has(artifactId)) return false;
+        const path = normalizeDocumentPath(artifact?.path || artifact?.name);
+        return !baselinePaths.has(path);
+    });
+    const readyCount = documentProgress?.filter(item => item.status === 'ready').length || 0;
+    const progressIcon = (status: DocumentProgressItem['status']) => {
+        if (status === 'writing') return <LoaderCircle className="h-4 w-4 animate-spin text-amber-300" />;
+        if (status === 'ready') return <CheckCircle2 className="h-4 w-4 text-emerald-300" />;
+        if (status === 'failed') return <AlertCircle className="h-4 w-4 text-rose-300" />;
+        return <Circle className="h-4 w-4 text-zinc-700" />;
+    };
+    const progressLabel = (status: DocumentProgressItem['status']) => {
+        if (status === 'writing') return text.documentWriting || 'Writing';
+        if (status === 'ready') return text.documentReady || 'Ready';
+        if (status === 'failed') return text.documentFailed || 'Failed';
+        return text.documentPending || 'Pending';
+    };
+
     return (
         <div className="h-full overflow-y-auto px-6 py-5">
+            {documentProgress ? (
+                <section aria-label={text.documentProgress || 'Project documents'} className="mb-6">
+                    <div className="mb-3 flex items-baseline justify-between">
+                        <div>
+                            <h3 className="type-footnote text-zinc-100">{text.documentProgress || 'Project documents'}</h3>
+                            <p className="type-caption-2 mt-1 text-zinc-500">{text.documentProgressHint || 'Produced in dependency order from the confirmed brief.'}</p>
+                        </div>
+                        <span className="type-caption-2 tabular-nums text-zinc-400">{readyCount}/{documentProgress.length}</span>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40">
+                        {documentProgress.map((item) => {
+                            const artifactId = String(item.artifact?.artifact_id || item.artifact?.id || '').trim();
+                            return (
+                                <div key={item.path} className="flex min-h-12 items-center gap-3 border-b border-zinc-900 px-3 last:border-b-0">
+                                    {progressIcon(item.status)}
+                                    <div className="min-w-0 flex-1">
+                                        <div className="type-footnote truncate text-zinc-200">{item.name}</div>
+                                        <div className="type-caption-2 truncate text-zinc-600">{item.path}</div>
+                                    </div>
+                                    <span className="type-caption-2 shrink-0 text-zinc-500">{progressLabel(item.status)}</span>
+                                    {item.status === 'ready' && artifactId ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onPreview(artifactId, item.artifact?.name || item.name)}
+                                            title={text.preview}
+                                            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            ) : null}
+            {additionalArtifacts.length > 0 ? (
+            <section aria-label={documentProgress ? (text.otherArtifacts || 'Other deliverables') : undefined}>
+                {documentProgress ? <h3 className="type-footnote mb-3 text-zinc-100">{text.otherArtifacts || 'Other deliverables'}</h3> : null}
             <div className="overflow-hidden border-y border-zinc-200 dark:border-zinc-800">
                 <table className="w-full table-fixed border-collapse">
                     <thead>
@@ -72,7 +141,7 @@ export const ArtifactsPanel = memo(({
                         </tr>
                     </thead>
                     <tbody>
-                        {artifacts.map((art) => {
+                        {additionalArtifacts.map((art) => {
                             const type = art.artifact_type || 'Document';
                             const artifactId = String(art.artifact_id || art.id || '').trim();
                             const reviewKey = artifactId || art.id;
@@ -125,6 +194,8 @@ export const ArtifactsPanel = memo(({
                     </tbody>
                 </table>
             </div>
+            </section>
+            ) : null}
         </div>
     );
 });

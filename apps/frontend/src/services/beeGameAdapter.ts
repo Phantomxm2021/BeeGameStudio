@@ -143,7 +143,7 @@ type BeeGameArtifact = {
   package_download?: boolean;
 };
 
-type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko';
+type BeeGameLanguage = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'it' | 'pt';
 
 type BeeGameIdeaIntakeRequest = {
   idea: string;
@@ -1326,6 +1326,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_status: startedInfo.status,
         tool_detail: startedInfo.detail,
         artifact_id: startedArtifactPath ? encodeArtifactId(projectId, event.sessionId, startedArtifactPath) : undefined,
+        artifact_path: startedArtifactPath ? toWorkspaceRelativePath(startedArtifactPath, workspacePath) : undefined,
         is_subagent_tool: startedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -1347,6 +1348,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_detail: progressInfo.detail,
         tool_output: progressInfo.output,
         artifact_id: progressArtifactPath ? encodeArtifactId(projectId, event.sessionId, progressArtifactPath) : undefined,
+        artifact_path: progressArtifactPath ? toWorkspaceRelativePath(progressArtifactPath, workspacePath) : undefined,
         is_subagent_tool: progressInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -1371,6 +1373,7 @@ function eventToWebSocketMessages(projectId: string, event: BeeGameEvent, worksp
         tool_detail: finishedInfo.detail,
         tool_output: finishedInfo.output,
         artifact_id: finishedArtifactPath ? encodeArtifactId(projectId, event.sessionId, finishedArtifactPath) : undefined,
+        artifact_path: finishedArtifactPath ? toWorkspaceRelativePath(finishedArtifactPath, workspacePath) : undefined,
         is_subagent_tool: finishedInfo.isSubagent,
         timestamp: Date.parse(event.createdAt) || Date.now(),
       } as WebSocketMessage];
@@ -1837,12 +1840,17 @@ function normalizeIntakeOption(option: BeeGameIntakeOption): BeeGameIntakeOption
   };
 }
 
-function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' {
+function normalizeBeeGameLanguage(language: string | undefined, fallbackText: string): BeeGameLanguage {
   const normalized = String(language || '').trim();
   if (normalized === 'zh-TW' || normalized === 'zh-HK') return 'zh-TW';
   if (normalized === 'zh' || normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh';
   if (normalized === 'ja' || normalized.startsWith('ja-')) return 'ja';
   if (normalized === 'ko' || normalized.startsWith('ko-')) return 'ko';
+  if (normalized === 'fr' || normalized.startsWith('fr-')) return 'fr';
+  if (normalized === 'de' || normalized.startsWith('de-')) return 'de';
+  if (normalized === 'es' || normalized.startsWith('es-')) return 'es';
+  if (normalized === 'it' || normalized.startsWith('it-')) return 'it';
+  if (normalized === 'pt' || normalized.startsWith('pt-')) return 'pt';
   if (normalized === 'en' || normalized.startsWith('en-')) return 'en';
   return containsCjk(fallbackText) ? 'zh' : 'en';
 }
@@ -2119,9 +2127,12 @@ const BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS = 1500;
 const BEEGAME_INTAKE_JOB_MAX_POLLS = 240;
 
 function buildIdeaIntakeRequestBody(data: BeeGameIdeaIntakeRequest): BeeGameIdeaIntakeRequest {
+  const language = data.language
+    ? normalizeBeeGameLanguage(data.language, data.idea)
+    : undefined;
   return {
     idea: data.idea,
-    ...(data.language ? { language: data.language } : {}),
+    ...(language ? { language } : {}),
     clientRequestId: data.clientRequestId ?? createClientRequestId(),
   };
 }

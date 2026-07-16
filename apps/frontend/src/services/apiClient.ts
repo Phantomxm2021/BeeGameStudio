@@ -38,10 +38,14 @@ export const resolveAuthTokenAsync = async (): Promise<string> => (
 );
 
 export const buildApiUrl = (path: string): string => {
-  if (!API_BASE_URL || /^[a-z][a-z\d+\-.]*:/i.test(path)) {
+  return buildApiUrlWithBase(path, API_BASE_URL);
+};
+
+export const buildApiUrlWithBase = (path: string, baseUrl: string): string => {
+  if (!baseUrl || /^[a-z][a-z\d+\-.]*:/i.test(path)) {
     return path;
   }
-  const normalizedBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${normalizedBase}${normalizedPath}`;
 };

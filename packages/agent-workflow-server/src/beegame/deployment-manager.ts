@@ -498,7 +498,7 @@ export class BeeGameDeploymentManager {
 }
 
 function formatAcceptanceIssues(issues: string[]): string {
-  if (issues.length === 0) return 'Deployment requires a passed native delivery acceptance report.'
+  if (issues.length === 0) return 'Deployment requires a passed native acceptance result.'
   const visible = issues.slice(0, 12)
   const remaining = issues.length - visible.length
   return [

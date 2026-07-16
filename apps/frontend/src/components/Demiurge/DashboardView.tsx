@@ -247,7 +247,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         () => getWaitingApprovalState(projectRuntimeDisplay, reviewDisplayModels),
         [projectRuntimeDisplay, reviewDisplayModels],
     );
-    const isProjectInteractionLocked = isOpeningProject || isSyncing;
+    const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
+    const isProjectInteractionLocked = isOpeningProject
+        || isSyncing
+        || (isBeeGameMode && !hasCurrentRuntimeSnapshot);
     const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked;
     const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
     const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
@@ -282,6 +285,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         if (isBeeGameMode) {
             const phase = String(projectStatus?.phase || '').toLowerCase();
             if (isOffline) return 'offline';
+            if (!hasCurrentRuntimeSnapshot) return 'starting';
             if (phase === 'starting' || isProjectStarting) return 'starting';
             if (phase === 'running') return 'running';
             if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
@@ -295,7 +299,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
             messages: displayMessages,
         });
-    }, [isBeeGameMode, projectStatus?.phase, isOffline, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
+    }, [isBeeGameMode, projectStatus?.phase, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
 
     const refreshPreviewStatus = async () => {
         await loadProjectRuntimeState(projectId);
@@ -330,7 +334,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         if (!canManagePreview || isProjectInteractionLocked) return;
         try {
             await api.stopProjectPreview(projectId);
-            setPreviewRefreshNonce(value => value + 1);
             await refreshPreviewStatus();
         } catch (error) {
             showError(error instanceof Error ? error.message : String(error));
@@ -570,6 +573,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 isWorkspaceBusy={isProjectWorkspaceMutationLocked}
                 buildReport={projectStatus?.build_report || null}
                 projectTarget={projectTargetLabel}
+                acceptance={projectRuntimeDisplay?.acceptance}
                 deployments={deploymentHistory}
                 previewRefreshNonce={previewRefreshNonce}
                 onStartPreview={canManagePreview ? handleStartPreview : undefined}

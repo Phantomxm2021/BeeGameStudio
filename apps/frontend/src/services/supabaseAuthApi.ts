@@ -50,6 +50,7 @@ const OAUTH_PKCE_STORAGE_KEY = 'beegame_supabase_oauth_pkce';
 const OAUTH_START_FUNCTION_PATH = '/functions/v1/beegame-oauth-start';
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const SESSION_REFRESH_LEEWAY_MS = 60_000;
 let pendingRedirectConsumption: {
   key: string;
   promise: Promise<boolean>;
@@ -57,6 +58,7 @@ let pendingRedirectConsumption: {
 let pendingSessionInitialization: Promise<BeeGameSupabaseSession | null> | null = null;
 let pendingSessionRefresh: Promise<BeeGameSupabaseSession | null> | null = null;
 let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
+let httpOnlySessionExpiresAt = 0;
 
 const getSupabaseUrl = (): string => String(import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const getSupabaseAnonKey = (): string => String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
@@ -77,7 +79,15 @@ export function getSupabaseAccessToken(): string {
 }
 
 export async function getValidSupabaseAccessToken(): Promise<string> {
-  if (isHttpOnlySessionsEnabled()) return '';
+  if (isHttpOnlySessionsEnabled()) {
+    if (
+      httpOnlySessionUser &&
+      httpOnlySessionExpiresAt <= Date.now() + SESSION_REFRESH_LEEWAY_MS
+    ) {
+      await refreshSupabaseSession();
+    }
+    return '';
+  }
   const token = getSupabaseAccessToken();
   if (token) return token;
   const session = getStoredSupabaseSession();
@@ -393,6 +403,7 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
     }
     const cookieSession = toCookieSession(await response.json());
     httpOnlySessionUser = cookieSession.user;
+    httpOnlySessionExpiresAt = cookieSession.expiresAt;
     return cookieSession;
   }
   const supabaseUrl = getSupabaseUrl();
@@ -467,6 +478,7 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
       // a request/CSRF configuration error and must not sign the whole UI out.
       if (response.status === 401) {
         httpOnlySessionUser = null;
+        httpOnlySessionExpiresAt = 0;
         return null;
       }
       throw new Error(`Secure session refresh is temporarily unavailable (${response.status})`);
@@ -474,6 +486,7 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
     const value = await response.json() as unknown;
     const session = toCookieSession(value);
     httpOnlySessionUser = session.user;
+    httpOnlySessionExpiresAt = session.expiresAt;
     return session;
   }
   const session = getStoredSupabaseSession();
@@ -538,6 +551,7 @@ function isDefinitiveAuthenticationFailure(status: number): boolean {
 export function clearSupabaseSession(): void {
   localStorage.removeItem(SESSION_STORAGE_KEY);
   httpOnlySessionUser = null;
+  httpOnlySessionExpiresAt = 0;
   if (isHttpOnlySessionsEnabled()) {
     void fetch(buildSameOriginApiUrl('/api/auth/session/logout'), {
       method: 'POST',
@@ -575,6 +589,7 @@ async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<
         const cookieSession = toCookieSession(value);
         localStorage.removeItem(SESSION_STORAGE_KEY);
         httpOnlySessionUser = cookieSession.user;
+        httpOnlySessionExpiresAt = cookieSession.expiresAt;
         return;
       }
     } catch {

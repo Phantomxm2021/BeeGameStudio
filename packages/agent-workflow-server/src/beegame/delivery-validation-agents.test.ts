@@ -1,49 +1,56 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  DELIVERY_VALIDATOR_AGENT_TYPE,
   DELIVERY_VALIDATOR_AGENT_TYPES,
-  createDeliveryValidationAgentDefinitions,
+  DOCUMENT_REVIEWER_AGENT_TYPE,
+  materializeBeeGameNativeAgents,
 } from './delivery-validation-agents'
 
-describe('delivery validation agents', () => {
-  test('uses one independent acceptance subagent without a parallel validation track', () => {
-    const definitions = createDeliveryValidationAgentDefinitions()
+describe('native delivery agents', () => {
+  test('materializes standard Claude Code agent files without an SDK override', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-native-agents-'))
+    try {
+      materializeBeeGameNativeAgents(dataDir)
+      const agentsDir = join(dataDir, '.runtime', 'app', 'agents')
+      const validator = await readFile(
+        join(agentsDir, `${DELIVERY_VALIDATOR_AGENT_TYPE}.md`),
+        'utf8',
+      )
+      const reviewer = await readFile(
+        join(agentsDir, `${DOCUMENT_REVIEWER_AGENT_TYPE}.md`),
+        'utf8',
+      )
 
-    expect(DELIVERY_VALIDATOR_AGENT_TYPES).toEqual(['beegame-acceptance-validator'])
-    expect(definitions).toHaveLength(1)
-    expect(definitions[0]).toEqual(expect.objectContaining({
-      agentType: 'beegame-acceptance-validator',
-      source: 'policySettings',
-    }))
-    expect(definitions[0]?.tools).toEqual(expect.arrayContaining(['Read', 'Skill', 'Bash']))
-    expect(definitions[0]?.tools).toEqual(expect.arrayContaining(['SearchExtraTools', 'ExecuteExtraTool']))
-    expect(definitions[0]?.disallowedTools).toEqual(expect.arrayContaining(['Write', 'Edit']))
-    expect(definitions[0]?.maxTurns).toBeGreaterThanOrEqual(24)
-
-    const prompt = definitions[0]?.getSystemPrompt() ?? ''
-    expect(prompt).toContain('approved product, technical, asset, and acceptance documents')
-    expect(prompt).toContain('without inventing a second host-owned contract')
-    expect(prompt).toContain('Ignore feature claims')
-    expect(prompt).toContain('logs, transcripts, prior validation reports')
-    expect(prompt).toContain('return blocked rather than guessing')
-    expect(prompt).toContain('Invoke beegame-game-acceptance through the Skill tool')
-    expect(prompt).toContain('a missing manifest is a failure')
-    expect(prompt).toContain('genuinely asset-free project')
-    expect(prompt).toContain('Do not repeatedly list the same directory')
-    expect(prompt).toContain('caller-supplied desired status')
-    expect(prompt).toContain('[player-path:stable-id]')
-    expect(prompt).toContain('"deliveryModes":["managed-file","embedded","procedural"]')
-    expect(prompt).toContain('workingDirectory')
-    expect(prompt).toContain('assertion')
-    expect(prompt).toContain('Return one JSON object only')
+      expect(DELIVERY_VALIDATOR_AGENT_TYPES).toEqual([
+        'beegame-acceptance-validator',
+      ])
+      expect(validator).toContain(`name: ${DELIVERY_VALIDATOR_AGENT_TYPE}`)
+      expect(validator).toContain('disallowedTools: [Write, Edit')
+      expect(validator).toContain('Return exactly one terminal JSON object')
+      expect(validator).toContain('do not assume Web, Unity, Godot, Unreal')
+      expect(reviewer).toContain(`name: ${DOCUMENT_REVIEWER_AGENT_TYPE}`)
+      expect(reviewer).toContain('docs/ART_DIRECTION.md')
+      expect(reviewer).toContain('selected document language')
+      expect(reviewer).toContain('Do not edit files')
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
   })
 
-  test('leaves native Agent lifecycle decisions to Claude Code', () => {
-    const definitions = createDeliveryValidationAgentDefinitions()
-
-    for (const definition of definitions) {
-      expect(definition).not.toHaveProperty('background')
-      expect(definition.getSystemPrompt()).not.toContain('run_in_background')
-      expect(definition.getSystemPrompt()).not.toContain('TaskOutput')
+  test('refreshes only BeeGame-owned native agent files', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-native-agents-refresh-'))
+    try {
+      materializeBeeGameNativeAgents(dataDir)
+      materializeBeeGameNativeAgents(dataDir)
+      await expect(readFile(
+        join(dataDir, '.runtime', 'app', 'agents', `${DELIVERY_VALIDATOR_AGENT_TYPE}.md`),
+        'utf8',
+      )).resolves.toContain('status":"passed|failed|blocked')
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
     }
   })
 })

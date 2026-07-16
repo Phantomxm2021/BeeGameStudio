@@ -31,7 +31,10 @@ import type {
   BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 import type { BeeGamePreviewRunner } from '../beegame/preview-manager'
-import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
+import {
+  getObservedNativeAcceptance,
+  recordNativeAcceptanceReportForTest,
+} from '../beegame/native-acceptance-evidence'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -825,7 +828,7 @@ describe('beegame session routes', () => {
     } finally { await rm(workspace, { recursive: true, force: true }) }
   })
 
-  test('keeps the confirmed build handoff concise without creating a parallel host workflow', async () => {
+  test('forwards ordinary Claude turns without a hidden BeeGame task contract', async () => {
     const ideaWorkspace = await mkdtemp(join(tmpdir(), 'beegame-idea-policy-'))
     const buildWorkspace = await mkdtemp(join(tmpdir(), 'beegame-build-policy-'))
     const submittedPrompts: string[] = []
@@ -862,9 +865,7 @@ describe('beegame session routes', () => {
       })
       await waitFor(() => submittedPrompts.length === 1)
       await waitFor(() => manager.get(ideaSession.id)?.turnStatus === 'idle')
-      expect(submittedPrompts[0]).toContain('Idea intake contract:')
-      expect(submittedPrompts[0]).not.toContain('Evidence-backed delivery contract:')
-      expect(submittedPrompts[0]).not.toContain('Game production planning contract:')
+      expect(submittedPrompts[0]).toBe(JSON.stringify({ kind: 'game_idea', idea: 'new game' }))
       await expect(stat(join(ideaWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
 
       const buildSession = buildManager.start({ workspacePath: buildWorkspace, userId: DEFAULT_LOCAL_USER_ID })
@@ -875,26 +876,10 @@ describe('beegame session routes', () => {
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
       expect(buildManager.events(buildSession.id).filter(event => event.type === 'turn.failed')).toEqual([])
       expect(submittedPrompts.length).toBeGreaterThanOrEqual(2)
-      expect(submittedPrompts[1]).toContain('Confirmed build request:')
-      expect(submittedPrompts[1]).toContain('docs/GDD.md')
-      expect(submittedPrompts[1]).toContain('docs/TECHNICAL_DESIGN.md')
-      expect(submittedPrompts[1]).toContain('docs/ART_DIRECTION.md')
-      expect(submittedPrompts[1]).toContain('docs/UI_UX_SPEC.md')
-      expect(submittedPrompts[1]).toContain('docs/AUDIO_DESIGN.md')
-      expect(submittedPrompts[1]).toContain('docs/ASSET_PLAN.md')
-      expect(submittedPrompts[1]).toContain('docs/acceptance/gameplay-checklist.md')
-      expect(submittedPrompts[1]).toContain('fresh Claude Code native subagent')
-      expect(submittedPrompts[1]).toContain('fresh native acceptance subagent')
-      expect(submittedPrompts[1]).toContain('Invoke applicable native Skills through the Skill tool')
-      expect(submittedPrompts[1]).toContain('before invoking another validator')
-      expect(submittedPrompts[1]).toContain('never prescribe its status')
-      expect(submittedPrompts[1]).toContain('[player-path:stable-id]')
-      expect(submittedPrompts[1]).toContain('docs/acceptance/validation-report.json')
-      expect(submittedPrompts[1]).toContain('terminal JSON unchanged')
-      expect(submittedPrompts[1]).not.toContain('Game production planning contract:')
-      expect(submittedPrompts[1]).not.toContain('Evidence-backed delivery contract:')
-      expect(submittedPrompts[1]).not.toContain('Resource integration contract')
-      expect(submittedPrompts[1]!.length).toBeLessThan(5_000)
+      expect(submittedPrompts[1]).toBe(JSON.stringify({
+        kind: 'confirmed_build_brief',
+        confirmed_gdd: '# Approved game',
+      }))
       await expect(stat(join(buildWorkspace, 'docs/production-brief.json'))).rejects.toThrow()
       await buildManager.sendWithDisplay(
         buildSession.id,
@@ -905,13 +890,7 @@ describe('beegame session routes', () => {
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
       expect(submittedPrompts[2]).toContain('Continue from the persisted implementation plan.')
       expect(submittedPrompts[2]).not.toContain('Confirmed build request:')
-      expect(submittedPrompts[2]).toContain('Existing project change request:')
-      expect(submittedPrompts[2]).toContain('only asked for explanation, diagnosis, review, or status')
-      expect(submittedPrompts[2]).toContain('update only the affected approved documents')
-      expect(submittedPrompts[2]).toContain('docs/acceptance/validation-report.json')
-      expect(submittedPrompts[2]).toContain('End with a non-empty user-facing result')
-      expect(submittedPrompts[2]).not.toContain('Game production planning contract:')
-      expect(submittedPrompts[2]).not.toContain('Evidence-backed delivery contract:')
+      expect(submittedPrompts[2]).not.toContain('Existing project change request:')
       await buildManager.sendWithDisplay(
         buildSession.id,
         JSON.stringify({
@@ -931,8 +910,10 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[3]).not.toContain('Existing project change request:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
     } finally {
-      manager.stop(manager.list()[0]?.id ?? '')
-      buildManager.stop(buildManager.list()[0]?.id ?? '')
+      const ideaSessionId = manager.list()[0]?.id
+      const buildSessionId = buildManager.list()[0]?.id
+      if (ideaSessionId) manager.stop(ideaSessionId)
+      if (buildSessionId) buildManager.stop(buildSessionId)
       await rm(ideaWorkspace, { recursive: true, force: true })
       await rm(buildWorkspace, { recursive: true, force: true })
     }
@@ -972,11 +953,9 @@ describe('beegame session routes', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-acceptance-agent-'))
     let starts = 0
     let submits = 0
-    let definitions: Array<{ agentType: string }> = []
     const manager = new BeeGameSessionManager({
-      async start(input) {
+      async start() {
         starts += 1
-        definitions = input.agentDefinitions ?? []
         return {
           async submit(turn) {
             submits += 1
@@ -1001,7 +980,6 @@ describe('beegame session routes', () => {
 
       expect(starts).toBe(1)
       expect(submits).toBe(1)
-      expect(definitions.map(definition => definition.agentType)).toContain('beegame-acceptance-validator')
       expect(manager.events(session.id).some(event => event.type.startsWith('delivery.validation'))).toBe(false)
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -1299,10 +1277,7 @@ describe('beegame session routes', () => {
       await waitFor(() => fake.runtimes[0]?.submits.length === 1)
       expect(fake.runtimes[0]?.submits[0]).not.toHaveProperty('thinkingMode')
       const submittedPrompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
-      expect(submittedPrompt).toContain('Existing project change request:')
-      expect(submittedPrompt).toContain('update only the affected approved documents')
-      expect(submittedPrompt).toContain('beegame-game-acceptance')
-      expect(submittedPrompt).not.toContain('Confirmed build request:')
+      expect(submittedPrompt).toBe('Build the next feature.')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -2051,8 +2026,7 @@ describe('beegame session routes', () => {
         }),
       ])
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toBe(fake.starts[0]?.env.BEEGAME_CONFIG_DIR)
-      expect(fake.runtimes[0].submits[0].prompt).toContain('Build a tiny puzzle game.')
-      expect(fake.runtimes[0].submits[0].prompt).toContain('Existing project change request:')
+      expect(fake.runtimes[0].submits[0].prompt).toBe('Build a tiny puzzle game.')
 
       const eventsRes = await app.request(
         `/api/console/sessions/${session.id}/events`,
@@ -2371,10 +2345,15 @@ describe('beegame session routes', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          language: 'en',
+          language: 'zh',
           brief: {
             idea: 'A confirmed product idea',
-            option: { id: 'selected-mode', title: 'Selected mode' },
+            option: {
+              id: 'selected-mode',
+              title: 'Selected mode',
+              gameplay: 'One canonical playable rules description.',
+              coreGameplayHypothesis: 'One canonical playable rules description.',
+            },
             settings: { dimension: '3D' },
             confirmedGdd: '# Approved design',
           },
@@ -2385,7 +2364,17 @@ describe('beegame session routes', () => {
       const submitted = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
       expect(submitted).toContain('"kind": "confirmed_build_brief"')
       expect(submitted).toContain('"confirmed_gdd": "# Approved design"')
-      expect(submitted).toContain('Confirmed build request:')
+      expect(submitted).toContain('Build and deliver the confirmed game project below.')
+      expect(submitted).toContain('"document_language": "zh"')
+      expect(submitted).toContain('Simplified Chinese')
+      expect(submitted).toContain('docs/ART_DIRECTION.md')
+      expect(submitted).toContain('docs/acceptance/gameplay-checklist.md')
+      expect(submitted).toContain('Write each document to its canonical path as soon as it is ready')
+      expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
+      expect(submitted).toContain('beegame-document-reviewer')
+      expect(submitted).toContain('beegame-acceptance-validator')
+      expect(submitted).not.toContain('coreGameplayHypothesis')
+      expect(submitted).not.toContain('Confirmed build request:')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -3885,6 +3874,7 @@ describe('beegame session routes', () => {
       await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.empty'))
 
       const events = manager.events(session.id)
+      expect(fake.starts[0]?.language).toBe('zh')
       expect(events).toEqual(expect.arrayContaining([
         expect.objectContaining({
           type: 'turn.empty',
@@ -3925,6 +3915,51 @@ describe('beegame session routes', () => {
       const thinking = manager.events(session.id).filter(event => event.type === 'assistant.thinking')
       expect(thinking.map(event => event.payload?.status)).toEqual(['started', 'ended'])
       expect(thinking.at(-1)?.payload).toEqual(expect.objectContaining({ reason: 'turn_completed' }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps native continuation events after an intermediate result until the runner returns', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-continuation-'))
+    const manager = new BeeGameSessionManager({
+      async start() {
+        return {
+          async submit(input) {
+            input.onMessage({
+              type: 'assistant',
+              message: {
+                id: 'assistant-before-background',
+                content: [{ type: 'text', text: 'Waiting for the reviewer.' }],
+              },
+            })
+            input.onMessage({ type: 'result', result: 'Background task launched' })
+            input.onMessage({
+              type: 'assistant',
+              message: {
+                id: 'assistant-after-background',
+                content: [{ type: 'text', text: 'Reviewer completed; continuing delivery.' }],
+              },
+            })
+            input.onMessage({ type: 'result', result: 'Delivery complete' })
+          },
+          stop() {},
+        }
+      },
+    }, workspace)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Build and validate the project.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.completed'))
+
+      const assistantMessages = manager.events(session.id)
+        .filter(event => event.type === 'assistant.message')
+        .map(event => event.text)
+      expect(assistantMessages).toEqual([
+        'Waiting for the reviewer.',
+        'Reviewer completed; continuing delivery.',
+      ])
+      expect(manager.events(session.id).filter(event => event.type === 'result')).toHaveLength(2)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -4037,6 +4072,68 @@ describe('beegame session routes', () => {
         prompt: 'Review the game plan.',
       })
     } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('records a native acceptance result passively from the real Agent tool lifecycle', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-evidence-data-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-evidence-project-'))
+    await writeFile(join(workspace, 'game.txt'), 'current revision')
+    const report = {
+      validatorId: 'beegame-acceptance-validator',
+      status: 'passed',
+      summary: 'Observed the approved player path on the current revision.',
+      evidence: [],
+      findings: [],
+    }
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'tool_native_acceptance',
+            name: 'Agent',
+            input: {
+              subagent_type: 'beegame-acceptance-validator',
+              prompt: 'Independently validate the current workspace.',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool_native_acceptance',
+            content: JSON.stringify(report),
+          }],
+        },
+      },
+      { type: 'result', result: 'Validation completed.' },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, dataRoot)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Validate the completed project.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.completed'))
+
+      expect(getObservedNativeAcceptance({
+        dataRoot,
+        sessionId: session.id,
+        workspacePath: workspace,
+      })).toEqual({
+        state: 'current',
+        evidence: expect.objectContaining({
+          status: 'passed',
+          summary: report.summary,
+          toolUseID: 'tool_native_acceptance',
+        }),
+      })
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
       await rm(workspace, { recursive: true, force: true })
     }
   })
@@ -4226,7 +4323,8 @@ describe('beegame session routes', () => {
         phase: 'waiting_approval',
         blocked: true,
         approval_required: true,
-        active_agents: ['beegame'],
+        active_agents: ['claude-code'],
+        acceptance: { status: 'not_run' },
         project_target: expect.objectContaining({
           kind: 'native',
           engine: 'custom-engine',
@@ -4237,6 +4335,57 @@ describe('beegame session routes', () => {
           status: 'tracking',
         }),
       }))
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps project runtime running when a native result is followed by background work', async () => {
+    const { projectsRoot, workspace } = await createConfiguredProjectWorkspace()
+    const fake = createFakeRunner([
+      { type: 'result', result: 'Background work is still active.' },
+    ], 'wait_after_usage')
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const projectId = 'project_runtime_intermediate_result'
+      const projectRes = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Intermediate Result Runtime',
+          root_path: workspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectRes.status).toBe(200)
+      const ensureRes = await app.request(`/api/projects/${projectId}/session/ensure`, {
+        method: 'POST',
+      })
+      const ensured = await ensureRes.json()
+      const inputRes = await app.request(`/api/beegame-sessions/${ensured.session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Continue in the background.' }),
+      })
+      expect(inputRes.status).toBe(200)
+
+      await waitFor(async () => {
+        const eventsRes = await app.request(`/api/beegame-sessions/${ensured.session.id}/events`)
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'result')
+      })
+      const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
+      expect(stateRes.status).toBe(200)
+      expect(await stateRes.json()).toEqual(expect.objectContaining({
+        project_id: projectId,
+        phase: 'running',
+        active_agents: ['claude-code'],
+      }))
+      await app.request(`/api/beegame-sessions/${ensured.session.id}/stop`, { method: 'POST' })
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -6714,11 +6863,16 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('requires the authenticated preview owner for iframe requests', async () => {
+  test('grants the authenticated preview owner a scoped iframe capability', async () => {
     const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-iframe-preview-'))
-    const internalServer = createServer((_req, res) => {
+    const internalServer = createServer((req, res) => {
+      if (req.url?.endsWith('/src/main.tsx')) {
+        res.setHeader('content-type', 'application/javascript')
+        res.end('document.body.dataset.previewLoaded = "true"')
+        return
+      }
       res.setHeader('content-type', 'text/html')
       res.end('<html><head></head><body>iframe preview</body></html>')
     })
@@ -6773,18 +6927,44 @@ describe('beegame session routes', () => {
           body: JSON.stringify({ workspacePath: workspace }),
         },
       )
+      const capabilityCookie = (startRes.headers.get('set-cookie') ?? '').split(';', 1)[0]
       const anonymousIframeRes = await app.request(previewPath)
       const otherUserIframeRes = await app.request(previewPath, {
         headers: { authorization: 'Bearer other-token' },
       })
       const iframeRes = await app.request(previewPath, {
-        headers: { authorization: 'Bearer owner-token' },
+        headers: { cookie: capabilityCookie },
+      })
+      const forgedIframeRes = await app.request(previewPath, {
+        headers: { cookie: `${capabilityCookie}x` },
+      })
+      const sandboxedModuleRes = await app.request(`${previewPath}src/main.tsx`, {
+        headers: {
+          origin: 'null',
+          'sec-fetch-dest': 'script',
+          'sec-fetch-mode': 'cors',
+        },
+      })
+      const sandboxedNavigationRes = await app.request(`${previewPath}src/main.tsx`, {
+        headers: {
+          origin: 'null',
+          'sec-fetch-dest': 'document',
+          'sec-fetch-mode': 'navigate',
+        },
       })
       const iframeText = await iframeRes.text()
 
       expect(startRes.status).toBe(200)
+      expect(capabilityCookie).toStartWith('beegame_preview_capability=')
+      expect(startRes.headers.get('set-cookie')).toContain(`Path=${previewPath}`)
+      expect(startRes.headers.get('set-cookie')).toContain('HttpOnly')
       expect(anonymousIframeRes.status).toBe(401)
       expect(otherUserIframeRes.status).toBe(404)
+      expect(forgedIframeRes.status).toBe(401)
+      expect(sandboxedModuleRes.status).toBe(200)
+      expect(sandboxedModuleRes.headers.get('access-control-allow-origin')).toBe('*')
+      expect(await sandboxedModuleRes.text()).toContain('previewLoaded')
+      expect(sandboxedNavigationRes.status).toBe(401)
       expect(iframeRes.status).toBe(200)
       expect(iframeText).toContain('iframe preview')
       expect(iframeText).toContain('beegame.preview.console')

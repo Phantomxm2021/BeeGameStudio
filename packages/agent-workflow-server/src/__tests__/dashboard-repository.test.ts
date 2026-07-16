@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
 import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
+import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 
@@ -62,6 +63,15 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(ownerBEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
       expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
+      expect(ownerAEnv.CLAUDE_CONFIG_DIR).not.toBe(ownerBEnv.CLAUDE_CONFIG_DIR)
+      await expect(readFile(
+        join(ownerAEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-acceptance-validator')
+      await expect(readFile(
+        join(ownerBEnv.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-acceptance-validator')
       await expect(readFile(
         join(ownerAEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
@@ -74,6 +84,68 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(ownerBEnv.CLAUDE_CONFIG_DIR, 'settings.json'),
         'utf8',
       )).resolves.toContain('"mcpSkillsEnabled": false')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps Supabase logical runtime config while forcing the authenticated user isolation directory', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-supabase-env-'))
+    const userRoot = join(dataRoot, 'users', 'owner-user')
+    const runtimeCalls: Array<{ url: string; body: unknown }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => userRoot,
+      skillsConfig: false,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        authToken: 'user-token',
+        fetchImpl: (async () => Response.json([])) as unknown as typeof fetch,
+      }),
+      supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (
+          input: Parameters<typeof fetch>[0],
+          init?: Parameters<typeof fetch>[1],
+        ) => {
+          runtimeCalls.push({
+            url: String(input),
+            body: JSON.parse(String(init?.body)),
+          })
+          return Response.json({
+            env: {
+              OPENAI_BASE_URL: 'https://provider.test/v1',
+              FEATURE_MCP_SKILLS: '0',
+              CLAUDE_CONFIG_DIR: '/forged/other-user',
+              BEEGAME_CONFIG_DIR: '/forged/other-user',
+            },
+          })
+        }) as unknown as typeof fetch,
+      }),
+    })
+
+    try {
+      const env = await repository.getRuntimeEnv(
+        userRoot,
+        'owner-user',
+        'authenticated-user-token',
+      )
+
+      expect(runtimeCalls).toHaveLength(1)
+      expect(runtimeCalls[0]?.body).toEqual({
+        p_user_id: 'owner-user',
+        p_data_dir: userRoot,
+      })
+      expect(env.OPENAI_BASE_URL).toBe('https://provider.test/v1')
+      expect(env.FEATURE_MCP_SKILLS).toBe('0')
+      expect(env.CLAUDE_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
+      expect(env.BEEGAME_CONFIG_DIR).toBe(env.CLAUDE_CONFIG_DIR)
+      await expect(readFile(
+        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
+        'utf8',
+      )).resolves.toContain('skills: [beegame-game-acceptance]')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -150,6 +222,14 @@ describe('DashboardRepository Supabase boundaries', () => {
         ),
         'utf8',
       )).resolves.toContain('name: beegame-game-acceptance')
+      await expect(readFile(
+        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-acceptance-validator')
+      await expect(readFile(
+        join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-document-reviewer.md'),
+        'utf8',
+      )).resolves.toContain('name: beegame-document-reviewer')
     } finally {
       globalThis.fetch = originalFetch
       await rm(dataRoot, { recursive: true, force: true })

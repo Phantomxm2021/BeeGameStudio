@@ -30,6 +30,7 @@ export interface ChatDisplayMessage
     | 'thought'
     | 'taskId'
     | 'artifactId'
+    | 'artifactPath'
     | 'renderHint'
     | 'artifactType'
     | 'taskKind'
@@ -156,6 +157,7 @@ export interface ProjectRuntimeDisplayModel {
   baseline?: ReviewDisplayBindingRef | null;
   next_action?: string;
   review_status?: ReviewStatusDisplayPayload | null;
+  acceptance?: ProjectBaselineStatusPayload['acceptance'];
   context?: ContextVisibilityPayload;
   execution_evidence?: ExecutionEvidencePayload[];
   build_report?: BuildReportDisplayModel;
@@ -303,6 +305,7 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   thought: message.thought,
   taskId: message.taskId,
   artifactId: message.artifactId,
+  artifactPath: message.artifactPath,
   renderHint: message.renderHint,
   artifactType: message.artifactType,
   taskKind: message.taskKind,
@@ -413,6 +416,7 @@ export const toProjectRuntimeDisplayModel = (
     baseline: normalizeBindingDisplay(normalizedPayload.baseline),
     next_action: trimString(normalizedPayload.next_action) || undefined,
     review_status: normalizeReviewStatusDisplay(normalizedPayload.review_status),
+    acceptance: normalizedPayload.acceptance,
     context: normalizedPayload.context
       ? {
           bundle_id: trimString(normalizedPayload.context.bundle_id) || undefined,

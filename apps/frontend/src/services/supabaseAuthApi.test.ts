@@ -19,6 +19,7 @@ describe('supabaseAuthApi', () => {
   afterEach(() => {
     vi.useRealTimers();
     localStorage.clear();
+    clearSupabaseSession();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -174,6 +175,33 @@ describe('supabaseAuthApi', () => {
     expect(first?.user.id).toBe('cookie-user');
     expect(second?.user.id).toBe('cookie-user');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('proactively refreshes an HttpOnly session before a long-running poll reaches expiry', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        authenticated: true,
+        expires_at: Date.now() + 30_000,
+        user: { id: 'cookie-user' },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        authenticated: true,
+        expires_at: Date.now() + 3_600_000,
+        user: { id: 'cookie-user' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await hydrateSupabaseSessionUser();
+    expect(await getValidSupabaseAccessToken()).toBe('');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/auth/session', {
+      credentials: 'include',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/auth/session/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
   });
 
   it('signs up with email/password and stores the returned session when available', async () => {

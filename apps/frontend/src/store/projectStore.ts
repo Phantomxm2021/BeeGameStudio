@@ -254,8 +254,12 @@ export const useProjectStore = create<ProjectState>()(
 
       loadProjectRuntimeState: async (projectId) => {
         if (!projectId) return;
+        const activeProjectId = get().activeProjectId;
+        if (activeProjectId && activeProjectId !== projectId) return;
         try {
           const runtimeState = await getProjectRuntimeStateSingleFlight(projectId);
+          const currentActiveProjectId = get().activeProjectId;
+          if (currentActiveProjectId && currentActiveProjectId !== projectId) return;
           set({
             projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
             pendingReviews: runtimeState.pendingReviews,
@@ -326,7 +330,12 @@ export const useProjectStore = create<ProjectState>()(
           // Mandatory opening signal as per integration guide
           await withProjectOpenTimeout(api.openProject(normalizedProjectId));
 
-          set({ activeProjectId: normalizedProjectId, isOpeningProject: false });
+          set({
+            activeProjectId: normalizedProjectId,
+            isOpeningProject: false,
+            pendingReviews: [],
+            projectStatus: null,
+          });
           // Clear current messages to prepare for loading new project's history
           useChatStore.getState().clearMessages();
         } catch (error) {
