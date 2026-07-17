@@ -29,9 +29,24 @@ describe('preview capability', () => {
     const request = new Request('https://studio.example/previews/session-1/', {
       headers: { cookie },
     })
+    const capabilityUrl = manager.issueUrl(
+      '/previews/session-1/?__beegame_preview_refresh=1',
+      'session-1',
+      'user-1',
+    )
+    const sandboxedNavigation = new Request(`https://studio.example${capabilityUrl}`, {
+      headers: {
+        origin: 'null',
+        'sec-fetch-dest': 'iframe',
+        'sec-fetch-mode': 'navigate',
+      },
+    })
 
     expect(manager.verifyRequest(request, 'session-1')).toEqual({ userId: 'user-1' })
+    expect(manager.verifyRequest(sandboxedNavigation, 'session-1')).toEqual({ userId: 'user-1' })
     expect(manager.verifyRequest(request, 'session-2')).toBeUndefined()
+    expect(capabilityUrl).toContain('__beegame_preview_refresh=1')
+    expect(capabilityUrl).toContain('__beegame_preview_capability=')
 
     const tampered = new Request(request.url, {
       headers: { cookie: `${cookie}x` },
@@ -62,6 +77,7 @@ describe('preview capability', () => {
 
     manager.revokeSession('session-1')
     expect(manager.verifyRequest(request, 'session-1')).toBeUndefined()
+    expect(manager.verifyRequest(sandboxedNavigation, 'session-1')).toBeUndefined()
     expect(manager.allowsSandboxedSubresource(moduleRequest, 'session-1')).toBe(false)
   })
 })

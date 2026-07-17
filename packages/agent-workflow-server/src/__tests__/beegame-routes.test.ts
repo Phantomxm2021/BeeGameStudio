@@ -42,6 +42,16 @@ import {
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 
+function expectPreviewCapabilityUrl(actual: unknown, expectedBase: string): void {
+  expect(typeof actual).toBe('string')
+  const fallbackOrigin = 'http://beegame.test'
+  const actualUrl = new URL(String(actual), fallbackOrigin)
+  const expectedUrl = new URL(expectedBase, fallbackOrigin)
+  expect(actualUrl.origin).toBe(expectedUrl.origin)
+  expect(actualUrl.pathname).toBe(expectedUrl.pathname)
+  expect(actualUrl.searchParams.get('__beegame_preview_capability')).toBeTruthy()
+}
+
 beforeAll(() => {
   process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 53).toString('base64')
 })
@@ -4651,8 +4661,8 @@ describe('beegame session routes', () => {
       expect(stateRes.status).toBe(200)
       expect(state.build_report).toEqual(expect.objectContaining({
         status: 'passed',
-        build_url: `/previews/${session.id}/`,
       }))
+      expectPreviewCapabilityUrl(state.build_report.build_url, `/previews/${session.id}/`)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -4785,8 +4795,8 @@ describe('beegame session routes', () => {
       expect(previewRes.status).toBe(200)
       expect(preview).toEqual(expect.objectContaining({
         status: 'running',
-        url: `/previews/${preview.sessionId}/`,
       }))
+      expectPreviewCapabilityUrl(preview.url, `/previews/${preview.sessionId}/`)
       await writeAcceptedDeliveryReport(workspace, projectsRoot, preview.sessionId)
 
       const deployRes = await app.request(
@@ -6780,13 +6790,13 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: `/previews/${session.id}/`,
         script: 'dev',
       }))
+      expectPreviewCapabilityUrl(started.url, `/previews/${session.id}/`)
       expect(status).toEqual(expect.objectContaining({
         status: 'running',
-        url: `/previews/${session.id}/`,
       }))
+      expectPreviewCapabilityUrl(status.url, `/previews/${session.id}/`)
       expect(stopped).toEqual(expect.objectContaining({ status: 'stopped' }))
       expect(starts).toHaveLength(1)
       expect(starts[0].cwd).toBe(resolve(workspace))
@@ -6869,8 +6879,8 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: `https://bgs.phantomsxr.com${previewPath}`,
       }))
+      expectPreviewCapabilityUrl(started.url, `https://bgs.phantomsxr.com${previewPath}`)
       expect(starts[0].env.PORT).toBe(String(internalPort))
       expect(starts[0].command).toContain('--base')
       expect(starts[0].command).toContain(previewPath)
@@ -6951,8 +6961,8 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: previewPath,
       }))
+      expectPreviewCapabilityUrl(started.url, previewPath)
       expect(starts[0].command).toContain('--base')
       expect(starts[0].command).toContain(previewPath)
       expect(proxiedRootRes.status).toBe(200)
@@ -7064,7 +7074,9 @@ describe('beegame session routes', () => {
     const originalPreviewPublicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     delete process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-iframe-preview-'))
+    const internalRequests: string[] = []
     const internalServer = createServer((req, res) => {
+      internalRequests.push(req.url || '')
       if (req.url?.endsWith('/src/main.tsx')) {
         res.setHeader('content-type', 'application/javascript')
         res.end('document.body.dataset.previewLoaded = "true"')
@@ -7125,12 +7137,20 @@ describe('beegame session routes', () => {
         },
       )
       const capabilityCookie = (startRes.headers.get('set-cookie') ?? '').split(';', 1)[0]
+      const startPayload = await startRes.json() as { url: string }
       const anonymousIframeRes = await app.request(previewPath)
       const otherUserIframeRes = await app.request(previewPath, {
         headers: { authorization: 'Bearer other-token' },
       })
       const iframeRes = await app.request(previewPath, {
         headers: { cookie: capabilityCookie },
+      })
+      const sandboxedIframeNavigationRes = await app.request(startPayload.url, {
+        headers: {
+          origin: 'null',
+          'sec-fetch-dest': 'iframe',
+          'sec-fetch-mode': 'navigate',
+        },
       })
       const forgedIframeRes = await app.request(previewPath, {
         headers: { cookie: `${capabilityCookie}x` },
@@ -7152,6 +7172,7 @@ describe('beegame session routes', () => {
       const iframeText = await iframeRes.text()
 
       expect(startRes.status).toBe(200)
+      expect(startPayload.url).toContain('__beegame_preview_capability=')
       expect(capabilityCookie).toStartWith('beegame_preview_capability=')
       expect(startRes.headers.get('set-cookie')).toContain(`Path=${previewPath}`)
       expect(startRes.headers.get('set-cookie')).toContain('HttpOnly')
@@ -7163,6 +7184,9 @@ describe('beegame session routes', () => {
       expect(await sandboxedModuleRes.text()).toContain('previewLoaded')
       expect(sandboxedNavigationRes.status).toBe(401)
       expect(iframeRes.status).toBe(200)
+      expect(sandboxedIframeNavigationRes.status).toBe(200)
+      expect(sandboxedIframeNavigationRes.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(internalRequests.every(url => !url.includes('__beegame_preview_capability'))).toBe(true)
       expect(iframeText).toContain('iframe preview')
       expect(iframeText).toContain('beegame.preview.console')
     } finally {
@@ -7718,10 +7742,10 @@ describe('beegame session routes', () => {
       expect(startRes.status).toBe(200)
       expect(started).toEqual(expect.objectContaining({
         status: 'running',
-        url: previewPath,
         script: 'dev',
         entrypoint: 'client/package.json',
       }))
+      expectPreviewCapabilityUrl(started.url, previewPath)
       expect(starts).toHaveLength(2)
       expect(starts[0]).toEqual(expect.objectContaining({
         cwd: resolve(workspace, 'server'),

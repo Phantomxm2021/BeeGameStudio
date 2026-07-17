@@ -104,7 +104,11 @@ import {
   listBeeGamePermissions,
 } from './auth/user-context'
 import { createBeeGameAuthContext } from './auth/auth-context'
-import { createPreviewCapabilityManager } from './auth/preview-capability'
+import {
+  PREVIEW_CAPABILITY_QUERY_PARAM,
+  createPreviewCapabilityManager,
+  type PreviewCapabilityManager,
+} from './auth/preview-capability'
 import { registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes } from './auth/session-routes'
 import {
   DashboardRepository,
@@ -1354,6 +1358,7 @@ export function createAgentWorkflowApp(
         dashboardDataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
         beeGameSessions,
         beeGamePreviews,
+        previewCapabilities,
         dashboardRepository,
       })
       return c.json(state)
@@ -1446,7 +1451,11 @@ export function createAgentWorkflowApp(
         sessionRef.sessionId,
         user.id,
       ))
-      return c.json(beeGamePreviews.status(sessionRef.sessionId, sessionRef.workspacePath))
+      return c.json(withPreviewCapability(
+        beeGamePreviews.status(sessionRef.sessionId, sessionRef.workspacePath),
+        previewCapabilities,
+        user.id,
+      ))
     } catch (err) {
       return tracedRouteError(c, 'project.preview', err)
     }
@@ -1486,7 +1495,7 @@ export function createAgentWorkflowApp(
         ensured.session.id,
         user.id,
       ))
-      return c.json(snapshot)
+      return c.json(withPreviewCapability(snapshot, previewCapabilities, user.id))
     } catch (err) {
       return projectWorkspaceMutationRouteError(c, 'project.preview.start', err)
     }
@@ -1526,7 +1535,7 @@ export function createAgentWorkflowApp(
         ensured.session.id,
         user.id,
       ))
-      return c.json(snapshot)
+      return c.json(withPreviewCapability(snapshot, previewCapabilities, user.id))
     } catch (err) {
       return projectWorkspaceMutationRouteError(c, 'project.preview.restart', err)
     }
@@ -2445,6 +2454,8 @@ export function createAgentWorkflowApp(
         ),
       issuePreviewCookie: (request, sessionId, userId) =>
         previewCapabilities.issueCookie(request, sessionId, userId),
+      issuePreviewUrl: (url, sessionId, userId) =>
+        previewCapabilities.issueUrl(url, sessionId, userId),
       revokePreviewCapability: sessionId => previewCapabilities.revokeSession(sessionId),
       listDeploymentRecords: (request, sessionId) =>
         dashboardRepository.listDeploymentRecords(
@@ -2530,6 +2541,8 @@ export function createAgentWorkflowApp(
         ),
       issuePreviewCookie: (request, sessionId, userId) =>
         previewCapabilities.issueCookie(request, sessionId, userId),
+      issuePreviewUrl: (url, sessionId, userId) =>
+        previewCapabilities.issueUrl(url, sessionId, userId),
       revokePreviewCapability: sessionId => previewCapabilities.revokeSession(sessionId),
       persistAssetManifest: (request, metadata, manifest) =>
         dashboardRepository.upsertAssetManifest(
@@ -3501,6 +3514,7 @@ async function getBeeGameProjectRuntimeState(input: {
   dashboardDataRoot?: string
   beeGameSessions: BeeGameSessionManager
   beeGamePreviews: BeeGamePreviewManager
+  previewCapabilities: PreviewCapabilityManager
   dashboardRepository: DashboardRepository
 }): Promise<JsonObject> {
   const sessionRef = await resolveBeeGameProjectSessionReference(input)
@@ -3545,7 +3559,16 @@ async function getBeeGameProjectRuntimeState(input: {
     next_action: runtime.nextAction,
     context: deriveBeeGameContextVisibility(events, snapshot),
     project_target: assetManifest.project_target ?? null,
-    build_report: preview ? previewSnapshotToProjectBuildReport(preview) : null,
+    build_report: preview
+      ? previewSnapshotToProjectBuildReport({
+          ...preview,
+          url: input.previewCapabilities.issueUrl(
+            preview.url,
+            sessionRef.sessionId,
+            input.user.id,
+          ),
+        })
+      : null,
     review_status: null,
     acceptance,
     model_config_id: sessionRef.live?.modelConfigId ?? sessionRef.latest?.modelConfigId ?? snapshot?.modelConfigId ?? null,
@@ -3909,8 +3932,13 @@ function deriveBeeGameContextVisibility(
     runtime_features: [],
     token_budget: {
       status: 'tracking',
+      input_tokens: usage.prompt_tokens,
+      cached_input_tokens: usage.cache_read_tokens + usage.cache_creation_tokens,
+      output_tokens: usage.completion_tokens,
       prompt_tokens: usage.prompt_tokens,
       completion_tokens: usage.completion_tokens,
+      cache_read_tokens: usage.cache_read_tokens,
+      cache_creation_tokens: usage.cache_creation_tokens,
       total_tokens: usage.total_tokens,
     },
     counters: {
@@ -3945,6 +3973,17 @@ function previewSnapshotToProjectBuildReport(preview: BeeGamePreviewSnapshot): J
   }
 }
 
+function withPreviewCapability(
+  preview: BeeGamePreviewSnapshot,
+  capabilities: PreviewCapabilityManager,
+  userId: string,
+): BeeGamePreviewSnapshot {
+  return {
+    ...preview,
+    url: capabilities.issueUrl(preview.url, preview.sessionId, userId),
+  }
+}
+
 async function proxyBeeGamePreviewRequest(
   request: Request,
   sessionId: string,
@@ -3958,6 +3997,7 @@ async function proxyBeeGamePreviewRequest(
     : '/'
   const targetPath = preservePublicPath ? requestUrl.pathname : restPath
   const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
+  requestUrl.searchParams.delete(PREVIEW_CAPABILITY_QUERY_PARAM)
   target.search = requestUrl.search
   const headers = new Headers(request.headers)
   headers.delete('host')
@@ -3977,6 +4017,7 @@ async function proxyBeeGamePreviewRequest(
     })
   }
   const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers))
+  responseHeaders.set('referrer-policy', 'no-referrer')
   if (method === 'GET' && isHtmlResponse(upstream.headers)) {
     const html = await upstream.text()
     responseHeaders.delete('content-length')
@@ -4129,6 +4170,11 @@ function registerBeeGameSessionRoutes(
     ) => Promise<void>
     issuePreviewCookie: (
       request: Request,
+      sessionId: string,
+      userId: string,
+    ) => string
+    issuePreviewUrl: (
+      url: string,
       sessionId: string,
       userId: string,
     ) => string
@@ -4599,7 +4645,14 @@ function registerBeeGameSessionRoutes(
         sessionId,
         options.getCurrentUser(c.req.raw).id,
       ))
-      return c.json(beeGamePreviews.status(sessionId, workspacePath))
+      return c.json({
+        ...beeGamePreviews.status(sessionId, workspacePath),
+        url: options.issuePreviewUrl(
+          beeGamePreviews.status(sessionId, workspacePath).url,
+          sessionId,
+          options.getCurrentUser(c.req.raw).id,
+        ),
+      })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -4638,7 +4691,14 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         options.getCurrentUser(c.req.raw).id,
       ))
-      return c.json(snapshot)
+      return c.json({
+        ...snapshot,
+        url: options.issuePreviewUrl(
+          snapshot.url,
+          c.req.param('id'),
+          options.getCurrentUser(c.req.raw).id,
+        ),
+      })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }
@@ -4677,7 +4737,14 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         options.getCurrentUser(c.req.raw).id,
       ))
-      return c.json(snapshot)
+      return c.json({
+        ...snapshot,
+        url: options.issuePreviewUrl(
+          snapshot.url,
+          c.req.param('id'),
+          options.getCurrentUser(c.req.raw).id,
+        ),
+      })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
     }

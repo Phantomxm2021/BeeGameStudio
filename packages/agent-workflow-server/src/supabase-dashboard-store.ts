@@ -1884,6 +1884,8 @@ function normalizeProjectRuntimeSnapshot(
     ? {
         prompt_tokens: Math.max(0, Number(usage.prompt_tokens) || 0),
         completion_tokens: Math.max(0, Number(usage.completion_tokens) || 0),
+        cache_read_tokens: Math.max(0, Number(usage.cache_read_tokens) || 0),
+        cache_creation_tokens: Math.max(0, Number(usage.cache_creation_tokens) || 0),
         total_tokens: Math.max(0, Number(usage.total_tokens) || 0),
       }
     : undefined

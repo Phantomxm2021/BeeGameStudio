@@ -2022,16 +2022,56 @@ function hasNativeFinalResult(
 }
 
 export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
-  const turnIds = new Set(events.map(event => event.turnId).filter((value): value is string => Boolean(value)))
-  const total = emptyRuntimeUsage()
-  for (const turnId of turnIds) {
-    addRuntimeUsage(total, getRuntimeUsageForTurn(events, turnId))
+  // Claude SDK result.modelUsage is a cumulative snapshot for the resumed native
+  // session. Summing snapshots (or grouping them by BeeGame turn) bills the same
+  // tokens repeatedly. The newest valid snapshot is therefore authoritative.
+  for (const event of [...events].reverse()) {
+    if (event.type !== 'result') continue
+    const usage = getModelUsageFromEventPayload(event.payload)
+    if (usage) return usage
   }
-  const eventsWithoutTurn = events.filter(event => !event.turnId)
-  if (eventsWithoutTurn.length > 0) {
-    addRuntimeUsage(total, getRuntimeUsageForTurn(eventsWithoutTurn))
+
+  // Older/partial transports do not always expose modelUsage. Preserve the
+  // message-level fallback for those sessions; unlike modelUsage these values
+  // describe distinct messages and are deduplicated by message id.
+  const assistantUsage = sumAssistantMessageUsage(events)
+  if (assistantUsage.total_tokens > 0) return assistantUsage
+
+  // A result-only legacy transport has no message ids to deduplicate. Count at
+  // most the latest result in each BeeGame turn so streamed copies are not
+  // multiplied while distinct legacy turns remain measurable.
+  const resultUsageByTurn = new Map<string, BeeGameRuntimeSnapshot['usage']>()
+  for (const event of events) {
+    if (event.type !== 'result') continue
+    const usage = getUsageFromEventPayload(event.payload)
+    if (usage.total_tokens <= 0) continue
+    resultUsageByTurn.set(event.turnId || '__session__', usage)
   }
-  return total
+  return [...resultUsageByTurn.values()].reduce((total, usage) => {
+    addRuntimeUsage(total, usage)
+    return total
+  }, emptyRuntimeUsage())
+}
+
+function getRuntimeUsageForTurn(
+  events: BeeGameEvent[],
+  turnId?: string,
+): BeeGameRuntimeSnapshot['usage'] {
+  const scopedEvents = turnId
+    ? events.filter(event => event.turnId === turnId)
+    : events
+  for (const event of [...scopedEvents].reverse()) {
+    if (event.type !== 'result') continue
+    const usage = getModelUsageFromEventPayload(event.payload)
+    if (usage) return usage
+  }
+
+  for (const event of [...scopedEvents].reverse()) {
+    if (event.type !== 'result') continue
+    const usage = getUsageFromEventPayload(event.payload)
+    if (usage.total_tokens > 0) return usage
+  }
+  return sumAssistantMessageUsage(scopedEvents)
 }
 
 export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
@@ -2049,37 +2089,6 @@ export function sumAssistantMessageUsage(events: BeeGameEvent[]): BeeGameRuntime
     total.total_tokens += usage.total_tokens
     return total
   }, emptyRuntimeUsage())
-}
-
-function getRuntimeUsageForTurn(
-  events: BeeGameEvent[],
-  turnId?: string,
-): BeeGameRuntimeSnapshot['usage'] {
-  const scopedEvents = turnId
-    ? events.filter(event => event.turnId === turnId)
-    : events
-  const modelUsage = emptyRuntimeUsage()
-  let hasModelUsage = false
-  for (const event of scopedEvents) {
-    if (event.type !== 'result') continue
-    const usage = getModelUsageFromEventPayload(event.payload)
-    if (!usage) continue
-    hasModelUsage = true
-    addRuntimeUsage(modelUsage, usage)
-  }
-  if (hasModelUsage) return modelUsage
-
-  const resultUsage = emptyRuntimeUsage()
-  let hasResultUsage = false
-  for (const event of scopedEvents) {
-    if (event.type !== 'result') continue
-    const usage = getUsageFromEventPayload(event.payload)
-    if (usage.total_tokens <= 0) continue
-    hasResultUsage = true
-    addRuntimeUsage(resultUsage, usage)
-  }
-  if (hasResultUsage) return resultUsage
-  return sumAssistantMessageUsage(scopedEvents)
 }
 
 function deriveLatestTurnDiagnostics(

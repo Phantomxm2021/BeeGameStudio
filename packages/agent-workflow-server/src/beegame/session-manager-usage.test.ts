@@ -38,7 +38,7 @@ describe('BeeGame assistant usage aggregation', () => {
     })
   })
 
-  test('prefers final SDK model usage and aggregates every turn', () => {
+  test('uses the latest cumulative SDK model usage snapshot without summing turns', () => {
     const events = [
       assistantUsageEvent(1, 'turn-1', 'visible-1', 10, 5),
       resultModelUsageEvent(2, 'turn-1', {
@@ -57,11 +57,36 @@ describe('BeeGame assistant usage aggregation', () => {
     ]
 
     expect(getLatestRuntimeUsage(events)).toEqual({
-      prompt_tokens: 300,
-      completion_tokens: 50,
-      cache_read_tokens: 700,
-      cache_creation_tokens: 90,
-      total_tokens: 1_140,
+      prompt_tokens: 200,
+      completion_tokens: 30,
+      cache_read_tokens: 400,
+      cache_creation_tokens: 50,
+      total_tokens: 680,
+    })
+  })
+
+  test('does not add repeated cumulative snapshots from one native turn', () => {
+    const events = [
+      resultModelUsageEvent(1, 'turn-1', {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 300,
+        cacheCreationInputTokens: 40,
+      }),
+      resultModelUsageEvent(2, 'turn-1', {
+        inputTokens: 140,
+        outputTokens: 35,
+        cacheReadInputTokens: 500,
+        cacheCreationInputTokens: 60,
+      }),
+    ]
+
+    expect(getLatestRuntimeUsage(events)).toEqual({
+      prompt_tokens: 140,
+      completion_tokens: 35,
+      cache_read_tokens: 500,
+      cache_creation_tokens: 60,
+      total_tokens: 735,
     })
   })
 })

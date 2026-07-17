@@ -479,12 +479,41 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         return getWorkspaceFolderName(activeProject?.root_path) || projectName;
     }, [activeProject?.root_path, projectName]);
 
-    const displayedTokenTotal = useMemo(() => {
-        const storedTotal = Number(tokenUsage[projectId]?.total_tokens) || 0;
-        const runtimeTotal = Number(projectStatus?.context?.token_budget?.total_tokens) || 0;
-        const savedTotal = Number(savedRuntimeSnapshot?.usage?.total_tokens) || 0;
-        return Math.max(storedTotal, runtimeTotal, savedTotal);
-    }, [projectId, projectStatus?.context?.token_budget?.total_tokens, savedRuntimeSnapshot?.usage?.total_tokens, tokenUsage]);
+    const displayedTokenUsage = useMemo(() => {
+        const stored = tokenUsage[projectId];
+        const runtime = projectStatus?.context?.token_budget;
+        const saved = savedRuntimeSnapshot?.usage;
+        const normalizeUsage = (usage: typeof stored | typeof runtime | typeof saved) => {
+            const promptTokens = Number(usage?.prompt_tokens) || 0;
+            const completionTokens = Number(usage?.completion_tokens) || 0;
+            const totalTokens = Number(usage?.total_tokens) || 0;
+            const hasCacheBreakdown = Boolean(usage && (
+                'cached_input_tokens' in usage ||
+                'cache_read_tokens' in usage ||
+                'cache_creation_tokens' in usage
+            ));
+            const cacheReadTokens = Number(usage && 'cache_read_tokens' in usage ? usage.cache_read_tokens : 0) || 0;
+            const cacheCreationTokens = Number(usage && 'cache_creation_tokens' in usage ? usage.cache_creation_tokens : 0) || 0;
+            const inputTokens = Number(usage && 'input_tokens' in usage ? usage.input_tokens : 0) || promptTokens;
+            const knownCachedInputTokens = Number(usage && 'cached_input_tokens' in usage ? usage.cached_input_tokens : 0)
+                || cacheReadTokens + cacheCreationTokens;
+            const legacyCachedInputTokens = Math.max(0, totalTokens - inputTokens - completionTokens);
+            return {
+                inputTokens,
+                cachedInputTokens: hasCacheBreakdown ? knownCachedInputTokens : legacyCachedInputTokens,
+                outputTokens: Number(usage && 'output_tokens' in usage ? usage.output_tokens : 0)
+                    || completionTokens,
+                totalTokens,
+            };
+        };
+
+        // The live runtime snapshot is authoritative and must be allowed to
+        // correct an older inflated client/store value downward.
+        if (runtime) return normalizeUsage(runtime);
+        if (saved) return normalizeUsage(saved);
+        if (stored) return normalizeUsage(stored);
+        return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    }, [projectId, projectStatus?.context?.token_budget, savedRuntimeSnapshot?.usage, tokenUsage]);
 
     useEffect(() => {
         if (!isBeeGameMode) return;
@@ -538,7 +567,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                     lang={lang}
                     status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
                     progress={progressPercent}
-                    tokens={displayedTokenTotal}
+                    tokens={displayedTokenUsage.totalTokens}
                     isSyncing={isSyncing}
                     onRename={handleRename}
                 />
@@ -565,7 +594,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 projectName={displayProjectName}
                 status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
                 phaseLabel={phaseLabel}
-                tokens={displayedTokenTotal}
+                inputTokens={displayedTokenUsage.inputTokens}
+                cachedInputTokens={displayedTokenUsage.cachedInputTokens}
+                outputTokens={displayedTokenUsage.outputTokens}
                 credits={creditSummary}
                 accountCreditBalance={creditBalance}
                 isSyncing={isSyncing}

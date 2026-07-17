@@ -31,7 +31,9 @@ interface BeeGameLivePreviewPageProps {
     projectName: string;
     status: DashboardStatus;
     phaseLabel: string;
-    tokens: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
     credits?: {
         settledCredits: number;
         outstandingReservedCredits: number;
@@ -130,7 +132,9 @@ export function BeeGameLivePreviewPage({
     projectName,
     status,
     phaseLabel,
-    tokens,
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
     credits,
     accountCreditBalance,
     isSyncing,
@@ -347,7 +351,9 @@ export function BeeGameLivePreviewPage({
                             {projectTarget ? (
                                 <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} />
                             ) : null}
-                            <ProjectHintRow label={labels.tokens} value={tokens.toLocaleString()} />
+                            <ProjectHintRow label={labels.inputTokens || 'Input tokens'} value={inputTokens.toLocaleString()} />
+                            <ProjectHintRow label={labels.cachedInputTokens || 'Cached input tokens'} value={cachedInputTokens.toLocaleString()} />
+                            <ProjectHintRow label={labels.outputTokens || 'Output tokens'} value={outputTokens.toLocaleString()} />
                             {credits ? (
                                 <>
                                     <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />

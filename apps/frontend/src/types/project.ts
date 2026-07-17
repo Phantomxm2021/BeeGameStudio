@@ -11,6 +11,8 @@ export interface ProjectRuntimeSnapshot {
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
+    cache_read_tokens?: number;
+    cache_creation_tokens?: number;
     total_tokens: number;
   };
   phase_name?: string;

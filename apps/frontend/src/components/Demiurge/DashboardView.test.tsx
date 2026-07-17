@@ -459,7 +459,9 @@ describe('DashboardView runtime loading', () => {
 
     it('uses live runtime token budget when persisted token usage has not caught up', async () => {
         mockedTokenUsage = {
-            proj_1: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            // Simulates the historical client overcount. A newer runtime
+            // snapshot must be allowed to correct this value downward.
+            proj_1: { prompt_tokens: 8_000, completion_tokens: 1_999, total_tokens: 9_999 },
         };
         mockedProjectStatus = {
             ...mockedProjectStatus,
@@ -467,7 +469,9 @@ describe('DashboardView runtime loading', () => {
                 token_budget: {
                     prompt_tokens: 120,
                     completion_tokens: 30,
-                    total_tokens: 150,
+                    cache_read_tokens: 500,
+                    cache_creation_tokens: 50,
+                    total_tokens: 700,
                 },
             },
         };
@@ -476,9 +480,38 @@ describe('DashboardView runtime loading', () => {
 
         await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-        expect(screen.queryByText('150')).not.toBeInTheDocument();
+        expect(screen.queryByText('670')).not.toBeInTheDocument();
+        expect(screen.queryByText('30')).not.toBeInTheDocument();
         await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
-        expect(screen.getByText('150')).toBeInTheDocument();
+        expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('120')).toBeInTheDocument();
+        expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('550')).toBeInTheDocument();
+        expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('30')).toBeInTheDocument();
+    });
+
+    it('recovers cached input from legacy snapshots that only persisted a total', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            context: {
+                token_budget: {
+                    prompt_tokens: 254_542,
+                    completion_tokens: 81_019,
+                    total_tokens: 6_424_792,
+                },
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+        expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('254,542')).toBeInTheDocument();
+        expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('6,089,231')).toBeInTheDocument();
+        expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('81,019')).toBeInTheDocument();
     });
 
     it('moves header metrics into the selected project hover hint and removes BeeGame branding chrome', async () => {
@@ -507,7 +540,9 @@ describe('DashboardView runtime loading', () => {
         expect(screen.getByTestId('beegame-project-hint')).toBeInTheDocument();
         expect(screen.getByText('平台')).toBeInTheDocument();
         expect(screen.getByText('Web')).toBeInTheDocument();
-        expect(screen.getByText('消耗')).toBeInTheDocument();
+        expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('缓存输入 Tokens')).toBeInTheDocument();
+        expect(screen.getByText('输出 Tokens')).toBeInTheDocument();
         expect(screen.getByText('Agent 状态')).toBeInTheDocument();
         expect(screen.getByText('交付验收')).toBeInTheDocument();
         expect(screen.getByText('已通过')).toBeInTheDocument();

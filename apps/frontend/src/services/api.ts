@@ -168,8 +168,13 @@ export interface ContextVisibilityPayload {
   }>;
   token_budget?: {
     status?: string;
+    input_tokens?: number;
+    cached_input_tokens?: number;
+    output_tokens?: number;
     prompt_tokens?: number;
     completion_tokens?: number;
+    cache_read_tokens?: number;
+    cache_creation_tokens?: number;
     total_tokens?: number;
   };
   counters?: Record<string, number>;
