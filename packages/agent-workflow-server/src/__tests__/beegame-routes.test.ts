@@ -6899,7 +6899,8 @@ describe('beegame session routes', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-local-preview-'))
     const internalServer = createServer((req, res) => {
       res.setHeader('content-type', 'text/html')
-      res.end(`<html><head><title>Preview</title></head><body>${req.url || '/'}</body></html>`)
+      const requestPath = (req.url || '/').split('?', 1)[0]
+      res.end(`<html><head><script type="module" src="${requestPath}@vite/client"></script><title>Preview</title></head><body>${req.url || '/'}</body></html>`)
     })
     await new Promise<void>((resolveReady, rejectReady) => {
       internalServer.once('error', rejectReady)
@@ -6957,6 +6958,7 @@ describe('beegame session routes', () => {
       expect(proxiedRootRes.status).toBe(200)
       expect(proxiedRootRes.headers.get('access-control-allow-origin')).toBe('*')
       expect(proxiedRootText).toContain(previewPath)
+      expect(proxiedRootText).not.toContain('@vite/client')
       expect(proxiedRootText).toContain('data-beegame-preview-console-bridge')
       expect(proxiedRootText).toContain('beegame.preview.console')
 

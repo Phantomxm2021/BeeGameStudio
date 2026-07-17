@@ -37,6 +37,7 @@ import {
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
+import { stripViteClientScript } from './beegame/vite-preview-host'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisherFromEnv,
@@ -3979,7 +3980,8 @@ async function proxyBeeGamePreviewRequest(
   if (method === 'GET' && isHtmlResponse(upstream.headers)) {
     const html = await upstream.text()
     responseHeaders.delete('content-length')
-    return new Response(injectBeeGamePreviewConsoleBridge(html, sessionId), {
+    const previewHtml = stripViteClientScript(html, `${prefix}/`)
+    return new Response(injectBeeGamePreviewConsoleBridge(previewHtml, sessionId), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
