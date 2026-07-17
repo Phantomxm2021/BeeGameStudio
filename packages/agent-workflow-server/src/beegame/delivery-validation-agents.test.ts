@@ -35,11 +35,16 @@ describe('native delivery agents', () => {
       expect(validator).toContain('document, build, test, runtime, asset, and skill')
       expect(validator).toContain('Keep the terminal JSON concise')
       expect(validator).toContain('Run as a foreground native subagent')
+      expect(validator).toContain('permissionMode: bubble')
+      expect(validator).toContain('assets/asset-manifest.json')
+      expect(validator).toContain('runtime asset load failure')
       expect(reviewer).toContain(`name: ${DOCUMENT_REVIEWER_AGENT_TYPE}`)
       expect(reviewer).toContain('tools: [Read, Glob, Grep, Skill]')
       expect(reviewer).not.toContain('tools: [Read, Glob, Grep, Skill, Bash]')
       expect(reviewer).toContain('docs/ART_DIRECTION.md')
       expect(reviewer).toContain('selected document language')
+      expect(reviewer).toContain('selected game user-visible language')
+      expect(reviewer).toContain('never infer one from the other')
       expect(reviewer).toContain('Do not edit files')
       expect(reviewer).toContain('Return exactly one terminal JSON object')
       expect(reviewer).toContain('READY|NEEDS_REVISION|BLOCKED')
@@ -58,6 +63,31 @@ describe('native delivery agents', () => {
         join(dataDir, '.runtime', 'app', 'agents', `${DELIVERY_VALIDATOR_AGENT_TYPE}.md`),
         'utf8',
       )).resolves.toContain('status":"passed|failed|blocked')
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps validator build and test commands on the native visible permission path', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-validator-permissions-'))
+    try {
+      materializeBeeGameNativeAgents(dataDir)
+      const validator = await readFile(
+        join(
+          dataDir,
+          '.runtime',
+          'app',
+          'agents',
+          `${DELIVERY_VALIDATOR_AGENT_TYPE}.md`,
+        ),
+        'utf8',
+      )
+
+      expect(validator).toContain('tools: [Read, Glob, Grep, Skill, Bash')
+      expect(validator).toContain('permissionMode: bubble')
+      expect(validator).not.toContain('permissionMode: dontAsk')
+      expect(validator).not.toContain('permissionMode: bypassPermissions')
+      expect(validator).toContain('Run the project-native build and tests')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

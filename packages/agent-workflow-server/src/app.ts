@@ -5345,9 +5345,18 @@ function buildConfirmedBriefPrompt(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
 ): string {
+  const documentLanguage = resolveConfirmedBriefLanguage(
+    brief.documentLanguage,
+    language,
+  )
+  const gameUserVisibleLanguage = resolveConfirmedBriefLanguage(
+    brief.gameUserVisibleLanguage,
+    language,
+  )
   const confirmedBrief = JSON.stringify({
     kind: 'confirmed_build_brief',
-    document_language: language ?? null,
+    document_language: documentLanguage ?? null,
+    game_user_visible_language: gameUserVisibleLanguage ?? null,
     idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
     selected_option: toCanonicalConfirmedOption(brief.option),
     settings: isObject(brief.settings) ? brief.settings : null,
@@ -5358,9 +5367,13 @@ function buildConfirmedBriefPrompt(
   return [
     'Build and deliver the confirmed game project below.',
     '',
-    language
-      ? `Write all human-readable project documentation and user-facing game text in ${getDocumentLanguageName(language)}. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.`
-      : 'Write project documentation in the language used by the confirmed user brief. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
+    documentLanguage
+      ? `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`
+      : 'Write project documentation in the language used by the confirmed user brief.',
+    gameUserVisibleLanguage
+      ? `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`
+      : 'Write player-visible game text in the language used by the confirmed user brief.',
+    'Treat document language and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth. Preserve every explicit user choice and constraint; do not silently replace the selected platform, engine, dimension, genre, visual style, input methods, or scope.',
     'Before implementation, create the complete project documentation baseline in this same native Claude Code task. Write each document to its canonical path as soon as it is ready so progress and review remain observable; do not hold completed documents for one final batch.',
@@ -5369,7 +5382,7 @@ function buildConfirmedBriefPrompt(
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
     'Give every committed requirement and player path a stable identifier. For each player path, document the concrete player actions, observable expected results, and required evidence. Keep this platform-neutral and use the project documents own structure; do not introduce a BeeGame-specific game schema.',
     `After docs/ASSET_PLAN.md is stable and before implementation, create assets/asset-manifest.json as the canonical machine-readable asset contract. Declare the selected project target and every committed asset responsibility, including procedural and embedded assets; use managed-file only for real file-backed slots. Derive target format capabilities from the selected project runtime, never from an available Pack. Use this canonical vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. Keep the manifest consistent with ASSET_PLAN and the implementation; an intentionally empty external-resource set still requires an explicit valid manifest rather than silently bypassing the asset contract.`,
-    'Finish the complete document baseline before launching one native beegame-document-reviewer subagent in the foreground. Pass it the canonical confirmed brief and selected document language, and do not modify project documents while that review is running. Do not begin implementation until the reviewer returns exactly one schema-valid terminal JSON object with verdict READY for that exact document revision. Empty output, malformed JSON, or JSON wrapped in prose is invalid and must never be inferred as READY; launch a fresh reviewer for the same revision instead. If it reports findings, finish all document corrections and launch a new reviewer for the changed revision; do not continue the old reviewer with SendMessage and do not treat its old result as approval of changed files. If the native runtime nevertheless moves the reviewer to the background, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session.',
+    'Finish the complete document baseline before launching one native beegame-document-reviewer subagent in the foreground. Pass it the canonical confirmed brief, selected document language, and selected game user-visible language as explicit separate inputs, and do not modify project documents while that review is running. Do not begin implementation until the reviewer returns exactly one schema-valid terminal JSON object with verdict READY for that exact document revision. Empty output, malformed JSON, or JSON wrapped in prose is invalid and must never be inferred as READY; launch a fresh reviewer for the same revision instead. If it reports findings, finish all document corrections and launch a new reviewer for the changed revision; do not continue the old reviewer with SendMessage and do not treat its old result as approval of changed files. If the native runtime nevertheless moves the reviewer to the background, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session.',
     '',
     'Plan and implement the project with applicable native Skills. Before independent validation, create and run the executable build, test, and runtime acceptance entrypoints appropriate to the selected project toolchain. Prefer the project\'s existing native test and runtime tools; add only the smallest missing harness needed for observable assertions, not a second application framework. These checks must contain observable assertions for the documented player paths wherever the project runtime can automate them; compilation or source inspection is not a substitute. Do not postpone creation of a required test harness until the Validator discovers it is missing.',
     'After all intended project edits and project-native checks are complete, invoke exactly one native beegame-acceptance-validator subagent in the foreground for that exact workspace revision, so any project-native runtime permission remains visible to the user. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. Use its terminal JSON directly. Empty output, malformed JSON, or JSON wrapped in prose is not a terminal result. If the native runtime nevertheless moves it to the background, do not poll TaskOutput or read its output file; yield the turn and let the native task notification resume this same session. After notification, treat only the Validator terminal result as acceptance evidence. A blocked result remains blocked and must never be described as ready or delivered. If validation fails, repair only the observed findings first; after any project edit, launch a new foreground Validator for the changed revision and require one final complete player-path smoke pass. Never make a post-validation cleanup edit without validating that final revision. If no valid terminal Validator JSON is returned, continue the task until validation reaches a terminal passed, failed, or blocked result; do not claim completion from compilation, source inspection, or the implementation agent\'s own summary alone.',
@@ -5377,6 +5390,13 @@ function buildConfirmedBriefPrompt(
     'Confirmed brief:',
     confirmedBrief,
   ].join('\n')
+}
+
+function resolveConfirmedBriefLanguage(
+  value: unknown,
+  fallback?: BeeGameSessionLanguage,
+): BeeGameSessionLanguage | undefined {
+  return isBeeGameSessionLanguage(value) ? value : fallback
 }
 
 function toCanonicalConfirmedOption(value: unknown): JsonObject | null {

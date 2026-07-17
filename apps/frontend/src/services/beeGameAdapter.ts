@@ -218,6 +218,8 @@ export type BeeGameBuildBrief = {
   option: BeeGameIntakeOption;
   settings: BeeGameIntakeSettings;
   language?: BeeGameLanguage | string;
+  documentLanguage?: BeeGameLanguage | string;
+  gameUserVisibleLanguage?: BeeGameLanguage | string;
   root_path?: string;
   title?: string;
   confirmedGdd?: string;

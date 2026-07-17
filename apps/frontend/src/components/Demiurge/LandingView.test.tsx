@@ -65,6 +65,7 @@ const {
     SupabaseAuthApiError,
     clearSupabaseSession,
     getValidSupabaseAccessToken,
+    isHttpOnlySessionsEnabled,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
@@ -86,6 +87,7 @@ const {
     },
     clearSupabaseSession: vi.fn(),
     getValidSupabaseAccessToken: vi.fn(),
+    isHttpOnlySessionsEnabled: vi.fn(() => false),
     isSupabaseAuthConfigured: vi.fn(),
     sendSupabasePasswordReset: vi.fn(),
     signInWithSupabaseOAuth: vi.fn(),
@@ -212,6 +214,7 @@ vi.mock('../../services/supabaseAuthApi', () => ({
     SupabaseAuthApiError,
     clearSupabaseSession,
     getValidSupabaseAccessToken,
+    isHttpOnlySessionsEnabled,
     isSupabaseAuthConfigured,
     sendSupabasePasswordReset,
     signInWithSupabaseOAuth,
@@ -1656,6 +1659,8 @@ describe('LandingView bootstrap submission', () => {
         expect(brief).toMatchObject({
             idea: 'LLM generated idea',
             language: 'zh',
+            documentLanguage: 'zh',
+            gameUserVisibleLanguage: 'zh',
             title: 'LLM Mode A',
             option: { id: 'llm_mode_a', title: 'LLM Mode A' },
             settings: {

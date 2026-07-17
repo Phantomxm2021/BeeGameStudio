@@ -2419,6 +2419,8 @@ describe('beegame session routes', () => {
           language: 'zh',
           brief: {
             idea: 'A confirmed product idea',
+            documentLanguage: 'zh',
+            gameUserVisibleLanguage: 'en',
             option: {
               id: 'selected-mode',
               title: 'Selected mode',
@@ -2437,12 +2439,16 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('"confirmed_gdd": "# Approved design"')
       expect(submitted).toContain('Build and deliver the confirmed game project below.')
       expect(submitted).toContain('"document_language": "zh"')
+      expect(submitted).toContain('"game_user_visible_language": "en"')
       expect(submitted).toContain('Simplified Chinese')
+      expect(submitted).toContain('Write all player-visible game text in English.')
+      expect(submitted).toContain('Treat document language and player-visible game language as separate confirmed requirements')
       expect(submitted).toContain('docs/ART_DIRECTION.md')
       expect(submitted).toContain('docs/acceptance/gameplay-checklist.md')
       expect(submitted).toContain('Write each document to its canonical path as soon as it is ready')
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
+      expect(submitted).toContain('selected game user-visible language as explicit separate inputs')
       expect(submitted).toContain('beegame-acceptance-validator')
       expect(submitted).toContain('assets/asset-manifest.json')
       expect(submitted).toContain('procedural and embedded assets')

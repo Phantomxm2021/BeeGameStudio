@@ -383,6 +383,8 @@ function buildAttachmentBrief(
             scope: option.scope,
         },
         language,
+        documentLanguage: language,
+        gameUserVisibleLanguage: language,
         title,
         confirmedGdd: analysis.gddDraft,
         buildSource: analysis.sourceType,
@@ -1299,6 +1301,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             },
             title: selectedOption.title,
             language: lang,
+            documentLanguage: lang,
+            gameUserVisibleLanguage: lang,
         };
         setIntakeError('');
         setIsPreparing(true);
