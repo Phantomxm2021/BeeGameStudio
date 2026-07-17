@@ -40,6 +40,27 @@ describe('native document review evidence', () => {
     expect(current(workspace)).toEqual({ state: 'missing' })
   })
 
+  test('makes a review stale when the canonical asset contract changes', async () => {
+    workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      '{"version":1,"project_target":{"asset_format_capabilities":[]},"slots":[]}',
+    )
+    recordNativeDocumentReviewForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: SESSION_ID,
+      workspacePath: workspace,
+      report: readyReport(),
+    })
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      '{"version":1,"project_target":{"asset_format_capabilities":[]},"slots":[{"id":"new"}]}',
+    )
+
+    expect(current(workspace).state).toBe('stale')
+  })
+
   test('records READY for the exact reviewed document revision', async () => {
     workspace = await createWorkspace()
     recordReady(workspace)

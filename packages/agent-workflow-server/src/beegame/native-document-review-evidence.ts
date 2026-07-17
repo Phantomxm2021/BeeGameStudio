@@ -221,6 +221,8 @@ export function digestProjectDocuments(workspacePath: string): string {
     }
   }
   visit(docsRoot)
+  const assetManifest = join(workspace, 'assets', 'asset-manifest.json')
+  if (existsSync(assetManifest)) files.push(assetManifest)
   const hash = createHash('sha256')
   for (const file of files.sort()) {
     hash.update(relative(workspace, file).split('\\').join('/'))

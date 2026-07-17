@@ -36,6 +36,9 @@ describe('native delivery agents', () => {
       expect(validator).toContain('Keep the terminal JSON concise')
       expect(validator).toContain('Run as a foreground native subagent')
       expect(validator).toContain('permissionMode: bubble')
+      expect(validator).toContain('do not retry equivalent command variants')
+      expect(validator).toContain('named test and assertions actually exercise')
+      expect(validator).toContain('generated siblings in authored source directories')
       expect(validator).toContain('assets/asset-manifest.json')
       expect(validator).toContain('runtime asset load failure')
       expect(reviewer).toContain(`name: ${DOCUMENT_REVIEWER_AGENT_TYPE}`)
@@ -49,6 +52,9 @@ describe('native delivery agents', () => {
       expect(reviewer).toContain('Return exactly one terminal JSON object')
       expect(reviewer).toContain('READY|NEEDS_REVISION|BLOCKED')
       expect(reviewer).toContain('An empty response')
+      expect(reviewer).toContain('project_target')
+      expect(reviewer).toContain('slots to be an array')
+      expect(reviewer).toContain('legacy or invented root shapes')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }
@@ -88,6 +94,7 @@ describe('native delivery agents', () => {
       expect(validator).not.toContain('permissionMode: dontAsk')
       expect(validator).not.toContain('permissionMode: bypassPermissions')
       expect(validator).toContain('Run the project-native build and tests')
+      expect(validator).toContain('Record one precise BLOCKED finding')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

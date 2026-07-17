@@ -47,6 +47,33 @@ export type ResourceUsageTag = (typeof RESOURCE_USAGE_TAGS)[number]
 /** Single machine-readable vocabulary used by manifest authors and auditors. */
 export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
   version: 1,
+  rootFields: ['version', 'project_target', 'slots'],
+  projectTargetFields: [
+    'platform',
+    'runtime',
+    'asset_format_capabilities',
+  ],
+  slotFields: [
+    'id',
+    'required',
+    'delivery_mode',
+    'category',
+    'dimension',
+    'target',
+    'resource_requirement',
+    'resource_binding',
+    'uploaded_files',
+    'integration_evidence',
+    'status',
+  ],
+  targetFields: ['path'],
+  resourceRequirementFields: [
+    'category',
+    'dimension',
+    'accepted_formats',
+    'tags',
+  ],
+  integrationEvidenceFields: ['references', 'runtime_event_ids'],
   deliveryModes: RESOURCE_SLOT_DELIVERY_MODES,
   dimensions: RESOURCE_DIMENSIONS,
   categories: RESOURCE_CATEGORIES,

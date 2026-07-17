@@ -9,6 +9,7 @@ import {
   recordNativeAcceptanceReportForTest,
 } from './native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from './native-document-review-evidence'
+import { REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
 
 const TEST_SESSION_ID = 'native-acceptance-test-session'
 
@@ -29,6 +30,21 @@ describe('native delivery acceptance gate', () => {
       outcome: 'passed',
       issues: [],
     })
+  })
+
+  test('does not accept READY when deterministic document contracts are invalid', async () => {
+    workspace = await createWorkspace()
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({ version: 1, project: {}, assets: [] }),
+    )
+    recordReadyDocumentReview(workspace)
+
+    const result = evaluate(workspace)
+    expect(result.allowed).toBe(false)
+    expect(result.outcome).toBe('rejected')
+    expect(result.issues.join(' ')).toContain('project_target must be an object')
+    expect(result.issues.join(' ')).toContain('slots must be an array')
   })
 
   test('binds acceptance to the revision observed when the validator starts', async () => {
@@ -581,9 +597,21 @@ describe('native delivery acceptance gate', () => {
 
 async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'beegame-delivery-audit-'))
-  await mkdir(join(root, 'docs'), { recursive: true })
   await mkdir(join(root, 'src'), { recursive: true })
-  await writeFile(join(root, 'docs', 'GDD.md'), '# Approved game\n')
+  for (const path of REQUIRED_PROJECT_DOCUMENTS) {
+    await mkdir(join(root, path, '..'), { recursive: true })
+    await writeFile(join(root, path), `# Approved ${path}\n`)
+  }
+  await mkdir(join(root, 'assets'), { recursive: true })
+  await writeFile(join(root, 'assets', 'asset-manifest.json'), JSON.stringify({
+    version: 1,
+    project_target: {
+      platform: 'selected-target',
+      runtime: 'project-native',
+      asset_format_capabilities: [],
+    },
+    slots: [],
+  }))
   await writeFile(join(root, 'src', 'entry.ts'), 'export const ready = true\n')
   recordReadyDocumentReview(root)
   return root

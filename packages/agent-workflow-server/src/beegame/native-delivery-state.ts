@@ -1,5 +1,6 @@
 import { getObservedNativeAcceptance } from './native-acceptance-evidence'
 import { getObservedNativeDocumentReview } from './native-document-review-evidence'
+import { auditDocumentReadiness } from './document-readiness-audit'
 
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
@@ -59,6 +60,19 @@ export function getNativeDeliveryState(input: {
       status: 'blocked',
       reason: 'document_review_blocked',
       summary: review.evidence.summary,
+      observedAt: review.evidence.createdAt,
+    }
+  }
+
+  const readiness = auditDocumentReadiness(input.workspacePath)
+  if (!readiness.valid) {
+    return {
+      status: 'failed',
+      reason: 'document_review_needs_revision',
+      summary: [
+        'Document review cannot be READY because deterministic project-contract checks failed.',
+        ...readiness.issues,
+      ].join(' '),
       observedAt: review.evidence.createdAt,
     }
   }

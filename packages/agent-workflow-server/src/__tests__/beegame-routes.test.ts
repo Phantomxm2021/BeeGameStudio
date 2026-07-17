@@ -2451,11 +2451,13 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('selected game user-visible language as explicit separate inputs')
       expect(submitted).toContain('beegame-acceptance-validator')
       expect(submitted).toContain('assets/asset-manifest.json')
+      expect(submitted).toContain('"rootFields":["version","project_target","slots"]')
       expect(submitted).toContain('procedural and embedded assets')
       expect(submitted).toContain('JSON wrapped in prose is invalid')
       expect(submitted).toContain('executable build, test, and runtime acceptance entrypoints')
       expect(submitted).toContain('add only the smallest missing harness')
       expect(submitted).toContain('Do not postpone creation of a required test harness')
+      expect(submitted).toContain('generated build and typecheck outputs outside authored source directories')
       expect(submitted).toContain('subagent in the foreground')
       expect(submitted).toContain('project-native runtime permission remains visible to the user')
       expect(submitted).toContain('let the native task notification resume this same session')
@@ -8682,6 +8684,16 @@ async function writeAcceptedDeliveryReport(
     join(acceptanceDirectory, 'gameplay-checklist.md'),
     '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
   )
+  await mkdir(join(workspace, 'assets'), { recursive: true })
+  await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
+    version: 1,
+    project_target: {
+      platform: 'selected-target',
+      runtime: 'project-native',
+      asset_format_capabilities: [],
+    },
+    slots: [],
+  }))
   const report = {
       validatorId: 'beegame-acceptance-validator',
       status: 'passed',

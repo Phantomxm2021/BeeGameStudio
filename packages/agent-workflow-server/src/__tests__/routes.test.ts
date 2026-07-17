@@ -2488,6 +2488,16 @@ describe('agent workflow server routes', () => {
         '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
         'utf8',
       )
+      await mkdir(join(projectRoot, 'assets'), { recursive: true })
+      await writeFile(join(projectRoot, 'assets', 'asset-manifest.json'), JSON.stringify({
+        version: 1,
+        project_target: {
+          platform: 'selected-target',
+          runtime: 'project-native',
+          asset_format_capabilities: [],
+        },
+        slots: [],
+      }))
       const acceptanceReport = {
         validatorId: 'beegame-acceptance-validator',
         status: 'passed',
