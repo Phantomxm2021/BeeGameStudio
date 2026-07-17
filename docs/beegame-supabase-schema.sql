@@ -1437,6 +1437,7 @@ declare
   reservation_credits integer;
   weighted_tokens integer;
   credit_unit integer;
+  available_unreserved_credits integer;
   settled_credits integer;
   refunded_credits integer;
   target_project_id text;
@@ -1489,10 +1490,19 @@ begin
   reservation_credits := reservation_row.credits;
   weighted_tokens := greatest(coalesce(p_weighted_tokens, 0), 0);
   credit_unit := greatest(coalesce(p_credit_unit_weighted_tokens, 10000), 1);
-  settled_credits := least(
-    reservation_credits,
-    greatest(1, ceil(weighted_tokens::numeric / credit_unit::numeric)::integer)
+  settled_credits := greatest(
+    1,
+    ceil(weighted_tokens::numeric / credit_unit::numeric)::integer
   );
+  available_unreserved_credits := greatest(
+    0,
+    coalesce(account_row.included_credits, 0) -
+      coalesce(account_row.consumed_credits, 0) -
+      coalesce(account_row.reserved_credits, 0)
+  );
+  if greatest(0, settled_credits - reservation_credits) > available_unreserved_credits then
+    raise exception 'Insufficient credits to settle actual token usage';
+  end if;
   refunded_credits := greatest(0, reservation_credits - settled_credits);
   target_project_id := coalesce(p_project_id, reservation_row.project_id);
 

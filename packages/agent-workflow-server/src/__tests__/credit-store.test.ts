@@ -89,6 +89,59 @@ describe('credit-store', () => {
     }
   })
 
+  test('settles actual usage above the initial reservation when balance is available', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-credit-overage-'))
+    try {
+      const reservation = reserveCredits('user-a', {
+        dataDir,
+        credits: 2,
+        kind: 'full_build',
+      })
+      const settled = settleCreditReservation('user-a', {
+        dataDir,
+        reservationId: reservation.id,
+        weightedTokens: 35_001,
+      })
+
+      expect(settled).toEqual(expect.objectContaining({
+        reservedCredits: 2,
+        settledCredits: 4,
+        refundedCredits: 0,
+      }))
+      expect(getCreditBalance('user-a', { dataDir })).toEqual(expect.objectContaining({
+        balanceCredits: 296,
+        consumedCredits: 4,
+        reservedCredits: 0,
+      }))
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps the reservation open when actual usage exceeds the available balance', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-credit-overage-'))
+    try {
+      const reservation = reserveCredits('user-a', {
+        dataDir,
+        credits: 200,
+        kind: 'full_build',
+      })
+
+      expect(() => settleCreditReservation('user-a', {
+        dataDir,
+        reservationId: reservation.id,
+        weightedTokens: 3_000_001,
+      })).toThrow('Insufficient credits to settle actual token usage')
+      expect(getCreditBalance('user-a', { dataDir })).toEqual(expect.objectContaining({
+        balanceCredits: 100,
+        consumedCredits: 0,
+        reservedCredits: 200,
+      }))
+    } finally {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
   test('grants credits with provider-neutral payment metadata', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'beegame-credit-store-'))
     try {

@@ -264,10 +264,20 @@ export function settleCreditReservation(
 
   const reservedCredits = reservation.credits
   const weightedTokens = normalizeNonNegativeNumber(options.weightedTokens, 0)
-  const settledCredits = Math.min(
-    reservedCredits,
-    Math.max(1, Math.ceil(weightedTokens / CREDIT_UNIT_WEIGHTED_TOKENS)),
+  const settledCredits = Math.max(
+    1,
+    Math.ceil(weightedTokens / CREDIT_UNIT_WEIGHTED_TOKENS),
   )
+  const availableUnreservedCredits = Math.max(
+    0,
+    normalizeNonNegativeNumber(account.includedCredits, DEFAULT_FREE_CREDITS) -
+      normalizeNonNegativeNumber(account.consumedCredits, 0) -
+      normalizeNonNegativeNumber(account.reservedCredits, 0),
+  )
+  const additionalCredits = Math.max(0, settledCredits - reservedCredits)
+  if (additionalCredits > availableUnreservedCredits) {
+    throw new Error('Insufficient credits to settle actual token usage')
+  }
   const refundedCredits = Math.max(0, reservedCredits - settledCredits)
   account.reservedCredits = Math.max(
     0,

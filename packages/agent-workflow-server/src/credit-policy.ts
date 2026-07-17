@@ -87,7 +87,7 @@ export function quoteCreditTask(input: {
     balanceCredits: input.balanceCredits,
     canStart,
     message: canStart
-      ? `This request will reserve ${policy.reservedCredits} credits. Unused credits will be refunded.`
+      ? `This request will reserve ${policy.reservedCredits} credits. Final charges follow actual token usage, and unused reserved credits will be refunded.`
       : `This request requires ${policy.reservedCredits} credits, but only ${input.balanceCredits} credits are available.`,
   }
 }
