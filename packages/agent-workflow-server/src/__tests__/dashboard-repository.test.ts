@@ -531,6 +531,38 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
+  test('uses the configured auth transport for HttpOnly session requests', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
+    const authorizationHeaders: string[] = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      getAuthToken: request => request.headers.get('cookie') === 'beegame_session=session-id'
+        ? 'cookie-access-token'
+        : undefined,
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          authorizationHeaders.push(new Headers(init?.headers).get('authorization') ?? '')
+          return Response.json([])
+        }) as unknown as typeof fetch,
+      }),
+    })
+
+    try {
+      await repository.listProjects(
+        new Request('http://beegame.test/api/projects', {
+          headers: { cookie: 'beegame_session=session-id' },
+        }),
+        { id: '00000000-0000-0000-0000-000000000001', role: 'owner' },
+      )
+      expect(authorizationHeaders).toEqual(['Bearer cookie-access-token'])
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
   test('uses canonical account id for Supabase credit balance and ledger', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const calls: string[] = []

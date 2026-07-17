@@ -1638,6 +1638,7 @@ describe('LandingView bootstrap submission', () => {
         fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
         expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+        expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('LLM generated pitch A.');
         mockLoadCurrentUser.mockClear();
         fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
 

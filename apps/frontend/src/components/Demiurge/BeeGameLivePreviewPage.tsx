@@ -329,19 +329,62 @@ export function BeeGameLivePreviewPage({
                     >
                         {projectName}
                     </div>
-                    <button
-                        type="button"
-                        data-testid="beegame-project-info-trigger"
-                        aria-label={labels.projectInfo || 'Project info'}
-                        aria-describedby={isProjectHintOpen ? 'beegame-project-hint' : undefined}
+                    <div
+                        className="relative shrink-0"
                         onMouseEnter={() => setProjectHintOpen(true)}
                         onMouseLeave={() => setProjectHintOpen(false)}
-                        onFocus={() => setProjectHintOpen(true)}
-                        onBlur={() => setProjectHintOpen(false)}
-                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-700 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
                     >
-                        <Info className="h-4 w-4" />
-                    </button>
+                        <button
+                            type="button"
+                            data-testid="beegame-project-info-trigger"
+                            aria-label={labels.projectInfo || 'Project info'}
+                            aria-describedby={isProjectHintOpen ? 'beegame-project-hint' : undefined}
+                            onFocus={() => setProjectHintOpen(true)}
+                            onBlur={() => setProjectHintOpen(false)}
+                            className="grid h-7 w-7 place-items-center rounded-lg border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-700 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
+                        >
+                            <Info className="h-4 w-4" />
+                        </button>
+                        {isProjectHintOpen ? (
+                            <div
+                                id="beegame-project-hint"
+                                role="tooltip"
+                                data-testid="beegame-project-hint"
+                                className="absolute right-0 top-[calc(100%+0.75rem)] z-[110] w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
+                            >
+                                <span className="absolute -top-1.5 right-2 h-3 w-3 rotate-45 border-l border-t border-zinc-800 bg-zinc-950" aria-hidden="true" />
+                                {projectTarget ? (
+                                    <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} />
+                                ) : null}
+                                <ProjectHintRow label={labels.inputTokens || 'Input tokens'} value={inputTokens.toLocaleString()} />
+                                <ProjectHintRow label={labels.cachedInputTokens || 'Cached input tokens'} value={cachedInputTokens.toLocaleString()} />
+                                <ProjectHintRow label={labels.outputTokens || 'Output tokens'} value={outputTokens.toLocaleString()} />
+                                {roleTokens ? (
+                                    <>
+                                        <div className="my-2 border-t border-zinc-800" />
+                                        <ProjectHintRow label={labels.mainAgentTokens || 'Main Agent'} value={roleTokens.mainAgent.toLocaleString()} />
+                                        <ProjectHintRow label={labels.reviewerTokens || 'Reviewer'} value={roleTokens.reviewer.toLocaleString()} />
+                                        <ProjectHintRow label={labels.validatorTokens || 'Validator'} value={roleTokens.validator.toLocaleString()} />
+                                        <ProjectHintRow label={labels.otherSubagentTokens || 'Other subagents'} value={roleTokens.otherSubagents.toLocaleString()} />
+                                        <ProjectHintRow label={labels.waitingTokens || 'Waiting'} value={roleTokens.waiting.toLocaleString()} />
+                                    </>
+                                ) : null}
+                                {credits ? (
+                                    <>
+                                        <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />
+                                        <ProjectHintRow label={labels.reserved} value={credits.outstandingReservedCredits.toLocaleString()} />
+                                    </>
+                                ) : null}
+                                <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
+                                {acceptance ? (
+                                    <ProjectHintRow
+                                        label={lang === 'zh' ? '交付验收' : lang === 'zh-TW' ? '交付驗收' : 'Acceptance'}
+                                        value={acceptanceStatusLabel(acceptance.status, lang)}
+                                    />
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
                     {isSyncing ? (
                         <div
                             data-testid="beegame-sync-status"
@@ -349,44 +392,6 @@ export function BeeGameLivePreviewPage({
                         >
                             <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                             <span>{labels.syncing}</span>
-                        </div>
-                    ) : null}
-                    {isProjectHintOpen ? (
-                        <div
-                            id="beegame-project-hint"
-                            role="tooltip"
-                            data-testid="beegame-project-hint"
-                            className="absolute left-5 top-12 z-50 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
-                        >
-                            {projectTarget ? (
-                                <ProjectHintRow label={labels.platform || 'Platform'} value={projectTarget} />
-                            ) : null}
-                            <ProjectHintRow label={labels.inputTokens || 'Input tokens'} value={inputTokens.toLocaleString()} />
-                            <ProjectHintRow label={labels.cachedInputTokens || 'Cached input tokens'} value={cachedInputTokens.toLocaleString()} />
-                            <ProjectHintRow label={labels.outputTokens || 'Output tokens'} value={outputTokens.toLocaleString()} />
-                            {roleTokens ? (
-                                <>
-                                    <div className="my-2 border-t border-zinc-800" />
-                                    <ProjectHintRow label={labels.mainAgentTokens || 'Main Agent'} value={roleTokens.mainAgent.toLocaleString()} />
-                                    <ProjectHintRow label={labels.reviewerTokens || 'Reviewer'} value={roleTokens.reviewer.toLocaleString()} />
-                                    <ProjectHintRow label={labels.validatorTokens || 'Validator'} value={roleTokens.validator.toLocaleString()} />
-                                    <ProjectHintRow label={labels.otherSubagentTokens || 'Other subagents'} value={roleTokens.otherSubagents.toLocaleString()} />
-                                    <ProjectHintRow label={labels.waitingTokens || 'Waiting'} value={roleTokens.waiting.toLocaleString()} />
-                                </>
-                            ) : null}
-                            {credits ? (
-                                <>
-                                    <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />
-                                    <ProjectHintRow label={labels.reserved} value={credits.outstandingReservedCredits.toLocaleString()} />
-                                </>
-                            ) : null}
-                            <ProjectHintRow label={labels.executionStatus || labels.phase} value={phaseLabel} />
-                            {acceptance ? (
-                                <ProjectHintRow
-                                    label={lang === 'zh' ? '交付验收' : lang === 'zh-TW' ? '交付驗收' : 'Acceptance'}
-                                    value={acceptanceStatusLabel(acceptance.status, lang)}
-                                />
-                            ) : null}
                         </div>
                     ) : null}
                 </div>

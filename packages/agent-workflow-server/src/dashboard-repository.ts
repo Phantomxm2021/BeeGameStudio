@@ -110,6 +110,12 @@ export type DashboardRepositoryOptions = {
   remoteCreditControl?: BeeGameCreditControlClient
   skillsConfig?: BeeGameSkillsConfig | false
   getUserDataRoot: (request?: Request) => string
+  /**
+   * Resolves the authenticated user's access token from the active transport.
+   * The dashboard supports both Authorization headers and HttpOnly sessions,
+   * so repository code must not independently assume one transport.
+   */
+  getAuthToken?: (request: Request) => string | undefined
   modelConfigStore?: ModelConfigStoreOptions | false
 }
 
@@ -1149,7 +1155,9 @@ export class DashboardRepository {
   private supabaseForRequest(request?: Request): SupabaseDashboardStore | undefined {
     if (!this.supabaseStore) return undefined
     return this.supabaseStore.withAuthToken(
-      this.requireAuthToken(request ? getBearerToken(request) : undefined),
+      this.requireAuthToken(request
+        ? this.options.getAuthToken?.(request) ?? getBearerToken(request)
+        : undefined),
     )
   }
 

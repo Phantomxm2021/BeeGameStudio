@@ -624,7 +624,9 @@ export const useChat = ({
         // Requirements: 4.3
         if (message.usage) {
           updateTokenUsage(message.usage, refs.projectId, message.task_id);
-          refs.loadTokenUsage(refs.projectId).catch(err => console.error('[useChat] Token usage refresh failed:', err));
+          if (!isBeeGameAdapterEnabled()) {
+            refs.loadTokenUsage(refs.projectId).catch(err => console.error('[useChat] Token usage refresh failed:', err));
+          }
           refs.onTaskEvent?.('usage', message.usage);
           console.log('[useChat] Token usage updated:', message.usage);
         }

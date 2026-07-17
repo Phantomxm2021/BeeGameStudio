@@ -200,7 +200,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
                 refreshTimerRef.current = setTimeout(() => {
                     console.log(`[DashboardView] Debounced data refresh triggered by event: ${type}`);
-                    loadTokenUsage(projectId).catch(console.error);
+                    if (!isBeeGameMode) {
+                        loadTokenUsage(projectId).catch(console.error);
+                    }
                     if (!isBeeGameMode) {
                         loadPhases(projectId);
                         loadTasks(projectId).catch(console.error);

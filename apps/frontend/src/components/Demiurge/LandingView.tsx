@@ -1920,8 +1920,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
                     {intakePhase === 'confirming_brief' && selectedOption && settings ? (
                         <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
-                            <p className="type-body mt-3 text-zinc-300">{selectedOption.pitch}</p>
-                            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                            <dl className="grid gap-x-8 gap-y-4 py-1 sm:grid-cols-2">
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.platform}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd></div>
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.engine}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.engine || 'React')}</dd></div>
                                 <div><dt className="type-footnote text-zinc-500">{intakeText.fields.presentation}</dt><dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.dimension)}</dd></div>

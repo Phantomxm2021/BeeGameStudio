@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJSONStorage } from 'zustand/middleware';
 
-const { getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProjects, openProject, chatActions } = vi.hoisted(() => ({
+const { getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProjects, openProject, chatActions, updateTokenUsage } = vi.hoisted(() => ({
     getPendingUserReviews: vi.fn(),
     getProjectStatus: vi.fn(),
     getProjectRuntimeState: vi.fn(),
@@ -11,6 +11,7 @@ const { getPendingUserReviews, getProjectStatus, getProjectRuntimeState, getProj
         clearMessages: vi.fn(),
         addMessage: vi.fn(),
     },
+    updateTokenUsage: vi.fn(),
 }));
 
 vi.mock('../services/api', async () => {
@@ -33,6 +34,12 @@ vi.mock('./chatStore', () => ({
     },
 }));
 
+vi.mock('./systemStore', () => ({
+    useSystemStore: {
+        getState: () => ({ updateTokenUsage }),
+    },
+}));
+
 import { useProjectStore } from './projectStore';
 
 describe('projectStore pending review normalization', () => {
@@ -52,6 +59,7 @@ describe('projectStore pending review normalization', () => {
         openProject.mockResolvedValue({});
         chatActions.clearMessages.mockReset();
         chatActions.addMessage.mockReset();
+        updateTokenUsage.mockReset();
         storageData = new Map<string, string>();
         useProjectStore.persist.setOptions({
             storage: createJSONStorage(() => ({
@@ -159,6 +167,13 @@ describe('projectStore pending review normalization', () => {
                 project_id: 'proj_1',
                 phase: 'running',
                 blocked: false,
+                context: {
+                    token_budget: {
+                        prompt_tokens: 120,
+                        completion_tokens: 30,
+                        total_tokens: 150,
+                    },
+                },
             },
             pendingReviews: [{ gate_id: 'permission_1' }],
         });
@@ -169,6 +184,10 @@ describe('projectStore pending review normalization', () => {
         expect(getProjectRuntimeState).toHaveBeenCalledWith('proj_1');
         expect(useProjectStore.getState().projectStatus?.phase).toBe('running');
         expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
+        expect(updateTokenUsage).toHaveBeenCalledWith(
+            { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+            'proj_1',
+        );
     });
 
     it('coalesces concurrent runtime snapshot loads for the same project', async () => {

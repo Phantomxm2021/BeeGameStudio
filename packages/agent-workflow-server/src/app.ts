@@ -401,6 +401,7 @@ export function createAgentWorkflowApp(
     remoteCreditControl: createRemoteCreditControlClient(billingConfig),
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
+    getAuthToken: getRequestAuthToken,
     modelConfigStore,
   })
   const intakeJobs = new Map<string, BeeGameIntakeJob>()
@@ -2728,10 +2729,18 @@ function tracedRouteResponse(
     Response.json(body, { status }),
 ): Response {
   const traceId = randomUUID()
+  const diagnostic = error instanceof Error
+    ? {
+        cause: error.name,
+        ...(process.env.NODE_ENV !== 'production'
+          ? { causeMessage: error.message, causeStack: error.stack }
+          : {}),
+      }
+    : { cause: 'unknown_error' }
   console.warn('[BeeGame] route failed', {
     traceId,
     route,
-    cause: error instanceof Error ? error.name : 'unknown_error',
+    ...diagnostic,
   })
   return createResponse({ error: publicError, traceId })
 }

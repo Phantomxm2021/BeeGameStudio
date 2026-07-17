@@ -291,7 +291,7 @@ describe('useChat clarification gate handling', () => {
     expect(onTaskEvent).toHaveBeenCalledWith('credit_update', expect.any(Object));
   });
 
-  it('updates local token usage and refreshes project usage after usage messages', async () => {
+  it('uses BeeGame usage events without issuing a duplicate token request', async () => {
     const onTaskEvent = vi.fn();
     renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
 
@@ -313,7 +313,7 @@ describe('useChat clarification gate handling', () => {
       'proj_1',
       'pipe_1',
     );
-    expect(systemStoreState.loadTokenUsage).toHaveBeenCalledWith('proj_1');
+    expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
     expect(onTaskEvent).toHaveBeenCalledWith('usage', { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
   });
 

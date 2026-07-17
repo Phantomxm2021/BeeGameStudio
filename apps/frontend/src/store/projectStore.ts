@@ -23,6 +23,7 @@ import {
 import type { BeeGameBuildBrief } from '../services/beeGameAdapter';
 import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import { useChatStore } from './chatStore';
+import { useSystemStore } from './systemStore';
 import type { ProductReadinessView } from '../types/message';
 
 const normalizeProjectTimestamp = (project: Project): Project => {
@@ -265,6 +266,14 @@ export const useProjectStore = create<ProjectState>()(
             projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
             pendingReviews: runtimeState.pendingReviews,
           });
+          const tokenBudget = runtimeState.status.context?.token_budget;
+          if (tokenBudget) {
+            useSystemStore.getState().updateTokenUsage({
+              prompt_tokens: Number(tokenBudget.prompt_tokens ?? tokenBudget.input_tokens) || 0,
+              completion_tokens: Number(tokenBudget.completion_tokens ?? tokenBudget.output_tokens) || 0,
+              total_tokens: Number(tokenBudget.total_tokens) || 0,
+            }, projectId);
+          }
         } catch (error) {
           if (
             getProjectStoreErrorStatus(error) !== 401 &&

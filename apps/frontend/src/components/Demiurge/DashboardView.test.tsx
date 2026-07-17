@@ -537,7 +537,8 @@ describe('DashboardView runtime loading', () => {
 
         await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
 
-        expect(screen.getByTestId('beegame-project-hint')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-project-hint')).toHaveClass('absolute', 'right-0', 'top-[calc(100%+0.75rem)]');
+        expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('left-5');
         expect(screen.getByText('平台')).toBeInTheDocument();
         expect(screen.getByText('Web')).toBeInTheDocument();
         expect(screen.getByText('输入 Tokens')).toBeInTheDocument();
