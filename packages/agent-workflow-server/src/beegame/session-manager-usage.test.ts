@@ -1,11 +1,22 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  calculateCreditWeightedTokens,
   getLatestRuntimeUsage,
   sumAssistantMessageUsage,
   type BeeGameEvent,
 } from './session-manager'
 
 describe('BeeGame assistant usage aggregation', () => {
+  test('prices cached input and output by cost-equivalent token weights', () => {
+    expect(calculateCreditWeightedTokens({
+      prompt_tokens: 254_542,
+      completion_tokens: 81_019,
+      cache_read_tokens: 6_089_231,
+      cache_creation_tokens: 0,
+      total_tokens: 6_424_792,
+    })).toBe(1_268_561)
+  })
+
   test('counts streamed fragments of one assistant message once', () => {
     const events = [
       assistantUsageEvent(1, 'turn-1', 'message-1', 20_000, 3_001),

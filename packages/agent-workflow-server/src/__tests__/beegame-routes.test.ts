@@ -2525,8 +2525,8 @@ describe('beegame session routes', () => {
 
       const creditsRes = await app.request('/api/credits')
       expect(await creditsRes.json()).toEqual(expect.objectContaining({
-        balanceCredits: 296,
-        consumedCredits: 4,
+        balanceCredits: 294,
+        consumedCredits: 6,
         reservedCredits: 0,
       }))
       const ledgerRes = await app.request('/api/credits/ledger')
@@ -2549,13 +2549,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 4,
-          weightedTokens: 40_000,
+          credits: 6,
+          weightedTokens: 51_750,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 46,
+          credits: 44,
           weightedTokens: undefined,
           projectId: session.id,
         },
@@ -2575,13 +2575,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 4,
-          weightedTokens: 40_000,
+          credits: 6,
+          weightedTokens: 51_750,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 46,
+          credits: 44,
           weightedTokens: undefined,
           projectId: session.id,
         },
@@ -2682,10 +2682,10 @@ describe('beegame session routes', () => {
       const summaryRes = await app.request(`/api/credits/summary?projectId=${projectId}`)
       expect(await summaryRes.json()).toEqual(expect.objectContaining({
         reservedCredits: 50,
-        settledCredits: 3,
-        refundedCredits: 47,
+        settledCredits: 4,
+        refundedCredits: 46,
         outstandingReservedCredits: 0,
-        weightedTokens: 23_001,
+        weightedTokens: 35_005,
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -2744,8 +2744,8 @@ describe('beegame session routes', () => {
 
       const creditsRes = await app.request('/api/credits')
       expect(await creditsRes.json()).toEqual(expect.objectContaining({
-        balanceCredits: 297,
-        consumedCredits: 3,
+        balanceCredits: 296,
+        consumedCredits: 4,
         reservedCredits: 0,
       }))
       expect(listCreditLedger(DEFAULT_LOCAL_USER_ID, { dataDir: projectsRoot })
@@ -2763,13 +2763,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 3,
-          weightedTokens: 23_001,
+          credits: 4,
+          weightedTokens: 35_005,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 47,
+          credits: 46,
           weightedTokens: undefined,
           projectId: session.id,
         },
@@ -2845,13 +2845,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 2,
-          weightedTokens: 12_500,
+          credits: 3,
+          weightedTokens: 22_500,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 48,
+          credits: 47,
           weightedTokens: undefined,
           projectId: session.id,
         },
@@ -2973,13 +2973,13 @@ describe('beegame session routes', () => {
         },
         {
           kind: 'settle',
-          credits: 2,
-          weightedTokens: 17_500,
+          credits: 3,
+          weightedTokens: 27_500,
           projectId: session.id,
         },
         {
           kind: 'refund',
-          credits: 48,
+          credits: 47,
           weightedTokens: undefined,
           projectId: session.id,
         },

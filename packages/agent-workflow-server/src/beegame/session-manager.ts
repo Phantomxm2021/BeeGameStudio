@@ -277,6 +277,7 @@ type PendingCreditOperation =
       policy: BeeGameCreditTaskPolicy
       weightedTokens: number
       settleToTotalTokens: number
+      settleToWeightedTokens: number
     }
   | {
       kind: 'refund'
@@ -306,6 +307,7 @@ type SessionRecord = {
   nextTurnIndex: number
   currentTurnId: string | null
   lastSettledTotalTokens: number
+  lastSettledWeightedTokens: number
   pendingCreditOperation: PendingCreditOperation | null
   pendingCreditRetryInFlight: boolean
   pendingCreditRetryFailures: number
@@ -487,6 +489,9 @@ export class BeeGameSessionManager {
       lastSettledTotalTokens: recoveredTranscript
         ? getLatestRuntimeUsage(recoveredTranscript.events).total_tokens
         : 0,
+      lastSettledWeightedTokens: recoveredTranscript
+        ? calculateCreditWeightedTokens(getLatestRuntimeUsage(recoveredTranscript.events))
+        : 0,
       pendingCreditOperation: recoverPendingCreditOperation(
         recoveredTranscript?.events ?? [],
       ),
@@ -551,6 +556,8 @@ export class BeeGameSessionManager {
             workspacePath: record.session.cwd,
             totalTokens: operation.settleToTotalTokens,
             previousSettledTotalTokens: record.lastSettledTotalTokens,
+            weightedTokenTotal: operation.settleToWeightedTokens,
+            previousSettledWeightedTokens: record.lastSettledWeightedTokens,
             retry: true,
           },
           ...(record.authToken ? { authToken: record.authToken } : {}),
@@ -558,6 +565,10 @@ export class BeeGameSessionManager {
         record.lastSettledTotalTokens = Math.max(
           record.lastSettledTotalTokens,
           operation.settleToTotalTokens,
+        )
+        record.lastSettledWeightedTokens = Math.max(
+          record.lastSettledWeightedTokens,
+          operation.settleToWeightedTokens,
         )
         record.pendingCreditOperation = null
         record.pendingCreditRetryFailures = 0
@@ -1375,9 +1386,10 @@ export class BeeGameSessionManager {
     policy: BeeGameCreditTaskPolicy,
   ): Promise<boolean> {
     const usage = this.deriveRuntimeSnapshot(record).usage
+    const weightedTokenTotal = calculateCreditWeightedTokens(usage)
     const tokenDelta = Math.max(
       0,
-      usage.total_tokens - record.lastSettledTotalTokens,
+      weightedTokenTotal - record.lastSettledWeightedTokens,
     )
     if (tokenDelta <= 0) return false
     let settlement: CreditSettlement
@@ -1400,6 +1412,9 @@ export class BeeGameSessionManager {
           workspacePath: record.session.cwd,
           totalTokens: usage.total_tokens,
           previousSettledTotalTokens: record.lastSettledTotalTokens,
+          weightedTokenTotal,
+          previousSettledWeightedTokens: record.lastSettledWeightedTokens,
+          creditWeights: CREDIT_TOKEN_WEIGHTS,
         },
         ...(record.authToken ? { authToken: record.authToken } : {}),
       })
@@ -1410,6 +1425,7 @@ export class BeeGameSessionManager {
         policy,
         weightedTokens: tokenDelta,
         settleToTotalTokens: usage.total_tokens,
+        settleToWeightedTokens: weightedTokenTotal,
       }
       record.pendingCreditRetryFailures = 0
       record.pendingCreditRetryAfter = 0
@@ -1423,6 +1439,7 @@ export class BeeGameSessionManager {
       return true
     }
     record.lastSettledTotalTokens = usage.total_tokens
+    record.lastSettledWeightedTokens = weightedTokenTotal
     this.append(record, 'system.status', 'Credit settled', {
       type: 'credit.settled',
       reservationId: reservation.id,
@@ -1708,13 +1725,17 @@ function parsePendingCreditOperation(
   const policy = parseCreditTaskPolicy(record.policy)
   const weightedTokens = normalizeNonNegativeInteger(record.weightedTokens)
   const settleToTotalTokens = normalizeNonNegativeInteger(record.settleToTotalTokens)
-  if (!policy || weightedTokens <= 0 || settleToTotalTokens <= 0) return null
+  const settleToWeightedTokens = normalizeNonNegativeInteger(
+    record.settleToWeightedTokens ?? weightedTokens,
+  )
+  if (!policy || weightedTokens <= 0 || settleToTotalTokens <= 0 || settleToWeightedTokens <= 0) return null
   return {
     kind: 'settle',
     reservation,
     policy,
     weightedTokens,
     settleToTotalTokens,
+    settleToWeightedTokens,
   }
 }
 
@@ -2066,6 +2087,30 @@ export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSna
     addRuntimeUsage(total, usage)
     return total
   }, emptyRuntimeUsage())
+}
+
+export const CREDIT_TOKEN_WEIGHTS = {
+  input: 1,
+  cacheRead: 0.1,
+  cacheCreation: 1.25,
+  output: 5,
+} as const
+
+/**
+ * Converts cumulative model usage into cost-equivalent input tokens. The
+ * ratios mirror the provider cost shape exposed by Claude-compatible SDK
+ * modelUsage: cached reads are discounted, cache writes carry a premium, and
+ * generated output is materially more expensive than uncached input.
+ */
+export function calculateCreditWeightedTokens(
+  usage: BeeGameRuntimeSnapshot['usage'],
+): number {
+  const hundredths =
+    normalizeFiniteNumber(usage.prompt_tokens) * 100 +
+    normalizeFiniteNumber(usage.cache_read_tokens) * 10 +
+    normalizeFiniteNumber(usage.cache_creation_tokens) * 125 +
+    normalizeFiniteNumber(usage.completion_tokens) * 500
+  return Math.ceil(hundredths / 100)
 }
 
 function getRuntimeUsageForTurn(
