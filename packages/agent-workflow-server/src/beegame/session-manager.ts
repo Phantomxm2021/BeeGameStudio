@@ -2077,14 +2077,14 @@ function hasNativeFinalResult(
 }
 
 export function getLatestRuntimeUsage(events: BeeGameEvent[]): BeeGameRuntimeSnapshot['usage'] {
-  // Claude SDK result.modelUsage is a cumulative snapshot for the resumed native
-  // session. Summing snapshots (or grouping them by BeeGame turn) bills the same
-  // tokens repeatedly. The newest valid snapshot is therefore authoritative.
-  for (const event of [...events].reverse()) {
-    if (event.type !== 'result') continue
-    const usage = getModelUsageFromEventPayload(event.payload)
-    if (usage) return usage
-  }
+  // Claude SDK result.modelUsage is cumulative while one native accounting
+  // epoch remains active. A resumed/compacted native session may start a new
+  // epoch whose counters are lower than the previous terminal snapshot. Keep
+  // only the latest snapshot inside each monotonic epoch, then add the epochs;
+  // summing every result double-counts while taking only the final result loses
+  // all usage before a native counter reset.
+  const modelUsage = aggregateCumulativeModelUsage(events)
+  if (modelUsage) return modelUsage
 
   // Older/partial transports do not always expose modelUsage. Preserve the
   // message-level fallback for those sessions; unlike modelUsage these values
@@ -2136,14 +2136,26 @@ function getRuntimeUsageForTurn(
   events: BeeGameEvent[],
   turnId?: string,
 ): BeeGameRuntimeSnapshot['usage'] {
+  if (turnId) {
+    const firstTurnEventIndex = events.findIndex(event => event.turnId === turnId)
+    const lastTurnEventIndex = events.findLastIndex(event => event.turnId === turnId)
+    if (firstTurnEventIndex >= 0 && lastTurnEventIndex >= firstTurnEventIndex) {
+      const throughTurn = aggregateCumulativeModelUsage(
+        events.slice(0, lastTurnEventIndex + 1),
+      )
+      if (throughTurn) {
+        const beforeTurn = aggregateCumulativeModelUsage(
+          events.slice(0, firstTurnEventIndex),
+        )
+        return subtractRuntimeUsage(throughTurn, beforeTurn ?? emptyRuntimeUsage())
+      }
+    }
+  }
   const scopedEvents = turnId
     ? events.filter(event => event.turnId === turnId)
     : events
-  for (const event of [...scopedEvents].reverse()) {
-    if (event.type !== 'result') continue
-    const usage = getModelUsageFromEventPayload(event.payload)
-    if (usage) return usage
-  }
+  const modelUsage = aggregateCumulativeModelUsage(scopedEvents)
+  if (modelUsage) return modelUsage
 
   for (const event of [...scopedEvents].reverse()) {
     if (event.type !== 'result') continue
@@ -2176,6 +2188,7 @@ function deriveLatestTurnDiagnostics(
   const turnId = [...events].reverse().find(event => event.turnId)?.turnId
   if (!turnId) return undefined
   const turnEvents = events.filter(event => event.turnId === turnId)
+  const usage = getRuntimeUsageForTurn(events, turnId)
   const countTool = (toolName: string) => turnEvents.filter(event => (
     event.type === 'tool.started' &&
     getDashboardPayloadString(event.payload, 'toolName') === toolName
@@ -2184,15 +2197,16 @@ function deriveLatestTurnDiagnostics(
     turnId,
     agentCalls: countTool('Agent'),
     taskOutputCalls: countTool('TaskOutput'),
-    usage: getRuntimeUsageForTurn(turnEvents),
-    roleTokens: deriveObservedRoleTokens(turnEvents),
+    usage,
+    roleTokens: deriveObservedRoleTokens(turnEvents, usage),
   }
 }
 
 function deriveObservedRoleTokens(
   events: BeeGameEvent[],
+  usage = getRuntimeUsageForTurn(events),
 ): NonNullable<BeeGameRuntimeSnapshot['turnDiagnostics']>['roleTokens'] {
-  const total = getRuntimeUsageForTurn(events).total_tokens
+  const total = usage.total_tokens
   const roleByToolUse = new Map<string, string>()
   for (const event of events) {
     if (event.type !== 'tool.started') continue
@@ -2314,6 +2328,65 @@ function getModelUsageFromEventPayload(
     })
   }
   return found ? total : null
+}
+
+function aggregateCumulativeModelUsage(
+  events: BeeGameEvent[],
+): BeeGameRuntimeSnapshot['usage'] | null {
+  const epochs: BeeGameRuntimeSnapshot['usage'][] = []
+  let latestInEpoch: BeeGameRuntimeSnapshot['usage'] | null = null
+  for (const event of events) {
+    if (event.type !== 'result') continue
+    const snapshot = getModelUsageFromEventPayload(event.payload)
+    if (!snapshot) continue
+    if (latestInEpoch && hasCumulativeCounterReset(latestInEpoch, snapshot)) {
+      epochs.push(latestInEpoch)
+    }
+    latestInEpoch = snapshot
+  }
+  if (latestInEpoch) epochs.push(latestInEpoch)
+  if (epochs.length === 0) return null
+  return epochs.reduce((total, usage) => {
+    addRuntimeUsage(total, usage)
+    return total
+  }, emptyRuntimeUsage())
+}
+
+function hasCumulativeCounterReset(
+  previous: BeeGameRuntimeSnapshot['usage'],
+  current: BeeGameRuntimeSnapshot['usage'],
+): boolean {
+  return current.prompt_tokens < previous.prompt_tokens ||
+    current.completion_tokens < previous.completion_tokens ||
+    current.cache_read_tokens < previous.cache_read_tokens ||
+    current.cache_creation_tokens < previous.cache_creation_tokens
+}
+
+function subtractRuntimeUsage(
+  total: BeeGameRuntimeSnapshot['usage'],
+  previous: BeeGameRuntimeSnapshot['usage'],
+): BeeGameRuntimeSnapshot['usage'] {
+  const promptTokens = Math.max(0, total.prompt_tokens - previous.prompt_tokens)
+  const completionTokens = Math.max(
+    0,
+    total.completion_tokens - previous.completion_tokens,
+  )
+  const cacheReadTokens = Math.max(
+    0,
+    total.cache_read_tokens - previous.cache_read_tokens,
+  )
+  const cacheCreationTokens = Math.max(
+    0,
+    total.cache_creation_tokens - previous.cache_creation_tokens,
+  )
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    cache_read_tokens: cacheReadTokens,
+    cache_creation_tokens: cacheCreationTokens,
+    total_tokens:
+      promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens,
+  }
 }
 
 function emptyRuntimeUsage(): BeeGameRuntimeSnapshot['usage'] {

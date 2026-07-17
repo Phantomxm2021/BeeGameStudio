@@ -100,6 +100,56 @@ describe('BeeGame assistant usage aggregation', () => {
       total_tokens: 735,
     })
   })
+
+  test('adds terminal snapshots from distinct native accounting epochs', () => {
+    const events = [
+      resultModelUsageEvent(1, 'turn-1', {
+        inputTokens: 700,
+        outputTokens: 90,
+        cacheReadInputTokens: 8_000,
+        cacheCreationInputTokens: 40,
+      }),
+      resultModelUsageEvent(2, 'turn-2', {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 900,
+        cacheCreationInputTokens: 5,
+      }),
+      resultModelUsageEvent(3, 'turn-3', {
+        inputTokens: 180,
+        outputTokens: 35,
+        cacheReadInputTokens: 1_400,
+        cacheCreationInputTokens: 8,
+      }),
+    ]
+
+    expect(getLatestRuntimeUsage(events)).toEqual({
+      prompt_tokens: 880,
+      completion_tokens: 125,
+      cache_read_tokens: 9_400,
+      cache_creation_tokens: 48,
+      total_tokens: 10_453,
+    })
+  })
+
+  test('does not mistake identical cumulative snapshots for new epochs', () => {
+    const snapshot = {
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadInputTokens: 500,
+      cacheCreationInputTokens: 10,
+    }
+    expect(getLatestRuntimeUsage([
+      resultModelUsageEvent(1, 'turn-1', snapshot),
+      resultModelUsageEvent(2, 'turn-2', snapshot),
+    ])).toEqual({
+      prompt_tokens: 120,
+      completion_tokens: 30,
+      cache_read_tokens: 500,
+      cache_creation_tokens: 10,
+      total_tokens: 660,
+    })
+  })
 })
 
 function assistantUsageEvent(
