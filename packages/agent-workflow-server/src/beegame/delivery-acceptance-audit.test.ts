@@ -63,9 +63,9 @@ describe('native delivery acceptance gate', () => {
     }).state).toBe('stale')
   })
 
-  test('captures an exact terminal result from the native background task lifecycle', async () => {
+  test('captures an exact terminal result from the native foreground Agent lifecycle', async () => {
     workspace = await createWorkspace()
-    recordBackgroundResult(workspace, passingReport())
+    recordForegroundResult(workspace, passingReport())
 
     expect(evaluate(workspace)).toEqual({
       allowed: true,
@@ -74,11 +74,11 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
-  test('binds a background result to the revision at its original Agent dispatch', async () => {
+  test('binds a foreground result to the revision at its original Agent dispatch', async () => {
     workspace = await createWorkspace()
-    const pending = startBackgroundValidator(workspace)
+    const pending = startForegroundValidator(workspace)
     await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
-    completeBackgroundValidator(workspace, pending, passingReport())
+    completeForegroundValidator(workspace, pending, passingReport())
 
     expect(getObservedNativeAcceptance({
       dataRoot: dataRootFor(workspace),
@@ -110,14 +110,9 @@ describe('native delivery acceptance gate', () => {
     })).toEqual({ state: 'missing' })
   })
 
-  test('rejects prose-wrapped JSON inside a native TaskOutput envelope', async () => {
+  test('rejects prose-wrapped JSON from the foreground Validator result', async () => {
     workspace = await createWorkspace()
-    const pending = startBackgroundValidator(workspace)
-    completeBackgroundValidator(
-      workspace,
-      pending,
-      `Validation complete. ${JSON.stringify(passingReport())}`,
-    )
+    recordForegroundResult(workspace, `Validation complete. ${JSON.stringify(passingReport())}`)
 
     expect(getObservedNativeAcceptance({
       dataRoot: dataRootFor(workspace),
@@ -309,11 +304,9 @@ function record(
   })
 }
 
-function startBackgroundValidator(workspace: string): {
-  taskId: string
+function startForegroundValidator(workspace: string): {
   toolUseID: string
 } {
-  const taskId = 'native-validator-task'
   const toolUseID = 'native-validator-agent-tool'
   observeNativeAcceptanceToolEvent({
     dataRoot: dataRootFor(workspace),
@@ -327,25 +320,12 @@ function startBackgroundValidator(workspace: string): {
     },
     createdAt: new Date(),
   })
-  observeNativeAcceptanceToolEvent({
-    dataRoot: dataRootFor(workspace),
-    sessionId: TEST_SESSION_ID,
-    workspacePath: workspace,
-    eventType: 'system.status',
-    payload: {
-      type: 'system',
-      subtype: 'task_started',
-      task_id: taskId,
-      tool_use_id: toolUseID,
-    },
-    createdAt: new Date(),
-  })
-  return { taskId, toolUseID }
+  return { toolUseID }
 }
 
-function completeBackgroundValidator(
+function completeForegroundValidator(
   workspace: string,
-  pending: { taskId: string; toolUseID: string },
+  pending: { toolUseID: string },
   report: unknown,
 ): void {
   observeNativeAcceptanceToolEvent({
@@ -354,17 +334,17 @@ function completeBackgroundValidator(
     workspacePath: workspace,
     eventType: 'tool.completed',
     payload: {
-      toolName: 'TaskOutput',
-      toolUseID: `${pending.toolUseID}-output`,
-      input: { task_id: pending.taskId, block: true },
-      output: nativeTaskOutput(report),
+      toolName: 'Agent',
+      toolUseID: pending.toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+      output: typeof report === 'string' ? report : JSON.stringify(report),
     },
     createdAt: new Date(),
   })
 }
 
-function recordBackgroundResult(workspace: string, report: unknown): void {
-  completeBackgroundValidator(workspace, startBackgroundValidator(workspace), report)
+function recordForegroundResult(workspace: string, report: unknown): void {
+  completeForegroundValidator(workspace, startForegroundValidator(workspace), report)
 }
 
 function nativeTaskOutput(report: unknown): string {

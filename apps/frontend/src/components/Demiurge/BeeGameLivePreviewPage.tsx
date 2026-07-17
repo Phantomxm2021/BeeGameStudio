@@ -34,6 +34,13 @@ interface BeeGameLivePreviewPageProps {
     inputTokens: number;
     cachedInputTokens: number;
     outputTokens: number;
+    roleTokens?: {
+        mainAgent: number;
+        reviewer: number;
+        validator: number;
+        otherSubagents: number;
+        waiting: number;
+    };
     credits?: {
         settledCredits: number;
         outstandingReservedCredits: number;
@@ -135,6 +142,7 @@ export function BeeGameLivePreviewPage({
     inputTokens,
     cachedInputTokens,
     outputTokens,
+    roleTokens,
     credits,
     accountCreditBalance,
     isSyncing,
@@ -354,6 +362,16 @@ export function BeeGameLivePreviewPage({
                             <ProjectHintRow label={labels.inputTokens || 'Input tokens'} value={inputTokens.toLocaleString()} />
                             <ProjectHintRow label={labels.cachedInputTokens || 'Cached input tokens'} value={cachedInputTokens.toLocaleString()} />
                             <ProjectHintRow label={labels.outputTokens || 'Output tokens'} value={outputTokens.toLocaleString()} />
+                            {roleTokens ? (
+                                <>
+                                    <div className="my-2 border-t border-zinc-800" />
+                                    <ProjectHintRow label={labels.mainAgentTokens || 'Main Agent'} value={roleTokens.mainAgent.toLocaleString()} />
+                                    <ProjectHintRow label={labels.reviewerTokens || 'Reviewer'} value={roleTokens.reviewer.toLocaleString()} />
+                                    <ProjectHintRow label={labels.validatorTokens || 'Validator'} value={roleTokens.validator.toLocaleString()} />
+                                    <ProjectHintRow label={labels.otherSubagentTokens || 'Other subagents'} value={roleTokens.otherSubagents.toLocaleString()} />
+                                    <ProjectHintRow label={labels.waitingTokens || 'Waiting'} value={roleTokens.waiting.toLocaleString()} />
+                                </>
+                            ) : null}
                             {credits ? (
                                 <>
                                     <ProjectHintRow label={labels.credits} value={credits.settledCredits.toLocaleString()} />

@@ -13,6 +13,7 @@ import {
   drainNativeBackgroundNotifications,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
+  parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
   type MutableAppState,
   stopRunningLocalShellTasks,
@@ -107,7 +108,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         waits += 1
         running = false
         queued.push({
-          value: '<task-notification>review complete</task-notification>',
+          value: '<task-notification><task-id>review-1</task-id><status>completed</status><result>review complete</result></task-notification>',
           mode: 'task-notification',
           uuid: 'notification-1',
         })
@@ -117,7 +118,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     expect(waits).toBe(1)
     expect(progressFlushes).toBeGreaterThanOrEqual(2)
     expect(processed).toEqual([
-      '<task-notification>review complete</task-notification>',
+      '<task-notification><task-id>review-1</task-id><status>completed</status><result>review complete</result></task-notification>',
     ])
   })
 
@@ -128,8 +129,8 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     await drainNativeBackgroundNotifications({
       signal: controller.signal,
       takeNotifications: () => [
-        { value: 'first', mode: 'task-notification' },
-        { value: 'second', mode: 'task-notification' },
+        { value: '<task-notification><task-id>first</task-id><status>completed</status></task-notification>', mode: 'task-notification' },
+        { value: '<task-notification><task-id>second</task-id><status>completed</status></task-notification>', mode: 'task-notification' },
       ],
       hasRunningTasks: () => true,
       runNotification: async command => {
@@ -139,7 +140,36 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       waitForProgress: async () => {},
     })
 
-    expect(processed).toEqual(['first'])
+    expect(processed).toEqual(['<task-notification><task-id>first</task-id><status>completed</status></task-notification>'])
+  })
+
+  test('only resumes for unique terminal native task notifications', async () => {
+    const controller = new AbortController()
+    const processed: string[] = []
+    const terminal = '<task-notification><task-id>review-1</task-id><tool-use-id>tool-1</tool-use-id><status>completed</status></task-notification>'
+    const queued = [
+      { value: '<task-notification><task-id>review-1</task-id></task-notification>', mode: 'task-notification' },
+      { value: terminal, mode: 'task-notification' },
+      { value: terminal, mode: 'task-notification' },
+    ]
+    await drainNativeBackgroundNotifications({
+      signal: controller.signal,
+      takeNotifications: () => queued.splice(0),
+      hasRunningTasks: () => false,
+      runNotification: async command => { processed.push(String(command.value)) },
+    })
+    expect(processed).toEqual([terminal])
+  })
+
+  test('parses only the native terminal lifecycle envelope', () => {
+    expect(parseNativeTerminalTaskNotification({
+      value: '<task-notification><task-id>a</task-id><status>completed</status></task-notification>',
+      mode: 'task-notification',
+    })).toEqual({ key: 'a', taskId: 'a', status: 'completed' })
+    expect(parseNativeTerminalTaskNotification({
+      value: '<task-notification><task-id>a</task-id></task-notification>',
+      mode: 'task-notification',
+    })).toBeUndefined()
   })
 
   test('fails before a Claude turn when required native delivery agents were not discovered', () => {

@@ -163,6 +163,13 @@ export type BeeGameRuntimeSnapshot = {
     cache_creation_tokens: number
     total_tokens: number
   }
+  roleTokens: {
+    mainAgent: number
+    reviewer: number
+    validator: number
+    otherSubagents: number
+    waiting: number
+  }
   turnDiagnostics?: {
     turnId: string
     agentCalls: number
@@ -173,6 +180,13 @@ export type BeeGameRuntimeSnapshot = {
       cache_read_tokens: number
       cache_creation_tokens: number
       total_tokens: number
+    }
+    roleTokens: {
+      mainAgent: number
+      reviewer: number
+      validator: number
+      otherSubagents: number
+      waiting: number
     }
   }
 }
@@ -1958,6 +1972,7 @@ function deriveRuntimeSnapshotFromEvents(
     phaseStatus: deriveSnapshotPhaseStatus(events, options),
     updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
     usage,
+    roleTokens: deriveObservedRoleTokens(events),
     ...(turnDiagnostics ? { turnDiagnostics } : {}),
   }
 }
@@ -2106,7 +2121,58 @@ function deriveLatestTurnDiagnostics(
     agentCalls: countTool('Agent'),
     taskOutputCalls: countTool('TaskOutput'),
     usage: getRuntimeUsageForTurn(turnEvents),
+    roleTokens: deriveObservedRoleTokens(turnEvents),
   }
+}
+
+function deriveObservedRoleTokens(
+  events: BeeGameEvent[],
+): NonNullable<BeeGameRuntimeSnapshot['turnDiagnostics']>['roleTokens'] {
+  const total = getRuntimeUsageForTurn(events).total_tokens
+  const roleByToolUse = new Map<string, string>()
+  for (const event of events) {
+    if (event.type !== 'tool.started') continue
+    if (getDashboardPayloadString(event.payload, 'toolName') !== 'Agent') continue
+    const payload = isRuntimeRecord(event.payload) ? event.payload : undefined
+    const input = payload && isRuntimeRecord(payload.input) ? payload.input : undefined
+    const toolUseID = typeof payload?.toolUseID === 'string' ? payload.toolUseID : ''
+    const role = typeof input?.subagent_type === 'string' ? input.subagent_type : ''
+    if (toolUseID && role) roleByToolUse.set(toolUseID, role)
+  }
+
+  const latestTerminalByTask = new Map<string, { role: string; tokens: number }>()
+  for (const event of events) {
+    if (event.type !== 'system.status' || !isRuntimeRecord(event.payload)) continue
+    if (getDashboardPayloadString(event.payload, 'subtype') !== 'task_notification') continue
+    const taskId = getDashboardPayloadString(event.payload, 'task_id')
+    const toolUseID = getDashboardPayloadString(event.payload, 'tool_use_id')
+    const usage = isRuntimeRecord(event.payload.usage) ? event.payload.usage : undefined
+    if (!taskId || !toolUseID || !usage) continue
+    latestTerminalByTask.set(taskId, {
+      role: roleByToolUse.get(toolUseID) ?? 'other',
+      tokens: normalizeFiniteNumber(usage.total_tokens),
+    })
+  }
+
+  let reviewer = 0
+  let validator = 0
+  let otherSubagents = 0
+  for (const value of latestTerminalByTask.values()) {
+    if (value.role === 'beegame-document-reviewer') reviewer += value.tokens
+    else if (value.role === 'beegame-acceptance-validator') validator += value.tokens
+    else otherSubagents += value.tokens
+  }
+  return {
+    mainAgent: Math.max(0, total - reviewer - validator - otherSubagents),
+    reviewer,
+    validator,
+    otherSubagents,
+    waiting: 0,
+  }
+}
+
+function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function getAssistantUsageIdentity(event: BeeGameEvent): string {
@@ -2258,6 +2324,7 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       cache_creation_tokens: Number(usage.cache_creation_tokens ?? 0),
       total_tokens: Number(usage.total_tokens ?? 0),
     },
+    roleTokens: normalizeRoleTokens(record.roleTokens),
     ...(record.turnDiagnostics && typeof record.turnDiagnostics === 'object' && !Array.isArray(record.turnDiagnostics)
       ? normalizeTurnDiagnostics(record.turnDiagnostics as Record<string, unknown>)
       : {}),
@@ -2282,7 +2349,21 @@ function normalizeTurnDiagnostics(
         cache_creation_tokens: Number(usage.cache_creation_tokens ?? 0),
         total_tokens: Number(usage.total_tokens ?? 0),
       },
+      roleTokens: normalizeRoleTokens(value.roleTokens),
     },
+  }
+}
+
+function normalizeRoleTokens(
+  value: unknown,
+): NonNullable<BeeGameRuntimeSnapshot['turnDiagnostics']>['roleTokens'] {
+  const record = isRuntimeRecord(value) ? value : {}
+  return {
+    mainAgent: Number(record.mainAgent ?? 0),
+    reviewer: Number(record.reviewer ?? 0),
+    validator: Number(record.validator ?? 0),
+    otherSubagents: Number(record.otherSubagents ?? 0),
+    waiting: 0,
   }
 }
 
@@ -3149,10 +3230,20 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
       return mapTextEvent('result', extractMessageText(message))
     case 'system':
     case 'status':
-      return mapTextEvent('system.status', extractMessageText(message))
+      return mapNativeTaskLifecycleEvent(message) ?? mapTextEvent('system.status', extractMessageText(message))
     default:
       return mapTextEvent('system.status', extractMessageText(message))
   }
+}
+
+function mapNativeTaskLifecycleEvent(message: DashboardSDKMessage): {
+  type: BeeGameEventType
+  text: string
+  payload: DashboardSDKMessage
+} | null {
+  const subtype = getStringField(message, 'subtype')
+  if (subtype !== 'task_started' && subtype !== 'task_notification') return null
+  return { type: 'system.status', text: subtype, payload: message }
 }
 
 function isSDKExecutionError(message: DashboardSDKMessage): boolean {

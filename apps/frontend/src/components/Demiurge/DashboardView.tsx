@@ -597,6 +597,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 inputTokens={displayedTokenUsage.inputTokens}
                 cachedInputTokens={displayedTokenUsage.cachedInputTokens}
                 outputTokens={displayedTokenUsage.outputTokens}
+                roleTokens={projectStatus?.context?.token_budget?.role_tokens ? {
+                    mainAgent: Number(projectStatus.context.token_budget.role_tokens.mainAgent) || 0,
+                    reviewer: Number(projectStatus.context.token_budget.role_tokens.reviewer) || 0,
+                    validator: Number(projectStatus.context.token_budget.role_tokens.validator) || 0,
+                    otherSubagents: Number(projectStatus.context.token_budget.role_tokens.otherSubagents) || 0,
+                    waiting: 0,
+                } : undefined}
                 credits={creditSummary}
                 accountCreditBalance={creditBalance}
                 isSyncing={isSyncing}

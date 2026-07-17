@@ -3940,6 +3940,13 @@ function deriveBeeGameContextVisibility(
       cache_read_tokens: usage.cache_read_tokens,
       cache_creation_tokens: usage.cache_creation_tokens,
       total_tokens: usage.total_tokens,
+      role_tokens: snapshot?.roleTokens ?? {
+        mainAgent: usage.total_tokens,
+        reviewer: 0,
+        validator: 0,
+        otherSubagents: 0,
+        waiting: 0,
+      },
     },
     counters: {
       eventCount: events.length,
@@ -5307,7 +5314,7 @@ function buildConfirmedBriefPrompt(
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
     'Pass the canonical confirmed brief and selected document language to one native beegame-document-reviewer subagent for the current document revision. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first. If the native Agent tool reports that this reviewer is running asynchronously and will notify you when it finishes, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session.',
     '',
-    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, ask one native beegame-acceptance-validator subagent for that exact workspace revision to independently run the project-native checks and observable player paths. Do not change project files while that Validator is running. If the native Agent tool reports that this Validator is running asynchronously and will notify you when it finishes, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session. Do not launch another Validator for the same unchanged revision. If validation fails, repair the observed findings and validate the changed revision again. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
+    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, invoke exactly one native beegame-acceptance-validator subagent in the foreground for that exact workspace revision (run_in_background must be false). The Validator must return its one terminal JSON object directly as the Agent tool result. Never use TaskOutput or read a temporary task output file as acceptance evidence. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. If validation fails, repair only the observed findings first, then validate the changed revision and require one final complete player-path smoke pass. If no valid terminal Validator JSON is returned, the delivery remains incomplete. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
     '',
     'Confirmed brief:',
     confirmedBrief,

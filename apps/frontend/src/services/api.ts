@@ -176,6 +176,13 @@ export interface ContextVisibilityPayload {
     cache_read_tokens?: number;
     cache_creation_tokens?: number;
     total_tokens?: number;
+    role_tokens?: {
+      mainAgent?: number;
+      reviewer?: number;
+      validator?: number;
+      otherSubagents?: number;
+      waiting?: number;
+    };
   };
   counters?: Record<string, number>;
 }

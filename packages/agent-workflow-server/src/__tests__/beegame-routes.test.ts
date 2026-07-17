@@ -2438,9 +2438,9 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
       expect(submitted).toContain('beegame-acceptance-validator')
-      expect(submitted).toContain('do not poll TaskOutput or read its output file')
-      expect(submitted).toContain('yield that response so the native task notification can resume this same session')
-      expect(submitted).toContain('Do not launch another Validator for the same unchanged revision')
+      expect(submitted).toContain('run_in_background must be false')
+      expect(submitted).toContain('Never use TaskOutput or read a temporary task output file as acceptance evidence')
+      expect(submitted).toContain('do not launch another Validator for the same unchanged revision')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
     } finally {
@@ -2458,10 +2458,18 @@ describe('beegame session routes', () => {
         message: {
           content: [
             { type: 'text', text: 'Built with usage.' },
-            { type: 'tool_use', id: 'agent-call', name: 'Agent', input: {} },
+            { type: 'tool_use', id: 'agent-call', name: 'Agent', input: { subagent_type: 'beegame-document-reviewer' } },
             { type: 'tool_use', id: 'task-output-call', name: 'TaskOutput', input: {} },
           ],
         },
+      },
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'review-task',
+        tool_use_id: 'agent-call',
+        status: 'completed',
+        usage: { total_tokens: 500 },
       },
       {
         type: 'result',
@@ -2590,6 +2598,13 @@ describe('beegame session routes', () => {
           cache_creation_tokens: 1_000,
           total_tokens: 40_000,
         },
+        roleTokens: {
+          mainAgent: 39_500,
+          reviewer: 500,
+          validator: 0,
+          otherSubagents: 0,
+          waiting: 0,
+        },
         turnDiagnostics: expect.objectContaining({
           agentCalls: 1,
           taskOutputCalls: 1,
@@ -2599,6 +2614,13 @@ describe('beegame session routes', () => {
             cache_read_tokens: 5_000,
             cache_creation_tokens: 1_000,
             total_tokens: 40_000,
+          },
+          roleTokens: {
+            mainAgent: 39_500,
+            reviewer: 500,
+            validator: 0,
+            otherSubagents: 0,
+            waiting: 0,
           },
         }),
       }))
@@ -4244,7 +4266,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('records a native acceptance result from the real background TaskOutput lifecycle', async () => {
+  test('does not accept a background TaskOutput as delivery evidence', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-background-data-'))
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-background-project-'))
     await writeFile(join(workspace, 'game.txt'), 'current revision')
@@ -4329,14 +4351,7 @@ describe('beegame session routes', () => {
         dataRoot,
         sessionId: session.id,
         workspacePath: workspace,
-      })).toEqual({
-        state: 'current',
-        evidence: expect.objectContaining({
-          status: 'passed',
-          summary: report.summary,
-          toolUseID: 'tool_native_background_acceptance',
-        }),
-      })
+      })).toEqual({ state: 'missing' })
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
       await rm(workspace, { recursive: true, force: true })

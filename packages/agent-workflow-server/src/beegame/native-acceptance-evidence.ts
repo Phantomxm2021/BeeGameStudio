@@ -43,18 +43,6 @@ type NativeAcceptanceDispatch = {
   createdAt: string
 }
 
-type NativeAcceptanceBackgroundTask = {
-  version: 3
-  kind: 'background-task'
-  sessionId: string
-  turnId?: string
-  taskId: string
-  toolUseID: string
-  validatorId: string
-  workspaceDigest: string
-  createdAt: string
-}
-
 export type NativeAcceptanceEvidence = {
   version: 3
   kind: 'result'
@@ -73,7 +61,6 @@ export type NativeAcceptanceEvidence = {
 
 type NativeAcceptanceObservation =
   | NativeAcceptanceDispatch
-  | NativeAcceptanceBackgroundTask
   | NativeAcceptanceEvidence
 
 const REQUIRED_PASSING_EVIDENCE = new Set<NativeAcceptanceEvidenceKind>([
@@ -102,16 +89,7 @@ export function observeNativeAcceptanceToolEvent(input: {
 }): void {
   if (!isRecord(input.payload)) return
 
-  if (input.eventType === 'system.status') {
-    observeBackgroundTaskStart({ ...input, payload: input.payload })
-    return
-  }
-
   const toolName = stringValue(input.payload.toolName)
-  if (toolName === 'TaskOutput' && input.eventType === 'tool.completed') {
-    observeBackgroundTaskResult({ ...input, payload: input.payload })
-    return
-  }
   if (toolName !== 'Agent') return
   const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
   const validatorId = stringValue(toolInput.subagent_type)
@@ -158,92 +136,6 @@ export function observeNativeAcceptanceToolEvent(input: {
     summary: report.summary,
     reportDigest: digestJson(report),
     workspaceDigest: dispatch.workspaceDigest,
-    evidence: report.evidence,
-    findings: report.findings,
-    createdAt: input.createdAt.toISOString(),
-  })
-}
-
-function observeBackgroundTaskStart(input: {
-  dataRoot: string
-  sessionId: string
-  turnId?: string
-  eventType: string
-  payload: Record<string, unknown>
-  createdAt: Date
-}): void {
-  if (stringValue(input.payload.subtype) !== 'task_started') return
-  const taskId = stringValue(input.payload.task_id)
-  const toolUseID = stringValue(input.payload.tool_use_id)
-  if (!taskId || !toolUseID) return
-
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  if (observations.some(observation =>
-    observation.kind === 'background-task' &&
-    observation.taskId === taskId &&
-    observation.toolUseID === toolUseID
-  )) return
-  const dispatch = findLatestObservation(observations, observation =>
-    observation.kind === 'dispatch' && observation.toolUseID === toolUseID
-  )
-  if (!dispatch || dispatch.kind !== 'dispatch') return
-
-  appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
-    kind: 'background-task',
-    sessionId: input.sessionId,
-    ...(input.turnId ? { turnId: input.turnId } : {}),
-    taskId,
-    toolUseID,
-    validatorId: dispatch.validatorId,
-    workspaceDigest: dispatch.workspaceDigest,
-    createdAt: input.createdAt.toISOString(),
-  })
-}
-
-function observeBackgroundTaskResult(input: {
-  dataRoot: string
-  sessionId: string
-  turnId?: string
-  eventType: string
-  payload: Record<string, unknown>
-  createdAt: Date
-}): void {
-  const toolInput = isRecord(input.payload.input) ? input.payload.input : {}
-  const taskId = stringValue(toolInput.task_id)
-  if (!taskId) return
-
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const backgroundTask = findLatestObservation(observations, observation =>
-    observation.kind === 'background-task' && observation.taskId === taskId
-  )
-  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
-  if (observations.some(observation =>
-    observation.kind === 'result' &&
-    observation.toolUseID === backgroundTask.toolUseID
-  )) return
-
-  const terminalOutput = unwrapNativeTaskOutput(
-    stringValue(input.payload.output),
-  )
-  if (terminalOutput === undefined) return
-  const report = parseNativeAcceptanceReport(
-    terminalOutput,
-    backgroundTask.validatorId,
-  )
-  if (!report) return
-
-  appendObservation(input.dataRoot, input.sessionId, {
-    version: 3,
-    kind: 'result',
-    sessionId: input.sessionId,
-    ...(input.turnId ? { turnId: input.turnId } : {}),
-    toolUseID: backgroundTask.toolUseID,
-    validatorId: backgroundTask.validatorId,
-    status: report.status,
-    summary: report.summary,
-    reportDigest: digestJson(report),
-    workspaceDigest: backgroundTask.workspaceDigest,
     evidence: report.evidence,
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
@@ -408,7 +300,6 @@ function readObservations(
           observation.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
           (
             observation.kind === 'dispatch' ||
-            observation.kind === 'background-task' ||
             observation.kind === 'result'
           )
           ? [observation]
@@ -454,33 +345,6 @@ function parseTerminalJsonObject(text: string): Record<string, unknown> | undefi
   } catch {
     return undefined
   }
-}
-
-function unwrapNativeTaskOutput(text: string): string | undefined {
-  const openTag = '<output>'
-  const closeTag = '</output>'
-  const start = text.indexOf(openTag)
-  if (start < 0 || text.indexOf(openTag, start + openTag.length) >= 0) {
-    return undefined
-  }
-  const end = text.indexOf(closeTag, start + openTag.length)
-  if (
-    end < 0 ||
-    text.indexOf(closeTag, end + closeTag.length) >= 0 ||
-    text.slice(end + closeTag.length).trim()
-  ) return undefined
-  return text.slice(start + openTag.length, end).trim()
-}
-
-function findLatestObservation(
-  observations: NativeAcceptanceObservation[],
-  predicate: (observation: NativeAcceptanceObservation) => boolean,
-): NativeAcceptanceObservation | undefined {
-  for (let index = observations.length - 1; index >= 0; index -= 1) {
-    const observation = observations[index]
-    if (observation && predicate(observation)) return observation
-  }
-  return undefined
 }
 
 function stringValue(value: unknown): string {

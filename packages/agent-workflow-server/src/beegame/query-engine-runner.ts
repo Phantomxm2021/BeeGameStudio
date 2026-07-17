@@ -202,6 +202,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
   private activateNativeSession: (() => void) | null = null
   private notificationQueue: NativeNotificationQueue | null = null
   private sdkEventQueue: NativeSdkEventQueue | null = null
+  private readonly consumedTaskNotifications = new Set<string>()
 
   constructor(private readonly input: BeeGameSessionRunnerStartInput) {}
 
@@ -292,6 +293,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
             : {}),
         },
       ),
+      consumedNotificationKeys: this.consumedTaskNotifications,
     })
   }
 
@@ -567,6 +569,7 @@ export async function drainNativeBackgroundNotifications({
   runNotification,
   flushProgress = () => {},
   waitForProgress = waitForNativeBackgroundProgress,
+  consumedNotificationKeys = new Set<string>(),
 }: {
   signal: AbortSignal
   takeNotifications(): NativeQueuedCommand[]
@@ -574,12 +577,16 @@ export async function drainNativeBackgroundNotifications({
   runNotification(command: NativeQueuedCommand): Promise<void>
   flushProgress?(): void
   waitForProgress?(signal: AbortSignal): Promise<void>
+  consumedNotificationKeys?: Set<string>
 }): Promise<void> {
   while (!signal.aborted) {
     flushProgress()
     const notifications = takeNotifications()
     if (notifications.length > 0) {
       for (const notification of notifications) {
+        const terminal = parseNativeTerminalTaskNotification(notification)
+        if (!terminal || consumedNotificationKeys.has(terminal.key)) continue
+        consumedNotificationKeys.add(terminal.key)
         await runNotification(notification)
         if (signal.aborted) return
       }
@@ -591,6 +598,54 @@ export async function drainNativeBackgroundNotifications({
     }
     await waitForProgress(signal)
   }
+}
+
+type NativeTerminalTaskNotification = {
+  key: string
+  taskId?: string
+  toolUseId?: string
+  status: 'completed' | 'failed' | 'stopped' | 'killed'
+}
+
+/**
+ * Reads only Claude Code's native task-notification transport envelope. It
+ * does not interpret task output or make workflow decisions. Status-less
+ * progress notifications are deliberately not submitted to the model.
+ */
+export function parseNativeTerminalTaskNotification(
+  command: NativeQueuedCommand,
+): NativeTerminalTaskNotification | undefined {
+  if (typeof command.value !== 'string') return undefined
+  const value = command.value
+  const status = readXmlTransportField(value, 'status')
+  if (
+    status !== 'completed' &&
+    status !== 'failed' &&
+    status !== 'stopped' &&
+    status !== 'killed'
+  ) return undefined
+  const taskId = readXmlTransportField(value, 'task-id')
+  const toolUseId = readXmlTransportField(value, 'tool-use-id')
+  const key = toolUseId || taskId || command.uuid
+  if (!key) return undefined
+  return {
+    key,
+    ...(taskId ? { taskId } : {}),
+    ...(toolUseId ? { toolUseId } : {}),
+    status,
+  }
+}
+
+function readXmlTransportField(value: string, field: string): string | undefined {
+  const opening = `<${field}>`
+  const closing = `</${field}>`
+  const start = value.indexOf(opening)
+  if (start < 0) return undefined
+  const contentStart = start + opening.length
+  const end = value.indexOf(closing, contentStart)
+  if (end < 0) return undefined
+  const content = value.slice(contentStart, end).trim()
+  return content || undefined
 }
 
 async function waitForNativeBackgroundProgress(signal: AbortSignal): Promise<void> {
