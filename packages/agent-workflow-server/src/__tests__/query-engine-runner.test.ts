@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   closeBeeGameRuntimeDispatcher,
+  consumeNativeMessageStream,
   createNativeNotificationQueue,
   createNativeSdkEventQueue,
   createBeeGameToolPermissionContext,
@@ -14,6 +15,7 @@ import {
   getCompletedNativeTaskOutputTaskId,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
+  initializeBeeGameNativeQueryMode,
   parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
   type MutableAppState,
@@ -22,6 +24,17 @@ import {
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 
 describe('QueryEngineSessionRuntime shell cleanup', () => {
+
+  test('initializes embedded QueryEngine as Claude Code native non-interactive mode', () => {
+    const values: boolean[] = []
+    initializeBeeGameNativeQueryMode({
+      setIsInteractive(value: boolean) {
+        values.push(value)
+      },
+    })
+
+    expect(values).toEqual([false])
+  })
 
   test('maps the session language to a response-only native system preference', () => {
     expect(getBeeGameResponseLanguageInstruction('zh')).toBe(
@@ -70,6 +83,34 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       { type: 'system', subtype: 'task_notification', task_id: 'agent-1', status: 'completed' },
     ])
     expect(queue.drain()).toEqual([])
+  })
+
+  test('flushes native progress while a Claude message is still pending', async () => {
+    let releaseMessage = () => {}
+    const gate = new Promise<void>(resolve => { releaseMessage = resolve })
+    const messages: Array<{ type: string }> = []
+    let waits = 0
+    let flushes = 0
+
+    async function* stream() {
+      await gate
+      yield { type: 'assistant' }
+    }
+
+    await consumeNativeMessageStream({
+      stream: stream(),
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      flushProgress: () => { flushes += 1 },
+      waitForProgress: async () => {
+        waits += 1
+        if (waits === 2) releaseMessage()
+      },
+    })
+
+    expect(waits).toBeGreaterThanOrEqual(2)
+    expect(flushes).toBeGreaterThanOrEqual(3)
+    expect(messages).toEqual([{ type: 'assistant' }])
   })
 
   test('waits for native background work but excludes foreground tasks and long-lived teammates', () => {

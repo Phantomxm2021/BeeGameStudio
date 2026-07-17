@@ -21,10 +21,9 @@ describe('BeeGame billing app', () => {
       ])
 
       expect(result).not.toBe('timed-out')
-      expect((result as Response).status).toBe(401)
+      expect((result as Response).status).toBe(503)
       expect(await (result as Response).json()).toEqual({
-        error: 'Unauthorized',
-        message: 'authentication required',
+        error: 'Authentication service is temporarily unavailable',
       })
     } finally {
       if (originalTimeout === undefined) {

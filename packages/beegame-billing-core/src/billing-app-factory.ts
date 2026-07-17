@@ -46,7 +46,15 @@ export function createBeeGameBillingRouteApp(
       await next()
       return
     }
-    const user = await options.resolveRequestUser(c.req.raw)
+    let user: BeeGameBillingUserContext | undefined
+    try {
+      user = await options.resolveRequestUser(c.req.raw)
+    } catch (error) {
+      console.warn('[BeeGame billing] request user resolution unavailable:', error)
+      return c.json({
+        error: 'Authentication service is temporarily unavailable',
+      }, 503)
+    }
     if (!user) {
       return c.json({
         error: 'Unauthorized',

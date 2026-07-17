@@ -255,11 +255,21 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     if (input.signal.aborted) return
     this.activateNativeSession?.()
     engine.resetAbortController()
-    for await (const message of engine.submitMessage(prompt, options)) {
-      const consumedTaskId = getCompletedNativeTaskOutputTaskId(message)
-      if (consumedTaskId) this.consumedTaskNotifications.add(consumedTaskId)
-      input.onMessage(message)
-      if (input.signal.aborted) break
+    await consumeNativeMessageStream({
+      stream: engine.submitMessage(prompt, options),
+      signal: input.signal,
+      flushProgress: () => this.flushNativeSdkEvents(input),
+      onMessage: message => {
+        const consumedTaskId = getCompletedNativeTaskOutputTaskId(message)
+        if (consumedTaskId) this.consumedTaskNotifications.add(consumedTaskId)
+        input.onMessage(message)
+      },
+    })
+  }
+
+  private flushNativeSdkEvents(input: BeeGameSessionSubmitInput): void {
+    for (const event of this.sdkEventQueue?.drain() ?? []) {
+      input.onMessage(event)
     }
   }
 
@@ -279,11 +289,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       takeNotifications: () =>
         this.notificationQueue?.takeMainThreadTaskNotifications() ?? [],
       hasRunningTasks: () => hasRunningNativeBackgroundTasks(this.appState),
-      flushProgress: () => {
-        for (const event of this.sdkEventQueue?.drain() ?? []) {
-          input.onMessage(event)
-        }
-      },
+      flushProgress: () => this.flushNativeSdkEvents(input),
       runNotification: notification => this.runNativeTurn(
         engine,
         notification.value,
@@ -337,6 +343,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     this.notificationQueue = createNativeNotificationQueue(messageQueueModule)
     this.sdkEventQueue = createNativeSdkEventQueue(sdkEventQueueModule)
 
+    initializeBeeGameNativeQueryMode(bootstrapModule)
     call(configModule, 'enableConfigs')
     enableBeeGameRuntimeCompaction(configModule)
     call(
@@ -493,6 +500,65 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     })
 
     return this.engine
+  }
+}
+
+/**
+ * QueryEngine is the native non-interactive Claude Code entrypoint. BeeGame
+ * embeds it without running main.tsx, so mirror the entrypoint's bootstrap
+ * flag before tools and agents are assembled. Without this, feature-gated
+ * fork agents can mistake the dashboard worker for an interactive TUI and
+ * force every explicitly foreground subagent into the background.
+ *
+ * This does not implement a BeeGame task mode. It only keeps Claude Code's
+ * process-global bootstrap state consistent with QueryEngine's own
+ * `isNonInteractiveSession: true` tool context.
+ */
+export function initializeBeeGameNativeQueryMode(
+  bootstrapModule: Record<string, unknown>,
+): void {
+  call(bootstrapModule, 'setIsInteractive', false)
+}
+
+/**
+ * QueryEngine messages and native agent progress use separate Claude Code
+ * transports. Keep draining the progress transport while the next model or
+ * tool message is pending so the dashboard observes native progress in real
+ * time instead of receiving a large replay at turn completion. The messages
+ * are forwarded unchanged and never influence the native turn.
+ */
+export async function consumeNativeMessageStream({
+  stream,
+  signal,
+  onMessage,
+  flushProgress,
+  waitForProgress = waitForNativeBackgroundProgress,
+}: {
+  stream: AsyncIterable<DashboardSDKMessage>
+  signal: AbortSignal
+  onMessage(message: DashboardSDKMessage): void
+  flushProgress(): void
+  waitForProgress?(signal: AbortSignal): Promise<void>
+}): Promise<void> {
+  const iterator = stream[Symbol.asyncIterator]()
+  let pending = iterator.next()
+  try {
+    while (!signal.aborted) {
+      const outcome = await Promise.race([
+        pending.then(result => ({ kind: 'message' as const, result })),
+        waitForProgress(signal).then(() => ({ kind: 'progress' as const })),
+      ])
+      if (outcome.kind === 'progress') {
+        flushProgress()
+        continue
+      }
+      flushProgress()
+      if (outcome.result.done) return
+      onMessage(outcome.result.value)
+      pending = iterator.next()
+    }
+  } finally {
+    flushProgress()
   }
 }
 
