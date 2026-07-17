@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+} from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
 
@@ -43,6 +53,18 @@ type NativeAcceptanceDispatch = {
   createdAt: string
 }
 
+type NativeAcceptanceBackgroundTask = {
+  version: 3
+  kind: 'background-task'
+  sessionId: string
+  turnId?: string
+  taskId: string
+  toolUseID: string
+  validatorId: string
+  workspaceDigest: string
+  createdAt: string
+}
+
 export type NativeAcceptanceEvidence = {
   version: 3
   kind: 'result'
@@ -61,6 +83,7 @@ export type NativeAcceptanceEvidence = {
 
 type NativeAcceptanceObservation =
   | NativeAcceptanceDispatch
+  | NativeAcceptanceBackgroundTask
   | NativeAcceptanceEvidence
 
 const REQUIRED_PASSING_EVIDENCE = new Set<NativeAcceptanceEvidenceKind>([
@@ -88,6 +111,11 @@ export function observeNativeAcceptanceToolEvent(input: {
   createdAt: Date
 }): void {
   if (!isRecord(input.payload)) return
+
+  if (input.eventType === 'system.status') {
+    observeNativeBackgroundAcceptanceEvent({ ...input, payload: input.payload })
+    return
+  }
 
   const toolName = stringValue(input.payload.toolName)
   if (toolName !== 'Agent') return
@@ -140,6 +168,125 @@ export function observeNativeAcceptanceToolEvent(input: {
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
   })
+}
+
+function observeNativeBackgroundAcceptanceEvent(input: {
+  dataRoot: string
+  sessionId: string
+  workspacePath: string
+  turnId?: string
+  eventType: string
+  payload: Record<string, unknown>
+  createdAt: Date
+}): void {
+  const subtype = stringValue(input.payload.subtype)
+  const taskId = stringValue(input.payload.task_id)
+  const toolUseID = stringValue(input.payload.tool_use_id)
+  if (!taskId || !toolUseID) return
+
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (subtype === 'task_started') {
+    if (observations.some(observation =>
+      observation.kind === 'background-task' &&
+      observation.taskId === taskId &&
+      observation.toolUseID === toolUseID
+    )) return
+    const dispatch = observations.findLast(observation =>
+      observation.kind === 'dispatch' && observation.toolUseID === toolUseID
+    )
+    if (!dispatch || dispatch.kind !== 'dispatch') return
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 3,
+      kind: 'background-task',
+      sessionId: input.sessionId,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      taskId,
+      toolUseID,
+      validatorId: dispatch.validatorId,
+      workspaceDigest: dispatch.workspaceDigest,
+      createdAt: input.createdAt.toISOString(),
+    })
+    return
+  }
+
+  if (
+    subtype !== 'task_notification' ||
+    stringValue(input.payload.status) !== 'completed'
+  ) return
+  if (observations.some(observation =>
+    observation.kind === 'result' && observation.toolUseID === toolUseID
+  )) return
+  const backgroundTask = observations.findLast(observation =>
+    observation.kind === 'background-task' &&
+    observation.taskId === taskId &&
+    observation.toolUseID === toolUseID
+  )
+  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
+
+  const report = parseNativeAcceptanceReport(
+    readNativeBackgroundTaskTerminalText(stringValue(input.payload.output_file)),
+    backgroundTask.validatorId,
+  )
+  if (!report) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 3,
+    kind: 'result',
+    sessionId: input.sessionId,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    toolUseID,
+    validatorId: backgroundTask.validatorId,
+    status: report.status,
+    summary: report.summary,
+    reportDigest: digestJson(report),
+    workspaceDigest: backgroundTask.workspaceDigest,
+    evidence: report.evidence,
+    findings: report.findings,
+    createdAt: input.createdAt.toISOString(),
+  })
+}
+
+const MAX_NATIVE_TASK_OUTPUT_BYTES = 16 * 1024 * 1024
+
+function readNativeBackgroundTaskTerminalText(path: string): string {
+  if (!path || !existsSync(path)) return ''
+  let file: number | undefined
+  try {
+    file = openSync(path, 'r')
+    const size = fstatSync(file).size
+    const length = Math.min(size, MAX_NATIVE_TASK_OUTPUT_BYTES)
+    const offset = Math.max(0, size - length)
+    const bytes = Buffer.alloc(length)
+    readSync(file, bytes, 0, length, offset)
+    const lines = bytes.toString('utf8').split('\n')
+    if (offset > 0) lines.shift()
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]?.trim()
+      if (!line) continue
+      try {
+        const message = JSON.parse(line) as unknown
+        const text = getNativeAssistantText(message)
+        if (text) return text
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    return ''
+  } finally {
+    if (file !== undefined) closeSync(file)
+  }
+  return ''
+}
+
+function getNativeAssistantText(value: unknown): string {
+  if (!isRecord(value) || value.type !== 'assistant') return ''
+  const message = isRecord(value.message) ? value.message : undefined
+  if (!message || !Array.isArray(message.content)) return ''
+  return message.content.flatMap(item => {
+    if (!isRecord(item) || item.type !== 'text') return []
+    const text = stringValue(item.text)
+    return text ? [text] : []
+  }).join('\n').trim()
 }
 
 export function getObservedNativeAcceptance(input: {
@@ -300,6 +447,7 @@ function readObservations(
           observation.validatorId === DELIVERY_VALIDATOR_AGENT_TYPES[0] &&
           (
             observation.kind === 'dispatch' ||
+            observation.kind === 'background-task' ||
             observation.kind === 'result'
           )
           ? [observation]

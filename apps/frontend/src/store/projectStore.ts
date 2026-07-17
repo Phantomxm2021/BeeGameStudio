@@ -21,6 +21,7 @@ import {
   type ProjectBaselineStatusPayload,
 } from '../services/api';
 import type { BeeGameBuildBrief } from '../services/beeGameAdapter';
+import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import { useChatStore } from './chatStore';
 import type { ProductReadinessView } from '../types/message';
 
@@ -265,7 +266,10 @@ export const useProjectStore = create<ProjectState>()(
             pendingReviews: runtimeState.pendingReviews,
           });
         } catch (error) {
-          if (getProjectStoreErrorStatus(error) !== 401) {
+          if (
+            getProjectStoreErrorStatus(error) !== 401 &&
+            !isAuthenticationServiceUnavailable(error)
+          ) {
             console.error(`Failed to load runtime state for project ${projectId}:`, error);
           }
           throw error;

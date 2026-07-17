@@ -38,6 +38,8 @@ import {
   getObservedNativeAcceptance,
   recordNativeAcceptanceReportForTest,
 } from '../beegame/native-acceptance-evidence'
+import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
+import { getObservedNativeDocumentReview } from '../beegame/native-document-review-evidence'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -788,9 +790,13 @@ describe('beegame session routes', () => {
     })
 
     expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('2')
     expect(await response.json()).toEqual({
       error: 'Authentication unavailable',
+      code: 'authentication_unavailable',
       message: 'Authentication service is temporarily unavailable',
+      recoverable: true,
+      retry_after_ms: 2_000,
     })
   })
 
@@ -2438,8 +2444,8 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
       expect(submitted).toContain('beegame-acceptance-validator')
-      expect(submitted).toContain('run_in_background must be false')
-      expect(submitted).toContain('Never use TaskOutput or read a temporary task output file as acceptance evidence')
+      expect(submitted).toContain('let the native task notification resume this same session')
+      expect(submitted).toContain('do not poll TaskOutput or read its output file')
       expect(submitted).toContain('do not launch another Validator for the same unchanged revision')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
@@ -4266,6 +4272,68 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('records a native document review passively from the real Agent tool lifecycle', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-review-data-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-review-project-'))
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Approved game\n')
+    const report = {
+      reviewerId: 'beegame-document-reviewer',
+      verdict: 'READY',
+      summary: 'The current documents are complete and internally consistent.',
+      findings: [],
+    }
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'tool_native_document_review',
+            name: 'Agent',
+            input: {
+              subagent_type: 'beegame-document-reviewer',
+              prompt: 'Review the approved project documents.',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool_native_document_review',
+            content: JSON.stringify(report),
+          }],
+        },
+      },
+      { type: 'result', result: 'Document review completed.' },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, dataRoot)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Review the project documents.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.completed'))
+
+      expect(getObservedNativeDocumentReview({
+        dataRoot,
+        sessionId: session.id,
+        workspacePath: workspace,
+      })).toEqual({
+        state: 'current',
+        evidence: expect.objectContaining({
+          verdict: 'READY',
+          summary: report.summary,
+          toolUseID: 'tool_native_document_review',
+        }),
+      })
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('does not accept a background TaskOutput as delivery evidence', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-background-data-'))
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-background-project-'))
@@ -4544,7 +4612,7 @@ describe('beegame session routes', () => {
         blocked: true,
         approval_required: true,
         active_agents: ['claude-code'],
-        acceptance: { status: 'not_run' },
+        acceptance: expect.objectContaining({ status: 'not_run' }),
         project_target: expect.objectContaining({
           kind: 'native',
           engine: 'custom-engine',
@@ -7271,6 +7339,51 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('returns a failed deployment to the same native session for acceptance repair', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-deployment-repair-route-'))
+    const workspace = join(projectsRoot, 'deployment-repair-game')
+    const fake = createFakeRunner([{ type: 'result', result: 'Repair requested.' }])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const session = await startTestSession(app, workspace)
+      await writeFile(
+        join(session.cwd, 'package.json'),
+        JSON.stringify({ scripts: { build: 'vite build' } }),
+      )
+      const deployRes = await app.request(
+        `/api/beegame-sessions/${session.id}/deployments`,
+        { method: 'POST' },
+      )
+      const failedDeployment = await deployRes.json() as { status?: string }
+      expect(failedDeployment.status).toBe('failed')
+
+      const repairRes = await app.request(
+        `/api/beegame-sessions/${session.id}/action`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'deployment_failure_repair',
+            language: 'zh',
+          }),
+        },
+      )
+      expect(repairRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      const repairPrompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
+      expect(repairPrompt).toContain('"kind": "deployment_failure_repair_request"')
+      expect(repairPrompt).toContain('"reason": "document_review_missing"')
+      expect(repairPrompt).toContain('beegame-document-reviewer')
+      expect(repairPrompt).toContain('beegame-acceptance-validator')
+      expect(repairPrompt).toContain('without weakening or bypassing the deployment gate')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
   test('rolls back to a previous successful deployment record', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-rollback-route-'))
     const workspace = join(projectsRoot, 'rollback-game')
@@ -8539,6 +8652,17 @@ async function writeAcceptedDeliveryReport(
     JSON.stringify(report),
   )
   if (dataRoot && sessionId) {
+    recordNativeDocumentReviewForTest({
+      dataRoot,
+      sessionId,
+      workspacePath: workspace,
+      report: {
+        reviewerId: 'beegame-document-reviewer',
+        verdict: 'READY',
+        summary: 'The current documents are implementation-ready.',
+        findings: [],
+      },
+    })
     recordNativeAcceptanceReportForTest({ dataRoot, sessionId, workspacePath: workspace, report })
   }
 }

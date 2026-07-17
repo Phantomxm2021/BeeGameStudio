@@ -188,6 +188,66 @@ describe('BeeGame user context', () => {
     expect(second).toEqual(first)
   })
 
+  test('serves a recently verified user while Supabase context revalidation is temporarily unavailable', async () => {
+    let calls = 0
+    let unavailable = false
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      cacheTtlMs: 0,
+      staleTtlMs: 10_000,
+      retryBaseMs: 10_000,
+      fetchImpl: async () => {
+        calls += 1
+        if (unavailable) throw new Error('temporary network failure')
+        return Response.json({ id: 'long-running-user', role: 'developer' })
+      },
+    })
+    const request = () => new Request('https://beegame.test/api/current-user', {
+      headers: { authorization: 'Bearer long-running-token' },
+    })
+
+    const verified = await resolver?.(request())
+    unavailable = true
+    const stale = await resolver?.(request())
+    await waitFor(() => calls === 2)
+    const duringBackoff = await resolver?.(request())
+
+    expect(verified).toEqual({ id: 'long-running-user', role: 'developer' })
+    expect(stale).toEqual(verified)
+    expect(duringBackoff).toEqual(verified)
+    expect(calls).toBe(2)
+  })
+
+  test('removes stale identity immediately when revalidation explicitly rejects the token', async () => {
+    let calls = 0
+    let invalid = false
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      cacheTtlMs: 0,
+      staleTtlMs: 10_000,
+      fetchImpl: async () => {
+        calls += 1
+        return invalid
+          ? new Response('unauthorized', { status: 401 })
+          : Response.json({ id: 'revoked-user', role: 'developer' })
+      },
+    })
+    const request = () => new Request('https://beegame.test/api/current-user', {
+      headers: { authorization: 'Bearer revoked-token' },
+    })
+
+    await resolver?.(request())
+    invalid = true
+    await resolver?.(request())
+    await waitFor(() => calls === 2)
+    await Bun.sleep(0)
+
+    expect(await resolver?.(request())).toBeUndefined()
+    expect(calls).toBe(3)
+  })
+
   test('does not fall back to raw Supabase auth user when the BeeGame context RPC rejects access', async () => {
     const calls: string[] = []
     const resolver = createSupabaseUserResolver({
@@ -454,3 +514,11 @@ describe('BeeGame user context', () => {
     ).toEqual({ id: 'owner-user', role: 'owner' })
   })
 })
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 1_000
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for condition')
+    await Bun.sleep(1)
+  }
+}

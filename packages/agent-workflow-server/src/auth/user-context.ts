@@ -101,7 +101,9 @@ export function createSupabaseUserResolver(
     apiKey?: string
     fetchImpl?: BeeGameFetch
     cacheTtlMs?: number
+    staleTtlMs?: number
     resolveTimeoutMs?: number
+    retryBaseMs?: number
   } = {},
 ): BeeGameUserResolver | undefined {
   const baseUrl = trimString(
@@ -119,20 +121,21 @@ export function createSupabaseUserResolver(
   if (!baseUrl || !apiKey) return undefined
   const fetchImpl = options.fetchImpl ?? fetch
   const cacheTtlMs = normalizeAuthCacheTtlMs(options.cacheTtlMs)
+  const staleTtlMs = normalizeAuthStaleTtlMs(options.staleTtlMs)
   const resolveTimeoutMs = normalizeAuthResolveTimeoutMs(options.resolveTimeoutMs)
-  const resolvedUsers = new Map<string, { expiresAt: number; user: BeeGameUserContext }>()
+  const retryBaseMs = normalizeAuthRetryBaseMs(options.retryBaseMs)
+  const resolvedUsers = new Map<string, {
+    expiresAt: number
+    staleUntil: number
+    user: BeeGameUserContext
+  }>()
   const pendingUsers = new Map<string, Promise<BeeGameUserContext | undefined>>()
-  return async request => {
-    const token = getBearerToken(request)
-    if (!token) return undefined
-    const tokenKey = createHash('sha256').update(token).digest('hex')
-    const cached = resolvedUsers.get(tokenKey)
-    if (cached && cached.expiresAt > Date.now()) return cached.user
-    if (cached) resolvedUsers.delete(tokenKey)
+  const retryStates = new Map<string, { attempts: number; retryAt: number }>()
 
-    const pending = pendingUsers.get(tokenKey)
-    if (pending) return await pending
-
+  const startResolution = (
+    tokenKey: string,
+    token: string,
+  ): Promise<BeeGameUserContext | undefined> => {
     const resolution = fetchSupabaseUserContext(
       baseUrl,
       apiKey,
@@ -141,19 +144,65 @@ export function createSupabaseUserResolver(
       resolveTimeoutMs,
     )
       .then(user => {
-        if (user && cacheTtlMs > 0) {
+        retryStates.delete(tokenKey)
+        if (user && (cacheTtlMs > 0 || staleTtlMs > 0)) {
+          const now = Date.now()
           resolvedUsers.set(tokenKey, {
             user,
-            expiresAt: Date.now() + cacheTtlMs,
+            expiresAt: now + cacheTtlMs,
+            staleUntil: now + cacheTtlMs + staleTtlMs,
           })
+        } else {
+          resolvedUsers.delete(tokenKey)
         }
         return user
+      })
+      .catch(error => {
+        const cached = resolvedUsers.get(tokenKey)
+        if (
+          error instanceof BeeGameAuthUnavailableError &&
+          cached &&
+          cached.staleUntil > Date.now()
+        ) {
+          const previousAttempts = retryStates.get(tokenKey)?.attempts ?? 0
+          const attempts = previousAttempts + 1
+          retryStates.set(tokenKey, {
+            attempts,
+            retryAt: Date.now() + Math.min(30_000, retryBaseMs * 2 ** Math.min(attempts - 1, 5)),
+          })
+          return cached.user
+        }
+        throw error
       })
       .finally(() => {
         pendingUsers.delete(tokenKey)
       })
     pendingUsers.set(tokenKey, resolution)
-    return await resolution
+    return resolution
+  }
+
+  return async request => {
+    const token = getBearerToken(request)
+    if (!token) return undefined
+    const tokenKey = createHash('sha256').update(token).digest('hex')
+    const now = Date.now()
+    const cached = resolvedUsers.get(tokenKey)
+    if (cached && cached.expiresAt > now) return cached.user
+    if (cached && cached.staleUntil > now) {
+      const retryState = retryStates.get(tokenKey)
+      if (!pendingUsers.has(tokenKey) && (!retryState || retryState.retryAt <= now)) {
+        void startResolution(tokenKey, token).catch(() => undefined)
+      }
+      return cached.user
+    }
+    if (cached) {
+      resolvedUsers.delete(tokenKey)
+      retryStates.delete(tokenKey)
+    }
+
+    const pending = pendingUsers.get(tokenKey)
+    if (pending) return await pending
+    return await startResolution(tokenKey, token)
   }
 }
 
@@ -260,6 +309,22 @@ function normalizeAuthResolveTimeoutMs(value: number | undefined): number {
     10,
   )
   return Number.isFinite(configured) && configured >= 0 ? configured : 3_000
+}
+
+function normalizeAuthStaleTtlMs(value: number | undefined): number {
+  const configured = value ?? Number.parseInt(
+    process.env.BEEGAME_AUTH_CONTEXT_STALE_TTL_MS ?? '',
+    10,
+  )
+  return Number.isFinite(configured) && configured >= 0 ? configured : 5 * 60_000
+}
+
+function normalizeAuthRetryBaseMs(value: number | undefined): number {
+  const configured = value ?? Number.parseInt(
+    process.env.BEEGAME_AUTH_CONTEXT_RETRY_BASE_MS ?? '',
+    10,
+  )
+  return Number.isFinite(configured) && configured > 0 ? configured : 1_000
 }
 
 function toSupabaseUserContext(value: unknown): BeeGameUserContext | undefined {

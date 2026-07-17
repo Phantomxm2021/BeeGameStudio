@@ -27,6 +27,7 @@ import {
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { observeNativeAcceptanceToolEvent } from './native-acceptance-evidence'
+import { observeNativeDocumentReviewToolEvent } from './native-document-review-evidence'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 
 export type BeeGameImageAttachment = {
@@ -1292,6 +1293,24 @@ export class BeeGameSessionManager {
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
     try {
+      observeNativeDocumentReviewToolEvent({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      // Delivery provenance is a passive gate, never an Agent runtime
+      // controller. Failure to persist it must not interrupt Claude Code.
+      console.warn('[BeeGame] Failed to persist native document review evidence', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
+    try {
       observeNativeAcceptanceToolEvent({
         dataRoot: this.dashboardDataRoot,
         sessionId: record.session.id,
@@ -1304,7 +1323,7 @@ export class BeeGameSessionManager {
     } catch (error) {
       // Acceptance provenance is a deployment gate, never an Agent runtime
       // controller. Failure to persist it must not interrupt Claude Code.
-      console.warn('[BeeGame] Failed to persist native acceptance evidence', {
+      console.warn('[BeeGame] Failed to persist native delivery evidence', {
         sessionId: record.session.id,
         cause: error instanceof Error ? error.name : 'unknown_error',
       })

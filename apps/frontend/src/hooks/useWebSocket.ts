@@ -16,7 +16,10 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import type { WebSocketMessage } from '../types/message';
 import { resolveAuthToken } from '../services/api';
-import apiClient, { API_BASE_URL } from '../services/apiClient';
+import apiClient, {
+  API_BASE_URL,
+  isAuthenticationServiceUnavailable,
+} from '../services/apiClient';
 import { beeGameAdapter, isBeeGameAdapterEnabled } from '../services/beeGameAdapter';
 import { messageValidator } from '../utils/messageValidator';
 import { errorLogger } from '../utils/errorLogger';
@@ -556,7 +559,9 @@ export const useWebSocket = ({
         } catch (error) {
           if (cancelled) return;
           consecutiveFailures += 1;
-          console.warn('[WebSocket] BeeGame adapter poll failed:', error);
+          if (!isAuthenticationServiceUnavailable(error)) {
+            console.warn('[WebSocket] BeeGame adapter poll failed:', error);
+          }
           setState('reconnecting');
           if (consecutiveFailures === 3) {
             callbacksRef.current.showToastError?.('BeeGame 连接暂时不可用，正在自动重连');

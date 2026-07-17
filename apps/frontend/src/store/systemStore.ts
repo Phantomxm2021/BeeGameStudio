@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import type { Agent, SystemStatus, Activity, TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
+import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import {
   getSupabaseSessionUser,
 } from '../services/supabaseAuthApi';
@@ -286,7 +287,9 @@ export const useSystemStore = create<SystemState>()(
           const usage = (await api.getProjectTokenUsage(projectId, { headers: { 'Hide-Error-Toast': 'true' } })) as unknown as TokenUsage;
           get().updateTokenUsage(usage, projectId);
         } catch (error) {
-          console.error('Failed to load token usage:', error);
+          if (!isAuthenticationServiceUnavailable(error)) {
+            console.error('Failed to load token usage:', error);
+          }
         }
       },
 

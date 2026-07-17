@@ -1041,7 +1041,7 @@ describe('DashboardView runtime loading', () => {
 
         expect(apiMocks.requestProjectAction).toHaveBeenCalledWith(expect.objectContaining({
             project_id: 'proj_1',
-            kind: 'build_error_repair',
+            kind: 'deployment_failure_repair',
         }));
         expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument();
     });

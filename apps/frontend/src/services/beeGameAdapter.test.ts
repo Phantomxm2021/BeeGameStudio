@@ -258,6 +258,23 @@ describe('beeGameAdapter prompt rules', () => {
     await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
   });
 
+  it('preserves recoverable authentication outage metadata from fetch routes', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      code: 'authentication_unavailable',
+      message: 'Authentication service is temporarily unavailable',
+      recoverable: true,
+      retry_after_ms: 2_000,
+    }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.getProjectRuntimeState('project_1')).rejects.toMatchObject({
+      status: 503,
+      code: 'authentication_unavailable',
+      recoverable: true,
+      retryAfterMs: 2_000,
+    });
+  });
+
   it('scopes cloud project cache to the authenticated user', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',

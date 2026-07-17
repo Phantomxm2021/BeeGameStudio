@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { getObservedNativeAcceptance } from './native-acceptance-evidence'
+import { getNativeDeliveryState } from './native-delivery-state'
 
 export type PersistedDeliveryAcceptance = {
   allowed: boolean
@@ -10,8 +10,9 @@ export type PersistedDeliveryAcceptance = {
 /**
  * Passive deployment gate. BeeGame does not parse project requirements,
  * checklists, platform semantics, or repair state. It only verifies that the
- * native Claude Code validator produced a terminal result for the exact
- * workspace revision that is about to be deployed.
+ * native Claude Code document reviewer approved the current documents and the
+ * native validator produced a terminal result for the exact workspace
+ * revision that is about to be deployed.
  */
 export function evaluatePersistedDeliveryAcceptance(
   workspacePath: string,
@@ -21,31 +22,44 @@ export function evaluatePersistedDeliveryAcceptance(
     return rejected('Deployment requires an observed native acceptance result.')
   }
 
-  const observation = getObservedNativeAcceptance({
+  const state = getNativeDeliveryState({
     ...provenance,
     workspacePath: resolve(workspacePath),
   })
-  if (observation.state === 'missing') {
-    return rejected('Deployment requires an observed native acceptance Validator result.')
-  }
-  if (observation.state === 'stale') {
-    return rejected('The project changed after native acceptance; validate the current revision before deployment.')
-  }
-
-  if (observation.evidence.status === 'passed') {
+  if (state.status === 'passed') {
     return { allowed: true, outcome: 'passed', issues: [] }
   }
-  if (observation.evidence.status === 'blocked') {
+  if (state.status === 'blocked') {
     return {
       allowed: false,
       outcome: 'blocked',
-      issues: [observation.evidence.summary],
+      issues: [state.summary],
     }
+  }
+  if (state.reason === 'document_review_missing') {
+    return rejected(
+      'Deployment requires an observed native Document Reviewer result.',
+    )
+  }
+  if (state.reason === 'document_review_stale') {
+    return rejected(
+      'Project documents changed after review; review the current document revision before deployment.',
+    )
+  }
+  if (state.reason === 'acceptance_missing') {
+    return rejected(
+      'Deployment requires an observed native acceptance Validator result.',
+    )
+  }
+  if (state.reason === 'acceptance_stale') {
+    return rejected(
+      'The project changed after native acceptance; validate the current revision before deployment.',
+    )
   }
   return {
     allowed: false,
     outcome: 'rejected',
-    issues: [observation.evidence.summary],
+    issues: [state.summary],
   }
 }
 

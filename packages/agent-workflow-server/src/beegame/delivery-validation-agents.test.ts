@@ -38,6 +38,9 @@ describe('native delivery agents', () => {
       expect(reviewer).toContain('docs/ART_DIRECTION.md')
       expect(reviewer).toContain('selected document language')
       expect(reviewer).toContain('Do not edit files')
+      expect(reviewer).toContain('Return exactly one terminal JSON object')
+      expect(reviewer).toContain('READY|NEEDS_REVISION|BLOCKED')
+      expect(reviewer).toContain('An empty response')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

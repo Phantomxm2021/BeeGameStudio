@@ -8,6 +8,7 @@ import {
   type BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
+import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
 
 describe('BeeGameDeploymentManager', () => {
   let root: string
@@ -281,7 +282,7 @@ describe('BeeGameDeploymentManager', () => {
       workspacePath: workspace,
     })
     expect(rejected.status).toBe('failed')
-    expect(rejected.message).toContain('native acceptance Validator result')
+    expect(rejected.message).toContain('native Document Reviewer result')
     expect(builds).toBe(0)
 
     await mkdir(join(workspace, 'docs', 'acceptance'), { recursive: true })
@@ -311,6 +312,7 @@ describe('BeeGameDeploymentManager', () => {
       join(workspace, 'docs', 'acceptance', 'validation-report.json'),
       JSON.stringify(report),
     )
+    recordReadyDocumentReview(root, 'delivery-gated-session', workspace)
     recordNativeAcceptanceReportForTest({
       dataRoot: root,
       sessionId: 'delivery-gated-session',
@@ -432,3 +434,21 @@ describe('BeeGameDeploymentManager', () => {
     expect(deployment.url).toBe('')
   })
 })
+
+function recordReadyDocumentReview(
+  dataRoot: string,
+  sessionId: string,
+  workspacePath: string,
+): void {
+  recordNativeDocumentReviewForTest({
+    dataRoot,
+    sessionId,
+    workspacePath,
+    report: {
+      reviewerId: 'beegame-document-reviewer',
+      verdict: 'READY',
+      summary: 'The current documents are implementation-ready.',
+      findings: [],
+    },
+  })
+}

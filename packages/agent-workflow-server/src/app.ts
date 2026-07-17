@@ -46,7 +46,7 @@ import {
   type BeeGameDeploymentPublisher,
   type BeeGameDeploymentRunner,
 } from './beegame/deployment-manager'
-import { getObservedNativeAcceptance } from './beegame/native-acceptance-evidence'
+import { getNativeDeliveryState } from './beegame/native-delivery-state'
 import {
   readBeeGameAssetManifest,
   bindBeeGameLibraryResourceInWorkspace,
@@ -485,9 +485,13 @@ export function createAgentWorkflowApp(
       user = await authContext.resolveRequestUser(c.req.raw)
     } catch (error) {
       if (error instanceof BeeGameAuthUnavailableError) {
+        c.header('Retry-After', '2')
         return c.json({
           error: 'Authentication unavailable',
+          code: 'authentication_unavailable',
           message: 'Authentication service is temporarily unavailable',
+          recoverable: true,
+          retry_after_ms: 2_000,
         }, 503)
       }
       throw error
@@ -3541,12 +3545,15 @@ async function getBeeGameProjectRuntimeState(input: {
   })
   const assetManifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
     .catch(() => ({ version: 1 as const, slots: [], project_target: undefined }))
-  const acceptance = input.dashboardDataRoot
-    ? toProjectAcceptanceState(getObservedNativeAcceptance({
+  const evidenceProvenance = input.dashboardDataRoot
+    ? {
         dataRoot: input.dashboardDataRoot,
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
-      }))
+      }
+    : undefined
+  const acceptance = evidenceProvenance
+    ? toProjectAcceptanceState(getNativeDeliveryState(evidenceProvenance))
     : { status: 'not_run' }
   return {
     project_id: input.project.id,
@@ -3718,20 +3725,12 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
 }
 
 function toProjectAcceptanceState(
-  observation: ReturnType<typeof getObservedNativeAcceptance>,
+  state: ReturnType<typeof getNativeDeliveryState>,
 ): JsonObject {
-  if (observation.state === 'missing') return { status: 'not_run' }
-  if (observation.state === 'stale') {
-    return {
-      status: 'stale',
-      summary: observation.evidence.summary,
-      validated_at: observation.evidence.createdAt,
-    }
-  }
   return {
-    status: observation.evidence.status,
-    summary: observation.evidence.summary,
-    validated_at: observation.evidence.createdAt,
+    status: state.status,
+    summary: state.summary,
+    ...(state.observedAt ? { validated_at: state.observedAt } : {}),
   }
 }
 
@@ -5039,6 +5038,52 @@ function registerBeeGameSessionRoutes(
           },
         ))
       }
+      if (kind === 'deployment_failure_repair') {
+        const session = beeGameSessions.get(c.req.param('id'))
+        if (!session) return c.json({ error: 'Session not found' }, 404)
+        const persistedDeployments = await options.listDeploymentRecords?.(
+          c.req.raw,
+          session.id,
+        )
+        const deployments = persistedDeployments ?? (
+          beeGameDeployments ? await beeGameDeployments.list(session.id) : []
+        )
+        const latestFailure = deployments
+          .find(deployment => deployment.status === 'failed')
+        if (!latestFailure) {
+          return c.json({ error: 'No failed deployment is available' }, 409)
+        }
+        const deliveryState = getNativeDeliveryState({
+          dataRoot: getDashboardDataRoot(options.defaultWorkspacePath),
+          sessionId: session.id,
+          workspacePath: session.cwd,
+        })
+        return c.json(await beeGameSessions.sendWithDisplay(
+          c.req.param('id'),
+          JSON.stringify({
+            kind: 'deployment_failure_repair_request',
+            deployment_failure: {
+              message: latestFailure.message ?? '',
+              build_log: latestFailure.buildLog ?? '',
+            },
+            delivery_state: deliveryState,
+            instructions: [
+              'Continue this same native Claude Code task; do not treat this request as a new product brief.',
+              'Resolve the observed deployment or acceptance failure without weakening or bypassing the deployment gate.',
+              'If document review is missing, stale, blocked, or needs revision, resolve the document findings and obtain one valid READY result from beegame-document-reviewer before implementation or validation.',
+              'If native acceptance is missing or stale after document review is READY, run one beegame-acceptance-validator for the current workspace revision and wait for its native terminal result.',
+              'If validation reports findings, repair them and validate the changed revision again before claiming completion.',
+            ],
+          }, null, 2),
+          {
+            displayText: getServerOwnedProjectActionLabel(kind, language),
+            displayKind: 'deployment_failure_repair',
+            taskType: 'edit_turn',
+            language,
+            ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
+          },
+        ))
+      }
       return c.json({ error: 'Unsupported project action' }, 400)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -5312,9 +5357,10 @@ function buildConfirmedBriefPrompt(
     'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and docs/ASSET_PLAN.md after the product and presentation requirements are defined; (4) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
     'Together these documents must define the player-visible loop from launch through progress, win/fail and restart; controls for every selected input method; rules, state transitions and edge cases; presentation and asset requirements; a feasible technical design that traces each required behavior to an implementation responsibility; and observable acceptance paths with concrete actions and expected outcomes.',
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
+    'Give every committed requirement and player path a stable identifier. For each player path, document the concrete player actions, observable expected results, and required evidence. Keep this platform-neutral and use the project documents own structure; do not introduce a BeeGame-specific game schema.',
     'Pass the canonical confirmed brief and selected document language to one native beegame-document-reviewer subagent for the current document revision. Do not begin implementation until that reviewer reports READY; resolve every material contradiction, missing selected input, untestable behavior, or scope gap in the documents first. If the native Agent tool reports that this reviewer is running asynchronously and will notify you when it finishes, do not poll TaskOutput or read its output file; yield that response so the native task notification can resume this same session.',
     '',
-    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, invoke exactly one native beegame-acceptance-validator subagent in the foreground for that exact workspace revision (run_in_background must be false). The Validator must return its one terminal JSON object directly as the Agent tool result. Never use TaskOutput or read a temporary task output file as acceptance evidence. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. If validation fails, repair only the observed findings first, then validate the changed revision and require one final complete player-path smoke pass. If no valid terminal Validator JSON is returned, the delivery remains incomplete. Report a blocker honestly when required behavior cannot be verified; do not claim delivery from compilation or source inspection alone.',
+    'Plan and implement the project with applicable native Skills. After all intended project edits are complete, invoke exactly one native beegame-acceptance-validator subagent for that exact workspace revision. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. If the native runtime keeps it in the foreground, use its terminal JSON directly. If the native runtime moves it to the background, do not poll TaskOutput or read its output file; yield the turn and let the native task notification resume this same session. After notification, treat only the Validator terminal result as acceptance evidence. If validation fails, repair only the observed findings first, then validate the changed revision and require one final complete player-path smoke pass. If no valid terminal Validator JSON is returned, continue the task until validation reaches a terminal passed, failed, or blocked result; do not claim completion from compilation or source inspection alone.',
     '',
     'Confirmed brief:',
     confirmedBrief,
@@ -5530,12 +5576,13 @@ function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string 
 }
 
 function getServerOwnedProjectActionLabel(
-  kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair',
+  kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair',
   language: BeeGameSessionLanguage,
 ): string {
   const isChinese = language === 'zh' || language === 'zh-TW'
   if (kind === 'asset_integrate') return isChinese ? '集成所选资源' : 'Integrate selected assets'
   if (kind === 'asset_prepare_selection') return isChinese ? '完善资源选择条件' : 'Prepare resource selection'
+  if (kind === 'deployment_failure_repair') return isChinese ? '修复发布验收' : 'Repair deployment acceptance'
   return isChinese ? '修复构建错误' : 'Repair build errors'
 }
 

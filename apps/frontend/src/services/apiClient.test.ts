@@ -8,6 +8,7 @@ import {
   buildAuthHeaders,
   buildApiUrlWithBase,
   buildUnauthorizedMessage,
+  isAuthenticationServiceUnavailable,
 } from './apiClient';
 import apiClient from './apiClient';
 
@@ -334,6 +335,45 @@ describe('apiClient defaults', () => {
       },
     })).rejects.toMatchObject({ status: 401 });
 
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('classifies a temporary authentication outage without logging it as an API failure', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const request = apiClient.get('/api/projects/project-1/runtime-state', {
+      adapter: async config => {
+        throw new AxiosError(
+          'Request failed with status code 503',
+          AxiosError.ERR_BAD_RESPONSE,
+          config,
+          {},
+          {
+            config,
+            data: {
+              code: 'authentication_unavailable',
+              message: 'Authentication service is temporarily unavailable',
+              recoverable: true,
+              retry_after_ms: 2_000,
+            },
+            headers: { 'retry-after': '2' },
+            status: 503,
+            statusText: 'Service Unavailable',
+          },
+        );
+      },
+    });
+
+    await expect(request).rejects.toSatisfy((error: unknown) => {
+      expect(error).toMatchObject({
+        status: 503,
+        code: 'authentication_unavailable',
+        recoverable: true,
+        retryAfterMs: 2_000,
+      });
+      return isAuthenticationServiceUnavailable(error);
+    });
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });

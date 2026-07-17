@@ -8,6 +8,7 @@ import {
   observeNativeAcceptanceToolEvent,
   recordNativeAcceptanceReportForTest,
 } from './native-acceptance-evidence'
+import { recordNativeDocumentReviewForTest } from './native-document-review-evidence'
 
 const TEST_SESSION_ID = 'native-acceptance-test-session'
 
@@ -85,6 +86,157 @@ describe('native delivery acceptance gate', () => {
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
     }).state).toBe('stale')
+  })
+
+  test('captures the terminal result of a native Validator moved to the background', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-validator-tool'
+    const taskId = 'background-validator-task'
+    const outputFile = join(dataRoot, 'validator-output.jsonl')
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_started',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+      },
+      createdAt: new Date(),
+    })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_notification',
+        status: 'completed',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+        output_file: outputFile,
+      },
+      createdAt: new Date(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
+  test('binds a background result to the revision at its original Agent dispatch', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-validator-stale-tool'
+    const taskId = 'background-validator-stale-task'
+    const outputFile = join(dataRoot, 'stale-validator-output.jsonl')
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: {
+        toolName: 'Agent',
+        toolUseID,
+        input: { subagent_type: 'beegame-acceptance-validator' },
+      },
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_started',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+      },
+      createdAt: new Date(),
+    })
+    await writeFile(join(workspace, 'src', 'entry.ts'), 'export const ready = false\n')
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_notification',
+        status: 'completed',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+        output_file: outputFile,
+      },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('stale')
+  })
+
+  test('ignores a background completion without a linked native dispatch', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const outputFile = join(dataRoot, 'unlinked-validator-output.jsonl')
+    await mkdir(dataRoot, { recursive: true })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_notification',
+        status: 'completed',
+        task_id: 'unlinked-task',
+        tool_use_id: 'unlinked-tool',
+        output_file: outputFile,
+      },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    })).toEqual({ state: 'missing' })
   })
 
   test('ignores TaskOutput without an observed native background task link', async () => {
@@ -192,6 +344,51 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
+  test('never treats a blocked document review as deliverable', async () => {
+    workspace = await createWorkspace()
+    recordNativeDocumentReviewForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report: {
+        reviewerId: 'beegame-document-reviewer',
+        verdict: 'BLOCKED',
+        summary: 'The confirmed brief is unavailable.',
+        findings: [{
+          source: 'confirmed brief',
+          detail: 'The reviewer cannot compare the documents without the approved brief.',
+        }],
+      },
+    })
+    record(workspace, 'passed', 'A validator result cannot override document review.')
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'blocked',
+      issues: ['The confirmed brief is unavailable.'],
+    })
+  })
+
+  test('does not accept a passing validator result without runtime evidence', async () => {
+    workspace = await createWorkspace()
+    const report = passingReport() as {
+      evidence: Array<{ kind: string }>
+    }
+    report.evidence = report.evidence.filter(item => item.kind !== 'runtime')
+    recordNativeAcceptanceReportForTest({
+      dataRoot: dataRootFor(workspace),
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      report,
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['Deployment requires an observed native acceptance Validator result.'],
+    })
+  })
+
   test('invalidates acceptance when implementation or approved documents change', async () => {
     workspace = await createWorkspace()
     record(workspace, 'passed', 'Accepted current revision.')
@@ -200,7 +397,7 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace)).toEqual({
       allowed: false,
       outcome: 'rejected',
-      issues: ['The project changed after native acceptance; validate the current revision before deployment.'],
+      issues: ['Project documents changed after review; review the current document revision before deployment.'],
     })
   })
 
@@ -210,6 +407,7 @@ describe('native delivery acceptance gate', () => {
       join(workspace, 'docs', 'acceptance.md'),
       '# Project-native acceptance\n\nThe player can finish and restart a run.\n',
     )
+    recordReadyDocumentReview(workspace)
     record(workspace, 'passed', 'The native validator observed the documented flow.')
 
     expect(evaluate(workspace).allowed).toBe(true)
@@ -275,7 +473,22 @@ async function createWorkspace(): Promise<string> {
   await mkdir(join(root, 'src'), { recursive: true })
   await writeFile(join(root, 'docs', 'GDD.md'), '# Approved game\n')
   await writeFile(join(root, 'src', 'entry.ts'), 'export const ready = true\n')
+  recordReadyDocumentReview(root)
   return root
+}
+
+function recordReadyDocumentReview(workspace: string): void {
+  recordNativeDocumentReviewForTest({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    report: {
+      reviewerId: 'beegame-document-reviewer',
+      verdict: 'READY',
+      summary: 'The current project documents are implementation-ready.',
+      findings: [],
+    },
+  })
 }
 
 function record(

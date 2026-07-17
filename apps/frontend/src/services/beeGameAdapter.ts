@@ -487,7 +487,7 @@ export const beeGameAdapter = {
 
   async requestProjectAction(data: {
     project_id: string;
-    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair';
+    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair';
     slotIds?: string[];
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
@@ -2226,7 +2226,26 @@ async function readResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const message = getJsonErrorMessage(body) || response.statusText;
-    throw new Error(message);
+    const payload = body && typeof body === 'object'
+      ? body as {
+          code?: unknown;
+          recoverable?: unknown;
+          retry_after_ms?: unknown;
+        }
+      : {};
+    const error = new Error(message) as Error & {
+      status?: number;
+      code?: string;
+      recoverable?: boolean;
+      retryAfterMs?: number;
+    };
+    error.status = response.status;
+    if (typeof payload.code === 'string') error.code = payload.code;
+    if (payload.recoverable === true) error.recoverable = true;
+    if (typeof payload.retry_after_ms === 'number') {
+      error.retryAfterMs = payload.retry_after_ms;
+    }
+    throw error;
   }
   return response.json() as Promise<T>;
 }

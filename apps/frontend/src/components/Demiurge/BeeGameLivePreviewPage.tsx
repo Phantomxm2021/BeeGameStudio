@@ -67,6 +67,7 @@ interface BeeGameLivePreviewPageProps {
     onDeployProject?: () => void | Promise<void>;
     onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
     onFixBuildErrors?: () => void | Promise<void>;
+    onFixDeploymentFailure?: () => void | Promise<void>;
     onOpenExternal?: (url: string) => void;
     isDeploying?: boolean;
     onBack?: () => void;
@@ -159,6 +160,7 @@ export function BeeGameLivePreviewPage({
     onDeployProject,
     onRollbackDeployment,
     onFixBuildErrors,
+    onFixDeploymentFailure,
     onOpenExternal,
     isDeploying = false,
     onBack,
@@ -613,7 +615,7 @@ export function BeeGameLivePreviewPage({
                 labels={labels}
                 onClose={() => setDeploymentDialogOpen(false)}
                 onOpenExternal={onOpenExternal}
-                onFixBuildErrors={onFixBuildErrors}
+                onFixDeploymentFailure={onFixDeploymentFailure}
                 onDeploy={handleDeploy}
                 onRollback={onRollbackDeployment}
                 isDeploying={isDeploying}
@@ -630,7 +632,7 @@ function DeploymentDialog({
     labels,
     onClose,
     onOpenExternal,
-    onFixBuildErrors,
+    onFixDeploymentFailure,
     onDeploy,
     onRollback,
     isDeploying,
@@ -641,7 +643,7 @@ function DeploymentDialog({
     labels: Record<string, string>;
     onClose: () => void;
     onOpenExternal?: (url: string) => void;
-    onFixBuildErrors?: () => void | Promise<void>;
+    onFixDeploymentFailure?: () => void | Promise<void>;
     onDeploy: () => void | Promise<void>;
     onRollback?: (deploymentId: string) => void | Promise<void>;
     isDeploying: boolean;
@@ -763,7 +765,7 @@ function DeploymentDialog({
                                 <button
                                     type="button"
                                     aria-label={labels.fixBuildErrors}
-                                    onClick={() => void onFixBuildErrors?.()}
+                                    onClick={() => void onFixDeploymentFailure?.()}
                                     className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
                                 >
                                     <BsStars className="h-3.5 w-3.5" aria-hidden="true" />

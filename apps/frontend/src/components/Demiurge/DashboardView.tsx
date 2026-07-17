@@ -6,6 +6,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
 import { useChat } from '../../hooks/useChat';
 import { useToast } from '../../hooks/useToast';
+import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
 import type { Language } from './AgentsConfig';
 
 import { TopBar } from './TopBar';
@@ -64,6 +65,12 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error.trim()) return error;
     return fallback;
+};
+
+const logDashboardReadError = (label: string, error: unknown): void => {
+    if (!isAuthenticationServiceUnavailable(error)) {
+        console.error(label, error);
+    }
 };
 
 const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {
@@ -140,12 +147,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         if (summaryResult.status === 'fulfilled') {
             setCreditSummary(summaryResult.value);
         } else {
-            console.error('Failed to load credit summary:', summaryResult.reason);
+            logDashboardReadError('Failed to load credit summary:', summaryResult.reason);
         }
         if (balanceResult.status === 'fulfilled') {
             setCreditBalance(balanceResult.value);
         } else {
-            console.error('Failed to load credit balance:', balanceResult.reason);
+            logDashboardReadError('Failed to load credit balance:', balanceResult.reason);
         }
     }, [isBeeGameMode, projectId]);
 
@@ -200,7 +207,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                         loadAgents().catch(console.error);
                     }
                     if (authenticationStatus === 'authenticated') {
-                        loadProjectRuntimeState(projectId).catch(console.error);
+                        loadProjectRuntimeState(projectId).catch((error) => {
+                            logDashboardReadError('Failed to refresh project runtime state:', error);
+                        });
                     }
                     refreshCredits().catch(console.error);
                     refreshTimerRef.current = null;
@@ -413,7 +422,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                     loadAgents().catch(console.error);
                     loadTasks(projectId).catch(console.error);
                 }
-                loadProjectRuntimeState(projectId).catch(console.error);
+                loadProjectRuntimeState(projectId).catch((error) => {
+                    logDashboardReadError('Failed to poll project runtime state:', error);
+                });
             }
         };
 
@@ -624,6 +635,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                     return api.requestProjectAction({
                         project_id: projectId,
                         kind: 'build_error_repair',
+                    }).then(() => undefined);
+                } : undefined}
+                onFixDeploymentFailure={canSendMessage ? () => {
+                    if (isProjectInteractionLocked) return Promise.resolve();
+                    return api.requestProjectAction({
+                        project_id: projectId,
+                        kind: 'deployment_failure_repair',
                     }).then(() => undefined);
                 } : undefined}
                 isDeploying={isDeployingProject}

@@ -194,6 +194,25 @@ describe('projectStore pending review normalization', () => {
         expect(useProjectStore.getState().pendingReviews).toEqual([{ gate_id: 'permission_1' }]);
     });
 
+    it('does not flood the console when authentication context is temporarily unavailable', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        getProjectRuntimeState.mockRejectedValueOnce(Object.assign(
+            new Error('Authentication service is temporarily unavailable'),
+            {
+                status: 503,
+                code: 'authentication_unavailable',
+                recoverable: true,
+                retryAfterMs: 2_000,
+            },
+        ));
+
+        await expect(useProjectStore.getState().loadProjectRuntimeState('proj_1'))
+            .rejects.toMatchObject({ code: 'authentication_unavailable' });
+
+        expect(consoleError).not.toHaveBeenCalled();
+        consoleError.mockRestore();
+    });
+
     it('does not let a stale runtime response overwrite the newly active project', async () => {
         let resolveRequest!: (value: {
             status: { project_id: string; phase: string; blocked: boolean };

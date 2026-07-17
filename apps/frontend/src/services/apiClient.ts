@@ -18,6 +18,19 @@ export interface ApiErrorEnvelope {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 export const AUTHENTICATION_REQUIRED_EVENT = 'beegame:authentication-required';
 
+export const isAuthenticationServiceUnavailable = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as {
+    status?: unknown;
+    code?: unknown;
+    originalError?: { response?: { status?: unknown; data?: unknown } };
+  };
+  if (value.status === 503 && value.code === 'authentication_unavailable') return true;
+  const response = value.originalError?.response;
+  if (response?.status !== 503 || !response.data || typeof response.data !== 'object') return false;
+  return (response.data as { code?: unknown }).code === 'authentication_unavailable';
+};
+
 let showToastError: ((message: string) => void) | null = null;
 
 const getEnvAuthToken = (): string => {
@@ -154,19 +167,23 @@ apiClient.interceptors.response.use(
     if (authenticationIsDefinitivelyInvalid) notifyAuthenticationRequired();
     const hideToast = getHeaderValue(error.config?.headers, 'Hide-Error-Toast') === 'true';
     const hideErrorLog = getHeaderValue(error.config?.headers, 'Hide-Error-Log') === 'true';
-    if (!hideErrorLog) {
-      console.error('API Error:', error);
-    }
 
     let errorMessage = '请求失败，请稍后重试';
     let errorCode: string | undefined;
     let errorHostname: string | undefined;
+    let responseData: (Partial<ApiErrorEnvelope> & {
+      detail?: string;
+      error?: string;
+      hostname?: string;
+      retry_after_ms?: number;
+    }) | undefined;
     if (error.response) {
       const { status, data } = error.response;
-      const responseData = data as Partial<ApiErrorEnvelope> & {
+      responseData = data as Partial<ApiErrorEnvelope> & {
         detail?: string;
         error?: string;
         hostname?: string;
+        retry_after_ms?: number;
       };
       errorCode = typeof responseData?.code === 'string' ? responseData.code : undefined;
       errorHostname = typeof responseData?.hostname === 'string' ? responseData.hostname : undefined;
@@ -199,7 +216,13 @@ apiClient.interceptors.response.use(
       errorMessage = error.message || '请求配置错误';
     }
 
-    if (showToastError && !hideToast) {
+    const temporaryAuthenticationFailure = error.response?.status === 503 &&
+      errorCode === 'authentication_unavailable';
+    if (!hideErrorLog && !temporaryAuthenticationFailure) {
+      console.error('API Error:', error);
+    }
+
+    if (showToastError && !hideToast && !temporaryAuthenticationFailure) {
       showToastError(errorMessage);
     }
 
@@ -208,11 +231,17 @@ apiClient.interceptors.response.use(
       status?: number;
       code?: string;
       hostname?: string;
+      recoverable?: boolean;
+      retryAfterMs?: number;
     };
     enhancedError.originalError = error;
     enhancedError.status = error.response?.status;
     enhancedError.code = errorCode;
     enhancedError.hostname = errorHostname;
+    enhancedError.recoverable = responseData?.recoverable === true;
+    enhancedError.retryAfterMs = typeof responseData?.retry_after_ms === 'number'
+      ? responseData.retry_after_ms
+      : undefined;
     return Promise.reject(enhancedError);
   },
 );

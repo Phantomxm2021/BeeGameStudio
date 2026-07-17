@@ -7,6 +7,7 @@ import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
 import type { AgentWorkflowAppOptions } from '../app'
 import { createAgentWorkflowApp } from '../app'
 import { recordNativeAcceptanceReportForTest } from '../beegame/native-acceptance-evidence'
+import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
 import type {
   BeeGameModelRuntimeHost,
 } from '../beegame/model-runtime-host'
@@ -2550,6 +2551,17 @@ describe('agent workflow server routes', () => {
       )
       expect(ensureSessionRes.status).toBe(200)
       const ensured = await ensureSessionRes.json()
+      recordNativeDocumentReviewForTest({
+        dataRoot: workspace,
+        sessionId: ensured.session.id,
+        workspacePath: projectRoot,
+        report: {
+          reviewerId: 'beegame-document-reviewer',
+          verdict: 'READY',
+          summary: 'The current documents are implementation-ready.',
+          findings: [],
+        },
+      })
       recordNativeAcceptanceReportForTest({
         dataRoot: workspace,
         sessionId: ensured.session.id,

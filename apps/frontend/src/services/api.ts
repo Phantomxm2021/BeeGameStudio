@@ -884,7 +884,7 @@ export const api = {
 
   requestProjectAction: (data: {
     project_id: string;
-    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair';
+    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair';
     slotIds?: string[];
   }) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.requestProjectAction(data);
