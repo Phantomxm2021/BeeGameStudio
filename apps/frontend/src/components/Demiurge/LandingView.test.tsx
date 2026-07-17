@@ -1412,7 +1412,7 @@ describe('LandingView bootstrap submission', () => {
         expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)]');
         expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
         expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('type-title-3');
-        expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('type-body', 'min-h-0', 'overflow-y-auto');
+        expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass('scroll-fade', 'scroll-fade-y', 'scroll-fade-6', 'scrollbar-premium', 'type-body', 'min-h-0', 'overflow-y-auto');
         expect(within(cards[0]).queryByTestId('intake-option-tags')).not.toBeInTheDocument();
         expect(dialog).toHaveAttribute('data-intake-modal', 'true');
         expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();

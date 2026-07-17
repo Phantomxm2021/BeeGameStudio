@@ -583,7 +583,37 @@
   /* Sophisticated scrollbar handle utility */
   .scrollbar-premium {
     scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    scrollbar-gutter: stable;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-track,
+  .scrollbar-premium::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+    background-clip: content-box;
+    box-shadow: none;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.34);
+    background-clip: content-box;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-thumb:active {
+    background: rgba(255, 255, 255, 0.46);
+    background-clip: content-box;
   }
 
   /* Fallback visibility for scrollbar-hide (making it just very subtle instead of hidden) */

@@ -1789,7 +1789,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+                        <div className="scrollbar-premium relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
 
                     {attachmentBuildPhase !== 'idle' ? (
                         attachmentBuildAnalysis ? (
@@ -1832,7 +1832,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                                         <div className="type-footnote self-start text-white/45 transition-colors group-hover:text-white/60">{intakeText.optionCard.gameplay}</div>
                                         <div
                                             data-testid="intake-option-gameplay"
-                                            className="type-body min-h-0 overflow-y-auto pr-1 text-zinc-300 [scrollbar-width:thin]"
+                                            className="scroll-fade scroll-fade-y scroll-fade-6 scrollbar-premium type-body min-h-0 overflow-y-auto py-2 pr-2 text-zinc-300"
                                         >
                                             {option.gameplay}
                                         </div>
