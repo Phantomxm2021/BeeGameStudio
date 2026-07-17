@@ -54,8 +54,73 @@ type VitePreviewHostPlugin = {
 
 export function stripViteClientScript(html: string, base: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
-  const marker = `<script type="module" src="${normalizedBase}@vite/client"></script>`
-  return html.split(marker).join('')
+  const expectedSrc = `${normalizedBase}@vite/client`
+  const lowerHtml = html.toLowerCase()
+  let cursor = 0
+  let result = ''
+
+  while (cursor < html.length) {
+    const scriptStart = lowerHtml.indexOf('<script', cursor)
+    if (scriptStart < 0) return result + html.slice(cursor)
+    const openTagEnd = lowerHtml.indexOf('>', scriptStart + 7)
+    if (openTagEnd < 0) return result + html.slice(cursor)
+    const closeTagEnd = lowerHtml.indexOf('</script>', openTagEnd + 1)
+    if (closeTagEnd < 0) return result + html.slice(cursor)
+
+    const openTag = html.slice(scriptStart, openTagEnd + 1)
+    if (readHtmlAttribute(openTag, 'src') === expectedSrc) {
+      result += html.slice(cursor, scriptStart)
+      cursor = closeTagEnd + '</script>'.length
+      continue
+    }
+    result += html.slice(cursor, closeTagEnd + '</script>'.length)
+    cursor = closeTagEnd + '</script>'.length
+  }
+  return result
+}
+
+function readHtmlAttribute(openTag: string, expectedName: string): string | undefined {
+  let cursor = openTag.toLowerCase().indexOf('script') + 'script'.length
+  while (cursor > 0 && cursor < openTag.length) {
+    while (cursor < openTag.length && isHtmlWhitespace(openTag[cursor])) cursor += 1
+    if (cursor >= openTag.length || openTag[cursor] === '>') return undefined
+
+    const nameStart = cursor
+    while (
+      cursor < openTag.length &&
+      !isHtmlWhitespace(openTag[cursor]) &&
+      openTag[cursor] !== '=' &&
+      openTag[cursor] !== '>'
+    ) cursor += 1
+    const name = openTag.slice(nameStart, cursor).toLowerCase()
+    while (cursor < openTag.length && isHtmlWhitespace(openTag[cursor])) cursor += 1
+    if (openTag[cursor] !== '=') continue
+    cursor += 1
+    while (cursor < openTag.length && isHtmlWhitespace(openTag[cursor])) cursor += 1
+
+    const quote = openTag[cursor] === '"' || openTag[cursor] === "'"
+      ? openTag[cursor]
+      : undefined
+    if (quote) cursor += 1
+    const valueStart = cursor
+    if (quote) {
+      while (cursor < openTag.length && openTag[cursor] !== quote) cursor += 1
+    } else {
+      while (
+        cursor < openTag.length &&
+        !isHtmlWhitespace(openTag[cursor]) &&
+        openTag[cursor] !== '>'
+      ) cursor += 1
+    }
+    const value = openTag.slice(valueStart, cursor)
+    if (quote && cursor < openTag.length) cursor += 1
+    if (name === expectedName) return value
+  }
+  return undefined
+}
+
+function isHtmlWhitespace(value: string | undefined): boolean {
+  return value === ' ' || value === '\n' || value === '\r' || value === '\t' || value === '\f'
 }
 
 /**

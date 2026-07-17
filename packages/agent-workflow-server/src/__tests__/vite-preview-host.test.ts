@@ -8,6 +8,19 @@ describe('managed Vite preview host', () => {
     expect(stripViteClientScript(html, '/previews/session/')).toBe('<head></head>')
   })
 
+  test('removes the final Vite client tag regardless of attribute order and quoting', () => {
+    const html = [
+      '<head>',
+      "<script crossorigin src = '/previews/session/@vite/client' type='module'></script>",
+      '<script type="module" src="/previews/session/src/main.tsx"></script>',
+      '</head>',
+    ].join('')
+
+    expect(stripViteClientScript(html, '/previews/session/')).toBe(
+      '<head><script type="module" src="/previews/session/src/main.tsx"></script></head>',
+    )
+  })
+
   test('maps root-relative static files to the managed session base', () => {
     expect(rewriteRootStaticAssetRequest('/assets/models/hero.glb', '/previews/session/'))
       .toBe('/previews/session/assets/models/hero.glb')
