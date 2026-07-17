@@ -122,6 +122,74 @@ describe('native document review evidence', () => {
 
     expect(current(workspace).state).toBe('current')
   })
+
+  test('uses the native Agent launch path when reviewer notification omits output_file', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-review-empty-notification-path'
+    const taskId = 'background-review-empty-notification-task'
+    const outputFile = join(dataRoot, 'review-native-output.jsonl')
+    const payload = reviewerPayload(toolUseID)
+    observe('tool.started', workspace, payload)
+    await writeFile(
+      outputFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
+        },
+      })}\n`,
+    )
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: [
+        'Async agent launched successfully.',
+        `agentId: ${taskId}`,
+        'The agent is working in the background.',
+        `output_file: ${outputFile}`,
+      ].join('\n'),
+    })
+    observe('system.status', workspace, {
+      subtype: 'task_notification',
+      status: 'completed',
+      task_id: taskId,
+      tool_use_id: toolUseID,
+      output_file: '',
+    })
+
+    expect(current(workspace).state).toBe('current')
+  })
+
+  test('captures a completed reviewer when native resume emits init without task_notification', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-review-init-resume'
+    const taskId = 'background-review-init-task'
+    const outputFile = join(dataRoot, 'review-init-output.jsonl')
+    const payload = reviewerPayload(toolUseID)
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: [
+        'Async agent launched successfully.',
+        `agentId: ${taskId}`,
+        'The agent is working in the background.',
+        `output_file: ${outputFile}`,
+      ].join('\n'),
+    })
+    await writeFile(
+      outputFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
+        },
+      })}\n`,
+    )
+    observe('system.status', workspace, { subtype: 'init' })
+
+    expect(current(workspace).state).toBe('current')
+  })
 })
 
 async function createWorkspace(): Promise<string> {

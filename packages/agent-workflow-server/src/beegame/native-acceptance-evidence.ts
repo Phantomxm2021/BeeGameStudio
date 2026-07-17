@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
+import { parseNativeBackgroundTaskLaunch } from './native-background-task-output'
 
 type NativeAcceptanceResult = 'passed' | 'failed' | 'blocked'
 type NativeAcceptanceEvidenceKind =
@@ -62,6 +63,7 @@ type NativeAcceptanceBackgroundTask = {
   toolUseID: string
   validatorId: string
   workspaceDigest: string
+  outputFile?: string
   createdAt: string
 }
 
@@ -114,6 +116,14 @@ export function observeNativeAcceptanceToolEvent(input: {
 
   if (input.eventType === 'system.status') {
     observeNativeBackgroundAcceptanceEvent({ ...input, payload: input.payload })
+    if (stringValue(input.payload.subtype) === 'init') {
+      observePendingNativeBackgroundAcceptance(input)
+    }
+    return
+  }
+
+  if (input.eventType === 'result') {
+    observePendingNativeBackgroundAcceptance(input)
     return
   }
 
@@ -148,8 +158,32 @@ export function observeNativeAcceptanceToolEvent(input: {
     )
   if (!dispatch || dispatch.kind !== 'dispatch') return
 
+  const output = stringValue(input.payload.output)
+  const backgroundLaunch = parseNativeBackgroundTaskLaunch(output)
+  if (backgroundLaunch) {
+    if (!readObservations(input.dataRoot, input.sessionId).some(observation =>
+      observation.kind === 'background-task' &&
+      observation.taskId === backgroundLaunch.taskId &&
+      observation.toolUseID === toolUseID
+    )) {
+      appendObservation(input.dataRoot, input.sessionId, {
+        version: 3,
+        kind: 'background-task',
+        sessionId: input.sessionId,
+        ...(input.turnId ? { turnId: input.turnId } : {}),
+        taskId: backgroundLaunch.taskId,
+        toolUseID,
+        validatorId,
+        workspaceDigest: dispatch.workspaceDigest,
+        outputFile: backgroundLaunch.outputFile,
+        createdAt: input.createdAt.toISOString(),
+      })
+    }
+    return
+  }
+
   const report = parseNativeAcceptanceReport(
-    stringValue(input.payload.output),
+    output,
     validatorId,
   )
   if (!report) return
@@ -224,7 +258,9 @@ function observeNativeBackgroundAcceptanceEvent(input: {
   if (!backgroundTask || backgroundTask.kind !== 'background-task') return
 
   const report = parseNativeAcceptanceReport(
-    readNativeBackgroundTaskTerminalText(stringValue(input.payload.output_file)),
+    readNativeBackgroundTaskTerminalText(
+      stringValue(input.payload.output_file) || backgroundTask.outputFile || '',
+    ),
     backgroundTask.validatorId,
   )
   if (!report) return
@@ -243,6 +279,47 @@ function observeNativeBackgroundAcceptanceEvent(input: {
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
   })
+}
+
+function observePendingNativeBackgroundAcceptance(input: {
+  dataRoot: string
+  sessionId: string
+  workspacePath: string
+  turnId?: string
+  createdAt: Date
+}): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const completedToolUseIDs = new Set(observations.flatMap(observation =>
+    observation.kind === 'result' ? [observation.toolUseID] : []
+  ))
+  for (const task of observations) {
+    if (
+      task.kind !== 'background-task' ||
+      !task.outputFile ||
+      completedToolUseIDs.has(task.toolUseID)
+    ) continue
+    const report = parseNativeAcceptanceReport(
+      readNativeBackgroundTaskTerminalText(task.outputFile),
+      task.validatorId,
+    )
+    if (!report) continue
+    appendObservation(input.dataRoot, input.sessionId, {
+      version: 3,
+      kind: 'result',
+      sessionId: input.sessionId,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      toolUseID: task.toolUseID,
+      validatorId: task.validatorId,
+      status: report.status,
+      summary: report.summary,
+      reportDigest: digestJson(report),
+      workspaceDigest: task.workspaceDigest,
+      evidence: report.evidence,
+      findings: report.findings,
+      createdAt: input.createdAt.toISOString(),
+    })
+    completedToolUseIDs.add(task.toolUseID)
+  }
 }
 
 const MAX_NATIVE_TASK_OUTPUT_BYTES = 16 * 1024 * 1024

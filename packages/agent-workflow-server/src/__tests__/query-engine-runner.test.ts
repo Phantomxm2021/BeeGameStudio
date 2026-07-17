@@ -11,6 +11,7 @@ import {
   assertRequiredBeeGameNativeAgents,
   ensureBeeGameMacroGlobals,
   drainNativeBackgroundNotifications,
+  getCompletedNativeTaskOutputTaskId,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
   parseNativeTerminalTaskNotification,
@@ -159,6 +160,41 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       runNotification: async command => { processed.push(String(command.value)) },
     })
     expect(processed).toEqual([terminal])
+  })
+
+  test('does not resume a delayed notification after native TaskOutput already consumed the task', async () => {
+    const processed: string[] = []
+    const consumed = new Set(['review-1'])
+    const queued = [{
+      value: '<task-notification><task-id>review-1</task-id><tool-use-id>agent-tool-1</tool-use-id><status>completed</status></task-notification>',
+      mode: 'task-notification',
+    }]
+    await drainNativeBackgroundNotifications({
+      signal: new AbortController().signal,
+      takeNotifications: () => queued.splice(0),
+      hasRunningTasks: () => false,
+      runNotification: async command => { processed.push(String(command.value)) },
+      consumedNotificationKeys: consumed,
+    })
+
+    expect(processed).toEqual([])
+  })
+
+  test('recognizes only structured terminal TaskOutput consumption', () => {
+    expect(getCompletedNativeTaskOutputTaskId({
+      type: 'user',
+      tool_use_result: {
+        retrieval_status: 'success',
+        task: { task_id: 'review-1', status: 'completed' },
+      },
+    })).toBe('review-1')
+    expect(getCompletedNativeTaskOutputTaskId({
+      type: 'user',
+      tool_use_result: {
+        retrieval_status: 'success',
+        task: { task_id: 'review-1', status: 'running' },
+      },
+    })).toBeUndefined()
   })
 
   test('parses only the native terminal lifecycle envelope', () => {

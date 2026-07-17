@@ -256,6 +256,8 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
     this.activateNativeSession?.()
     engine.resetAbortController()
     for await (const message of engine.submitMessage(prompt, options)) {
+      const consumedTaskId = getCompletedNativeTaskOutputTaskId(message)
+      if (consumedTaskId) this.consumedTaskNotifications.add(consumedTaskId)
       input.onMessage(message)
       if (input.signal.aborted) break
     }
@@ -585,8 +587,14 @@ export async function drainNativeBackgroundNotifications({
     if (notifications.length > 0) {
       for (const notification of notifications) {
         const terminal = parseNativeTerminalTaskNotification(notification)
-        if (!terminal || consumedNotificationKeys.has(terminal.key)) continue
-        consumedNotificationKeys.add(terminal.key)
+        if (!terminal) continue
+        const keys = [
+          terminal.toolUseId,
+          terminal.taskId,
+          notification.uuid,
+        ].filter((value): value is string => Boolean(value))
+        if (keys.some(key => consumedNotificationKeys.has(key))) continue
+        for (const key of keys) consumedNotificationKeys.add(key)
         await runNotification(notification)
         if (signal.aborted) return
       }
@@ -634,6 +642,34 @@ export function parseNativeTerminalTaskNotification(
     ...(toolUseId ? { toolUseId } : {}),
     status,
   }
+}
+
+/**
+ * Detects only a structured Claude Code TaskOutput terminal retrieval. The
+ * task result has already been placed in the native conversation at this
+ * point, so replaying its later task-notification would duplicate the same
+ * completion. No task output or workflow semantics are interpreted here.
+ */
+export function getCompletedNativeTaskOutputTaskId(
+  message: DashboardSDKMessage,
+): string | undefined {
+  if (message.type !== 'user' || !isRecord(message.tool_use_result)) {
+    return undefined
+  }
+  if (message.tool_use_result.retrieval_status !== 'success') return undefined
+  const task = message.tool_use_result.task
+  if (!isRecord(task)) return undefined
+  const status = task.status
+  if (
+    status !== 'completed' &&
+    status !== 'failed' &&
+    status !== 'stopped' &&
+    status !== 'killed'
+  ) return undefined
+  const taskId = task.task_id
+  return typeof taskId === 'string' && taskId.trim()
+    ? taskId.trim()
+    : undefined
 }
 
 function readXmlTransportField(value: string, field: string): string | undefined {

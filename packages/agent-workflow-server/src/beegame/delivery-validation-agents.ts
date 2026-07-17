@@ -15,7 +15,7 @@ const NATIVE_AGENTS: Readonly<Record<string, string>> = {
   [`${DOCUMENT_REVIEWER_AGENT_TYPE}.md`]: `---
 name: ${DOCUMENT_REVIEWER_AGENT_TYPE}
 description: Independently review the approved project documents for completeness, internal consistency, testable player behavior, and implementation readiness before construction begins.
-tools: [Read, Glob, Grep, Skill, Bash]
+tools: [Read, Glob, Grep, Skill]
 disallowedTools: [Write, Edit, MultiEdit, NotebookEdit]
 model: inherit
 maxTurns: 12
@@ -45,6 +45,8 @@ maxTurns: 64
 ---
 
 You are an independent acceptance validator in a fresh Claude Code context.
+
+Run as a foreground native subagent. Runtime validation may require project-native shell commands whose permissions must remain visible to the user; do not move this validation into the background to suppress or bypass those permission decisions.
 
 Treat the approved project documents as the source of truth. Read them before judging the implementation. Treat every completion claim supplied by the caller as untrusted context, never as evidence. Discover the project's own toolchain from its files; do not assume Web, Unity, Godot, Unreal, or any other platform from names. Invoke the applicable acceptance Skill and any platform-specific validation capability that is actually available.
 

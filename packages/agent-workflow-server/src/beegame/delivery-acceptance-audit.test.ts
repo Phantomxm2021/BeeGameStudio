@@ -147,6 +147,118 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
+  test('uses the native Agent launch output when the terminal notification omits output_file', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-validator-empty-notification-path'
+    const taskId = 'background-validator-empty-notification-task'
+    const outputFile = join(dataRoot, 'validator-native-output.jsonl')
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    await mkdir(dataRoot, { recursive: true })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        ...agentPayload,
+        output: nativeAsyncAgentLaunch(taskId, outputFile),
+      },
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: {
+        subtype: 'task_notification',
+        status: 'completed',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+        output_file: '',
+      },
+      createdAt: new Date(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
+  test('captures a completed background Validator when native resume emits init without task_notification', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-validator-init-resume'
+    const taskId = 'background-validator-init-task'
+    const outputFile = join(dataRoot, 'validator-init-output.jsonl')
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    await mkdir(dataRoot, { recursive: true })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        ...agentPayload,
+        output: nativeAsyncAgentLaunch(taskId, outputFile),
+      },
+      createdAt: new Date(),
+    })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: { subtype: 'init' },
+      createdAt: new Date(),
+    })
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
   test('binds a background result to the revision at its original Agent dispatch', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
@@ -570,6 +682,15 @@ function nativeTaskOutput(report: unknown): string {
     '<output>',
     output,
     '</output>',
+  ].join('\n')
+}
+
+function nativeAsyncAgentLaunch(taskId: string, outputFile: string): string {
+  return [
+    'Async agent launched successfully.',
+    `agentId: ${taskId}`,
+    'The agent is working in the background.',
+    `output_file: ${outputFile}`,
   ].join('\n')
 }
 

@@ -28,6 +28,10 @@ import {
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
 import { observeNativeAcceptanceToolEvent } from './native-acceptance-evidence'
 import { observeNativeDocumentReviewToolEvent } from './native-document-review-evidence'
+import {
+  parseNativeBackgroundTaskLaunch,
+  readNativeBackgroundTaskUsage,
+} from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 
 export type BeeGameImageAttachment = {
@@ -2208,17 +2212,35 @@ function deriveObservedRoleTokens(
 ): NonNullable<BeeGameRuntimeSnapshot['turnDiagnostics']>['roleTokens'] {
   const total = usage.total_tokens
   const roleByToolUse = new Map<string, string>()
+  const backgroundUsageByToolUse = new Map<string, number>()
   for (const event of events) {
-    if (event.type !== 'tool.started') continue
+    if (
+      event.type !== 'tool.started' &&
+      event.type !== 'tool.completed'
+    ) continue
     if (getDashboardPayloadString(event.payload, 'toolName') !== 'Agent') continue
     const payload = isRuntimeRecord(event.payload) ? event.payload : undefined
     const input = payload && isRuntimeRecord(payload.input) ? payload.input : undefined
     const toolUseID = typeof payload?.toolUseID === 'string' ? payload.toolUseID : ''
     const role = typeof input?.subagent_type === 'string' ? input.subagent_type : ''
     if (toolUseID && role) roleByToolUse.set(toolUseID, role)
+    if (event.type === 'tool.completed' && toolUseID) {
+      const launch = parseNativeBackgroundTaskLaunch(
+        typeof payload?.output === 'string' ? payload.output : '',
+      )
+      const taskUsage = launch
+        ? readNativeBackgroundTaskUsage(launch.outputFile)
+        : undefined
+      if (taskUsage) {
+        backgroundUsageByToolUse.set(toolUseID, taskUsage.totalTokens)
+      }
+    }
   }
 
-  const latestTerminalByTask = new Map<string, { role: string; tokens: number }>()
+  const latestTerminalByTask = new Map<
+    string,
+    { toolUseID: string; role: string; tokens: number }
+  >()
   for (const event of events) {
     if (event.type !== 'system.status' || !isRuntimeRecord(event.payload)) continue
     if (getDashboardPayloadString(event.payload, 'subtype') !== 'task_notification') continue
@@ -2227,8 +2249,23 @@ function deriveObservedRoleTokens(
     const usage = isRuntimeRecord(event.payload.usage) ? event.payload.usage : undefined
     if (!taskId || !toolUseID || !usage) continue
     latestTerminalByTask.set(taskId, {
+      toolUseID,
       role: roleByToolUse.get(toolUseID) ?? 'other',
-      tokens: normalizeFiniteNumber(usage.total_tokens),
+      tokens: Math.max(
+        normalizeFiniteNumber(usage.total_tokens),
+        backgroundUsageByToolUse.get(toolUseID) ?? 0,
+      ),
+    })
+  }
+
+  for (const [toolUseID, tokens] of backgroundUsageByToolUse) {
+    if ([...latestTerminalByTask.values()].some(value =>
+      value.toolUseID === toolUseID
+    )) continue
+    latestTerminalByTask.set(`output:${toolUseID}`, {
+      toolUseID,
+      role: roleByToolUse.get(toolUseID) ?? 'other',
+      tokens,
     })
   }
 

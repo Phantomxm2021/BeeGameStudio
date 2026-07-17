@@ -2444,6 +2444,8 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
       expect(submitted).toContain('beegame-acceptance-validator')
+      expect(submitted).toContain('subagent in the foreground')
+      expect(submitted).toContain('project-native runtime permission remains visible to the user')
       expect(submitted).toContain('let the native task notification resume this same session')
       expect(submitted).toContain('do not poll TaskOutput or read its output file')
       expect(submitted).toContain('do not launch another Validator for the same unchanged revision')

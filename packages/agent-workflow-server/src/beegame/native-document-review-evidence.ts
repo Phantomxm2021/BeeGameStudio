@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DOCUMENT_REVIEWER_AGENT_TYPE } from './delivery-validation-agents'
+import { parseNativeBackgroundTaskLaunch } from './native-background-task-output'
 
 export type NativeDocumentReviewVerdict = 'READY' | 'NEEDS_REVISION' | 'BLOCKED'
 
@@ -47,6 +48,7 @@ type NativeDocumentReviewBackgroundTask = {
   toolUseID: string
   reviewerId: string
   documentsDigest: string
+  outputFile?: string
   createdAt: string
 }
 
@@ -88,6 +90,14 @@ export function observeNativeDocumentReviewToolEvent(input: {
   if (!isRecord(input.payload)) return
   if (input.eventType === 'system.status') {
     observeBackgroundEvent({ ...input, payload: input.payload })
+    if (stringValue(input.payload.subtype) === 'init') {
+      observePendingBackgroundResults(input)
+    }
+    return
+  }
+
+  if (input.eventType === 'result') {
+    observePendingBackgroundResults(input)
     return
   }
 
@@ -118,7 +128,31 @@ export function observeNativeDocumentReviewToolEvent(input: {
       observation.kind === 'dispatch' && observation.toolUseID === toolUseID,
   )
   if (!dispatch || dispatch.kind !== 'dispatch') return
-  const report = parseReport(stringValue(input.payload.output))
+  const output = stringValue(input.payload.output)
+  const backgroundLaunch = parseNativeBackgroundTaskLaunch(output)
+  if (backgroundLaunch) {
+    const observations = readObservations(input.dataRoot, input.sessionId)
+    if (!observations.some(observation =>
+      observation.kind === 'background-task' &&
+      observation.taskId === backgroundLaunch.taskId &&
+      observation.toolUseID === toolUseID
+    )) {
+      appendObservation(input.dataRoot, input.sessionId, {
+        version: 1,
+        kind: 'background-task',
+        sessionId: input.sessionId,
+        ...(input.turnId ? { turnId: input.turnId } : {}),
+        taskId: backgroundLaunch.taskId,
+        toolUseID,
+        reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
+        documentsDigest: dispatch.documentsDigest,
+        outputFile: backgroundLaunch.outputFile,
+        createdAt: input.createdAt.toISOString(),
+      })
+    }
+    return
+  }
+  const report = parseReport(output)
   if (!report) return
   appendResult(input, toolUseID, dispatch.documentsDigest, report)
 }
@@ -259,10 +293,36 @@ function observeBackgroundEvent(input: {
   )
   if (!task || task.kind !== 'background-task') return
   const report = parseReport(
-    readBackgroundTaskTerminalText(stringValue(input.payload.output_file)),
+    readBackgroundTaskTerminalText(
+      stringValue(input.payload.output_file) || task.outputFile || '',
+    ),
   )
   if (!report) return
   appendResult(input, toolUseID, task.documentsDigest, report)
+}
+
+function observePendingBackgroundResults(input: {
+  dataRoot: string
+  sessionId: string
+  workspacePath: string
+  turnId?: string
+  createdAt: Date
+}): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const completedToolUseIDs = new Set(observations.flatMap(observation =>
+    observation.kind === 'result' ? [observation.toolUseID] : []
+  ))
+  for (const task of observations) {
+    if (
+      task.kind !== 'background-task' ||
+      !task.outputFile ||
+      completedToolUseIDs.has(task.toolUseID)
+    ) continue
+    const report = parseReport(readBackgroundTaskTerminalText(task.outputFile))
+    if (!report) continue
+    appendResult(input, task.toolUseID, task.documentsDigest, report)
+    completedToolUseIDs.add(task.toolUseID)
+  }
 }
 
 function appendResult(
