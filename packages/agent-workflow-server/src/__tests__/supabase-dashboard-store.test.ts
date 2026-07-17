@@ -22,6 +22,39 @@ describe('SupabaseDashboardStore', () => {
     globalThis.fetch = originalFetch
   })
 
+  test('retries transient transport failures for idempotent reads', async () => {
+    let calls = 0
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+      fetchImpl: (async () => {
+        calls += 1
+        if (calls === 1) throw new Error('transient transport failure')
+        return Response.json([])
+      }) as unknown as typeof fetch,
+    })
+
+    await expect(store.listProjects('owner-user')).resolves.toEqual([])
+    expect(calls).toBe(2)
+  })
+
+  test('does not replay mutations after a transport failure', async () => {
+    let calls = 0
+    const store = new SupabaseDashboardStore({
+      url: 'https://project.supabase.co',
+      anonKey: 'anon-key',
+      authToken: 'user-token',
+      fetchImpl: (async () => {
+        calls += 1
+        throw new Error('mutation transport failure')
+      }) as unknown as typeof fetch,
+    })
+
+    await expect(store.deleteAuthUser('owner-user')).rejects.toThrow('mutation transport failure')
+    expect(calls).toBe(1)
+  })
+
   test('persists deployment records through Supabase REST', async () => {
     const ownerId = '00000000-0000-0000-0000-000000000001'
     const calls: Array<{ url: string; method: string; body?: unknown }> = []

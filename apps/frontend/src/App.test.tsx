@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 
 import App from './App';
 
@@ -17,6 +17,8 @@ let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' =
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
+const showError = vi.fn();
+const showSuccess = vi.fn();
 
 vi.mock('./store/projectStore', () => ({
   useProjectStore: () => ({
@@ -58,8 +60,8 @@ vi.mock('./store/chatStore', () => ({
 
 vi.mock('./contexts/ToastContext', () => ({
   useToastContext: () => ({
-    showError: vi.fn(),
-    showSuccess: vi.fn(),
+    showError,
+    showSuccess,
   }),
 }));
 
@@ -92,6 +94,7 @@ vi.mock('./components/Demiurge/DashboardView', () => ({
 
 describe('App view routing', () => {
   afterEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -126,6 +129,42 @@ describe('App view routing', () => {
     expect(screen.getByLabelText('Initializing BeeGame')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
     expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
+  });
+
+  it('shows a recovery state and retries a temporarily unavailable authentication service', async () => {
+    vi.useFakeTimers();
+    mockedAuthenticationStatus = 'initializing';
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      authenticated: true,
+      user: { id: 'owner-user' },
+    })));
+    const unavailable = Object.assign(
+      new Error('Authentication service is temporarily unavailable'),
+      { status: 503, code: 'authentication_unavailable' },
+    );
+    loadCurrentUser
+      .mockRejectedValueOnce(unavailable)
+      .mockResolvedValueOnce({
+        id: 'owner-user',
+        role: 'owner',
+        permissions: ['project.read'],
+      });
+
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(loadCurrentUser).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('认证服务暂时不可用，正在重新连接…')).toBeInTheDocument();
+    expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadCurrentUser).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the production app on the workspace dashboard when the URL has an internal diagnostics view', () => {

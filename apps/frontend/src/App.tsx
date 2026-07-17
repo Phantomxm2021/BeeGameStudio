@@ -11,7 +11,11 @@ import { useSystemStore } from './store/systemStore';
 import { useChatStore } from './store/chatStore';
 import { useToastContext } from './contexts/ToastContext';
 import { setToastErrorCallback, api } from './services/api';
-import { AUTHENTICATION_REQUIRED_EVENT, hasEnvAuthToken } from './services/apiClient';
+import {
+  AUTHENTICATION_REQUIRED_EVENT,
+  hasEnvAuthToken,
+  isAuthenticationServiceUnavailable,
+} from './services/apiClient';
 import { normalizeChatHistory } from './utils/chatHistory';
 import type { StartProjectResult } from './types/project';
 import { isBeeGameAdapterEnabled, type BeeGameBuildBrief } from './services/beeGameAdapter';
@@ -50,8 +54,11 @@ function App() {
 
   const [lang, setLang] = useState<Language>('zh');
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
+  const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
+  const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
   const loadedHistoryProjectRef = useRef<string | null>(null);
   const authenticationInitializationStartedRef = useRef(false);
+  const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
 
@@ -88,6 +95,7 @@ function App() {
     authenticationInitializationStartedRef.current = true;
     const initializeApp = async () => {
       try {
+        setAuthenticationInitializationError('');
         setAuthenticationStatus('initializing');
         const session = await initializeSupabaseSession();
         if (!session && (isHttpOnlySessionsEnabled() || !hasEnvAuthToken())) {
@@ -96,13 +104,31 @@ function App() {
         }
         await loadCurrentUser();
       } catch (error) {
+        if (isAuthenticationServiceUnavailable(error)) {
+          setAuthenticationInitializationError('认证服务暂时不可用，正在重新连接…');
+          authenticationInitializationStartedRef.current = false;
+          if (authenticationRetryTimerRef.current) {
+            clearTimeout(authenticationRetryTimerRef.current);
+          }
+          authenticationRetryTimerRef.current = setTimeout(() => {
+            authenticationRetryTimerRef.current = null;
+            setAuthenticationRetryVersion(version => version + 1);
+          }, 2_000);
+          return;
+        }
         setAuthenticationStatus('anonymous');
         console.error('Failed to initialize app:', error);
         showError(error instanceof Error ? error.message : '登录状态初始化失败');
       }
     };
     initializeApp();
-  }, [loadCurrentUser, setAuthenticationStatus, showError]);
+  }, [authenticationRetryVersion, loadCurrentUser, setAuthenticationStatus, showError]);
+
+  useEffect(() => () => {
+    if (authenticationRetryTimerRef.current) {
+      clearTimeout(authenticationRetryTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (authenticationStatus !== 'authenticated' || !currentUser?.id) {
@@ -171,7 +197,20 @@ function App() {
   };
 
   if (authenticationStatus === 'initializing') {
-    return <div className="min-h-screen bg-black" aria-label="Initializing BeeGame" />;
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-black px-6 text-center text-white"
+        role="status"
+        aria-label="Initializing BeeGame"
+      >
+        <div className="flex max-w-sm flex-col items-center gap-4">
+          <span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" aria-hidden="true" />
+          <p className="text-sm font-medium tracking-[-0.01em] text-white/80">
+            {authenticationInitializationError || '正在恢复登录状态…'}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

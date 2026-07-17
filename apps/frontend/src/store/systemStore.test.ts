@@ -27,6 +27,7 @@ describe('systemStore token usage', () => {
       tokenUsage: {},
       taskUsage: {},
       currentUser: null,
+      authenticationStatus: 'initializing',
     });
     vi.clearAllMocks();
   });
@@ -158,6 +159,28 @@ describe('systemStore token usage', () => {
     expect(useSystemStore.getState().currentUser).toBeNull();
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it('preserves the signed-in user while authentication is temporarily unavailable', async () => {
+    const currentUser = {
+      id: 'old-user',
+      role: 'owner' as const,
+      permissions: ['project.delete' as const],
+    };
+    useSystemStore.setState({
+      currentUser,
+      authenticationStatus: 'authenticated',
+    });
+    const unavailable = Object.assign(
+      new Error('Authentication service is temporarily unavailable'),
+      { status: 503, code: 'authentication_unavailable' },
+    );
+    vi.mocked(api.getCurrentUser).mockRejectedValue(unavailable);
+
+    await expect(useSystemStore.getState().loadCurrentUser()).rejects.toBe(unavailable);
+
+    expect(useSystemStore.getState().currentUser).toEqual(currentUser);
+    expect(useSystemStore.getState().authenticationStatus).toBe('initializing');
   });
 
 });

@@ -1520,7 +1520,7 @@ export class SupabaseDashboardStore {
     path: string,
     init: RequestInit = {},
   ): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+    const response = await this.fetchRestRequest(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
         apikey: this.anonKey,
@@ -1537,6 +1537,32 @@ export class SupabaseDashboardStore {
     }
     if (response.status === 204) return undefined as T
     return await response.json() as T
+  }
+
+  /**
+   * A local proxy, VPN transition, or pooled TLS connection can fail before an
+   * HTTP response exists. Retrying an idempotent Supabase read is safe; replaying
+   * a mutation is not. Certificate verification remains enabled on every try.
+   */
+  private async fetchRestRequest(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const method = String(init.method ?? 'GET').toUpperCase()
+    const retryDelays = method === 'GET' || method === 'HEAD'
+      ? [75, 200]
+      : []
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.fetchImpl(url, init)
+      } catch (error) {
+        const aborted = init.signal?.aborted || (
+          error instanceof Error && error.name === 'AbortError'
+        )
+        if (aborted || attempt >= retryDelays.length) throw error
+        await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]))
+      }
+    }
   }
 }
 

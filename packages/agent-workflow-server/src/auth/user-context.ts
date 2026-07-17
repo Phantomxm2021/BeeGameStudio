@@ -272,19 +272,27 @@ async function fetchSupabaseUserContextResponse(
     ? setTimeout(() => controller.abort(), resolveTimeoutMs)
     : undefined
   try {
-    return await fetchImpl(
-      joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
-      {
-        method: 'POST',
-        headers: {
-          apikey: apiKey,
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: '{}',
-        signal: controller.signal,
-      },
-    )
+    const retryDelays = [75, 200]
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await fetchImpl(
+          joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
+          {
+            method: 'POST',
+            headers: {
+              apikey: apiKey,
+              authorization: `Bearer ${token}`,
+              'content-type': 'application/json',
+            },
+            body: '{}',
+            signal: controller.signal,
+          },
+        )
+      } catch (error) {
+        if (controller.signal.aborted || attempt >= retryDelays.length) throw error
+        await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]))
+      }
+    }
   } catch (error) {
     throw new BeeGameAuthUnavailableError(
       undefined,

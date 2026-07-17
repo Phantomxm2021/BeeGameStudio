@@ -129,6 +129,29 @@ describe('BeeGame user context', () => {
     ).rejects.toBeInstanceOf(BeeGameAuthUnavailableError)
   })
 
+  test('recovers initial user resolution from a transient transport failure', async () => {
+    let calls = 0
+    const resolver = createSupabaseUserResolver({
+      url: 'https://project.supabase.co',
+      apiKey: 'anon-key',
+      fetchImpl: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('transient transport failure')
+        return Response.json({ id: 'recovered-user', role: 'developer' })
+      },
+    })
+
+    await expect(resolver?.(
+      new Request('https://beegame.test/api/current-user', {
+        headers: { authorization: 'Bearer recoverable-token' },
+      }),
+    )).resolves.toEqual(expect.objectContaining({
+      id: 'recovered-user',
+      role: 'developer',
+    }))
+    expect(calls).toBe(2)
+  })
+
   test('aborts a stalled Supabase lookup and does not reuse the failed pending resolution', async () => {
     let calls = 0
     const resolver = createSupabaseUserResolver({

@@ -50,6 +50,30 @@ const apiMocks = vi.hoisted(() => ({
         deployedAt: '2026-06-21T00:00:00.000Z',
     }),
     requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
+    getCreditBalance: vi.fn(() => Promise.resolve({
+        userId: 'user_1',
+        plan: 'free',
+        balanceCredits: 162,
+        includedCredits: 200,
+        consumedCredits: 38,
+        reservedCredits: 7,
+        creditUnitWeightedTokens: 1000,
+        estimates: {
+            ideaIntake: { minCredits: 1, maxCredits: 2 },
+            planningDocs: { minCredits: 2, maxCredits: 4 },
+            smallPlayableGame: { minCredits: 4, maxCredits: 8 },
+            standardGame: { minCredits: 8, maxCredits: 16 },
+            complexGame: { minCredits: 16, maxCredits: 32 },
+        },
+    })),
+    getCreditSummary: vi.fn(() => Promise.resolve({
+        entriesCount: 3,
+        reservedCredits: 50,
+        settledCredits: 12,
+        refundedCredits: 38,
+        outstandingReservedCredits: 0,
+        weightedTokens: 120000,
+    })),
 }));
 const status = {
     uptime: '1m',
@@ -210,30 +234,8 @@ vi.mock('../../services/api', () => ({
 }));
 
 vi.mock('../../services/creditsApi', () => ({
-    getCreditBalance: vi.fn(() => Promise.resolve({
-        userId: 'user_1',
-        plan: 'free',
-        balanceCredits: 162,
-        includedCredits: 200,
-        consumedCredits: 38,
-        reservedCredits: 7,
-        creditUnitWeightedTokens: 1000,
-        estimates: {
-            ideaIntake: { minCredits: 1, maxCredits: 2 },
-            planningDocs: { minCredits: 2, maxCredits: 4 },
-            smallPlayableGame: { minCredits: 4, maxCredits: 8 },
-            standardGame: { minCredits: 8, maxCredits: 16 },
-            complexGame: { minCredits: 16, maxCredits: 32 },
-        },
-    })),
-    getCreditSummary: vi.fn(() => Promise.resolve({
-        entriesCount: 3,
-        reservedCredits: 50,
-        settledCredits: 12,
-        refundedCredits: 38,
-        outstandingReservedCredits: 0,
-        weightedTokens: 120000,
-    })),
+    getCreditBalance: apiMocks.getCreditBalance,
+    getCreditSummary: apiMocks.getCreditSummary,
     getCreditLedger: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -348,6 +350,36 @@ describe('DashboardView runtime loading', () => {
         expect(loadPhases).not.toHaveBeenCalled();
         expect(loadTasks).not.toHaveBeenCalled();
         expect(loadAgents).not.toHaveBeenCalled();
+    });
+
+    it('refreshes credits only for credit events, not long-running tool activity', async () => {
+        vi.useFakeTimers();
+        try {
+            render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+            await act(async () => Promise.resolve());
+            expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(1);
+            expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(1);
+
+            act(() => {
+                capturedUseChatOptions?.onTaskEvent('tool_start');
+                capturedUseChatOptions?.onTaskEvent('tool_end');
+                capturedUseChatOptions?.onTaskEvent('usage');
+                vi.advanceTimersByTime(2_100);
+            });
+            await act(async () => Promise.resolve());
+            expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(1);
+            expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                capturedUseChatOptions?.onTaskEvent('credit_update');
+                capturedUseChatOptions?.onTaskEvent('credit_update');
+                await Promise.resolve();
+            });
+            expect(apiMocks.getCreditSummary).toHaveBeenCalledTimes(2);
+            expect(apiMocks.getCreditBalance).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('covers the dashboard while the server is starting the project runtime', async () => {

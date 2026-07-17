@@ -206,6 +206,12 @@ export const useSystemStore = create<SystemState>()(
           set({ currentUser, authenticationStatus: 'authenticated' });
           return currentUser;
         } catch (error) {
+          if (isAuthenticationServiceUnavailable(error)) {
+            // A temporary Supabase/TLS outage is not a logout. Preserve the
+            // initialization boundary so App can retry the same cookie session.
+            set({ authenticationStatus: 'initializing' });
+            throw error;
+          }
           if (getErrorStatus(error) !== 401) {
             console.error('Failed to load current user:', error);
           }

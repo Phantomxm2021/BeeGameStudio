@@ -96,6 +96,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
     const creditQuoteResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
+    const activeCreditProjectRef = useRef(projectId);
+    activeCreditProjectRef.current = projectId;
     const previousBeeGameStatusRef = useRef<string | null>(null);
     const isBeeGameMode = isBeeGameAdapterEnabled();
     const { i18n } = useTranslation('beegame');
@@ -138,22 +141,34 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         resolve?.(confirmed);
     }, []);
 
-    const refreshCredits = useCallback(async () => {
-        if (!isBeeGameMode) return;
-        const [summaryResult, balanceResult] = await Promise.allSettled([
-            getCreditSummary(projectId),
-            getCreditBalance(),
-        ]);
-        if (summaryResult.status === 'fulfilled') {
-            setCreditSummary(summaryResult.value);
-        } else {
-            logDashboardReadError('Failed to load credit summary:', summaryResult.reason);
+    const refreshCredits = useCallback((): Promise<void> => {
+        if (!isBeeGameMode) return Promise.resolve();
+        if (creditRefreshPromiseRef.current?.projectId === projectId) {
+            return creditRefreshPromiseRef.current.promise;
         }
-        if (balanceResult.status === 'fulfilled') {
-            setCreditBalance(balanceResult.value);
-        } else {
-            logDashboardReadError('Failed to load credit balance:', balanceResult.reason);
-        }
+        const request = (async () => {
+            const [summaryResult, balanceResult] = await Promise.allSettled([
+                getCreditSummary(projectId),
+                getCreditBalance(),
+            ]);
+            if (activeCreditProjectRef.current !== projectId) return;
+            if (summaryResult.status === 'fulfilled') {
+                setCreditSummary(summaryResult.value);
+            } else {
+                logDashboardReadError('Failed to load credit summary:', summaryResult.reason);
+            }
+            if (balanceResult.status === 'fulfilled') {
+                setCreditBalance(balanceResult.value);
+            } else {
+                logDashboardReadError('Failed to load credit balance:', balanceResult.reason);
+            }
+        })().finally(() => {
+            if (creditRefreshPromiseRef.current?.promise === request) {
+                creditRefreshPromiseRef.current = null;
+            }
+        });
+        creditRefreshPromiseRef.current = { projectId, promise: request };
+        return request;
     }, [isBeeGameMode, projectId]);
 
     const refreshDeploymentHistory = useCallback(async (): Promise<BeeGameDeploymentPayload[]> => {
@@ -181,6 +196,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         confirmCreditQuote,
         // Trigger data refreshes on significant task events
         onTaskEvent: (type) => {
+            if (type === 'credit_update') {
+                void refreshCredits();
+                return;
+            }
             if (
                 type === 'usage' ||
                 type === 'status_finished' ||
@@ -213,7 +232,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                             logDashboardReadError('Failed to refresh project runtime state:', error);
                         });
                     }
-                    refreshCredits().catch(console.error);
                     refreshTimerRef.current = null;
                 }, 2000);
             }
