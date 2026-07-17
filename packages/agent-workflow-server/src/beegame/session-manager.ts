@@ -3363,8 +3363,19 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
       return mapStreamEvent(record, message)
     case 'tool_progress':
       return mapTextEvent('tool.progress', extractMessageText(message))
-    case 'result':
-      return mapTextEvent('result', extractMessageText(message))
+    case 'result': {
+      // A native terminal result can legitimately carry accounting and status
+      // metadata without user-visible text. Persist that envelope so credits,
+      // diagnostics, and transcript recovery remain lossless; the frontend
+      // already projects result events to usage only, so this does not create
+      // an empty chat message. Protocol-only thinking markers stay hidden.
+      const text = extractMessageText(message).trim()
+      return {
+        type: 'result',
+        text: isThinkingProtocolControlText(text) ? '' : text,
+        payload: message,
+      }
+    }
     case 'system':
     case 'status':
       return mapNativeTaskLifecycleEvent(message) ?? mapTextEvent('system.status', extractMessageText(message))

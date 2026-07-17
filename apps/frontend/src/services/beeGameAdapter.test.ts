@@ -2754,7 +2754,10 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/beegame-sessions/beegame_usage/events?after=0') {
         return jsonResponse([
-          resultEvent(60, 'beegame_usage', 'turn-1', 100, 25),
+          {
+            ...resultEvent(60, 'beegame_usage', 'turn-1', 100, 25),
+            text: '',
+          },
         ]);
       }
       return jsonResponse({ error: 'not found' }, 404);

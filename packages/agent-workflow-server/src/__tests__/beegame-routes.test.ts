@@ -2479,7 +2479,7 @@ describe('beegame session routes', () => {
       },
       {
         type: 'result',
-        result: 'Done',
+        result: '',
         usage: {
           input_tokens: 20_000,
           output_tokens: 3_001,
@@ -3995,6 +3995,14 @@ describe('beegame session routes', () => {
         is_error: false,
         stop_reason: 'end_turn',
         result: '',
+        modelUsage: {
+          'runtime-model': {
+            inputTokens: 100,
+            outputTokens: 10,
+            cacheReadInputTokens: 300,
+            cacheCreationInputTokens: 5,
+          },
+        },
       },
     ])
     const manager = new BeeGameSessionManager(fake.runner, workspace)
@@ -4016,6 +4024,26 @@ describe('beegame session routes', () => {
         }),
       ]))
       expect(events.some(event => event.type === 'turn.completed')).toBe(false)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'result',
+          text: '',
+          payload: expect.objectContaining({
+            type: 'result',
+            modelUsage: expect.any(Object),
+          }),
+        }),
+      ]))
+      expect(manager.runtimeSnapshot(session.id).usage).toEqual({
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        cache_read_tokens: 300,
+        cache_creation_tokens: 5,
+        total_tokens: 415,
+      })
+      expect(manager.transcript(session.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'result', text: '' }),
+      ]))
       expect(manager.get(session.id)?.turnStatus).toBe('idle')
     } finally {
       await rm(workspace, { recursive: true, force: true })
