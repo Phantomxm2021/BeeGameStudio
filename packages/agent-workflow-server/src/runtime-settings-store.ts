@@ -126,22 +126,26 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   options: RuntimeSettingsStoreOptions = {},
 ): void {
   migrateLegacyRuntimeLayout(options)
-  if (
-    config.autoMemoryEnabled === undefined &&
-    config.autoDreamEnabled === undefined &&
-    config.skillSearchEnabled === undefined &&
-    config.treeSitterBashEnabled === undefined &&
-    config.webBrowserToolEnabled === undefined &&
-    config.bashClassifierEnabled === undefined &&
-    config.mcpSkillsEnabled === undefined
-  ) {
-    return
-  }
   const filePath = join(getBeeGameRuntimeConfigDir(options), 'settings.json')
   mkdirSync(dirname(filePath), { recursive: true })
   const previous = readJsonObject(filePath)
+  const previousSandbox = isObject(previous.sandbox) ? previous.sandbox : {}
+  const sandboxEnabled = process.env.BEEGAME_NATIVE_SANDBOX_ENABLED !== '0'
+  const sandboxFailIfUnavailable =
+    process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE !== '0'
   const next = {
     ...previous,
+    // BeeGame runs each Claude Code session in a dedicated process and
+    // workspace. Keep the remaining command boundary in Claude Code's native
+    // sandbox instead of granting broad Bash permissions from the dashboard.
+    // This is host isolation policy, not a user/model-provider feature flag.
+    sandbox: {
+      ...previousSandbox,
+      enabled: sandboxEnabled,
+      autoAllowBashIfSandboxed: sandboxEnabled,
+      allowUnsandboxedCommands: false,
+      failIfUnavailable: sandboxEnabled && sandboxFailIfUnavailable,
+    },
     ...(config.autoMemoryEnabled !== undefined
       ? { autoMemoryEnabled: config.autoMemoryEnabled }
       : {}),

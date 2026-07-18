@@ -26,13 +26,20 @@ import {
   type BeeGameCreditTaskType,
 } from '../credit-policy'
 import { cleanupRuntimeLayout } from '../runtime-settings-store'
-import { observeNativeAcceptanceToolEvent } from './native-acceptance-evidence'
-import { observeNativeDocumentReviewToolEvent } from './native-document-review-evidence'
+import {
+  observeNativeAcceptanceTaskNotification,
+  observeNativeAcceptanceToolEvent,
+} from './native-acceptance-evidence'
+import {
+  observeNativeDocumentReviewTaskNotification,
+  observeNativeDocumentReviewToolEvent,
+} from './native-document-review-evidence'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
+import type { BeeGameNativeTaskNotification } from './native-task-notification'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -219,6 +226,11 @@ export type BeeGameSessionRunnerStartInput = {
   env: Record<string, string>
   approvedOutboundTargets: BeeGameApprovedOutboundTargets
   language?: BeeGameSessionLanguage
+  /** Native background tasks may outlive the foreground turn that spawned them. */
+  onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
+  requestPermission?(
+    request: DashboardPermissionRequest,
+  ): Promise<DashboardPermissionDecision>
 }
 
 const RUNTIME_PROVIDER_URL_KEYS = [
@@ -238,6 +250,7 @@ export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void
+  onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
   requestPermission(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
@@ -976,6 +989,9 @@ export class BeeGameSessionManager {
         env,
         approvedOutboundTargets,
         ...(record.language ? { language: record.language } : {}),
+        onNativeTaskNotification: notification =>
+          this.observeNativeTaskNotification(record, notification),
+        requestPermission: request => this.requestPermission(record, request),
       })
       record.runner = runner
       try {
@@ -1118,6 +1134,36 @@ export class BeeGameSessionManager {
       requestPermission: request => this.requestPermission(record, request),
     })
     if (executionError && !signal.aborted) throw executionError
+  }
+
+  private observeNativeTaskNotification(
+    record: SessionRecord,
+    notification: BeeGameNativeTaskNotification,
+  ): void {
+    const evidenceInput = {
+      dataRoot: this.dashboardDataRoot,
+      sessionId: record.session.id,
+      workspacePath: record.session.cwd,
+      ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+      notification,
+      createdAt: new Date(),
+    }
+    try {
+      observeNativeDocumentReviewTaskNotification(evidenceInput)
+    } catch (error) {
+      console.warn('[BeeGame] Failed to persist native document review notification', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
+    try {
+      observeNativeAcceptanceTaskNotification(evidenceInput)
+    } catch (error) {
+      console.warn('[BeeGame] Failed to persist native acceptance notification', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
   }
 
   private appendAssistantPartialText(
@@ -3557,6 +3603,12 @@ function mapSDKMessageToToolEvents(
       const toolName = cached?.toolName ?? 'Tool'
       const failed = getBooleanField(block, 'is_error') === true
       const output = extractMessageText(block.content)
+      const nativeResult = toolName === 'Agent'
+        ? extractNativeAgentResult(block.content)
+        : undefined
+      const nativeTaskResult = toolName === 'TaskOutput'
+        ? extractNativeCompletedTaskResult(message)
+        : undefined
       events.push({
         type: failed ? 'tool.failed' : 'tool.completed',
         text: `${toolName} ${failed ? 'failed' : 'completed'}`,
@@ -3566,11 +3618,57 @@ function mapSDKMessageToToolEvents(
           toolName,
           ...(cached?.input ? { input: cached.input } : {}),
           output,
+          ...(nativeResult ? { nativeResult } : {}),
+          ...(nativeTaskResult ? { nativeTaskResult } : {}),
         },
       })
     }
   }
   return events
+}
+
+function extractNativeCompletedTaskResult(
+  message: DashboardSDKMessage,
+): { taskId: string; status: string; result?: string } | undefined {
+  const toolUseResult = getObjectField(message, 'tool_use_result')
+  if (getStringField(toolUseResult, 'retrieval_status') !== 'success') {
+    return undefined
+  }
+  const task = getObjectField(toolUseResult, 'task')
+  if (!task) return undefined
+  const taskId = getStringField(task, 'task_id').trim()
+  const status = getStringField(task, 'status').trim()
+  if (
+    !taskId ||
+    (status !== 'completed' &&
+      status !== 'failed' &&
+      status !== 'stopped' &&
+      status !== 'killed')
+  ) return undefined
+  const result = getStringField(task, 'output').trim() ||
+    getStringField(task, 'result').trim()
+  return {
+    taskId,
+    status,
+    ...(result ? { result } : {}),
+  }
+}
+
+/**
+ * Claude Code may append Agent lifecycle/usage metadata as additional text
+ * blocks. Preserve the subagent's own terminal text separately instead of
+ * asking delivery evidence consumers to parse the flattened presentation
+ * string.
+ */
+function extractNativeAgentResult(value: unknown): string | undefined {
+  const items = Array.isArray(value) ? value : [value]
+  for (const item of items) {
+    if (typeof item === 'string' && item.trim()) return item.trim()
+    if (!isObject(item) || getStringField(item, 'type') !== 'text') continue
+    const text = getStringField(item, 'text').trim()
+    if (text) return text
+  }
+  return undefined
 }
 
 function extractContentBlocks(message: DashboardSDKMessage): Record<string, unknown>[] {

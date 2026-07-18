@@ -43,7 +43,10 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
   } | null = null
   private disposed = false
 
-  private constructor(private readonly child: RuntimeProcess) {}
+  private constructor(
+    private readonly child: RuntimeProcess,
+    private readonly sessionInput: BeeGameSessionRunnerStartInput,
+  ) {}
 
   static async start(
     input: BeeGameSessionRunnerStartInput,
@@ -71,7 +74,7 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
           }
         },
       })
-      runtime = new ProcessIsolatedQueryEngineRuntime(child)
+      runtime = new ProcessIsolatedQueryEngineRuntime(child, input)
       child.exited.then(code => {
         if (!runtime?.disposed) {
           const error = new Error(`Claude runtime process exited (${code})`)
@@ -140,10 +143,25 @@ class ProcessIsolatedQueryEngineRuntime implements BeeGameSessionRuntime {
       }
       return
     }
-    if (message.type === 'permission.request') {
-      const turn = this.activeTurn
-      if (!turn || turn.id !== message.turnId) return
-      void turn.input.requestPermission(message.request)
+    if (message.type === 'session.task-notification') {
+      this.sessionInput.onNativeTaskNotification?.(message.notification)
+      return
+    }
+    if (message.type === 'session.permission.request') {
+      const requestPermission = this.sessionInput.requestPermission
+        ?? this.activeTurn?.input.requestPermission
+      if (!requestPermission) {
+        this.send({
+          type: 'permission.resolve',
+          requestId: message.requestId,
+          decision: {
+            behavior: 'deny',
+            message: 'Dashboard permission channel is unavailable',
+          },
+        })
+        return
+      }
+      void requestPermission(message.request)
         .then(decision => this.send({
           type: 'permission.resolve',
           requestId: message.requestId,

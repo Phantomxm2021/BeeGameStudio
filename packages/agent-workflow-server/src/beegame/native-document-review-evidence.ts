@@ -1,18 +1,22 @@
 import { createHash } from 'node:crypto'
 import {
   appendFileSync,
-  closeSync,
   existsSync,
-  fstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  readSync,
   readdirSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DOCUMENT_REVIEWER_AGENT_TYPE } from './delivery-validation-agents'
-import { parseNativeBackgroundTaskLaunch } from './native-background-task-output'
+import { auditDocumentReadiness } from './document-readiness-audit'
+import {
+  parseNativeBackgroundTaskLaunch,
+  parseNativeCompletedTaskOutput,
+} from './native-background-task-output'
+import {
+  parseNativeTerminalTaskNotification,
+  type BeeGameNativeTaskNotification,
+} from './native-task-notification'
 
 export type NativeDocumentReviewVerdict = 'READY' | 'NEEDS_REVISION' | 'BLOCKED'
 
@@ -48,7 +52,17 @@ type NativeDocumentReviewBackgroundTask = {
   toolUseID: string
   reviewerId: string
   documentsDigest: string
-  outputFile?: string
+  createdAt: string
+}
+
+type NativeDocumentReviewTerminal = {
+  version: 1
+  kind: 'terminal'
+  sessionId: string
+  turnId?: string
+  toolUseID: string
+  reviewerId: string
+  status: 'completed' | 'failed' | 'stopped' | 'killed'
   createdAt: string
 }
 
@@ -70,6 +84,7 @@ export type NativeDocumentReviewEvidence = {
 type NativeDocumentReviewObservation =
   | NativeDocumentReviewDispatch
   | NativeDocumentReviewBackgroundTask
+  | NativeDocumentReviewTerminal
   | NativeDocumentReviewEvidence
 
 /**
@@ -90,15 +105,15 @@ export function observeNativeDocumentReviewToolEvent(input: {
   if (!isRecord(input.payload)) return
   if (input.eventType === 'system.status') {
     observeBackgroundEvent({ ...input, payload: input.payload })
-    if (stringValue(input.payload.subtype) === 'init') {
-      observePendingBackgroundResults(input)
-    }
     return
   }
 
-  if (input.eventType === 'result') {
-    observePendingBackgroundResults(input)
-    return
+  if (input.eventType === 'tool.completed') {
+    const taskOutput = parseNativeCompletedTaskOutput(input.payload)
+    if (taskOutput) {
+      observeLinkedTaskOutput(input, taskOutput)
+      return
+    }
   }
 
   if (stringValue(input.payload.toolName) !== 'Agent') return
@@ -128,7 +143,8 @@ export function observeNativeDocumentReviewToolEvent(input: {
       observation.kind === 'dispatch' && observation.toolUseID === toolUseID,
   )
   if (!dispatch || dispatch.kind !== 'dispatch') return
-  const output = stringValue(input.payload.output)
+  const nativeResult = stringValue(input.payload.nativeResult)
+  const output = nativeResult || stringValue(input.payload.output)
   const backgroundLaunch = parseNativeBackgroundTaskLaunch(output)
   if (backgroundLaunch) {
     const observations = readObservations(input.dataRoot, input.sessionId)
@@ -146,15 +162,51 @@ export function observeNativeDocumentReviewToolEvent(input: {
         toolUseID,
         reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
         documentsDigest: dispatch.documentsDigest,
-        outputFile: backgroundLaunch.outputFile,
         createdAt: input.createdAt.toISOString(),
       })
     }
     return
   }
-  const report = parseReport(output)
+  appendTerminal(input, toolUseID, 'completed')
+  const report = parseReport(output, Boolean(nativeResult))
   if (!report) return
   appendResult(input, toolUseID, dispatch.documentsDigest, report)
+}
+
+function observeLinkedTaskOutput(
+  input: {
+    dataRoot: string
+    sessionId: string
+    workspacePath: string
+    turnId?: string
+    createdAt: Date
+  },
+  taskOutput: {
+    taskId: string
+    status: 'completed' | 'failed' | 'stopped' | 'killed'
+    result?: string
+  },
+): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const backgroundTask = observations.findLast(observation =>
+    observation.kind === 'background-task' &&
+    observation.taskId === taskOutput.taskId
+  )
+  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
+  if (observations.some(observation =>
+    observation.kind === 'result' &&
+    observation.toolUseID === backgroundTask.toolUseID
+  )) return
+  const dispatch = observations.findLast(observation =>
+    observation.kind === 'dispatch' &&
+    observation.toolUseID === backgroundTask.toolUseID
+  )
+  if (!dispatch || dispatch.kind !== 'dispatch') return
+  appendTerminal(input, dispatch.toolUseID, taskOutput.status)
+  if (taskOutput.status !== 'completed' || !taskOutput.result) return
+  const report = parseReport(taskOutput.result, true)
+  if (!report) return
+  appendResult(input, dispatch.toolUseID, dispatch.documentsDigest, report)
 }
 
 export function getObservedNativeDocumentReview(input: {
@@ -163,18 +215,85 @@ export function getObservedNativeDocumentReview(input: {
   workspacePath: string
 }):
   | { state: 'missing' }
+  | { state: 'running'; toolUseID: string; documentsDigest: string; createdAt: string }
   | { state: 'stale'; evidence: NativeDocumentReviewEvidence }
   | { state: 'current'; evidence: NativeDocumentReviewEvidence } {
-  const latest = readObservations(input.dataRoot, input.sessionId)
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const currentDigest = digestProjectDocuments(input.workspacePath)
+  const running = observations
+    .filter((observation): observation is NativeDocumentReviewDispatch =>
+      observation.kind === 'dispatch' &&
+      observation.documentsDigest === currentDigest &&
+      !observations.some(result =>
+        result.kind === 'result' && result.toolUseID === observation.toolUseID
+      ) &&
+      !observations.some(terminal =>
+        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
+      )
+    )
+    .at(-1)
+  if (running) return {
+    state: 'running',
+    toolUseID: running.toolUseID,
+    documentsDigest: running.documentsDigest,
+    createdAt: running.createdAt,
+  }
+  const latest = observations
     .filter(
       (observation): observation is NativeDocumentReviewEvidence =>
         observation.kind === 'result',
     )
     .at(-1)
   if (!latest) return { state: 'missing' }
-  return latest.documentsDigest === digestProjectDocuments(input.workspacePath)
+  return latest.documentsDigest === currentDigest
     ? { state: 'current', evidence: latest }
     : { state: 'stale', evidence: latest }
+}
+
+/** Passively persists the terminal result already emitted by Claude Code. */
+export function observeNativeDocumentReviewTaskNotification(input: {
+  dataRoot: string
+  sessionId: string
+  workspacePath: string
+  turnId?: string
+  notification: BeeGameNativeTaskNotification
+  createdAt: Date
+}): void {
+  const terminal = parseNativeTerminalTaskNotification(input.notification)
+  if (!terminal?.toolUseId) return
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (observations.some(observation =>
+    observation.kind === 'result' && observation.toolUseID === terminal.toolUseId
+  )) return
+  const dispatch = observations.findLast(observation =>
+    observation.kind === 'dispatch' && observation.toolUseID === terminal.toolUseId
+  )
+  if (!dispatch || dispatch.kind !== 'dispatch') return
+  appendTerminal(input, terminal.toolUseId, terminal.status)
+  if (terminal.status !== 'completed' || !terminal.result) return
+  const report = parseReport(terminal.result, true)
+  if (!report) return
+  appendResult(input, terminal.toolUseId, dispatch.documentsDigest, report)
+}
+
+function appendTerminal(
+  input: { dataRoot: string; sessionId: string; turnId?: string; createdAt: Date },
+  toolUseID: string,
+  status: NativeDocumentReviewTerminal['status'],
+): void {
+  if (readObservations(input.dataRoot, input.sessionId).some(observation =>
+    observation.kind === 'terminal' && observation.toolUseID === toolUseID
+  )) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 1,
+    kind: 'terminal',
+    sessionId: input.sessionId,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    toolUseID,
+    reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
+    status,
+    createdAt: input.createdAt.toISOString(),
+  })
 }
 
 export function recordNativeDocumentReviewForTest(input: {
@@ -226,9 +345,41 @@ export function digestProjectDocuments(workspacePath: string): string {
   const hash = createHash('sha256')
   for (const file of files.sort()) {
     hash.update(relative(workspace, file).split('\\').join('/'))
-    hash.update(readFileSync(file))
+    hash.update(
+      file === assetManifest
+        ? digestibleAssetContract(readFileSync(file, 'utf8'))
+        : readFileSync(file),
+    )
   }
   return hash.digest('hex')
+}
+
+function digestibleAssetContract(source: string): string {
+  try {
+    const manifest = JSON.parse(source) as unknown
+    if (!isRecord(manifest)) return source
+    const slots = Array.isArray(manifest.slots)
+      ? manifest.slots.map(slot => {
+          if (!isRecord(slot)) return slot
+          return {
+            id: slot.id,
+            required: slot.required,
+            delivery_mode: slot.delivery_mode,
+            category: slot.category,
+            dimension: slot.dimension,
+            target: slot.target,
+            resource_requirement: slot.resource_requirement,
+          }
+        }).sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+      : manifest.slots
+    return stableJson({
+      version: manifest.version,
+      project_target: manifest.project_target,
+      slots,
+    })
+  } catch {
+    return source
+  }
 }
 
 function observeBackgroundEvent(input: {
@@ -275,62 +426,15 @@ function observeBackgroundEvent(input: {
     return
   }
 
-  if (
-    subtype !== 'task_notification' ||
-    stringValue(input.payload.status) !== 'completed'
-  )
-    return
-  if (
-    observations.some(
-      observation =>
-        observation.kind === 'result' && observation.toolUseID === toolUseID,
-    )
-  )
-    return
-  const task = observations.findLast(
-    observation =>
-      observation.kind === 'background-task' &&
-      observation.taskId === taskId &&
-      observation.toolUseID === toolUseID,
-  )
-  if (!task || task.kind !== 'background-task') return
-  const report = parseReport(
-    readBackgroundTaskTerminalText(
-      stringValue(input.payload.output_file) || task.outputFile || '',
-    ),
-  )
-  if (!report) return
-  appendResult(input, toolUseID, task.documentsDigest, report)
-}
-
-function observePendingBackgroundResults(input: {
-  dataRoot: string
-  sessionId: string
-  workspacePath: string
-  turnId?: string
-  createdAt: Date
-}): void {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const completedToolUseIDs = new Set(observations.flatMap(observation =>
-    observation.kind === 'result' ? [observation.toolUseID] : []
-  ))
-  for (const task of observations) {
-    if (
-      task.kind !== 'background-task' ||
-      !task.outputFile ||
-      completedToolUseIDs.has(task.toolUseID)
-    ) continue
-    const report = parseReport(readBackgroundTaskTerminalText(task.outputFile))
-    if (!report) continue
-    appendResult(input, task.toolUseID, task.documentsDigest, report)
-    completedToolUseIDs.add(task.toolUseID)
-  }
+  // Terminal task results arrive through the native queue callback. SDK
+  // status events are lifecycle metadata only and never trigger file reads.
 }
 
 function appendResult(
   input: {
     dataRoot: string
     sessionId: string
+    workspacePath: string
     turnId?: string
     createdAt: Date
   },
@@ -338,6 +442,23 @@ function appendResult(
   documentsDigest: string,
   report: NativeDocumentReviewReport,
 ): void {
+  const readiness = report.verdict === 'READY'
+    ? auditDocumentReadiness(input.workspacePath)
+    : undefined
+  const effectiveReport: NativeDocumentReviewReport = readiness && !readiness.valid
+    ? {
+        reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
+        verdict: 'NEEDS_REVISION',
+        summary: [
+          'Deterministic project-contract checks rejected the Reviewer READY result.',
+          ...readiness.issues,
+        ].join(' '),
+        findings: readiness.issues.map(detail => ({
+          source: 'deterministic project-contract audit',
+          detail,
+        })),
+      }
+    : report
   appendObservation(input.dataRoot, input.sessionId, {
     version: 1,
     kind: 'result',
@@ -345,62 +466,21 @@ function appendResult(
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
     reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
-    verdict: report.verdict,
-    summary: report.summary,
-    findings: report.findings,
-    reportDigest: digestJson(report),
+    verdict: effectiveReport.verdict,
+    summary: effectiveReport.summary,
+    findings: effectiveReport.findings,
+    reportDigest: digestJson(effectiveReport),
     documentsDigest,
     createdAt: input.createdAt.toISOString(),
   })
 }
 
-const MAX_NATIVE_TASK_OUTPUT_BYTES = 16 * 1024 * 1024
 
-function readBackgroundTaskTerminalText(path: string): string {
-  if (!path || !existsSync(path)) return ''
-  let file: number | undefined
-  try {
-    file = openSync(path, 'r')
-    const size = fstatSync(file).size
-    const length = Math.min(size, MAX_NATIVE_TASK_OUTPUT_BYTES)
-    const offset = Math.max(0, size - length)
-    const bytes = Buffer.alloc(length)
-    readSync(file, bytes, 0, length, offset)
-    const lines = bytes.toString('utf8').split('\n')
-    if (offset > 0) lines.shift()
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index]?.trim()
-      if (!line) continue
-      try {
-        const value = JSON.parse(line) as unknown
-        const text = getAssistantText(value)
-        if (text) return text
-      } catch {}
-    }
-  } catch {
-    return ''
-  } finally {
-    if (file !== undefined) closeSync(file)
-  }
-  return ''
-}
-
-function getAssistantText(value: unknown): string {
-  if (!isRecord(value) || value.type !== 'assistant') return ''
-  const message = isRecord(value.message) ? value.message : undefined
-  if (!message || !Array.isArray(message.content)) return ''
-  return message.content
-    .flatMap(item => {
-      if (!isRecord(item) || item.type !== 'text') return []
-      const text = stringValue(item.text)
-      return text ? [text] : []
-    })
-    .join('\n')
-    .trim()
-}
-
-function parseReport(text: string): NativeDocumentReviewReport | undefined {
-  const report = parseTerminalJsonObject(text)
+function parseReport(
+  text: string,
+  allowNativePreface = false,
+): NativeDocumentReviewReport | undefined {
+  const report = parseTerminalJsonObject(text, allowNativePreface)
   if (
     !report ||
     stringValue(report.reviewerId) !== DOCUMENT_REVIEWER_AGENT_TYPE
@@ -451,7 +531,7 @@ function readObservations(
         return observation.version === 1 &&
           observation.sessionId === sessionId &&
           observation.reviewerId === DOCUMENT_REVIEWER_AGENT_TYPE &&
-          ['dispatch', 'background-task', 'result'].includes(observation.kind)
+          ['dispatch', 'background-task', 'terminal', 'result'].includes(observation.kind)
           ? [observation]
           : []
       } catch {
@@ -491,11 +571,24 @@ function stableJson(value: unknown): string {
 
 function parseTerminalJsonObject(
   text: string,
+  allowNativePreface = false,
 ): Record<string, unknown> | undefined {
   const trimmed = text.trim()
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined
+  if (!trimmed.endsWith('}')) return undefined
+  if (allowNativePreface && !trimmed.startsWith('{')) {
+    for (let start = trimmed.lastIndexOf('{'); start >= 0; start = trimmed.lastIndexOf('{', start - 1)) {
+      const parsed = parseJsonObject(trimmed.slice(start))
+      if (parsed) return parsed
+    }
+    return undefined
+  }
+  if (!trimmed.startsWith('{')) return undefined
+  return parseJsonObject(trimmed)
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
-    const value = JSON.parse(trimmed) as unknown
+    const value = JSON.parse(text) as unknown
     return isRecord(value) ? value : undefined
   } catch {
     return undefined

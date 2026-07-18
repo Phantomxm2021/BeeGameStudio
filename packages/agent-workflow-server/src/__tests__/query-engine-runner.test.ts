@@ -15,6 +15,7 @@ import {
   getCompletedNativeTaskOutputTaskId,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
+  initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
   parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
@@ -34,6 +35,46 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
 
     expect(values).toEqual([false])
+  })
+
+  test('initializes Claude Code native sandbox and forwards only its network decisions', async () => {
+    const calls: string[] = []
+    const permissionRequests: Array<Record<string, unknown>> = []
+    await initializeBeeGameNativeSandbox({
+      SandboxManager: {
+        getSandboxUnavailableReason: () => undefined,
+        isSandboxRequired: () => true,
+        isSandboxingEnabled: () => true,
+        initialize: async (ask: (host: { host: string; port?: number }) => Promise<boolean>) => {
+          calls.push('initialize')
+          expect(await ask({ host: 'registry.example', port: 443 })).toBe(true)
+        },
+      },
+    }, async request => {
+      permissionRequests.push(request)
+      return { behavior: 'allow' }
+    })
+
+    expect(calls).toEqual(['initialize'])
+    expect(permissionRequests).toEqual([
+      expect.objectContaining({
+        toolName: 'SandboxNetworkAccess',
+        input: { host: 'registry.example', port: 443 },
+      }),
+    ])
+  })
+
+  test('fails at session startup when required native sandbox is unavailable', async () => {
+    await expect(initializeBeeGameNativeSandbox({
+      SandboxManager: {
+        getSandboxUnavailableReason: () => 'missing sandbox dependency',
+        isSandboxRequired: () => true,
+        isSandboxingEnabled: () => false,
+        initialize: async () => {},
+      },
+    })).rejects.toThrow(
+      'Claude Code native sandbox is required but unavailable: missing sandbox dependency',
+    )
   })
 
   test('maps the session language to a response-only native system preference', () => {
@@ -164,6 +205,53 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ])
   })
 
+  test('keeps the bridge open across the foreground-to-background registration gap', async () => {
+    const queued: Array<{ value: string; mode: string }> = []
+    const processed: string[] = []
+    let running = false
+    let registrationChecks = 0
+
+    await drainNativeBackgroundNotifications({
+      signal: new AbortController().signal,
+      takeNotifications: () => queued.splice(0),
+      hasRunningTasks: () => running,
+      waitForTaskRegistration: async () => {
+        registrationChecks += 1
+        if (registrationChecks === 1) running = true
+      },
+      waitForProgress: async () => {
+        running = false
+        queued.push({
+          value: '<task-notification><task-id>validator-gap</task-id><status>completed</status></task-notification>',
+          mode: 'task-notification',
+        })
+      },
+      runNotification: async command => {
+        processed.push(String(command.value))
+      },
+    })
+
+    expect(registrationChecks).toBe(2)
+    expect(processed).toEqual([
+      '<task-notification><task-id>validator-gap</task-id><status>completed</status></task-notification>',
+    ])
+  })
+
+  test('returns a failed native validator notification unchanged to the same session', async () => {
+    const notification = '<task-notification><task-id>validator-1</task-id><tool-use-id>agent-validator-1</tool-use-id><status>failed</status><result>native validator failed</result></task-notification>'
+    const processed: string[] = []
+    const queued = [{ value: notification, mode: 'task-notification' }]
+
+    await drainNativeBackgroundNotifications({
+      signal: new AbortController().signal,
+      takeNotifications: () => queued.splice(0),
+      hasRunningTasks: () => false,
+      runNotification: async command => { processed.push(String(command.value)) },
+    })
+
+    expect(processed).toEqual([notification])
+  })
+
   test('preserves native notification order and stops without processing followers after abort', async () => {
     const controller = new AbortController()
     const processed: string[] = []
@@ -188,6 +276,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
   test('only resumes for unique terminal native task notifications', async () => {
     const controller = new AbortController()
     const processed: string[] = []
+    const observed: string[] = []
     const terminal = '<task-notification><task-id>review-1</task-id><tool-use-id>tool-1</tool-use-id><status>completed</status></task-notification>'
     const queued = [
       { value: '<task-notification><task-id>review-1</task-id></task-notification>', mode: 'task-notification' },
@@ -198,9 +287,11 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       signal: controller.signal,
       takeNotifications: () => queued.splice(0),
       hasRunningTasks: () => false,
+      onTerminalNotification: notification => observed.push(notification.value),
       runNotification: async command => { processed.push(String(command.value)) },
     })
     expect(processed).toEqual([terminal])
+    expect(observed).toEqual([terminal])
   })
 
   test('does not resume a delayed notification after native TaskOutput already consumed the task', async () => {
@@ -240,13 +331,22 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
 
   test('parses only the native terminal lifecycle envelope', () => {
     expect(parseNativeTerminalTaskNotification({
-      value: '<task-notification><task-id>a</task-id><status>completed</status></task-notification>',
+      value: '<task-notification><task-id>a</task-id><status>completed</status><result>{"status":"passed"}</result></task-notification>',
       mode: 'task-notification',
-    })).toEqual({ key: 'a', taskId: 'a', status: 'completed' })
+    })).toEqual({
+      key: 'a',
+      taskId: 'a',
+      status: 'completed',
+      result: '{"status":"passed"}',
+    })
     expect(parseNativeTerminalTaskNotification({
       value: '<task-notification><task-id>a</task-id></task-notification>',
       mode: 'task-notification',
     })).toBeUndefined()
+    expect(parseNativeTerminalTaskNotification({
+      value: '<task-notification><task-id>b</task-id><status>completed</status><result>{"detail":"literal </result> text"}</result></task-notification>',
+      mode: 'task-notification',
+    })?.result).toBe('{"detail":"literal </result> text"}')
   })
 
   test('fails before a Claude turn when required native delivery agents were not discovered', () => {
@@ -263,7 +363,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     ])).not.toThrow()
   })
 
-  test('uses Claude Code native accept-edits mode without enabling bypass permissions', () => {
+  test('uses native acceptEdits mode without enabling permission bypass', () => {
     expect(createBeeGameToolPermissionContext({
       mode: 'default',
       customRule: 'preserved',
@@ -295,6 +395,22 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     })
     expect(JSON.stringify(context)).not.toContain('Edit(/runtime/skills')
     expect(JSON.stringify(context)).not.toContain('Edit(/platform/builtin-skills')
+  })
+
+  test('delegates workspace file mutation boundaries to native acceptEdits mode', () => {
+    const context = createBeeGameToolPermissionContext(
+      { mode: 'acceptEdits' },
+      [],
+      '/workspace/current-project',
+    )
+
+    expect(context).toMatchObject({
+      mode: 'acceptEdits',
+      isBypassPermissionsModeAvailable: false,
+    })
+    expect(JSON.stringify(context)).not.toContain('Write(')
+    expect(JSON.stringify(context)).not.toContain('Edit(')
+    expect(JSON.stringify(context)).not.toContain('Bash(')
   })
 
   test('derives canonical skill roots from the current session environment', async () => {

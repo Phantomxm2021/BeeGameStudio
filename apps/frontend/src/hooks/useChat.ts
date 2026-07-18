@@ -475,7 +475,13 @@ export const useChat = ({
       case 'human_gate':
         setIsLoading(false);
         setCanContinue(false);
-      
+
+        // Permission events can arrive while the document is hidden, when the
+        // dashboard's visibility-aware status poll is intentionally paused.
+        // Refresh the authoritative pending review snapshot immediately so
+        // the browser-tab attention indicator and approval dialog do not wait
+        // for the user to return to the page.
+        refs.refreshProjectVisibility().catch(err => console.error('[useChat] Permission visibility refresh failed:', err));
         refs.onTaskEvent?.('human_gate', message);
         break;
 

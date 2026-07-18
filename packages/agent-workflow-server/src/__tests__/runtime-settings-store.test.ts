@@ -180,6 +180,12 @@ describe('runtime settings store', () => {
         join(dataDir, '.runtime', 'app', 'settings.json'),
         'utf8',
       ))).toEqual({
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: false,
+          failIfUnavailable: true,
+        },
         autoMemoryEnabled: false,
         autoDreamEnabled: true,
         skillSearchEnabled: true,
@@ -189,6 +195,35 @@ describe('runtime settings store', () => {
         mcpSkillsEnabled: true,
       })
     } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('materializes host-owned native sandbox policy even without user feature settings', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-sandbox-'))
+    const previousEnabled = process.env.BEEGAME_NATIVE_SANDBOX_ENABLED
+    const previousRequired = process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE
+    try {
+      process.env.BEEGAME_NATIVE_SANDBOX_ENABLED = '0'
+      process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE = '0'
+      syncRuntimeSettingsToDedicatedRuntimeConfig({}, { dataDir })
+
+      expect(JSON.parse(readFileSync(
+        join(dataDir, '.runtime', 'app', 'settings.json'),
+        'utf8',
+      ))).toEqual({
+        sandbox: {
+          enabled: false,
+          autoAllowBashIfSandboxed: false,
+          allowUnsandboxedCommands: false,
+          failIfUnavailable: false,
+        },
+      })
+    } finally {
+      if (previousEnabled === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_ENABLED
+      else process.env.BEEGAME_NATIVE_SANDBOX_ENABLED = previousEnabled
+      if (previousRequired === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE
+      else process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE = previousRequired
       rmSync(dataDir, { recursive: true, force: true })
     }
   })

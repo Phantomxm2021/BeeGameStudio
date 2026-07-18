@@ -2445,10 +2445,13 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Treat document language and player-visible game language as separate confirmed requirements')
       expect(submitted).toContain('docs/ART_DIRECTION.md')
       expect(submitted).toContain('docs/acceptance/gameplay-checklist.md')
+      expect(submitted).toContain('- [ ] PP-001 Launch the game and observe the initial playable state.')
       expect(submitted).toContain('Write each document to its canonical path as soon as it is ready')
       expect(submitted).toContain('Follow the document dependency order: (1) docs/GDD.md')
       expect(submitted).toContain('beegame-document-reviewer')
       expect(submitted).toContain('selected game user-visible language as explicit separate inputs')
+      expect(submitted).toContain('Every fresh Reviewer dispatch, including every re-review after findings are remediated')
+      expect(submitted).toContain('must repeat all three explicit inputs in that Agent call')
       expect(submitted).toContain('beegame-acceptance-validator')
       expect(submitted).toContain('assets/asset-manifest.json')
       expect(submitted).toContain('"rootFields":["version","project_target","slots"]')
@@ -2460,8 +2463,10 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('generated build and typecheck outputs outside authored source directories')
       expect(submitted).toContain('subagent in the foreground')
       expect(submitted).toContain('project-native runtime permission remains visible to the user')
-      expect(submitted).toContain('let the native task notification resume this same session')
-      expect(submitted).toContain('do not poll TaskOutput or read its output file')
+      expect(submitted).toContain('allow its native terminal notification to resume this same session')
+      expect(submitted).toContain('regardless of later messages or task retrieval')
+      expect(submitted).not.toContain('do not continue the old reviewer with SendMessage')
+      expect(submitted).not.toContain('do not poll TaskOutput or read its output file')
       expect(submitted).toContain('do not launch another Validator for the same unchanged revision')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
@@ -4319,8 +4324,7 @@ describe('beegame session routes', () => {
   test('records a native document review passively from the real Agent tool lifecycle', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-native-review-data-'))
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-review-project-'))
-    await mkdir(join(workspace, 'docs'), { recursive: true })
-    await writeFile(join(workspace, 'docs', 'GDD.md'), '# Approved game\n')
+    await writeAcceptedDeliveryReport(workspace)
     const report = {
       reviewerId: 'beegame-document-reviewer',
       verdict: 'READY',
@@ -4348,7 +4352,16 @@ describe('beegame session routes', () => {
           content: [{
             type: 'tool_result',
             tool_use_id: 'tool_native_document_review',
-            content: JSON.stringify(report),
+            content: [
+              {
+                type: 'text',
+                text: `Document review completed.\n\n${JSON.stringify(report)}`,
+              },
+              {
+                type: 'text',
+                text: 'agentId: native-review-agent\n<usage>total_tokens: 10</usage>',
+              },
+            ],
           }],
         },
       },
@@ -4464,6 +4477,89 @@ describe('beegame session routes', () => {
         sessionId: session.id,
         workspacePath: workspace,
       })).toEqual({ state: 'missing' })
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts one native terminal notification after the spawning turn ends', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-late-native-data-'))
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-late-native-project-'))
+    await writeFile(join(workspace, 'game.txt'), 'current revision')
+    const toolUseID = 'tool_late_native_acceptance'
+    const taskId = 'task_late_native_acceptance'
+    const report = {
+      validatorId: 'beegame-acceptance-validator',
+      status: 'passed',
+      summary: 'Observed the current revision after the foreground turn ended.',
+      evidence: passingNativeAcceptanceEvidence(),
+      findings: [],
+    }
+    const fake = createFakeRunner([
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: toolUseID,
+            name: 'Agent',
+            input: {
+              subagent_type: 'beegame-acceptance-validator',
+              prompt: 'Independently validate the current workspace.',
+            },
+          }],
+        },
+      },
+      {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: taskId,
+        tool_use_id: toolUseID,
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseID,
+            content: 'Async agent launched successfully.',
+          }],
+        },
+      },
+      { type: 'result', result: 'The native validator is still running.' },
+    ])
+    const manager = new BeeGameSessionManager(fake.runner, dataRoot)
+    try {
+      const session = manager.start({ workspacePath: workspace, userId: DEFAULT_LOCAL_USER_ID })
+      await manager.send(session.id, 'Validate the completed project.')
+      await waitFor(() => manager.events(session.id).some(event => event.type === 'turn.completed'))
+
+      const onNotification = fake.starts[0]?.onNativeTaskNotification
+      expect(onNotification).toBeFunction()
+      const value = [
+        '<task-notification>',
+        `<task-id>${taskId}</task-id>`,
+        `<tool-use-id>${toolUseID}</tool-use-id>`,
+        '<status>completed</status>',
+        `<result>${JSON.stringify(report)}</result>`,
+        '</task-notification>',
+      ].join('\n')
+      onNotification!({ value })
+      onNotification!({ value })
+
+      expect(getObservedNativeAcceptance({
+        dataRoot,
+        sessionId: session.id,
+        workspacePath: workspace,
+      })).toEqual({
+        state: 'current',
+        evidence: expect.objectContaining({
+          toolUseID,
+          status: 'passed',
+          summary: report.summary,
+        }),
+      })
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
       await rm(workspace, { recursive: true, force: true })
@@ -5776,6 +5872,73 @@ describe('beegame session routes', () => {
             event.payload?.autoApproved === true,
         ),
       ).toBe(false)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps the session permission channel alive after the spawning turn ends', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-session-permission-'))
+    const fake = createFakeRunner(undefined, 'result_only')
+    const app = createAgentWorkflowApp({ sessionRunner: fake.runner })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Launch a native background validator.' }),
+      })
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const requestPermission = fake.starts[0]?.requestPermission
+      expect(requestPermission).toBeFunction()
+      const lateDecision = requestPermission!({
+        toolUseID: 'background_validator_test',
+        toolName: 'Bash',
+        message: 'Run the project test suite?',
+        input: { command: 'npm test' },
+      })
+      await waitFor(async () => {
+        const eventsRes = await app.request(
+          `/api/beegame-sessions/${session.id}/events`,
+        )
+        const events = await eventsRes.json()
+        return events.some(
+          (event: { type: string; payload?: { toolUseID?: string } }) =>
+            event.type === 'permission.requested' &&
+            event.payload?.toolUseID === 'background_validator_test',
+        )
+      })
+
+      const resolveRes = await app.request(
+        `/api/beegame-sessions/${session.id}/permissions/background_validator_test`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'allow' }),
+        },
+      )
+      expect(resolveRes.status).toBe(200)
+      expect(await lateDecision).toEqual(expect.objectContaining({ behavior: 'allow' }))
+
+      const outsideDecision = await requestPermission!({
+        toolUseID: 'background_validator_outside_workspace',
+        toolName: 'Write',
+        message: 'Write outside the project?',
+        input: { file_path: join(dirname(workspace), 'outside.txt') },
+      })
+      expect(outsideDecision.behavior).toBe('deny')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -7423,6 +7586,8 @@ describe('beegame session routes', () => {
       expect(repairPrompt).toContain('beegame-document-reviewer')
       expect(repairPrompt).toContain('beegame-acceptance-validator')
       expect(repairPrompt).toContain('without weakening or bypassing the deployment gate')
+      expect(repairPrompt).toContain('Every fresh Reviewer dispatch, including a re-review after remediation')
+      expect(repairPrompt).toContain('canonical confirmed brief, selected document language, and selected game user-visible language as three explicit inputs')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -8682,7 +8847,7 @@ async function writeAcceptedDeliveryReport(
   }
   await writeFile(
     join(acceptanceDirectory, 'gameplay-checklist.md'),
-    '- [x] [requirement:requirement-primary] Primary behavior\n- [x] [player-path:path-primary] Primary path\n',
+    '- [x] REQ-001 Primary behavior\n- [x] PATH-001 Primary path\n',
   )
   await mkdir(join(workspace, 'assets'), { recursive: true })
   await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({

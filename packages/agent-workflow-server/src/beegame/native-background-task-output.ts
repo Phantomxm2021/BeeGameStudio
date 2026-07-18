@@ -5,6 +5,12 @@ export type NativeBackgroundTaskLaunch = {
   outputFile: string
 }
 
+export type NativeCompletedTaskOutput = {
+  taskId: string
+  status: 'completed' | 'failed' | 'stopped' | 'killed'
+  result?: string
+}
+
 type NativeBackgroundTaskUsage = {
   inputTokens: number
   outputTokens: number
@@ -19,8 +25,9 @@ const TERMINAL_TAIL_BYTES = 128 * 1024
 /**
  * Claude Code reports an asynchronously launched native Agent through the
  * Agent tool result before it later emits task_started/task_notification SDK
- * events. Preserve the opaque task id and output file from that native result
- * so a terminal notification with an empty output_file can still be resolved.
+ * events. Preserve the opaque task id and output file only for passive token
+ * accounting. Delivery evidence never reads this file and is captured from
+ * Claude Code's native terminal notification instead.
  */
 export function parseNativeBackgroundTaskLaunch(
   output: string,
@@ -36,6 +43,36 @@ export function parseNativeBackgroundTaskLaunch(
     else if (field === 'output_file') outputFile = value
   }
   return taskId && outputFile ? { taskId, outputFile } : undefined
+}
+
+/**
+ * Reads the structured result emitted by Claude Code's native TaskOutput tool.
+ * The caller must still link the opaque task id to an observed Agent dispatch;
+ * this function does not infer task ownership or workflow meaning.
+ */
+export function parseNativeCompletedTaskOutput(
+  payload: unknown,
+): NativeCompletedTaskOutput | undefined {
+  if (!isRecord(payload) || payload.toolName !== 'TaskOutput') return undefined
+  const nativeTaskResult = isRecord(payload.nativeTaskResult)
+    ? payload.nativeTaskResult
+    : undefined
+  if (!nativeTaskResult) return undefined
+  const taskId = stringValue(nativeTaskResult.taskId)
+  const status = stringValue(nativeTaskResult.status)
+  if (
+    !taskId ||
+    (status !== 'completed' &&
+      status !== 'failed' &&
+      status !== 'stopped' &&
+      status !== 'killed')
+  ) return undefined
+  const result = stringValue(nativeTaskResult.result)
+  return {
+    taskId,
+    status,
+    ...(result ? { result } : {}),
+  }
 }
 
 /** Reads accounting from a completed native subagent JSONL transcript. */

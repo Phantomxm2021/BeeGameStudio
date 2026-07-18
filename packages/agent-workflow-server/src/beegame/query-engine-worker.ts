@@ -28,7 +28,22 @@ process.on('message', raw => {
 async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
   if (message.type === 'runtime.init') {
     if (runtime) throw new Error('Claude runtime worker is already initialized')
-    runtime = await createQueryEngineRunner().start(deserializeStartInput(message.input))
+    runtime = await createQueryEngineRunner().start({
+      ...deserializeStartInput(message.input),
+      onNativeTaskNotification: notification => send({
+        type: 'session.task-notification',
+        notification,
+      }),
+      requestPermission: request => new Promise(resolve => {
+        const requestId = randomUUID()
+        permissions.set(requestId, resolve)
+        send({
+          type: 'session.permission.request',
+          requestId,
+          request,
+        })
+      }),
+    })
     send({ type: 'runtime.ready' })
     return
   }
@@ -50,8 +65,7 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
           const requestId = randomUUID()
           permissions.set(requestId, resolve)
           send({
-            type: 'permission.request',
-            turnId: message.turnId,
+            type: 'session.permission.request',
             requestId,
             request,
           })
@@ -66,7 +80,6 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
       })
     } finally {
       activeTurn = null
-      permissions.clear()
     }
     return
   }
@@ -85,6 +98,10 @@ async function handleMessage(message: QueryEngineParentMessage): Promise<void> {
   }
   if (message.type === 'runtime.dispose') {
     runtime?.stop()
+    for (const resolve of permissions.values()) {
+      resolve({ behavior: 'deny', message: 'Claude runtime worker was closed' })
+    }
+    permissions.clear()
     process.exit(0)
   }
 }

@@ -4,10 +4,12 @@ import { auditDocumentReadiness } from './document-readiness-audit'
 
 export type NativeDeliveryStateReason =
   | 'document_review_missing'
+  | 'document_review_running'
   | 'document_review_stale'
   | 'document_review_needs_revision'
   | 'document_review_blocked'
   | 'acceptance_missing'
+  | 'acceptance_running'
   | 'acceptance_stale'
   | 'acceptance_failed'
   | 'acceptance_blocked'
@@ -37,6 +39,14 @@ export function getNativeDeliveryState(input: {
       reason: 'document_review_missing',
       summary:
         'Document review has not produced a valid native terminal result.',
+    }
+  }
+  if (review.state === 'running') {
+    return {
+      status: 'not_run',
+      reason: 'document_review_running',
+      summary: 'The native Document Reviewer is still running.',
+      observedAt: review.createdAt,
     }
   }
   if (review.state === 'stale') {
@@ -84,6 +94,14 @@ export function getNativeDeliveryState(input: {
       reason: 'acceptance_missing',
       summary: 'Acceptance has not produced a valid native Validator result.',
       observedAt: review.evidence.createdAt,
+    }
+  }
+  if (acceptance.state === 'running') {
+    return {
+      status: 'not_run',
+      reason: 'acceptance_running',
+      summary: 'The native acceptance Validator is still running.',
+      observedAt: acceptance.createdAt,
     }
   }
   if (acceptance.state === 'stale') {

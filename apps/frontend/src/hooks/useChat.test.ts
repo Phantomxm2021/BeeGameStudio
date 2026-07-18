@@ -171,7 +171,7 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.isStopping).toBe(false);
   });
 
-  it('does not expose clarification gates as generic continue state', () => {
+  it('does not expose clarification gates as generic continue state and refreshes pending approvals', async () => {
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
     act(() => {
@@ -184,6 +184,9 @@ describe('useChat clarification gate handling', () => {
     });
 
     expect(result.current.canContinue).toBe(false);
+    await waitFor(() => {
+      expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
+    });
   });
 
   it('opens and closes one redacted thinking status by stable message id', () => {

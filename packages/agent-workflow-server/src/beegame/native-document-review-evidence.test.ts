@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getObservedNativeDocumentReview,
+  observeNativeDocumentReviewTaskNotification,
   observeNativeDocumentReviewToolEvent,
   recordNativeDocumentReviewForTest,
 } from './native-document-review-evidence'
+import { REQUIRED_PROJECT_DOCUMENTS } from './document-readiness-audit'
 
 const SESSION_ID = 'native-document-review-test-session'
 
@@ -61,6 +63,48 @@ describe('native document review evidence', () => {
     expect(current(workspace).state).toBe('stale')
   })
 
+  test('does not make document review stale when only asset integration state changes', async () => {
+    workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        version: 1,
+        project_target: { asset_format_capabilities: ['portable-model'] },
+        slots: [{
+          id: 'primary-visual',
+          delivery_mode: 'managed-file',
+          target: { path: 'assets/primary.portable-model' },
+          resource_requirement: { accepted_formats: ['portable-model'] },
+          status: 'missing',
+        }],
+      }),
+    )
+    recordReady(workspace)
+    await writeFile(
+      join(workspace, 'assets', 'asset-manifest.json'),
+      JSON.stringify({
+        slots: [{
+          integration_evidence: {
+            references: ['src/game.ts'],
+            runtime_event_ids: ['runtime-1'],
+          },
+          uploaded_files: ['assets/primary.portable-model'],
+          status: 'integrated',
+          resource_binding: { pack_id: 'pack', element_id: 'element' },
+          target: { path: 'assets/primary.portable-model' },
+          resource_requirement: { accepted_formats: ['portable-model'] },
+          delivery_mode: 'managed-file',
+          id: 'primary-visual',
+        }],
+        project_target: { asset_format_capabilities: ['portable-model'] },
+        version: 1,
+      }),
+    )
+
+    expect(current(workspace).state).toBe('current')
+  })
+
   test('records READY for the exact reviewed document revision', async () => {
     workspace = await createWorkspace()
     recordReady(workspace)
@@ -69,6 +113,28 @@ describe('native document review evidence', () => {
     expect(observation.state).toBe('current')
     if (observation.state === 'current') {
       expect(observation.evidence.verdict).toBe('READY')
+    }
+  })
+
+  test('downgrades a Reviewer READY result when deterministic contract checks fail', async () => {
+    workspace = await createWorkspace()
+    await writeFile(
+      join(workspace, 'docs', 'acceptance', 'gameplay-checklist.md'),
+      '# Acceptance\n## PATH-001 Launch the game\n- Action: Start.\n',
+    )
+
+    recordReady(workspace)
+
+    const observation = current(workspace)
+    expect(observation.state).toBe('current')
+    if (observation.state === 'current') {
+      expect(observation.evidence.verdict).toBe('NEEDS_REVISION')
+      expect(observation.evidence.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'deterministic project-contract audit',
+          detail: expect.stringContaining('Acceptance checklist contains no task items'),
+        }),
+      ]))
     }
   })
 
@@ -129,22 +195,47 @@ describe('native document review evidence', () => {
       `${JSON.stringify({
         type: 'assistant',
         message: {
+          stop_reason: 'end_turn',
           content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
         },
       })}\n`,
     )
-    observe('system.status', workspace, {
-      subtype: 'task_notification',
-      status: 'completed',
-      task_id: taskId,
-      tool_use_id: toolUseID,
-      output_file: outputFile,
+    notify(workspace, toolUseID, taskId, readyReport())
+
+    expect(current(workspace).state).toBe('current')
+  })
+
+  test('accepts a completed native TaskOutput linked to the observed background reviewer', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'task-output-review'
+    const taskId = 'task-output-review-task'
+    const payload = reviewerPayload(toolUseID)
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: [
+        'Async agent launched successfully.',
+        `agentId: ${taskId}`,
+        'The agent is working in the background.',
+        `output_file: ${join(dataRoot, 'review-output.jsonl')}`,
+      ].join('\n'),
+    })
+    observe('tool.completed', workspace, {
+      toolName: 'TaskOutput',
+      toolUseID: 'task-output-tool-use',
+      input: { task_id: taskId },
+      nativeTaskResult: {
+        taskId,
+        status: 'completed',
+        result: JSON.stringify(readyReport()),
+      },
     })
 
     expect(current(workspace).state).toBe('current')
   })
 
-  test('uses the native Agent launch path when reviewer notification omits output_file', async () => {
+  test('uses the native terminal result when SDK metadata omits output_file', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-review-empty-notification-path'
@@ -157,6 +248,7 @@ describe('native document review evidence', () => {
       `${JSON.stringify({
         type: 'assistant',
         message: {
+          stop_reason: 'end_turn',
           content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
         },
       })}\n`,
@@ -170,18 +262,12 @@ describe('native document review evidence', () => {
         `output_file: ${outputFile}`,
       ].join('\n'),
     })
-    observe('system.status', workspace, {
-      subtype: 'task_notification',
-      status: 'completed',
-      task_id: taskId,
-      tool_use_id: toolUseID,
-      output_file: '',
-    })
+    notify(workspace, toolUseID, taskId, readyReport())
 
     expect(current(workspace).state).toBe('current')
   })
 
-  test('captures a completed reviewer when native resume emits init without task_notification', async () => {
+  test('does not inspect a background output file during native resume', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-review-init-resume'
@@ -203,21 +289,108 @@ describe('native document review evidence', () => {
       `${JSON.stringify({
         type: 'assistant',
         message: {
+          stop_reason: 'end_turn',
           content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
         },
       })}\n`,
     )
     observe('system.status', workspace, { subtype: 'init' })
 
-    expect(current(workspace).state).toBe('current')
+    expect(current(workspace).state).toBe('running')
+  })
+
+  test('does not recover an unfinished background reviewer output', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'unfinished-background-review'
+    const taskId = 'unfinished-background-review-task'
+    const outputFile = join(dataRoot, 'unfinished-review-output.jsonl')
+    const payload = reviewerPayload(toolUseID)
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: [
+        'Async agent launched successfully.',
+        `agentId: ${taskId}`,
+        `output_file: ${outputFile}`,
+      ].join('\n'),
+    })
+    await writeFile(
+      outputFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        message: {
+          stop_reason: null,
+          content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
+        },
+      })}\n`,
+    )
+
+    observe('system.status', workspace, { subtype: 'init' })
+
+    expect(current(workspace).state).toBe('running')
+  })
+
+  test('does not use unrelated results or SendMessage as evidence triggers', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'background-review-with-unrelated-result'
+    const taskId = 'background-review-with-unrelated-result-task'
+    const outputFile = join(dataRoot, 'unrelated-result-review-output.jsonl')
+    const payload = reviewerPayload(toolUseID)
+    observe('tool.started', workspace, payload)
+    observe('tool.completed', workspace, {
+      ...payload,
+      output: [
+        'Async agent launched successfully.',
+        `agentId: ${taskId}`,
+        `output_file: ${outputFile}`,
+      ].join('\n'),
+    })
+    await writeFile(
+      outputFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        message: {
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: JSON.stringify(readyReport()) }],
+        },
+      })}\n`,
+    )
+
+    observe('result', workspace, { result: 'unrelated native turn result' })
+    observe('tool.completed', workspace, {
+      toolName: 'SendMessage',
+      toolUseID: 'send-message-follow-up',
+      output: JSON.stringify(readyReport()),
+    })
+
+    expect(current(workspace).state).toBe('running')
   })
 })
 
 async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'beegame-document-review-'))
-  await mkdir(join(root, 'docs'), { recursive: true })
   await mkdir(join(root, 'src'), { recursive: true })
-  await writeFile(join(root, 'docs', 'GDD.md'), '# Approved game\n')
+  for (const path of REQUIRED_PROJECT_DOCUMENTS) {
+    await mkdir(join(root, path, '..'), { recursive: true })
+    await writeFile(
+      join(root, path),
+      path.endsWith('gameplay-checklist.md')
+        ? '# Acceptance\n- [ ] PATH-001 Launch the game and observe the initial playable state.\n'
+        : `# ${path}\n`,
+    )
+  }
+  await mkdir(join(root, 'assets'), { recursive: true })
+  await writeFile(join(root, 'assets', 'asset-manifest.json'), JSON.stringify({
+    version: 1,
+    project_target: {
+      platform: 'selected-target',
+      runtime: 'project-native',
+      asset_format_capabilities: [],
+    },
+    slots: [],
+  }))
   return root
 }
 
@@ -258,6 +431,30 @@ function observe(
     workspacePath,
     eventType,
     payload,
+    createdAt: new Date(),
+  })
+}
+
+function notify(
+  workspacePath: string,
+  toolUseID: string,
+  taskId: string,
+  report: object,
+): void {
+  observeNativeDocumentReviewTaskNotification({
+    dataRoot: dataRootFor(workspacePath),
+    sessionId: SESSION_ID,
+    workspacePath,
+    notification: {
+      value: [
+        '<task-notification>',
+        `<task-id>${taskId}</task-id>`,
+        `<tool-use-id>${toolUseID}</tool-use-id>`,
+        '<status>completed</status>',
+        `<result>${JSON.stringify(report)}</result>`,
+        '</task-notification>',
+      ].join(''),
+    },
     createdAt: new Date(),
   })
 }

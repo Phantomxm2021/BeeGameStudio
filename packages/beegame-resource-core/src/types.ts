@@ -53,6 +53,9 @@ export const RESOURCE_ASSET_MANIFEST_VOCABULARY = {
     'runtime',
     'asset_format_capabilities',
   ],
+  projectTargetFieldShapes: {
+    asset_format_capabilities: 'string[]',
+  },
   slotFields: [
     'id',
     'required',

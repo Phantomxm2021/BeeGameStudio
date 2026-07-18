@@ -41,6 +41,9 @@ export function evaluatePersistedDeliveryAcceptance(
       'Deployment requires an observed native Document Reviewer result.',
     )
   }
+  if (state.reason === 'document_review_running') {
+    return rejected('The native Document Reviewer is still running.')
+  }
   if (state.reason === 'document_review_stale') {
     return rejected(
       'Project documents changed after review; review the current document revision before deployment.',
@@ -50,6 +53,9 @@ export function evaluatePersistedDeliveryAcceptance(
     return rejected(
       'Deployment requires an observed native acceptance Validator result.',
     )
+  }
+  if (state.reason === 'acceptance_running') {
+    return rejected('The native acceptance Validator is still running.')
   }
   if (state.reason === 'acceptance_stale') {
     return rejected(

@@ -16,7 +16,7 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace)).toMatchObject({ present: false, valid: true })
   })
 
-  test('rejects integrated slots whose files or runtime evidence are missing', async () => {
+  test('rejects integrated slots whose files or references are missing', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-missing-'))
     await mkdir(join(workspace, 'assets'), { recursive: true })
     await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
@@ -34,7 +34,6 @@ describe('asset contract audit', () => {
     expect(audit.valid).toBe(false)
     expect(audit.slots[0]).toMatchObject({ stage: 'failed' })
     expect(audit.issues).toContain('character-primary: Integrated slot files are missing from the project.')
-    expect(audit.issues).toContain('character-primary: Integrated slot has no runtime load evidence.')
   })
 
   test('reports exact canonical manifest shape errors instead of treating legacy maps as missing fields', async () => {
@@ -51,7 +50,7 @@ describe('asset contract audit', () => {
     ])
   })
 
-  test('verifies declared, bound, copied, referenced and runtime-loaded states separately', async () => {
+  test('treats manifest runtime event IDs as declarations rather than proof', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-assets-complete-'))
     await mkdir(join(workspace, 'assets', 'models'), { recursive: true })
     await mkdir(join(workspace, 'src'), { recursive: true })
@@ -76,7 +75,11 @@ describe('asset contract audit', () => {
     expect(auditAssetContract(workspace)).toMatchObject({
       present: true,
       valid: true,
-      slots: [{ id: 'character-primary', stage: 'runtime_loaded' }],
+      slots: [{
+        id: 'character-primary',
+        stage: 'referenced',
+        runtimeEventIds: ['runtime-check-1'],
+      }],
     })
   })
 
@@ -173,7 +176,7 @@ describe('asset contract audit', () => {
       slots: [{
         id: 'embedded-visual',
         deliveryMode: 'embedded',
-        stage: 'runtime_loaded',
+        stage: 'referenced',
       }],
     })
   })

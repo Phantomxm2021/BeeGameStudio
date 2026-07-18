@@ -146,6 +146,10 @@ describe('DashboardRepository Supabase boundaries', () => {
         join(env.CLAUDE_CONFIG_DIR, 'agents', 'beegame-acceptance-validator.md'),
         'utf8',
       )).resolves.toContain('skills: [beegame-game-acceptance]')
+      await expect(readFile(
+        join(env.CLAUDE_CONFIG_DIR, 'settings.json'),
+        'utf8',
+      )).resolves.toContain('"autoAllowBashIfSandboxed": true')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }

@@ -22,6 +22,12 @@ import type {
   BeeGameSessionSubmitInput,
   DashboardSDKMessage,
 } from './session-manager'
+import {
+  parseNativeTerminalTaskNotification,
+  type BeeGameNativeTaskNotification,
+} from './native-task-notification'
+
+export { parseNativeTerminalTaskNotification } from './native-task-notification'
 
 type DynamicModule = Record<string, unknown>
 
@@ -48,6 +54,15 @@ type NativeNotificationQueue = {
 
 type NativeSdkEventQueue = {
   drain(): DashboardSDKMessage[]
+}
+
+type NativeSandboxManager = {
+  getSandboxUnavailableReason(): string | undefined
+  isSandboxRequired(): boolean
+  isSandboxingEnabled(): boolean
+  initialize(
+    ask?: (hostPattern: { host: string; port?: number }) => Promise<boolean>,
+  ): Promise<void>
 }
 
 type QueryEngineConstructor = new (
@@ -151,6 +166,7 @@ export function createQueryEngineRunner(): BeeGameSessionRunner {
 export function createBeeGameToolPermissionContext(
   base: Record<string, unknown>,
   skillReadRoots: string | string[] = [],
+  _workspaceRoot?: string,
 ): Record<string, unknown> {
   const existingRules = isRecord(base.alwaysAllowRules)
     ? base.alwaysAllowRules
@@ -165,8 +181,10 @@ export function createBeeGameToolPermissionContext(
     .map(root => `Read(${resolve(root)}/**)`)
   return {
     ...base,
-    // This is a Claude Code native permission mode, not a BeeGame-owned
-    // allowlist. Its evaluator still asks for commands and sensitive access.
+    // Use Claude Code's native edit-accepting mode. It auto-allows file
+    // mutations only in the original working directory while Bash, network,
+    // sensitive paths and paths outside the workspace keep their native
+    // permission checks. BeeGame must not maintain a parallel edit allowlist.
     mode: 'acceptEdits',
     isBypassPermissionsModeAvailable: false,
     ...(skillReadRules.length > 0
@@ -178,6 +196,43 @@ export function createBeeGameToolPermissionContext(
         }
       : {}),
   }
+}
+
+export async function initializeBeeGameNativeSandbox(
+  sandboxModule: DynamicModule,
+  requestPermission?: BeeGameSessionRunnerStartInput['requestPermission'],
+): Promise<void> {
+  const sandboxManager = sandboxModule.SandboxManager as
+    | NativeSandboxManager
+    | undefined
+  if (!sandboxManager) {
+    throw new Error('Claude Code native SandboxManager is unavailable')
+  }
+
+  const unavailableReason = sandboxManager.getSandboxUnavailableReason()
+  if (unavailableReason) {
+    if (sandboxManager.isSandboxRequired()) {
+      throw new Error(`Claude Code native sandbox is required but unavailable: ${unavailableReason}`)
+    }
+    console.warn(`[BeeGame] Claude Code native sandbox is unavailable: ${unavailableReason}`)
+    return
+  }
+  if (!sandboxManager.isSandboxingEnabled()) return
+
+  await sandboxManager.initialize(async hostPattern => {
+    if (!requestPermission) return false
+    const toolUseID = randomUUID()
+    const decision = await requestPermission({
+      toolUseID,
+      toolName: 'SandboxNetworkAccess',
+      message: `Allow network connection to ${hostPattern.host}?`,
+      input: {
+        host: hostPattern.host,
+        ...(hostPattern.port !== undefined ? { port: hostPattern.port } : {}),
+      },
+    })
+    return decision.behavior === 'allow'
+  })
 }
 
 export async function resolveBeeGameSkillReadRoots(
@@ -290,6 +345,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         this.notificationQueue?.takeMainThreadTaskNotifications() ?? [],
       hasRunningTasks: () => hasRunningNativeBackgroundTasks(this.appState),
       flushProgress: () => this.flushNativeSdkEvents(input),
+      onTerminalNotification: notification =>
+        (this.input.onNativeTaskNotification ?? input.onNativeTaskNotification)?.(
+          notification,
+        ),
       runNotification: notification => this.runNativeTurn(
         engine,
         notification.value,
@@ -324,6 +383,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       conversationRecoveryModule,
       messageQueueModule,
       sdkEventQueueModule,
+      sandboxModule,
     ] = await Promise.all([
       loadRootModule('QueryEngine.js'),
       loadRootModule('Tool.js'),
@@ -338,6 +398,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       loadRootModule('utils/conversationRecovery.js'),
       loadRootModule('utils/messageQueueManager.js'),
       loadRootModule('utils/sdkEventQueue.js'),
+      loadRootModule('utils/sandbox/sandbox-adapter.js'),
     ])
 
     this.notificationQueue = createNativeNotificationQueue(messageQueueModule)
@@ -361,6 +422,10 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       call(bootstrapModule, 'setOriginalCwd', this.input.cwd)
     }
     this.activateNativeSession()
+    await initializeBeeGameNativeSandbox(
+      sandboxModule,
+      this.input.requestPermission,
+    )
 
     const skillReadRoots = await resolveBeeGameSkillReadRoots(this.input.env)
     const permissionContext = createBeeGameToolPermissionContext(
@@ -369,6 +434,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         'getEmptyToolPermissionContext',
       ) as Record<string, unknown>,
       skillReadRoots,
+      this.input.cwd,
     )
     const tools = call(toolsModule, 'getTools', permissionContext)
     const [commands, discoveredAgentDefinitions] = await Promise.all([
@@ -405,11 +471,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           ? { ...result, updatedInput: result.updatedInput ?? toolInput }
           : result
       }
-      const submitInput = this.currentSubmitInput
-      if (!submitInput) {
+      const requestPermission = this.input.requestPermission
+        ?? this.currentSubmitInput?.requestPermission
+      if (!requestPermission) {
         return {
           behavior: 'deny',
-          message: 'Dashboard permission request was created outside a turn.',
+          message: 'Dashboard permission channel is unavailable.',
           decisionReason: {
             type: 'other',
             reason: 'dashboard_permission_context_missing',
@@ -417,7 +484,7 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
           toolUseID,
         }
       }
-      const decision = await submitInput.requestPermission({
+      const decision = await requestPermission({
         toolUseID,
         toolName,
         message: result.message ?? 'Tool permission is required.',
@@ -637,7 +704,9 @@ export async function drainNativeBackgroundNotifications({
   runNotification,
   flushProgress = () => {},
   waitForProgress = waitForNativeBackgroundProgress,
+  waitForTaskRegistration = waitForNativeTaskRegistration,
   consumedNotificationKeys = new Set<string>(),
+  onTerminalNotification = () => {},
 }: {
   signal: AbortSignal
   takeNotifications(): NativeQueuedCommand[]
@@ -645,8 +714,11 @@ export async function drainNativeBackgroundNotifications({
   runNotification(command: NativeQueuedCommand): Promise<void>
   flushProgress?(): void
   waitForProgress?(signal: AbortSignal): Promise<void>
+  waitForTaskRegistration?(signal: AbortSignal): Promise<void>
   consumedNotificationKeys?: Set<string>
+  onTerminalNotification?(notification: BeeGameNativeTaskNotification): void
 }): Promise<void> {
+  let idleRegistrationChecked = false
   while (!signal.aborted) {
     flushProgress()
     const notifications = takeNotifications()
@@ -661,52 +733,33 @@ export async function drainNativeBackgroundNotifications({
         ].filter((value): value is string => Boolean(value))
         if (keys.some(key => consumedNotificationKeys.has(key))) continue
         for (const key of keys) consumedNotificationKeys.add(key)
+        onTerminalNotification({
+          value: notification.value as string,
+          ...(notification.uuid ? { uuid: notification.uuid } : {}),
+          ...(notification.isMeta !== undefined
+            ? { isMeta: notification.isMeta }
+            : {}),
+        })
         await runNotification(notification)
+        idleRegistrationChecked = false
         if (signal.aborted) return
       }
       continue
     }
     if (!hasRunningTasks()) {
+      // Foreground-to-background conversion resolves the Agent tool before
+      // its async task registration becomes visible in app state. Give the
+      // native registration microtask one bounded chance to settle so the
+      // headless transport does not close the session bridge in that gap.
+      if (!idleRegistrationChecked) {
+        idleRegistrationChecked = true
+        await waitForTaskRegistration(signal)
+        continue
+      }
       flushProgress()
       return
     }
     await waitForProgress(signal)
-  }
-}
-
-type NativeTerminalTaskNotification = {
-  key: string
-  taskId?: string
-  toolUseId?: string
-  status: 'completed' | 'failed' | 'stopped' | 'killed'
-}
-
-/**
- * Reads only Claude Code's native task-notification transport envelope. It
- * does not interpret task output or make workflow decisions. Status-less
- * progress notifications are deliberately not submitted to the model.
- */
-export function parseNativeTerminalTaskNotification(
-  command: NativeQueuedCommand,
-): NativeTerminalTaskNotification | undefined {
-  if (typeof command.value !== 'string') return undefined
-  const value = command.value
-  const status = readXmlTransportField(value, 'status')
-  if (
-    status !== 'completed' &&
-    status !== 'failed' &&
-    status !== 'stopped' &&
-    status !== 'killed'
-  ) return undefined
-  const taskId = readXmlTransportField(value, 'task-id')
-  const toolUseId = readXmlTransportField(value, 'tool-use-id')
-  const key = toolUseId || taskId || command.uuid
-  if (!key) return undefined
-  return {
-    key,
-    ...(taskId ? { taskId } : {}),
-    ...(toolUseId ? { toolUseId } : {}),
-    status,
   }
 }
 
@@ -738,22 +791,24 @@ export function getCompletedNativeTaskOutputTaskId(
     : undefined
 }
 
-function readXmlTransportField(value: string, field: string): string | undefined {
-  const opening = `<${field}>`
-  const closing = `</${field}>`
-  const start = value.indexOf(opening)
-  if (start < 0) return undefined
-  const contentStart = start + opening.length
-  const end = value.indexOf(closing, contentStart)
-  if (end < 0) return undefined
-  const content = value.slice(contentStart, end).trim()
-  return content || undefined
-}
-
 async function waitForNativeBackgroundProgress(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return
   await new Promise<void>(resolveWait => {
     const timer = setTimeout(finish, 100)
+    const onAbort = () => finish()
+    function finish() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      resolveWait()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function waitForNativeTaskRegistration(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  await new Promise<void>(resolveWait => {
+    const timer = setTimeout(finish, 10)
     const onAbort = () => finish()
     function finish() {
       clearTimeout(timer)

@@ -11,7 +11,6 @@ export type AssetIntegrationStage =
   | 'bound'
   | 'copied'
   | 'referenced'
-  | 'runtime_loaded'
   | 'failed'
 
 export type AssetSlotAudit = {
@@ -152,16 +151,19 @@ function auditSlot(
       issues.push(`Integration reference does not exist in the project: ${reference}`)
     }
   }
+  // These IDs are declarations that help the native Validator locate the
+  // intended runtime checks. They are not evidence by themselves: a project
+  // must not be able to certify its own runtime behavior by writing an ID into
+  // its manifest. Runtime proof is accepted only from the observed native
+  // Validator result for the current workspace revision.
   const runtimeEventIds = stringArray(integrationEvidence.runtime_event_ids)
   const referenced = copied && references.length > 0
-  const runtimeLoaded = referenced && runtimeEventIds.length > 0
   const declaredIntegrated = value.status === 'integrated'
   if (declaredIntegrated && deliveryMode === 'managed-file' && !bound) {
     issues.push('Integrated managed-file slot has no resource_binding provenance.')
   }
   if (declaredIntegrated && !copied) issues.push('Integrated slot files are missing from the project.')
   if (declaredIntegrated && !referenced) issues.push('Integrated slot has no code/reference evidence.')
-  if (declaredIntegrated && !runtimeLoaded) issues.push('Integrated slot has no runtime load evidence.')
   return {
     id,
     required,
@@ -170,9 +172,7 @@ function auditSlot(
     runtimeEventIds,
     stage: issues.length > 0 && declaredIntegrated
       ? 'failed'
-      : runtimeLoaded
-        ? 'runtime_loaded'
-        : referenced
+      : referenced
           ? 'referenced'
           : copied
             ? 'copied'

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { evaluatePersistedDeliveryAcceptance } from './delivery-acceptance-audit'
 import {
   getObservedNativeAcceptance,
+  observeNativeAcceptanceTaskNotification,
   observeNativeAcceptanceToolEvent,
   recordNativeAcceptanceReportForTest,
 } from './native-acceptance-evidence'
@@ -138,23 +139,11 @@ describe('native delivery acceptance gate', () => {
     await writeFile(outputFile, `${JSON.stringify({
       type: 'assistant',
       message: {
+        stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
       },
     })}\n`)
-    observeNativeAcceptanceToolEvent({
-      dataRoot,
-      sessionId: TEST_SESSION_ID,
-      workspacePath: workspace,
-      eventType: 'system.status',
-      payload: {
-        subtype: 'task_notification',
-        status: 'completed',
-        task_id: taskId,
-        tool_use_id: toolUseID,
-        output_file: outputFile,
-      },
-      createdAt: new Date(),
-    })
+    notifyAcceptance(workspace, toolUseID, taskId, passingReport())
 
     expect(evaluate(workspace)).toEqual({
       allowed: true,
@@ -163,7 +152,7 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
-  test('uses the native Agent launch output when the terminal notification omits output_file', async () => {
+  test('uses the native terminal result when SDK metadata omits output_file', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-validator-empty-notification-path'
@@ -186,6 +175,7 @@ describe('native delivery acceptance gate', () => {
     await writeFile(outputFile, `${JSON.stringify({
       type: 'assistant',
       message: {
+        stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
       },
     })}\n`)
@@ -200,20 +190,7 @@ describe('native delivery acceptance gate', () => {
       },
       createdAt: new Date(),
     })
-    observeNativeAcceptanceToolEvent({
-      dataRoot,
-      sessionId: TEST_SESSION_ID,
-      workspacePath: workspace,
-      eventType: 'system.status',
-      payload: {
-        subtype: 'task_notification',
-        status: 'completed',
-        task_id: taskId,
-        tool_use_id: toolUseID,
-        output_file: '',
-      },
-      createdAt: new Date(),
-    })
+    notifyAcceptance(workspace, toolUseID, taskId, passingReport())
 
     expect(evaluate(workspace)).toEqual({
       allowed: true,
@@ -222,7 +199,7 @@ describe('native delivery acceptance gate', () => {
     })
   })
 
-  test('captures a completed background Validator when native resume emits init without task_notification', async () => {
+  test('does not inspect a background Validator output file during native resume', async () => {
     workspace = await createWorkspace()
     const dataRoot = dataRootFor(workspace)
     const toolUseID = 'background-validator-init-resume'
@@ -256,6 +233,7 @@ describe('native delivery acceptance gate', () => {
     await writeFile(outputFile, `${JSON.stringify({
       type: 'assistant',
       message: {
+        stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
       },
     })}\n`)
@@ -269,9 +247,9 @@ describe('native delivery acceptance gate', () => {
     })
 
     expect(evaluate(workspace)).toEqual({
-      allowed: true,
-      outcome: 'passed',
-      issues: [],
+      allowed: false,
+      outcome: 'rejected',
+      issues: ['The native acceptance Validator is still running.'],
     })
   })
 
@@ -309,23 +287,11 @@ describe('native delivery acceptance gate', () => {
     await writeFile(outputFile, `${JSON.stringify({
       type: 'assistant',
       message: {
+        stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
       },
     })}\n`)
-    observeNativeAcceptanceToolEvent({
-      dataRoot,
-      sessionId: TEST_SESSION_ID,
-      workspacePath: workspace,
-      eventType: 'system.status',
-      payload: {
-        subtype: 'task_notification',
-        status: 'completed',
-        task_id: taskId,
-        tool_use_id: toolUseID,
-        output_file: outputFile,
-      },
-      createdAt: new Date(),
-    })
+    notifyAcceptance(workspace, toolUseID, taskId, passingReport())
 
     expect(getObservedNativeAcceptance({
       dataRoot,
@@ -342,6 +308,7 @@ describe('native delivery acceptance gate', () => {
     await writeFile(outputFile, `${JSON.stringify({
       type: 'assistant',
       message: {
+        stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
       },
     })}\n`)
@@ -388,6 +355,180 @@ describe('native delivery acceptance gate', () => {
       sessionId: TEST_SESSION_ID,
       workspacePath: workspace,
     })).toEqual({ state: 'missing' })
+  })
+
+  test('accepts a completed native TaskOutput linked to the observed background Validator', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'task-output-validator-tool'
+    const taskId = 'task-output-validator-task'
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        ...agentPayload,
+        output: nativeAsyncAgentLaunch(taskId, join(dataRoot, 'validator-output.jsonl')),
+      },
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'TaskOutput',
+        toolUseID: 'task-output-tool-use',
+        input: { task_id: taskId },
+        nativeTaskResult: {
+          taskId,
+          status: 'completed',
+          result: JSON.stringify(passingReport()),
+        },
+      },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('current')
+  })
+
+  test('does not recover an unfinished background Validator output', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'unfinished-background-validator'
+    const taskId = 'unfinished-background-validator-task'
+    const outputFile = join(dataRoot, 'unfinished-validator-output.jsonl')
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        ...agentPayload,
+        output: nativeAsyncAgentLaunch(taskId, outputFile),
+      },
+      createdAt: new Date(),
+    })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        stop_reason: null,
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'system.status',
+      payload: { subtype: 'init' },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('running')
+  })
+
+  test('does not use unrelated results or SendMessage as Validator evidence triggers', async () => {
+    workspace = await createWorkspace()
+    const dataRoot = dataRootFor(workspace)
+    const toolUseID = 'validator-with-unrelated-result'
+    const taskId = 'validator-with-unrelated-result-task'
+    const outputFile = join(dataRoot, 'unrelated-result-validator-output.jsonl')
+    const agentPayload = {
+      toolName: 'Agent',
+      toolUseID,
+      input: { subagent_type: 'beegame-acceptance-validator' },
+    }
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.started',
+      payload: agentPayload,
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        ...agentPayload,
+        output: nativeAsyncAgentLaunch(taskId, outputFile),
+      },
+      createdAt: new Date(),
+    })
+    await writeFile(outputFile, `${JSON.stringify({
+      type: 'assistant',
+      message: {
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify(passingReport()) }],
+      },
+    })}\n`)
+
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'result',
+      payload: { result: 'unrelated native turn result' },
+      createdAt: new Date(),
+    })
+    observeNativeAcceptanceToolEvent({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+      eventType: 'tool.completed',
+      payload: {
+        toolName: 'SendMessage',
+        toolUseID: 'validator-send-message-follow-up',
+        output: JSON.stringify(passingReport()),
+      },
+      createdAt: new Date(),
+    })
+
+    expect(getObservedNativeAcceptance({
+      dataRoot,
+      sessionId: TEST_SESSION_ID,
+      workspacePath: workspace,
+    }).state).toBe('running')
   })
 
   test('rejects prose-wrapped JSON from the foreground Validator result', async () => {
@@ -541,6 +682,24 @@ describe('native delivery acceptance gate', () => {
     expect(evaluate(workspace).allowed).toBe(true)
   })
 
+  test('keeps non-blocking validator observations on a passed result', async () => {
+    workspace = await createWorkspace()
+    const report = passingReport('Observed every required player path.') as {
+      findings: Array<{ source: string; detail: string }>
+    }
+    report.findings = [{
+      source: 'optional visual observation',
+      detail: 'The optional capture was unavailable; required state behavior passed.',
+    }]
+    recordForegroundResult(workspace, report)
+
+    expect(evaluate(workspace)).toEqual({
+      allowed: true,
+      outcome: 'passed',
+      issues: [],
+    })
+  })
+
   test('does not accept prose-wrapped or malformed Agent output as terminal evidence', async () => {
     workspace = await createWorkspace()
     observeNativeAcceptanceToolEvent({
@@ -600,7 +759,12 @@ async function createWorkspace(): Promise<string> {
   await mkdir(join(root, 'src'), { recursive: true })
   for (const path of REQUIRED_PROJECT_DOCUMENTS) {
     await mkdir(join(root, path, '..'), { recursive: true })
-    await writeFile(join(root, path), `# Approved ${path}\n`)
+    await writeFile(
+      join(root, path),
+      path.endsWith('gameplay-checklist.md')
+        ? '# Acceptance\n- [ ] PATH-001 Launch and observe the playable state.\n'
+        : `# Approved ${path}\n`,
+    )
   }
   await mkdir(join(root, 'assets'), { recursive: true })
   await writeFile(join(root, 'assets', 'asset-manifest.json'), JSON.stringify({
@@ -720,6 +884,30 @@ function nativeAsyncAgentLaunch(taskId: string, outputFile: string): string {
     'The agent is working in the background.',
     `output_file: ${outputFile}`,
   ].join('\n')
+}
+
+function notifyAcceptance(
+  workspace: string,
+  toolUseID: string,
+  taskId: string,
+  report: unknown,
+): void {
+  observeNativeAcceptanceTaskNotification({
+    dataRoot: dataRootFor(workspace),
+    sessionId: TEST_SESSION_ID,
+    workspacePath: workspace,
+    notification: {
+      value: [
+        '<task-notification>',
+        `<task-id>${taskId}</task-id>`,
+        `<tool-use-id>${toolUseID}</tool-use-id>`,
+        '<status>completed</status>',
+        `<result>${typeof report === 'string' ? report : JSON.stringify(report)}</result>`,
+        '</task-notification>',
+      ].join(''),
+    },
+    createdAt: new Date(),
+  })
 }
 
 function passingReport(summary = 'Observed every documented player path.'): object {

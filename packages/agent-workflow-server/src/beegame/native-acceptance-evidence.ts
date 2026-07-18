@@ -1,18 +1,21 @@
 import { createHash } from 'node:crypto'
 import {
   appendFileSync,
-  closeSync,
   existsSync,
-  fstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  readSync,
   readdirSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { DELIVERY_VALIDATOR_AGENT_TYPES } from './delivery-validation-agents'
-import { parseNativeBackgroundTaskLaunch } from './native-background-task-output'
+import {
+  parseNativeBackgroundTaskLaunch,
+  parseNativeCompletedTaskOutput,
+} from './native-background-task-output'
+import {
+  parseNativeTerminalTaskNotification,
+  type BeeGameNativeTaskNotification,
+} from './native-task-notification'
 
 type NativeAcceptanceResult = 'passed' | 'failed' | 'blocked'
 type NativeAcceptanceEvidenceKind =
@@ -63,7 +66,17 @@ type NativeAcceptanceBackgroundTask = {
   toolUseID: string
   validatorId: string
   workspaceDigest: string
-  outputFile?: string
+  createdAt: string
+}
+
+type NativeAcceptanceTerminal = {
+  version: 3
+  kind: 'terminal'
+  sessionId: string
+  turnId?: string
+  toolUseID: string
+  validatorId: string
+  status: 'completed' | 'failed' | 'stopped' | 'killed'
   createdAt: string
 }
 
@@ -86,6 +99,7 @@ export type NativeAcceptanceEvidence = {
 type NativeAcceptanceObservation =
   | NativeAcceptanceDispatch
   | NativeAcceptanceBackgroundTask
+  | NativeAcceptanceTerminal
   | NativeAcceptanceEvidence
 
 const REQUIRED_PASSING_EVIDENCE = new Set<NativeAcceptanceEvidenceKind>([
@@ -116,15 +130,15 @@ export function observeNativeAcceptanceToolEvent(input: {
 
   if (input.eventType === 'system.status') {
     observeNativeBackgroundAcceptanceEvent({ ...input, payload: input.payload })
-    if (stringValue(input.payload.subtype) === 'init') {
-      observePendingNativeBackgroundAcceptance(input)
-    }
     return
   }
 
-  if (input.eventType === 'result') {
-    observePendingNativeBackgroundAcceptance(input)
-    return
+  if (input.eventType === 'tool.completed') {
+    const taskOutput = parseNativeCompletedTaskOutput(input.payload)
+    if (taskOutput) {
+      observeLinkedTaskOutput(input, taskOutput)
+      return
+    }
   }
 
   const toolName = stringValue(input.payload.toolName)
@@ -158,7 +172,8 @@ export function observeNativeAcceptanceToolEvent(input: {
     )
   if (!dispatch || dispatch.kind !== 'dispatch') return
 
-  const output = stringValue(input.payload.output)
+  const nativeResult = stringValue(input.payload.nativeResult)
+  const output = nativeResult || stringValue(input.payload.output)
   const backgroundLaunch = parseNativeBackgroundTaskLaunch(output)
   if (backgroundLaunch) {
     if (!readObservations(input.dataRoot, input.sessionId).some(observation =>
@@ -175,16 +190,18 @@ export function observeNativeAcceptanceToolEvent(input: {
         toolUseID,
         validatorId,
         workspaceDigest: dispatch.workspaceDigest,
-        outputFile: backgroundLaunch.outputFile,
         createdAt: input.createdAt.toISOString(),
       })
     }
     return
   }
 
+  appendTerminal(input, toolUseID, 'completed')
+
   const report = parseNativeAcceptanceReport(
     output,
     validatorId,
+    Boolean(nativeResult),
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
@@ -194,6 +211,60 @@ export function observeNativeAcceptanceToolEvent(input: {
     ...(input.turnId ? { turnId: input.turnId } : {}),
     toolUseID,
     validatorId,
+    status: report.status,
+    summary: report.summary,
+    reportDigest: digestJson(report),
+    workspaceDigest: dispatch.workspaceDigest,
+    evidence: report.evidence,
+    findings: report.findings,
+    createdAt: input.createdAt.toISOString(),
+  })
+}
+
+function observeLinkedTaskOutput(
+  input: {
+    dataRoot: string
+    sessionId: string
+    workspacePath: string
+    turnId?: string
+    createdAt: Date
+  },
+  taskOutput: {
+    taskId: string
+    status: 'completed' | 'failed' | 'stopped' | 'killed'
+    result?: string
+  },
+): void {
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const backgroundTask = observations.findLast(observation =>
+    observation.kind === 'background-task' &&
+    observation.taskId === taskOutput.taskId
+  )
+  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
+  if (observations.some(observation =>
+    observation.kind === 'result' &&
+    observation.toolUseID === backgroundTask.toolUseID
+  )) return
+  const dispatch = observations.findLast(observation =>
+    observation.kind === 'dispatch' &&
+    observation.toolUseID === backgroundTask.toolUseID
+  )
+  if (!dispatch || dispatch.kind !== 'dispatch') return
+  appendTerminal(input, dispatch.toolUseID, taskOutput.status)
+  if (taskOutput.status !== 'completed' || !taskOutput.result) return
+  const report = parseNativeAcceptanceReport(
+    taskOutput.result,
+    dispatch.validatorId,
+    true,
+  )
+  if (!report) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 3,
+    kind: 'result',
+    sessionId: input.sessionId,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    toolUseID: dispatch.toolUseID,
+    validatorId: dispatch.validatorId,
     status: report.status,
     summary: report.summary,
     reportDigest: digestJson(report),
@@ -243,25 +314,35 @@ function observeNativeBackgroundAcceptanceEvent(input: {
     return
   }
 
-  if (
-    subtype !== 'task_notification' ||
-    stringValue(input.payload.status) !== 'completed'
-  ) return
-  if (observations.some(observation =>
-    observation.kind === 'result' && observation.toolUseID === toolUseID
-  )) return
-  const backgroundTask = observations.findLast(observation =>
-    observation.kind === 'background-task' &&
-    observation.taskId === taskId &&
-    observation.toolUseID === toolUseID
-  )
-  if (!backgroundTask || backgroundTask.kind !== 'background-task') return
+  // Terminal task results arrive through the native queue callback. SDK
+  // status events are lifecycle metadata only and never trigger file reads.
+}
 
+/** Passively persists the terminal result already emitted by Claude Code. */
+export function observeNativeAcceptanceTaskNotification(input: {
+  dataRoot: string
+  sessionId: string
+  workspacePath: string
+  turnId?: string
+  notification: BeeGameNativeTaskNotification
+  createdAt: Date
+}): void {
+  const terminal = parseNativeTerminalTaskNotification(input.notification)
+  if (!terminal?.toolUseId) return
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  if (observations.some(observation =>
+    observation.kind === 'result' && observation.toolUseID === terminal.toolUseId
+  )) return
+  const dispatch = observations.findLast(observation =>
+    observation.kind === 'dispatch' && observation.toolUseID === terminal.toolUseId
+  )
+  if (!dispatch || dispatch.kind !== 'dispatch') return
+  appendTerminal(input, terminal.toolUseId, terminal.status)
+  if (terminal.status !== 'completed' || !terminal.result) return
   const report = parseNativeAcceptanceReport(
-    readNativeBackgroundTaskTerminalText(
-      stringValue(input.payload.output_file) || backgroundTask.outputFile || '',
-    ),
-    backgroundTask.validatorId,
+    terminal.result,
+    dispatch.validatorId,
+    true,
   )
   if (!report) return
   appendObservation(input.dataRoot, input.sessionId, {
@@ -269,101 +350,36 @@ function observeNativeBackgroundAcceptanceEvent(input: {
     kind: 'result',
     sessionId: input.sessionId,
     ...(input.turnId ? { turnId: input.turnId } : {}),
-    toolUseID,
-    validatorId: backgroundTask.validatorId,
+    toolUseID: terminal.toolUseId,
+    validatorId: dispatch.validatorId,
     status: report.status,
     summary: report.summary,
     reportDigest: digestJson(report),
-    workspaceDigest: backgroundTask.workspaceDigest,
+    workspaceDigest: dispatch.workspaceDigest,
     evidence: report.evidence,
     findings: report.findings,
     createdAt: input.createdAt.toISOString(),
   })
 }
 
-function observePendingNativeBackgroundAcceptance(input: {
-  dataRoot: string
-  sessionId: string
-  workspacePath: string
-  turnId?: string
-  createdAt: Date
-}): void {
-  const observations = readObservations(input.dataRoot, input.sessionId)
-  const completedToolUseIDs = new Set(observations.flatMap(observation =>
-    observation.kind === 'result' ? [observation.toolUseID] : []
-  ))
-  for (const task of observations) {
-    if (
-      task.kind !== 'background-task' ||
-      !task.outputFile ||
-      completedToolUseIDs.has(task.toolUseID)
-    ) continue
-    const report = parseNativeAcceptanceReport(
-      readNativeBackgroundTaskTerminalText(task.outputFile),
-      task.validatorId,
-    )
-    if (!report) continue
-    appendObservation(input.dataRoot, input.sessionId, {
-      version: 3,
-      kind: 'result',
-      sessionId: input.sessionId,
-      ...(input.turnId ? { turnId: input.turnId } : {}),
-      toolUseID: task.toolUseID,
-      validatorId: task.validatorId,
-      status: report.status,
-      summary: report.summary,
-      reportDigest: digestJson(report),
-      workspaceDigest: task.workspaceDigest,
-      evidence: report.evidence,
-      findings: report.findings,
-      createdAt: input.createdAt.toISOString(),
-    })
-    completedToolUseIDs.add(task.toolUseID)
-  }
-}
-
-const MAX_NATIVE_TASK_OUTPUT_BYTES = 16 * 1024 * 1024
-
-function readNativeBackgroundTaskTerminalText(path: string): string {
-  if (!path || !existsSync(path)) return ''
-  let file: number | undefined
-  try {
-    file = openSync(path, 'r')
-    const size = fstatSync(file).size
-    const length = Math.min(size, MAX_NATIVE_TASK_OUTPUT_BYTES)
-    const offset = Math.max(0, size - length)
-    const bytes = Buffer.alloc(length)
-    readSync(file, bytes, 0, length, offset)
-    const lines = bytes.toString('utf8').split('\n')
-    if (offset > 0) lines.shift()
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index]?.trim()
-      if (!line) continue
-      try {
-        const message = JSON.parse(line) as unknown
-        const text = getNativeAssistantText(message)
-        if (text) return text
-      } catch {
-        continue
-      }
-    }
-  } catch {
-    return ''
-  } finally {
-    if (file !== undefined) closeSync(file)
-  }
-  return ''
-}
-
-function getNativeAssistantText(value: unknown): string {
-  if (!isRecord(value) || value.type !== 'assistant') return ''
-  const message = isRecord(value.message) ? value.message : undefined
-  if (!message || !Array.isArray(message.content)) return ''
-  return message.content.flatMap(item => {
-    if (!isRecord(item) || item.type !== 'text') return []
-    const text = stringValue(item.text)
-    return text ? [text] : []
-  }).join('\n').trim()
+function appendTerminal(
+  input: { dataRoot: string; sessionId: string; turnId?: string; createdAt: Date },
+  toolUseID: string,
+  status: NativeAcceptanceTerminal['status'],
+): void {
+  if (readObservations(input.dataRoot, input.sessionId).some(observation =>
+    observation.kind === 'terminal' && observation.toolUseID === toolUseID
+  )) return
+  appendObservation(input.dataRoot, input.sessionId, {
+    version: 3,
+    kind: 'terminal',
+    sessionId: input.sessionId,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    toolUseID,
+    validatorId: DELIVERY_VALIDATOR_AGENT_TYPES[0],
+    status,
+    createdAt: input.createdAt.toISOString(),
+  })
 }
 
 export function getObservedNativeAcceptance(input: {
@@ -372,10 +388,30 @@ export function getObservedNativeAcceptance(input: {
   workspacePath: string
 }):
   | { state: 'missing' }
+  | { state: 'running'; toolUseID: string; workspaceDigest: string; createdAt: string }
   | { state: 'stale'; evidence: NativeAcceptanceEvidence }
   | { state: 'current'; evidence: NativeAcceptanceEvidence } {
   const workspaceDigest = digestWorkspace(input.workspacePath)
-  const latest = readObservations(input.dataRoot, input.sessionId)
+  const observations = readObservations(input.dataRoot, input.sessionId)
+  const running = observations
+    .filter((observation): observation is NativeAcceptanceDispatch =>
+      observation.kind === 'dispatch' &&
+      observation.workspaceDigest === workspaceDigest &&
+      !observations.some(result =>
+        result.kind === 'result' && result.toolUseID === observation.toolUseID
+      ) &&
+      !observations.some(terminal =>
+        terminal.kind === 'terminal' && terminal.toolUseID === observation.toolUseID
+      )
+    )
+    .at(-1)
+  if (running) return {
+    state: 'running',
+    toolUseID: running.toolUseID,
+    workspaceDigest: running.workspaceDigest,
+    createdAt: running.createdAt,
+  }
+  const latest = observations
     .filter((observation): observation is NativeAcceptanceEvidence =>
       observation.kind === 'result'
     )
@@ -447,8 +483,9 @@ export function digestWorkspace(workspacePath: string): string {
 function parseNativeAcceptanceReport(
   text: string,
   validatorId: string,
+  allowNativePreface = false,
 ): NativeAcceptanceReport | undefined {
-  const report = parseTerminalJsonObject(text)
+  const report = parseTerminalJsonObject(text, allowNativePreface)
   if (!report || stringValue(report.validatorId) !== validatorId) return undefined
   const status = stringValue(report.status)
   if (status !== 'passed' && status !== 'failed' && status !== 'blocked') {
@@ -465,7 +502,7 @@ function parseNativeAcceptanceReport(
   }
 
   if (status === 'passed') {
-    if (findings.length > 0 || evidence.some(item => item.result !== 'passed')) {
+    if (evidence.some(item => item.result !== 'passed')) {
       return undefined
     }
     const kinds = new Set(evidence.map(item => item.kind))
@@ -525,6 +562,7 @@ function readObservations(
           (
             observation.kind === 'dispatch' ||
             observation.kind === 'background-task' ||
+            observation.kind === 'terminal' ||
             observation.kind === 'result'
           )
           ? [observation]
@@ -561,11 +599,26 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-function parseTerminalJsonObject(text: string): Record<string, unknown> | undefined {
+function parseTerminalJsonObject(
+  text: string,
+  allowNativePreface = false,
+): Record<string, unknown> | undefined {
   const trimmed = text.trim()
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined
+  if (!trimmed.endsWith('}')) return undefined
+  if (allowNativePreface && !trimmed.startsWith('{')) {
+    for (let start = trimmed.lastIndexOf('{'); start >= 0; start = trimmed.lastIndexOf('{', start - 1)) {
+      const parsed = parseJsonObject(trimmed.slice(start))
+      if (parsed) return parsed
+    }
+    return undefined
+  }
+  if (!trimmed.startsWith('{')) return undefined
+  return parseJsonObject(trimmed)
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
-    const parsed = JSON.parse(trimmed) as unknown
+    const parsed = JSON.parse(text) as unknown
     return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined

@@ -468,6 +468,27 @@ describe('DashboardView runtime loading', () => {
         expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
     });
 
+    it('does not present an idle turn as ready when native delivery evidence needs attention', async () => {
+        mockedProjectStatus = {
+            ...mockedProjectStatus,
+            phase: 'idle',
+            blocked: false,
+            approval_required: false,
+            acceptance: {
+                status: 'failed',
+                summary: 'The current revision did not pass native acceptance.',
+            },
+        };
+
+        render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+        await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+        expect(screen.getByText('Agent 状态')).toBeInTheDocument();
+        expect(screen.getByText('需要处理')).toBeInTheDocument();
+        expect(screen.getByText('未通过')).toBeInTheDocument();
+        expect(screen.queryByText('就绪')).not.toBeInTheDocument();
+    });
+
     it('localizes BeeGame turn state labels in the live preview header', async () => {
         mockedPhaseInfo = {
             current_phase: 3,

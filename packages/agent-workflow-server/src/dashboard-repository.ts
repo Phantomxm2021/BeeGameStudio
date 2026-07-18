@@ -1110,13 +1110,15 @@ export class DashboardRepository {
   ): void {
     const raw = env[RUNTIME_SETTINGS_ENV_KEY]
     delete env[RUNTIME_SETTINGS_ENV_KEY]
-    if (!raw) return
-    const parsed = safeParseJsonObject(raw)
-    if (!parsed) return
     const settings: RuntimeSettingsConfig = {}
-    for (const field of RUNTIME_SETTING_FIELDS) {
-      if (typeof parsed[field] === 'boolean') settings[field] = parsed[field]
+    const parsed = raw ? safeParseJsonObject(raw) : undefined
+    if (parsed) {
+      for (const field of RUNTIME_SETTING_FIELDS) {
+        if (typeof parsed[field] === 'boolean') settings[field] = parsed[field]
+      }
     }
+    // Host-owned isolation must be materialized even when Supabase has no
+    // optional runtime feature row for this user.
     syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
   }
 

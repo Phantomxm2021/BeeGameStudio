@@ -28,6 +28,10 @@ import {
     type BeeGameCreditSummary,
 } from '../../services/creditsApi';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
+import {
+    countPendingToolPermissions,
+    usePermissionTabAttention,
+} from '../../hooks/usePermissionTabAttention';
 
 interface DashboardViewProps {
     projectId: string;
@@ -257,6 +261,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         const reviewType = String(review?.type || '');
         return reviewType !== 'ASSET_MANIFEST_REVIEW' && Boolean(review?.gate_id);
     });
+    const pendingToolPermissionCount = countPendingToolPermissions(pendingReviews);
+    usePermissionTabAttention(
+        pendingToolPermissionCount,
+        translateBeeGame('approvalRequestShort'),
+    );
     const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
     const reviewDisplayModels = useMemo(() => toReviewDisplayModels(pendingReviews), [pendingReviews]);
     const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
@@ -313,11 +322,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const currentStatus = useMemo(() => {
         if (isBeeGameMode) {
             const phase = String(projectStatus?.phase || '').toLowerCase();
+            const acceptance = projectStatus?.acceptance?.status;
             if (isOffline) return 'offline';
             if (!hasCurrentRuntimeSnapshot) return 'starting';
             if (phase === 'starting' || isProjectStarting) return 'starting';
             if (phase === 'running') return 'running';
             if (phase === 'waiting_approval' || phase === 'awaiting_user') return 'waiting_approval';
+            if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
             if (phase === 'finished') return 'finished';
             if (phase === 'paused' || phase === 'failed') return 'paused';
         }
@@ -328,7 +339,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             hasWaitingApproval: waitingApproval.isWaitingStatus || hasPendingPlanReview,
             messages: displayMessages,
         });
-    }, [isBeeGameMode, projectStatus?.phase, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
+    }, [isBeeGameMode, projectStatus?.phase, projectStatus?.acceptance?.status, isOffline, hasCurrentRuntimeSnapshot, isLoading, canContinue, waitingApproval.isWaitingStatus, hasPendingPlanReview, displayMessages, isProjectStarting]);
 
     const refreshPreviewStatus = async () => {
         await loadProjectRuntimeState(projectId);
