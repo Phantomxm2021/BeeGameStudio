@@ -46,10 +46,9 @@ describe('native Resource Library tool', () => {
     expect(tool.alwaysLoad).toBe(true)
     expect(JSON.stringify(result)).not.toContain('sourceUrl')
     expect(result).toEqual({ data: expect.objectContaining({ items: [expect.objectContaining({ packId: 'pack-a' })] }) })
-    await expect(tool.prompt()).resolves.toContain('paginated catalog')
-    await expect(tool.prompt()).resolves.toContain('author the engine-native assembly yourself')
-    await expect(tool.prompt()).resolves.toContain('You may combine any number of Packs')
-    await expect(tool.prompt()).resolves.toContain('do not call a decorative Pack a complete scene solution')
+    await expect(tool.prompt()).resolves.toContain('Catalog results are paginated')
+    await expect(tool.prompt()).resolves.toContain('BeeGame does not select resources')
+    await expect(tool.prompt()).resolves.not.toContain('author the engine-native assembly yourself')
   })
 
   test('asks once for one explicit batch while all exploration stays read-only', async () => {
@@ -121,7 +120,7 @@ describe('native Resource Library tool', () => {
       components: [{ id: 'mesh-root', kind: 'mesh', name: 'Root', roles: ['environment'] }],
       inspection: { status: 'complete', source: 'server' },
     })
-    await expect(tool.prompt()).resolves.toContain('never restart the same Pack from its first page')
+    await expect(tool.prompt()).resolves.not.toContain('never restart the same Pack from its first page')
   })
 
   test('does not flood Agent context with a large Pack inventory', async () => {
@@ -280,7 +279,6 @@ describe('native Resource Library tool', () => {
     expect(result).toEqual({ data: expect.objectContaining({
       result: 'structurally_invalid',
       runtime_acceptance: expect.objectContaining({ observed: false, required: true }),
-      next_action: expect.stringContaining('Fix every reported contract issue'),
       imports: { total: 0, by_status: {}, invalid_ids: [] },
       coverage: expect.objectContaining({
         required_total: 1,
@@ -301,9 +299,8 @@ describe('native Resource Library tool', () => {
       }),
     }) })
     expect((result as { data: Record<string, unknown> }).data).not.toHaveProperty('requirements')
-    await expect(tool.prompt()).resolves.toContain('never fabricate Pack ids')
-    await expect(tool.prompt()).resolves.toContain('Treat technicalFacts as objective source-file evidence')
-    await expect(tool.prompt()).resolves.toContain('target-native importer')
+    await expect(tool.prompt()).resolves.not.toContain('never fabricate Pack ids')
+    await expect(tool.prompt()).resolves.toContain('objective technical facts')
   })
 
   test('reports facts for every imported Pack without deciding cross-Pack coherence', async () => {

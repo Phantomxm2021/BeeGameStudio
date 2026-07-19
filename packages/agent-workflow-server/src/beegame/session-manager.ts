@@ -13,9 +13,6 @@ import {
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 import {
-  RESOURCE_ASSET_MANIFEST_VOCABULARY,
-} from '@bee-game-studio/beegame-resource-core'
-import {
   refundCreditReservation,
   reserveCredits,
   settleCreditReservation,
@@ -1903,30 +1900,6 @@ function isBeeGameSessionLanguage(
     value === 'pt'
 }
 
-function withResourceAuthoringContract(prompt: string): string {
-  return [
-    prompt,
-    '',
-    'Resource exploration and authoring request:',
-    '- This is a fresh inspection-and-authoring pass requested by the user. Existing requirement, import and composition statuses, usage_evidence, runtime_event_ids, prior summaries, successful builds and successful unit tests are declarations or prior evidence; none proves that the current rendered result is complete or visually acceptable. Inspect the current implementation and observe the current revision in its target runtime before deciding that no work is needed.',
-    '- If the native `game-art-director-expert` Skill is enabled and available, invoke it to assess both the current rendered baseline and the finished result. Use that exact Skill name; do not invent an alias. If it is unavailable, report the missing capability instead of simulating the Skill. Keep this inside Claude Code\'s native Skill/Agent lifecycle; BeeGame does not choose the art, author the scene or operate a parallel workflow.',
-    '- Separate confirmed product intent from historical implementation claims. Gameplay rules, user decisions and approved art goals remain constraints. Existing ASSET_PLAN sourcing/fallback decisions, manifest completion labels and statements such as delivered or no matching Pack are claims that must be revalidated against the current catalog and runtime; do not use them as a reason to skip the requested pass.',
-    '- Treat assets/asset-manifest.json as the canonical project asset contract. Browse the Resource Library as a reusable catalog, not as one candidate list per requirement. Derive one explicit art-direction baseline from the approved documents, then choose any number of Packs and modular roots whose dimension, rendering style, shape language, material treatment, palette, scale and theme can form a coherent result. Cross-Pack composition is allowed; record the compatibility rationale and responsibility coverage for every selected Pack. Preserve each independent import, Pack version, source element, dependency closure and usage provenance.',
-    '- Use the selected file\'s real format and extension. Never rename binary contents to satisfy an earlier requested extension, and choose project loaders from the actual integrated format.',
-    '- Integrate the complete declared dependency closure, including external textures, materials, sidecar data, animation clips, fonts, or audio dependencies. Preserve relative references or update them explicitly; do not guess dependencies from one example filename.',
-    '- Keep target paths project-relative and compatible with the project\'s own packaging and asset-base mechanism. Do not introduce root-relative runtime URLs when the target may be hosted below a base path.',
-    '- A copied file is inventory, not a finished game asset. Build the target-native scene, sprite/atlas setup, animation, UI, audio or effect assembly, reference the exact imported paths, and verify observable runtime loading before marking an import referenced or a composition integrated. For modular families, preserve one shared source-to-target transform and authored part relationships; never independently normalize every part to the same size or origin.',
-    '- If existing Resource Library imports predate the latest Pack analysis or have no technical_facts, call refresh_import_metadata once before composing. Use the refreshed objective facts with the target-native importer; never treat them as universal engine settings.',
-    '- If an import, format capability, dependency closure, composition recipe or runtime evidence is incomplete, report the exact blocker instead of silently substituting an incompatible asset.',
-    '- Treat current asset_format_capabilities as proven toolchain support, not an immutable ban list. Before discarding a high-coverage coherent Pack, evaluate a target-native loader or reliable project-owned conversion path; update capabilities only after that path works and is verified.',
-    '- Respect project_target.resource_library_usage as a user/admin preference, not a BeeGame selector state machine. Explore modular Pack coverage when useful, choose elements yourself, and author the target-native assembly. Never infer usage or compatibility from the target platform or filenames.',
-    '- If this pass changes sourcing, composition design or the asset plan, update the affected documents and invoke the native Document Reviewer with the canonical confirmed brief and language inputs before treating the revised plan as implementation-ready.',
-    '- Before changing secondary or conditional effects, observe the normal player-facing baseline and identify the largest visible composition, framing, scale, material, lighting and readability problems. Fix the core scene first. After editing, observe the same player path and comparable view again; a build, unit test, source review, manifest status or event id is not a visual comparison.',
-    '- Before claiming complete art integration, satisfy every required artistic responsibility with real import/composition/project references or leave it explicitly blocked. Optional decoration never substitutes for unresolved core scene, character, UI, VFX or audio responsibilities. verify_integration proves only structural consistency. Completion additionally requires current-revision target-runtime evidence that the selected assets load, are visible, are coherently framed and form the intended game-facing composition; invoke the native acceptance Validator rather than substituting build success or self-authored event IDs. If the baseline or finished revision cannot be observed, or the Validator is absent, still running, blocked or failed, report that terminal fact and do not say the art pass is complete. End with a non-empty user-facing result describing the imports added, the target-native compositions authored, the files and dependencies used, the before/after runtime verification performed, and any unresolved blocker.',
-    `- Canonical manifest vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. requirements describe needs, imports record reusable source material, and compositions plus usage evidence record target-native authored results.`,
-  ].join('\n')
-}
-
 async function prepareBeeGamePromptInput(input: {
   text: string
   workspace: string
@@ -1943,12 +1916,10 @@ async function prepareBeeGamePromptInput(input: {
     : ''
   const requestText = input.text || (images.length > 0 ? 'Analyze the attached image.' : '')
   const userInput = `${requestText}${documentContext}`
-  // Ordinary Claude turns are forwarded without a hidden BeeGame task
-  // contract. Resource authoring is a distinct, user-triggered platform
-  // operation whose complete request is assembled here.
-  const promptText = input.displayKind === 'asset_integration'
-    ? withResourceAuthoringContract(userInput)
-    : userInput
+  // BeeGame forwards the user's objective without a hidden execution plan.
+  // Native Claude Code owns Skill selection, tool use, implementation and
+  // validation exactly as it does in the TUI.
+  const promptText = userInput
   if (images.length === 0) {
     return {
       prompt: promptText,

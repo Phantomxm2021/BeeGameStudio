@@ -147,7 +147,6 @@ state the missing capability. Never claim that the art pass is complete.
 4. Define or audit the rule-based visual system.
 5. Prioritize and implement the largest player-visible improvements.
 6. Observe the finished revision on the same player path.
-7. Invoke native acceptance validation and report its terminal result.
 
 Never output loose inspiration boards.
 Always output rule-based visual system.

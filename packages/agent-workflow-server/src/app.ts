@@ -9,7 +9,6 @@ import {
   type ModelProviderKind,
 } from '@bee-game-studio/agent-workflow'
 import {
-  RESOURCE_ASSET_MANIFEST_VOCABULARY,
   RESOURCE_LIBRARY_USAGE,
   type ResourceLibraryUsage,
 } from '../../beegame-resource-core/src/types'
@@ -4827,13 +4826,7 @@ function registerBeeGameSessionRoutes(
               build_log: latestFailure.buildLog ?? '',
             },
             delivery_state: deliveryState,
-            instructions: [
-              'Continue this same native Claude Code task; do not treat this request as a new product brief.',
-              'Resolve the observed deployment or acceptance failure without weakening or bypassing the deployment gate.',
-              'If document review is missing, stale, blocked, or needs revision, resolve the document findings and obtain one valid READY result from beegame-document-reviewer before implementation or validation. Every fresh Reviewer dispatch, including a re-review after remediation, must repeat the canonical confirmed brief, selected document language, and selected game user-visible language as three explicit inputs; do not ask the Reviewer to recover or infer them from prior messages, files, summaries, or transcripts.',
-              'If native acceptance is missing or stale after document review is READY, run one beegame-acceptance-validator for the current workspace revision and wait for its native terminal result.',
-              'If validation reports findings, repair them and validate the changed revision again before claiming completion.',
-            ],
+            objective: 'Resolve the observed failure in this existing native task without weakening the deployment gate. Use the available native capabilities autonomously and report the actual result.',
           }, null, 2),
           {
             displayText: getServerOwnedProjectActionLabel(kind, language),
@@ -5138,25 +5131,10 @@ function buildConfirmedBriefPrompt(
       : 'Write player-visible game text in the language used by the confirmed user brief.',
     'Treat document language and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
-    'Use the confirmed brief as the source of truth. Preserve every explicit user choice and constraint; do not silently replace the selected platform, engine, dimension, genre, visual style, input methods, or scope.',
-    'Before implementation, create the complete project documentation baseline in this same native Claude Code task. Write each document to its canonical path as soon as it is ready so progress and review remain observable; do not hold completed documents for one final batch.',
-    'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and an initial docs/ASSET_PLAN.md that defines asset responsibilities and compatibility requirements without inventing a sourcing outcome; (4) resolve Resource Library sourcing and finalize docs/ASSET_PLAN.md plus assets/asset-manifest.json; (5) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
-    'Together these documents must define the player-visible loop from launch through progress, win/fail and restart; controls for every selected input method; rules, state transitions and edge cases; presentation and asset requirements; a feasible technical design that traces each required behavior to an implementation responsibility; and observable acceptance paths with concrete actions and expected outcomes.',
-    'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
-    'Give every committed requirement and player path a stable identifier. For each player path, document the concrete player actions, observable expected results, and required evidence. In docs/acceptance/gameplay-checklist.md, represent every acceptance task as a Markdown checkbox whose text begins with that stable identifier, for example `- [ ] PP-001 Launch the game and observe the initial playable state.` Headings and ordinary bullet lists may explain a path but do not replace its checkbox task. Keep this platform-neutral and use the project documents own structure; do not introduce a BeeGame-specific game schema.',
-    `After the initial docs/ASSET_PLAN.md defines asset responsibilities, create assets/asset-manifest.json as the canonical machine-readable asset contract. Set project_target.resource_library_usage to ${resourceLibraryUsage}. Derive project_target.asset_format_capabilities from the selected runtime's real native loaders and toolchain. Keep game requirements separate from the independent imported resource inventory. Represent scenes, characters, UI and other game-facing units as target-native compositions that may use any number of imports. Use this canonical vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}.`,
-    resourceLibraryUsage === 'optional'
-      ? 'Choose each asset source deliberately. The Resource Library is available for exploration when it helps the approved art and gameplay plan.'
-      : `Before finalizing docs/ASSET_PLAN.md, use the native ResourceLibrary catalog actions to browse the published Pack collection and inspect available facets. Derive an explicit art-direction baseline from docs/ART_DIRECTION.md, then choose any number of Packs whose dimension, rendering style, shape language, material treatment, palette, scale and theme can produce one coherent game. Cross-Pack composition is allowed and often necessary for complete scene, character, UI, VFX and audio coverage; record each Pack's compatibility rationale and covered responsibilities. The confirmed Resource Library usage is ${resourceLibraryUsage}. Do not turn project requirements into one-element search slots. A requirement may use several Pack elements and one element may be shared by several target-native compositions. Do not let optional decoration hide unresolved core artistic responsibilities. If a strong candidate uses a currently unsupported format, evaluate a target-native loader or reliable project-owned conversion path before rejecting it, and report a precise blocker if neither is viable. If Pack metadata is insufficient, report that precise blocker instead of claiming the library is empty.`,
-    'Resource exploration before Reviewer READY is read-only. Do not integrate files or begin implementation until the approved resource and assembly plan is READY.',
-    'Finish the complete document baseline before launching one native beegame-document-reviewer subagent in the foreground. Pass it the canonical confirmed brief, selected document language, and selected game user-visible language as explicit separate inputs, and do not modify project documents while that review is running. Every fresh Reviewer dispatch, including every re-review after findings are remediated, must repeat all three explicit inputs in that Agent call; never ask the Reviewer to recover or infer them from prior messages, project files, summaries, or transcripts. Do not begin implementation until the reviewer returns exactly one schema-valid terminal JSON object with verdict READY for that exact document revision. Empty output, malformed JSON, or JSON wrapped in prose is invalid and must never be inferred as READY. If it reports findings, finish all document corrections and obtain a new native Reviewer result dispatched after the changed document revision. Any result remains bound to the document revision observed at its original Agent dispatch, regardless of later messages or task retrieval, and cannot approve changed files. If the native runtime moves the reviewer to the background, allow its native terminal notification to resume this same session and use only the schema-valid terminal result linked to that Reviewer dispatch as approval evidence.',
-    '',
-    'Plan and implement the project with applicable native Skills.',
-    ...(resourceLibraryUsage === 'optional'
-      ? []
-      : ['After Reviewer READY, explicitly choose the approved Resource elements and call ResourceLibrary import_elements once for the batch using stable import ids and target-appropriate project-relative destinations. Imports are independent inventory, not one-per-requirement bindings. BeeGame only copies and pins those elements plus their dependency closures; you remain responsible for project-native loading, placement, assembly and runtime verification.']),
-    'Before independent validation, create and run the executable build, test, and runtime acceptance entrypoints appropriate to the selected project toolchain. Prefer the project\'s existing native test and runtime tools; add only the smallest missing harness needed for observable assertions, not a second application framework. These checks must contain observable assertions for the documented player paths wherever the project runtime can automate them; compilation or source inspection is not a substitute. Keep generated build and typecheck outputs outside authored source directories so stale generated siblings cannot shadow the current implementation. Do not postpone creation of a required test harness until the Validator discovers it is missing.',
-    'After all intended project edits and project-native checks are complete, invoke exactly one native beegame-acceptance-validator subagent in the foreground for that exact workspace revision, so any project-native runtime permission remains visible to the user. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. Use its terminal JSON directly. Empty output, malformed JSON, or JSON wrapped in prose is not a terminal result. If the native runtime moves it to the background, allow its native terminal notification to resume this same session and treat only the schema-valid terminal result linked to that Validator dispatch as acceptance evidence. Every result remains bound to the workspace revision observed at its original Agent dispatch, regardless of later messages or task retrieval. A blocked result remains blocked and must never be described as ready or delivered. If validation fails, repair only the observed findings first; after any project edit, launch a new foreground Validator for the changed revision and require one final complete player-path smoke pass. Never make a post-validation cleanup edit without validating that final revision. If no valid terminal Validator JSON is returned, continue the task until validation reaches a terminal passed, failed, or blocked result; do not claim completion from compilation, source inspection, or the implementation agent\'s own summary alone.',
+    'Use the confirmed brief as the source of truth. Preserve its explicit choices and constraints, produce the project documentation and asset contract required to explain the delivered game, implement a playable result, and verify the current revision with observable evidence.',
+    `The confirmed Resource Library preference is ${resourceLibraryUsage}. The Resource Library is an available capability, not a BeeGame-authored selection plan; decide autonomously how to use it while respecting the confirmed brief.`,
+    'Use native Claude Code Skills, tools and agents according to their own discovery and execution behavior. BeeGame does not prescribe their names, invocation order, implementation strategy, or repair loop.',
+    'A complete result must truthfully distinguish delivered behavior, unresolved findings and external blockers. Do not present compilation, source inspection or a prior summary as proof of playability.',
     '',
     'Confirmed brief:',
     confirmedBrief,
@@ -5395,21 +5373,9 @@ function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string 
 
 function getServerOwnedResourceAuthoringPrompt(language: BeeGameSessionLanguage): string {
   if (language === 'zh' || language === 'zh-TW') {
-    return [
-      '重新审计当前游戏在目标运行时中的实际美术表现，并使用资源库对玩家可见结果做出实质改善。',
-      '这不是整理资源清单或修复元数据的任务：如果最终渲染结果没有发生必要的改善，就不能视为完成。',
-      '先观察当前版本并记录具体视觉缺口，再复核既有资产计划与资源来源决策；它们是历史实现声明，不是不可变的用户需求。',
-      '在不改变已确认玩法和产品意图的前提下，自主选择风格兼容的资源、编写目标运行时原生组合，并更新受影响的文档与资源合同。',
-      '最后必须观察当前版本的运行结果，并调用原生验收能力。若无法完成视觉观察或验收，请明确返回受阻，不要用构建成功、结构校验或自填证据代替。',
-    ].join('\n')
+    return '在不改变已确认玩法和产品意图的前提下，自主使用资源库改善当前游戏的玩家可见美术表现，并如实说明实际结果与任何阻塞。'
   }
-  return [
-    'Re-audit the game\'s actual art presentation in its target runtime and use the Resource Library to make a material player-visible improvement.',
-    'This is not a manifest-maintenance or metadata-repair task: if the rendered result does not receive the necessary improvement, the task is not complete.',
-    'Observe the current revision and record concrete visual gaps first. Then revalidate existing asset-plan and sourcing decisions; they are historical implementation claims, not immutable user requirements.',
-    'Without changing confirmed gameplay or product intent, choose style-compatible resources, author the target-runtime-native composition, and update affected documents and the asset contract.',
-    'Finally observe the current revision and invoke native acceptance. If visual observation or acceptance cannot be completed, return a clear blocker instead of substituting build success, structural validation, or self-authored evidence.',
-  ].join('\n')
+  return 'Autonomously use the Resource Library to improve the current game\'s player-visible art presentation without changing confirmed gameplay or product intent, and report the actual result and any blocker truthfully.'
 }
 
 function getServerOwnedProjectActionLabel(

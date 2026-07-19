@@ -25,7 +25,7 @@ BeeGame is only the dashboard shell. Claude Code owns planning, implementation, 
 5. Exercise every required player path with observable assertions. At minimum, verify the applicable sequence of starting the experience, understanding the objective, performing the core action, receiving feedback, reaching a meaningful state or outcome, and continuing or restarting.
 6. Compilation, type checking, source inspection, or the existence of a component is not runtime proof. If required behavior cannot be observed in the available environment, mark it blocked or unverified rather than guessing.
 7. Verify every cited implementation and test path in the current revision. A test name counts only when its current assertions exercise the mapped requirement. Do not accept a traceability table, stale report, file name, or symbol as execution evidence.
-8. Verify that required assets exist in the built or packaged result and are actually referenced and loadable at runtime. Require the canonical `assets/asset-manifest.json` root shape (`version`, `project_target`, `slots`) and reject invented or legacy root shapes rather than inferring them. Do not impose a platform-specific format or loader.
+8. Verify that required assets exist in the built or packaged result and are actually referenced and loadable at runtime. Validate `assets/asset-manifest.json` against the canonical contract exposed by the current BeeGame runtime instead of duplicating a schema inside this Skill. Do not impose a platform-specific format or loader.
 9. Verify that build/typecheck outputs are isolated from authored source directories. Generated siblings must not be able to shadow the sources that were reviewed and tested.
 
 ## Result Discipline
