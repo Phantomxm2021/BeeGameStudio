@@ -4,6 +4,7 @@ import type {
   ResourceResolvedElement,
   ResourceSelectionDependency,
 } from './types'
+import { normalizeResourceTechnicalFacts } from './technical-facts'
 
 /** Resolve one element explicitly selected by Claude Code without ranking it. */
 export function resolveExactResourceElement(
@@ -34,7 +35,7 @@ export function resolveExactResourceElement(
     ...(element.assetKind ? { assetKind: element.assetKind } : {}),
     ...(element.capabilities?.length ? { capabilities: element.capabilities } : {}),
     ...(element.contentProfile ? { contentProfile: element.contentProfile } : {}),
-    ...(Object.keys(element.specs).length ? { technicalFacts: { ...element.specs } } : {}),
+    ...(Object.keys(element.specs).length ? { technicalFacts: normalizeResourceTechnicalFacts(element.specs) } : {}),
     ...(element.relations?.length ? { relations: element.relations } : {}),
     dependencies: dependencyClosure(element, elementsById),
   }

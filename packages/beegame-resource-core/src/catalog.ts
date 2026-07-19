@@ -14,6 +14,7 @@ import type {
   ResourcePackPrimaryCategory,
   ResourceUsageTag,
 } from './types'
+import { normalizeResourceTechnicalFacts } from './technical-facts'
 
 /**
  * Browse published Packs without first inventing requirement slots or roles.
@@ -186,7 +187,7 @@ function summarizeElement(pack: ResourcePack, element: ResourceElement): Resourc
     ...(element.assetKind ? { assetKind: element.assetKind } : {}),
     capabilities: [...(element.capabilities ?? [])],
     ...(element.contentProfile ? { contentProfile: element.contentProfile } : {}),
-    ...(Object.keys(element.specs).length ? { technicalFacts: { ...element.specs } } : {}),
+    ...(Object.keys(element.specs).length ? { technicalFacts: normalizeResourceTechnicalFacts(element.specs) } : {}),
     relations: [...(element.relations ?? [])],
     dependencyCount: element.dependencies.length + (element.dependencyBindings?.length ?? 0),
   }

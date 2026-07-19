@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Sparkles, Upload } from 'lucide-react';
 import type { BeeGameAssetImportPayload, BeeGameAssetManifestPayload, BeeGameAssetRequirementPayload } from '../../../services/api';
+import type { ProjectBaselineStatusPayload } from '../../../services/api';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
@@ -14,6 +15,7 @@ interface AssetsPanelProps {
     isUploadingRequirementId?: string | null;
     onUpload?: (requirementId: string, file: File) => Promise<void>;
     onRequestSelectionPreparation?: () => void;
+    acceptance?: ProjectBaselineStatusPayload['acceptance'];
     lang?: Language;
 }
 
@@ -30,6 +32,7 @@ export const AssetsPanel = memo(({
     isUploadingRequirementId = null,
     onUpload,
     onRequestSelectionPreparation,
+    acceptance,
     lang = 'en',
 }: AssetsPanelProps) => {
     const { i18n } = useTranslation('beegame');
@@ -61,16 +64,19 @@ export const AssetsPanel = memo(({
                         {imports.length} {text.libraryBinding} · {compositions.length} {text.compositions}
                     </div>
                 </div>
-                {onRequestSelectionPreparation ? (
-                    <button
-                        type="button"
-                        onClick={() => onRequestSelectionPreparation()}
-                        className="type-button inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-3 py-2 text-amber-100 transition hover:bg-amber-400/[0.14]"
-                    >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        {text.replanWithAgent}
-                    </button>
-                ) : null}
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                    <AcceptancePill acceptance={acceptance} text={text} />
+                    {onRequestSelectionPreparation ? (
+                        <button
+                            type="button"
+                            onClick={() => onRequestSelectionPreparation()}
+                            className="type-button inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-3 py-2 text-amber-100 transition hover:bg-amber-400/[0.14]"
+                        >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            {text.replanWithAgent}
+                        </button>
+                    ) : null}
+                </div>
             </header>
 
             {compositions.length > 0 ? (
@@ -120,6 +126,35 @@ export const AssetsPanel = memo(({
 });
 
 AssetsPanel.displayName = 'AssetsPanel';
+
+function AcceptancePill({
+    acceptance,
+    text,
+}: {
+    acceptance?: ProjectBaselineStatusPayload['acceptance'];
+    text: AssetsPanelText;
+}) {
+    const status = acceptance?.status ?? 'not_run';
+    const config = status === 'passed'
+        ? { label: text.acceptancePassed, className: 'border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300', Icon: CheckCircle2 }
+        : status === 'failed'
+            ? { label: text.acceptanceFailed, className: 'border-red-400/25 bg-red-400/[0.08] text-red-300', Icon: CircleAlert }
+            : status === 'blocked'
+                ? { label: text.acceptanceBlocked, className: 'border-amber-400/25 bg-amber-400/[0.08] text-amber-200', Icon: CircleAlert }
+                : status === 'stale'
+                    ? { label: text.acceptanceStale, className: 'border-amber-400/25 bg-amber-400/[0.08] text-amber-200', Icon: CircleAlert }
+                    : { label: text.acceptanceNotRun, className: 'border-white/[0.09] bg-white/[0.03] text-zinc-400', Icon: Info };
+    return (
+        <div
+            className={`type-caption-2 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 ${config.className}`}
+            title={acceptance?.summary || config.label}
+            data-testid="asset-acceptance-status"
+        >
+            <config.Icon className="h-3.5 w-3.5" />
+            {config.label}
+        </div>
+    );
+}
 
 function AssetSection({ title, subdued = false, children }: { title: string; subdued?: boolean; children: ReactNode }) {
     return (

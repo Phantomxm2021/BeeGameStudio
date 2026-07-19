@@ -473,6 +473,7 @@ export function RightSidebar({
                                 isUploadingRequirementId={uploadingAssetRequirementId}
                                 onUpload={canMutateAssets ? handleUploadAsset : undefined}
                                 onRequestSelectionPreparation={canSendMessage && canIntegrateAssets ? handleRequestSelectionPreparation : undefined}
+                                acceptance={projectStatus?.acceptance}
                                 lang={lang}
                             />
                         )}

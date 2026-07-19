@@ -308,6 +308,8 @@ const CATALOG_TECHNICAL_FACT_KEYS = new Set([
   'boundsMinX', 'boundsMinY', 'boundsMinZ',
   'boundsMaxX', 'boundsMaxY', 'boundsMaxZ',
   'boundsSizeX', 'boundsSizeY', 'boundsSizeZ',
+  'boundsCenterX', 'boundsCenterY', 'boundsCenterZ',
+  'groundOffsetY', 'centeringOffsetX', 'centeringOffsetZ',
   'inspectionStatus', 'processor', 'processorVersion',
 ])
 

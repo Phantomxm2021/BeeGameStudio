@@ -4761,7 +4761,7 @@ function registerBeeGameSessionRoutes(
         if (!session) return c.json({ error: 'Session not found' }, 404)
         return c.json(await beeGameSessions.sendWithDisplay(
           c.req.param('id'),
-          JSON.stringify({ kind: 'resource_library_exploration_request', action: 'explore_plan_import_and_author' }, null, 2),
+          getServerOwnedResourceAuthoringPrompt(language),
           {
             displayText: getServerOwnedProjectActionLabel(kind, language),
             displayKind: 'asset_integration',
@@ -5391,6 +5391,25 @@ function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string 
   if (language === 'ja') return 'タスクを続けてください'
   if (language === 'ko') return '작업을 계속해 주세요'
   return 'Continue the task.'
+}
+
+function getServerOwnedResourceAuthoringPrompt(language: BeeGameSessionLanguage): string {
+  if (language === 'zh' || language === 'zh-TW') {
+    return [
+      '重新审计当前游戏在目标运行时中的实际美术表现，并使用资源库对玩家可见结果做出实质改善。',
+      '这不是整理资源清单或修复元数据的任务：如果最终渲染结果没有发生必要的改善，就不能视为完成。',
+      '先观察当前版本并记录具体视觉缺口，再复核既有资产计划与资源来源决策；它们是历史实现声明，不是不可变的用户需求。',
+      '在不改变已确认玩法和产品意图的前提下，自主选择风格兼容的资源、编写目标运行时原生组合，并更新受影响的文档与资源合同。',
+      '最后必须观察当前版本的运行结果，并调用原生验收能力。若无法完成视觉观察或验收，请明确返回受阻，不要用构建成功、结构校验或自填证据代替。',
+    ].join('\n')
+  }
+  return [
+    'Re-audit the game\'s actual art presentation in its target runtime and use the Resource Library to make a material player-visible improvement.',
+    'This is not a manifest-maintenance or metadata-repair task: if the rendered result does not receive the necessary improvement, the task is not complete.',
+    'Observe the current revision and record concrete visual gaps first. Then revalidate existing asset-plan and sourcing decisions; they are historical implementation claims, not immutable user requirements.',
+    'Without changing confirmed gameplay or product intent, choose style-compatible resources, author the target-runtime-native composition, and update affected documents and the asset contract.',
+    'Finally observe the current revision and invoke native acceptance. If visual observation or acceptance cannot be completed, return a clear blocker instead of substituting build success, structural validation, or self-authored evidence.',
+  ].join('\n')
 }
 
 function getServerOwnedProjectActionLabel(

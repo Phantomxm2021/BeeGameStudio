@@ -80,4 +80,27 @@ describe('AssetsPanel', () => {
         await user.click(screen.getByRole('button', { name: 'Ask agent to explore resources' }));
         expect(onRequestSelectionPreparation).toHaveBeenCalledWith();
     });
+
+    it('shows native current-revision acceptance separately from manifest completion claims', () => {
+        const { rerender } = render(
+            <AssetsPanel
+                manifest={{ version: 5, requirements: [{ id: 'level-art' }], imports: [], compositions: [] }}
+                isLoading={false}
+                acceptance={{ status: 'not_run' }}
+                lang="zh"
+            />,
+        );
+        expect(screen.getByTestId('asset-acceptance-status')).toHaveTextContent('尚未运行时验收');
+
+        rerender(
+            <AssetsPanel
+                manifest={{ version: 5, requirements: [{ id: 'level-art' }], imports: [], compositions: [] }}
+                isLoading={false}
+                acceptance={{ status: 'stale', summary: 'Project files changed after validation.' }}
+                lang="zh"
+            />,
+        );
+        expect(screen.getByTestId('asset-acceptance-status')).toHaveTextContent('修改后待重新验收');
+        expect(screen.getByTestId('asset-acceptance-status')).toHaveAttribute('title', 'Project files changed after validation.');
+    });
 });

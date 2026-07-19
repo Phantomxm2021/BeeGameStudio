@@ -48,4 +48,58 @@ describe('isolated model processing', () => {
       processor: 'assimpjs',
     }))
   }, 35_000)
+
+  test('reports authored scene-space bounds after node transforms without inventing a unit scale', () => {
+    const facts = inspectAssimpDocument({
+      rootnode: {
+        transformation: [
+          1, 0, 0, 10,
+          0, 1, 0, 20,
+          0, 0, 1, 30,
+          0, 0, 0, 1,
+        ],
+        meshes: [0],
+        children: [],
+      },
+      meshes: [{ vertices: [-1, 0, 0, 1, 2, 3], faces: [], bones: [], animmeshes: [] }],
+      animations: [],
+      materials: [],
+      textures: [],
+    })
+
+    expect(facts).toEqual(expect.objectContaining({
+      boundsMinX: 9,
+      boundsMinY: 20,
+      boundsMinZ: 30,
+      boundsMaxX: 11,
+      boundsMaxY: 22,
+      boundsMaxZ: 33,
+      boundsSizeX: 2,
+      boundsSizeY: 2,
+      boundsSizeZ: 3,
+      boundsCenterX: 10,
+      boundsCenterY: 21,
+      boundsCenterZ: 31.5,
+      groundOffsetY: -20,
+      centeringOffsetX: -10,
+      centeringOffsetZ: -31.5,
+    }))
+    expect(facts).not.toHaveProperty('unitScale')
+  })
+
+  test('accepts object-shaped Assimp positions without losing bounds', () => {
+    const facts = inspectAssimpDocument({
+      rootnode: { meshes: [0], children: [] },
+      meshes: [{ vertices: [{ x: -2, y: 1, z: -3 }, { x: 4, y: 5, z: 7 }], faces: [], bones: [], animmeshes: [] }],
+      animations: [],
+      materials: [],
+      textures: [],
+    })
+    expect(facts).toEqual(expect.objectContaining({
+      vertices: 2,
+      boundsSizeX: 6,
+      boundsSizeY: 4,
+      boundsSizeZ: 10,
+    }))
+  })
 })

@@ -965,10 +965,7 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[2]).not.toContain('Existing project change request:')
       await buildManager.sendWithDisplay(
         buildSession.id,
-        JSON.stringify({
-          kind: 'resource_library_exploration_request',
-          action: 'explore_plan_import_and_author',
-        }),
+        'Improve the current game art with the Resource Library and verify the rendered result.',
         { displayKind: 'asset_integration', taskType: 'asset_integration' },
       )
       await waitFor(() => submittedPrompts.length >= 4)
@@ -978,8 +975,13 @@ describe('beegame session routes', () => {
       expect(submittedPrompts[3]).toContain('real format and extension')
       expect(submittedPrompts[3]).toContain('observable runtime loading')
       expect(submittedPrompts[3]).toContain('fresh inspection-and-authoring pass')
+      expect(submittedPrompts[3]).toContain('historical implementation claims')
+      expect(submittedPrompts[3]).toContain('native game-art-direction Skill')
       expect(submittedPrompts[3]).toContain('refresh_import_metadata')
       expect(submittedPrompts[3]).toContain('proves only structural consistency')
+      expect(submittedPrompts[3]).toContain('native Document Reviewer')
+      expect(submittedPrompts[3]).toContain('native acceptance Validator')
+      expect(submittedPrompts[3]).toContain('do not say the art pass is complete')
       expect(submittedPrompts[3]).toContain('non-empty user-facing result')
       expect(submittedPrompts[3]).not.toContain('Existing project change request:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
@@ -7436,6 +7438,40 @@ describe('beegame session routes', () => {
       const liveHtml = await liveRes.text()
       expect(liveHtml).toContain('data-beegame-deployment-asset-base')
       expect(liveHtml).toContain('<main>Live game</main>')
+    } finally {
+      await rm(projectsRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('sends a player-visible art improvement objective for Resource Library authoring actions', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-resource-authoring-action-'))
+    const workspace = join(projectsRoot, 'resource-authoring-game')
+    const fake = createFakeRunner([{ type: 'result', result: 'Resource authoring turn ended.' }])
+    const app = createAgentWorkflowApp({
+      sessionRunner: fake.runner,
+      defaultWorkspacePath: projectsRoot,
+    })
+    try {
+      const session = await startTestSession(app, workspace)
+      const actionRes = await app.request(
+        `/api/beegame-sessions/${session.id}/action`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ kind: 'asset_explore_library', language: 'zh' }),
+        },
+      )
+
+      expect(actionRes.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
+      const prompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
+      expect(prompt).toContain('玩家可见结果做出实质改善')
+      expect(prompt).toContain('不是整理资源清单或修复元数据的任务')
+      expect(prompt).toContain('历史实现声明')
+      expect(prompt).toContain('native game-art-direction Skill')
+      expect(prompt).toContain('native Document Reviewer')
+      expect(prompt).toContain('native acceptance Validator')
+      expect(prompt).not.toContain('"kind": "resource_library_exploration_request"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
