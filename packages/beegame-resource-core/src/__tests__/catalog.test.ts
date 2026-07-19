@@ -45,6 +45,17 @@ describe('resource catalog browsing', () => {
     expect(page.items[0]?.technicalFacts).toEqual({ boundsSizeY: 4, hasTextureCoordinates: true })
   })
 
+  test('exposes authored preview descriptors without signing source URLs', () => {
+    const previewed = { ...elements[0]!, preview: { kind: 'model' as const, path: 'previews/ground.glb' } }
+    const page = browseResourcePackElements(packs, [previewed, ...elements.slice(1)], 'world-kit', { limit: 64 })
+
+    expect(page.items[0]).toEqual(expect.objectContaining({
+      elementId: 'ground',
+      preview: { kind: 'model', path: 'previews/ground.glb' },
+    }))
+    expect(JSON.stringify(page)).not.toContain('sourceUrl')
+  })
+
   test('uses technical metadata as exact filters and excludes incomplete dependency roots', () => {
     const broken = {
       ...element('broken', 'world-kit', 'models/broken.glb', 'models', 'model', ['environment'], ['modular']),

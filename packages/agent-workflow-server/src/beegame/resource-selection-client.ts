@@ -99,6 +99,7 @@ function parseCatalogElement(value: unknown): ResourceCatalogElement {
     if (!Array.isArray(value[key])) throw new Error('Resource catalog element is invalid')
   }
   if (typeof value.dependencyCount !== 'number') throw new Error('Resource catalog element is invalid')
+  if (value.preview !== undefined && (!isRecord(value.preview) || !['image', 'model', 'audio', 'document'].includes(String(value.preview.kind)) || typeof value.preview.path !== 'string' || !value.preview.path.trim())) throw new Error('Resource catalog element preview is invalid')
   if (value.technicalFacts !== undefined && !isPrimitiveRecord(value.technicalFacts)) throw new Error('Resource catalog element technical facts are invalid')
   return value as unknown as ResourceCatalogElement
 }

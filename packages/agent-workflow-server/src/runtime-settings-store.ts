@@ -138,6 +138,10 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
   const sandboxEnabled = process.env.BEEGAME_NATIVE_SANDBOX_ENABLED !== '0'
   const sandboxFailIfUnavailable =
     process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE !== '0'
+  const localBindingOverride =
+    process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+  const sandboxAllowLocalBinding = localBindingOverride === '1'
+    || (localBindingOverride !== '0' && process.env.NODE_ENV !== 'production')
   const next = {
     ...previous,
     // BeeGame runs each Claude Code session in a dedicated process and
@@ -150,6 +154,14 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
       autoAllowBashIfSandboxed: sandboxEnabled,
       allowUnsandboxedCommands: false,
       failIfUnavailable: sandboxEnabled && sandboxFailIfUnavailable,
+      // Native localhost binding is required for project-owned preview and
+      // runtime acceptance. Local development enables it by default. A
+      // production deployment must opt in from an isolated worker/container;
+      // this setting does not grant outbound access.
+      network: {
+        ...(isObject(previousSandbox.network) ? previousSandbox.network : {}),
+        allowLocalBinding: sandboxEnabled && sandboxAllowLocalBinding,
+      },
     },
     ...(config.autoMemoryEnabled !== undefined
       ? { autoMemoryEnabled: config.autoMemoryEnabled }

@@ -102,11 +102,11 @@ export function createNativeResourceLibraryTool(options: {
       return [
         'You control Resource Library exploration and all authoring decisions.',
         'Start with browse_packs. It is a paginated catalog, not a requirement matcher: inspect its facets, compare art-direction compatibility and content coverage, and follow nextCursor when useful before selecting elements.',
-        'After choosing a Pack, use index_pack_elements first. It returns one bounded compact inventory page with exact element paths and authored metadata. Keep the paths you select, follow nextCursor only when you need more candidates, and never restart the same Pack from its first page merely to recover prior output. Exact paths can be passed directly to import_elements as element_path; BeeGame resolves them against the inspected Pack version without exposing the full inventory to your context.',
+        'After choosing a Pack, use index_pack_elements first. It returns one bounded compact inventory page with exact element paths, preview descriptors, embedded-content summaries, semantic relations, and objective technical facts. Keep the paths you select, follow nextCursor when core scene responsibilities are not covered, and never restart the same Pack from its first page merely to recover prior output. Exact paths can be passed directly to import_elements as element_path; BeeGame resolves them against the inspected Pack version without exposing the full inventory to your context.',
         'Use inspect_pack for Pack structure and browse_pack_elements only when you need full authored details for a narrowly filtered subset. Select zero, one, or many elements for your own composition; do not map the Pack inventory one-to-one onto project requirements.',
         'Establish the approved art-direction baseline before choosing material: dimension, rendering style, shape language, material treatment, palette, scale, theme and presentation density. You may combine any number of Packs in one scene or artistic domain when their authored metadata and inspected contents can form one coherent result. Record why every selected Pack fits that shared baseline and what responsibilities it covers. Do not assume exact style-label equality is required, and do not call a decorative Pack a complete scene solution when core responsibilities remain uncovered. BeeGame never mixes Packs automatically and never decides how you use their elements.',
         'Use canonical category, usage-tag, asset-kind, capability, dimension and format fields for structured discovery. BeeGame does not interpret free-form intent, filenames, or keywords for you.',
-        'A Pack may be a modular construction kit rather than a complete scene. Select independent ground, path, building, prop, character or effect elements and author the engine-native assembly yourself.',
+        'A Pack may be a modular construction kit rather than a complete scene. Select independent ground, path, building, prop, character or effect elements and author the engine-native assembly yourself. Treat component-of and variant relations plus embedded component profiles as authored facts. Preserve one shared source-to-target transform for a modular family; never center and normalize every piece independently.',
         'Treat technicalFacts as objective source-file evidence, not target-runtime settings. Preserve authored source-format conventions and let the project\'s target-native importer decide coordinate, UV, material and animation conventions. Use inspected bounds and contentProfile when authoring target-native compositions; when a required fact is absent, inspect that resource once with the target toolchain. Never guess one fixed scale, pivot or texture orientation for every resource. Runtime visibility and loading must be observed before a composition is considered integrated.',
         'Treat project_target.asset_format_capabilities as the capabilities proven at the current revision, not an immutable ban list. Before rejecting a high-coverage, style-compatible Pack for format reasons, evaluate whether the target toolchain has a native loader or a reliable project-owned conversion path. Extend the toolchain and update the capabilities only after that path is implemented and verified; never rename binary contents or claim an untested conversion.',
         'Treat one loadable FBX, GLB, sprite atlas or similar root plus its declared dependency closure as one element; embedded meshes, skins, skeletons, clips, materials and textures are not separate selections.',
@@ -285,18 +285,38 @@ function compactElementIndex(
   return {
     packId,
     items: page.items.map(element => ({
+      elementName: element.elementName,
       elementPath: element.elementPath,
+      ...(element.preview ? { preview: element.preview } : {}),
       category: element.category,
       dimension: element.dimension,
       ...(element.assetKind ? { assetKind: element.assetKind } : {}),
       ...(element.usageTags.length ? { usageTags: element.usageTags } : {}),
       ...(element.capabilities.length ? { capabilities: element.capabilities } : {}),
+      ...(element.contentProfile ? { contentProfile: compactContentProfile(element.contentProfile) } : {}),
+      ...(element.relations.length ? { relations: element.relations } : {}),
       ...(element.technicalFacts ? { technicalFacts: compactTechnicalFacts(element.technicalFacts) } : {}),
       ...(element.dependencyCount ? { dependencyCount: element.dependencyCount } : {}),
     })),
     total: page.total,
     ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
     facets: page.facets,
+  }
+}
+
+function compactContentProfile(
+  profile: NonNullable<Awaited<ReturnType<ProjectResourceApplication['indexPackElements']>>['items'][number]['contentProfile']>,
+) {
+  return {
+    packaging: profile.packaging,
+    inspection: profile.inspection,
+    components: profile.components.map(component => ({
+      id: component.id,
+      kind: component.kind,
+      ...(component.name ? { name: component.name } : {}),
+      ...(component.roles?.length ? { roles: component.roles } : {}),
+      ...(component.skeletonSignature ? { skeletonSignature: component.skeletonSignature } : {}),
+    })),
   }
 }
 

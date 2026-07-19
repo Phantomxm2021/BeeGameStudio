@@ -434,6 +434,8 @@ export type ResourceCatalogElement = {
   elementId: string
   elementName: string
   elementPath: string
+  /** Unsigned authored preview descriptor; catalog browsing never exposes source URLs. */
+  preview?: ResourcePreview
   category: ResourceCategory
   dimension: ResourceDimension
   usageTags: readonly ResourceUsageTag[]

@@ -181,6 +181,7 @@ function summarizeElement(pack: ResourcePack, element: ResourceElement): Resourc
     elementId: element.id,
     elementName: element.name,
     elementPath: element.path,
+    ...(element.preview ? { preview: element.preview } : {}),
     category: element.category,
     dimension: element.dimensionOverride ?? pack.dimension,
     usageTags: [...(element.usageTags ?? [])],

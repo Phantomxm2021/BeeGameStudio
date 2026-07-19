@@ -185,6 +185,9 @@ describe('runtime settings store', () => {
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: false,
           failIfUnavailable: true,
+          network: {
+            allowLocalBinding: true,
+          },
         },
         autoMemoryEnabled: false,
         autoDreamEnabled: true,
@@ -203,9 +206,11 @@ describe('runtime settings store', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-sandbox-'))
     const previousEnabled = process.env.BEEGAME_NATIVE_SANDBOX_ENABLED
     const previousRequired = process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE
+    const previousLocalBinding = process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
     try {
       process.env.BEEGAME_NATIVE_SANDBOX_ENABLED = '0'
       process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE = '0'
+      process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = '0'
       syncRuntimeSettingsToDedicatedRuntimeConfig({}, { dataDir })
 
       expect(JSON.parse(readFileSync(
@@ -217,6 +222,9 @@ describe('runtime settings store', () => {
           autoAllowBashIfSandboxed: false,
           allowUnsandboxedCommands: false,
           failIfUnavailable: false,
+          network: {
+            allowLocalBinding: false,
+          },
         },
       })
     } finally {
@@ -224,6 +232,70 @@ describe('runtime settings store', () => {
       else process.env.BEEGAME_NATIVE_SANDBOX_ENABLED = previousEnabled
       if (previousRequired === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE
       else process.env.BEEGAME_NATIVE_SANDBOX_FAIL_IF_UNAVAILABLE = previousRequired
+      if (previousLocalBinding === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+      else process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = previousLocalBinding
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('can explicitly disable native local binding without disabling the sandbox', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-local-binding-'))
+    const previous = process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+    try {
+      process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = '0'
+      syncRuntimeSettingsToDedicatedRuntimeConfig({}, { dataDir })
+
+      expect(JSON.parse(readFileSync(
+        join(dataDir, '.runtime', 'app', 'settings.json'),
+        'utf8',
+      )).sandbox.network).toEqual({ allowLocalBinding: false })
+    } finally {
+      if (previous === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+      else process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = previous
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('requires an explicit local-binding opt-in in production', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-production-binding-'))
+    const previousBinding = process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+    const previousNodeEnv = process.env.NODE_ENV
+    try {
+      delete process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+      process.env.NODE_ENV = 'production'
+      syncRuntimeSettingsToDedicatedRuntimeConfig({}, { dataDir })
+
+      expect(JSON.parse(readFileSync(
+        join(dataDir, '.runtime', 'app', 'settings.json'),
+        'utf8',
+      )).sandbox.network).toEqual({ allowLocalBinding: false })
+    } finally {
+      if (previousBinding === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+      else process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = previousBinding
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previousNodeEnv
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('allows native local binding in an explicitly isolated production worker', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-isolated-binding-'))
+    const previousBinding = process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+    const previousNodeEnv = process.env.NODE_ENV
+    try {
+      process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = '1'
+      process.env.NODE_ENV = 'production'
+      syncRuntimeSettingsToDedicatedRuntimeConfig({}, { dataDir })
+
+      expect(JSON.parse(readFileSync(
+        join(dataDir, '.runtime', 'app', 'settings.json'),
+        'utf8',
+      )).sandbox.network).toEqual({ allowLocalBinding: true })
+    } finally {
+      if (previousBinding === undefined) delete process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING
+      else process.env.BEEGAME_NATIVE_SANDBOX_ALLOW_LOCAL_BINDING = previousBinding
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previousNodeEnv
       rmSync(dataDir, { recursive: true, force: true })
     }
   })

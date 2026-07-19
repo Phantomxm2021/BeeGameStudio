@@ -81,8 +81,16 @@ describe('native Resource Library tool', () => {
     const makeElement = (id: string, path: string) => ({
       packId: 'pack-a', packVersion: '1.0.0', packName: 'Kit', packStyle: 'Stylized', packStyles: ['Stylized'],
       packGameTypes: ['Strategy'], elementId: id, elementName: path.split('/').pop()!, elementPath: path,
+      preview: { kind: 'model' as const, path },
       category: 'environment' as const, dimension: '3D' as const, usageTags: [], assetKind: 'model' as const,
-      capabilities: [], technicalFacts: { boundsSizeY: 6, hasTextureCoordinates: true, externalReferences: '["too-large-for-index"]' }, relations: [], dependencyCount: 0,
+      capabilities: [],
+      contentProfile: {
+        packaging: 'self-contained' as const,
+        components: [{ id: 'mesh-root', kind: 'mesh' as const, name: 'Root', roles: ['environment'] }],
+        inspection: { status: 'complete' as const, source: 'server' as const },
+      },
+      technicalFacts: { boundsSizeY: 6, hasTextureCoordinates: true, externalReferences: '["too-large-for-index"]' },
+      relations: id === 'rock-a' ? [{ kind: 'component-of' as const, targetElementId: 'tree-a', role: 'detail' }] : [], dependencyCount: 0,
     })
     const tool = createNativeResourceLibraryTool({
       buildTool: definition => definition,
@@ -103,12 +111,16 @@ describe('native Resource Library tool', () => {
       packId: 'pack-a',
       total: 2,
       items: [
-        expect.objectContaining({ elementPath: 'models/tree-a.glb' }),
-        expect.objectContaining({ elementPath: 'models/rock-a.glb' }),
+        expect.objectContaining({ elementName: 'tree-a.glb', elementPath: 'models/tree-a.glb', preview: { kind: 'model', path: 'models/tree-a.glb' } }),
+        expect.objectContaining({ elementName: 'rock-a.glb', elementPath: 'models/rock-a.glb', relations: [{ kind: 'component-of', targetElementId: 'tree-a', role: 'detail' }] }),
       ],
     }) })
     expect((result.data as { items: Array<{ technicalFacts?: Record<string, unknown> }> }).items[0]?.technicalFacts).toEqual({ boundsSizeY: 6, hasTextureCoordinates: true })
-    expect(JSON.stringify(result)).not.toContain('contentProfile')
+    expect((result.data as { items: Array<{ contentProfile?: unknown }> }).items[0]?.contentProfile).toEqual({
+      packaging: 'self-contained',
+      components: [{ id: 'mesh-root', kind: 'mesh', name: 'Root', roles: ['environment'] }],
+      inspection: { status: 'complete', source: 'server' },
+    })
     await expect(tool.prompt()).resolves.toContain('never restart the same Pack from its first page')
   })
 

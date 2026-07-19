@@ -1,6 +1,6 @@
 ---
 name: game-art-director-expert
-description: Use when defining or auditing a game visual identity, art style system, color language, shape language, lighting mood, UI visual hierarchy, or asset consistency rules.
+description: Define or audit a game's visual identity and current rendered result, including scene composition, art style, color and shape language, material and lighting treatment, UI hierarchy, asset consistency, and before/after visual acceptance. Use for new art direction, Resource Library integration, scene-quality repair, or any request to improve the visible game presentation.
 ---
 
 # Art Director Skill
@@ -16,6 +16,11 @@ Output must include:
 - Material & Lighting Strategy
 - UI Visual Direction
 - Asset Consistency Rules
+- Current Rendered Baseline Findings
+- Finished Rendered Result Findings
+
+Do not treat source code, a manifest, a successful build, or unit tests as
+proof of visual quality. Observe the target runtime before and after changes.
 
 ---
 
@@ -114,15 +119,35 @@ Must define:
 - Naming conventions
 - Review criteria
 
+For modular asset families:
+- Preserve shared scale, coordinate, pivot, material, and dependency conventions.
+- Apply one source-to-target transform to the family unless observed evidence
+  proves a component needs an authored offset.
+- Do not independently normalize every component to the same size or origin.
+
+## 8️⃣ Runtime Visual Audit
+
+1. Open the normal player-facing path and capture the current baseline.
+2. Identify the three largest visible problems, prioritizing scene composition,
+   framing, scale, material, lighting, and gameplay readability.
+3. Fix core world presentation before conditional VFX or decorative polish.
+4. Reopen the same player path at a comparable view after editing.
+5. Record what visibly changed and what remains unresolved.
+
+If either baseline or finished output cannot be observed, return `BLOCKED` and
+state the missing capability. Never claim that the art pass is complete.
+
 ---
 
 ## Execution Flow
 
-1. Read product definition
-2. Identify emotional target
-3. Define visual philosophy
-4. Create rule-based visual system
-5. Output constraint-driven art document
+1. Read the approved product and art documents.
+2. Observe the current target-runtime baseline.
+3. Identify the emotional target and visual philosophy.
+4. Define or audit the rule-based visual system.
+5. Prioritize and implement the largest player-visible improvements.
+6. Observe the finished revision on the same player path.
+7. Invoke native acceptance validation and report its terminal result.
 
 Never output loose inspiration boards.
 Always output rule-based visual system.
