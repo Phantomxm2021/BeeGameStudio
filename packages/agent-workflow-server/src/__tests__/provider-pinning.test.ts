@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resetAgentWorkflow } from '@bee-game-studio/agent-workflow'
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
-import { createAgentWorkflowApp, type AgentWorkflowAppOptions } from '../app'
+import {
+  createProcessIsolatedModelRuntimeHost,
+  type ModelRuntimeWorkerRequest,
+} from '../beegame/model-runtime-host'
 
 const providerUrl = 'https://provider.example.test/v1'
 const privateProviderUrl = 'https://127.0.0.1/v1'
@@ -12,201 +14,72 @@ const privateProviderUrl = 'https://127.0.0.1/v1'
 const approvedProviderTarget: ApprovedOutboundTarget = {
   url: new URL(providerUrl),
   addresses: ['93.184.216.34'],
-  lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
+  lookup: (_hostname, _options, callback) =>
+    callback(null, '93.184.216.34', 4),
 }
 
 describe('OpenAI-compatible provider pinning', () => {
   let testRoot = ''
-  let originalFetch: typeof fetch
 
   beforeEach(async () => {
-    resetAgentWorkflow()
     testRoot = await mkdtemp(join(tmpdir(), 'provider-pinning-'))
-    originalFetch = globalThis.fetch
   })
 
   afterEach(async () => {
-    globalThis.fetch = originalFetch
     await rm(testRoot, { recursive: true, force: true })
   })
 
-  test('uses pinned dispatchers for approved intake and attachment provider requests', async () => {
-    const app = createApp(async () => approvedProviderTarget)
-    await createDefaultModelConfig(app)
-    const calls: Array<{
-      url: string
-      init: RequestInit & { dispatcher?: unknown }
-    }> = []
-    globalThis.fetch = (async (url, init) => {
-      calls.push({
-        url: String(url),
-        init: init as RequestInit & { dispatcher?: unknown },
-      })
-      return Response.json(
-        calls.length === 1 ? intakeResponse() : attachmentResponse(),
-      )
-    }) as typeof fetch
-
-    const intake = await app.request('/api/beegame-intake/options', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ idea: 'A small puzzle game' }),
-    })
-    const attachment = await app.request(
-      '/api/beegame-intake/analyze-attachments',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          attachments: [
-            {
-              type: 'file',
-              mediaType: 'text/markdown',
-              filename: 'design.md',
-              data: Buffer.from('# Design').toString('base64'),
-            },
-          ],
-        }),
+  test('passes only approved, resolved provider targets to the isolated worker', async () => {
+    const workerInputs: ModelRuntimeWorkerRequest['input'][] = []
+    const host = createProcessIsolatedModelRuntimeHost({
+      outboundTargetPolicyOptions: {
+        allowedHosts: ['provider.example.test'],
       },
-    )
+      resolveOutboundTarget: async () => approvedProviderTarget,
+      runWorker: async input => {
+        workerInputs.push(input)
+        return 'model result'
+      },
+    })
 
-    expect(intake.status).toBe(200)
-    expect(attachment.status).toBe(200)
-    expect(calls).toHaveLength(2)
-    for (const call of calls) {
-      expect(call.url).toBe(`${providerUrl}/chat/completions`)
-      expect(call.init.redirect).toBe('error')
-      expect(call.init.dispatcher).toBeDefined()
-    }
+    const result = await host.generate({
+      cwd: testRoot,
+      runtimeEnv: { OPENAI_BASE_URL: providerUrl },
+      systemPrompt: 'Return a structured result.',
+      messages: [{ role: 'user', content: 'Generate the result.' }],
+      querySource: 'provider_pinning_test',
+    })
+
+    expect(result).toBe('model result')
+    expect(workerInputs).toHaveLength(1)
+    expect(workerInputs[0]?.approvedOutboundTargets).toEqual({
+      OPENAI_BASE_URL: {
+        url: providerUrl,
+        addresses: ['93.184.216.34'],
+      },
+    })
   })
 
-  test('rejects a private provider target at request time without fetching it', async () => {
-    let allowProvider = true
-    const app = createApp(async value =>
-      allowProvider ? approvedTarget(value) : null,
-    )
-    await createDefaultModelConfig(app, privateProviderUrl)
-    allowProvider = false
-    let fetchCalls = 0
-    globalThis.fetch = (async () => {
-      fetchCalls += 1
-      return Response.json({})
-    }) as unknown as typeof fetch
-
-    const response = await app.request('/api/beegame-intake/options', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ idea: 'A small puzzle game' }),
+  test('rejects an unapproved provider before starting the isolated worker', async () => {
+    let workerCalls = 0
+    const host = createProcessIsolatedModelRuntimeHost({
+      outboundTargetPolicyOptions: { allowedHosts: [] },
+      resolveOutboundTarget: async () => null,
+      runWorker: async () => {
+        workerCalls += 1
+        return 'unexpected result'
+      },
     })
 
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({
-      error: 'Outbound URL is not permitted',
-    })
-    expect(fetchCalls).toBe(0)
+    await expect(
+      host.generate({
+        cwd: testRoot,
+        runtimeEnv: { OPENAI_BASE_URL: privateProviderUrl },
+        systemPrompt: 'Return a structured result.',
+        messages: [{ role: 'user', content: 'Generate the result.' }],
+        querySource: 'provider_pinning_test',
+      }),
+    ).rejects.toThrow('Outbound URL is not permitted')
+    expect(workerCalls).toBe(0)
   })
-
-  function createApp(
-    outboundTargetResolver: NonNullable<
-      AgentWorkflowAppOptions['outboundTargetResolver']
-    >,
-  ) {
-    return createAgentWorkflowApp({
-      defaultWorkspacePath: testRoot,
-      currentUser: { id: 'provider-pinning-user', role: 'owner' },
-      skillsConfig: false,
-      outboundTargetPolicyOptions: { allowedHosts: ['provider.example.test'] },
-      outboundTargetResolver,
-    })
-  }
 })
-
-async function createDefaultModelConfig(
-  app: ReturnType<typeof createAgentWorkflowApp>,
-  baseUrl = providerUrl,
-): Promise<void> {
-  const response = await app.request('/api/model-configs', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      name: 'Pinned provider',
-      provider: 'openai-compatible',
-      baseUrl,
-      apiKey: 'test-api-key',
-      models: { balanced: 'test-model' },
-      isDefault: true,
-    }),
-  })
-  expect(response.status).toBe(200)
-}
-
-function approvedTarget(value: string): ApprovedOutboundTarget {
-  return { ...approvedProviderTarget, url: new URL(value) }
-}
-
-function intakeResponse(): Record<string, unknown> {
-  return {
-    choices: [
-      {
-        message: {
-          content: JSON.stringify({
-            maturity: 'concrete',
-            options: [
-              {
-                title: 'Puzzle Sprint',
-                gameplay: 'Solve spatial puzzles before the timer expires.',
-                recommendedPlatform: 'Web',
-                recommendedEngine: 'React',
-                recommendedDimension: '2D',
-                recommendedGenre: 'Puzzle',
-                recommendedStyle: 'Minimal',
-                recommendedInputs: ['Keyboard/mouse'],
-              },
-              {
-                title: 'Puzzle Relay',
-                gameplay: 'Complete linked spatial puzzles under a shared limit.',
-                recommendedPlatform: 'Web',
-                recommendedEngine: 'React',
-                recommendedDimension: '2D',
-                recommendedGenre: 'Puzzle',
-                recommendedStyle: 'Minimal',
-                recommendedInputs: ['Keyboard/mouse'],
-              },
-              {
-                title: 'Puzzle Endurance',
-                gameplay: 'Solve an escalating sequence of spatial puzzles.',
-                recommendedPlatform: 'Web',
-                recommendedEngine: 'React',
-                recommendedDimension: '2D',
-                recommendedGenre: 'Puzzle',
-                recommendedStyle: 'Minimal',
-                recommendedInputs: ['Keyboard/mouse'],
-              },
-            ],
-          }),
-        },
-      },
-    ],
-  }
-}
-
-function attachmentResponse(): Record<string, unknown> {
-  return {
-    choices: [
-      {
-        message: {
-          content: JSON.stringify({
-            analysisId: 'fixture-analysis',
-            sourceType: 'gdd',
-            completeness: 'complete',
-            confirmedFacts: [],
-            inferredDesign: [],
-            missingFields: [],
-            conflicts: [],
-            gddDraft: '# Design',
-          }),
-        },
-      },
-    ],
-  }
-}

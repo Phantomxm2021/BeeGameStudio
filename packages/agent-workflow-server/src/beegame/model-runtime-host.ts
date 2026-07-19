@@ -73,9 +73,11 @@ const RUNTIME_PROVIDER_URL_KEYS = [
 export function createProcessIsolatedModelRuntimeHost(options: {
   outboundTargetPolicyOptions: OutboundTargetPolicyOptions
   resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
+  runWorker?: (input: ModelRuntimeWorkerRequest['input']) => Promise<string>
 }): BeeGameModelRuntimeHost {
   const resolveOutboundTarget =
     options.resolveOutboundTarget ?? resolveApprovedOutboundTarget
+  const executeWorker = options.runWorker ?? runWorker
 
   return {
     async generate(input) {
@@ -94,7 +96,7 @@ export function createProcessIsolatedModelRuntimeHost(options: {
         throw new Error('The selected model config has no runtime endpoint')
       }
 
-      return runWorker({
+      return executeWorker({
         ...input,
         approvedOutboundTargets: Object.fromEntries(
           Object.entries(approvedOutboundTargets).map(([key, target]) => [
