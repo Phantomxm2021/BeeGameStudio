@@ -5,208 +5,79 @@ import userEvent from '@testing-library/user-event';
 import { AssetsPanel } from './AssetsPanel';
 
 describe('AssetsPanel', () => {
-    it('shows the Pack and element selected from the resource library', () => {
-        render(<AssetsPanel manifest={{ version: 1, slots: [{
-            id: 'tree', resource_binding: { pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://signed.example/oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['category:models'], },
-        }] }} isLoading={false} />);
+    it('shows Resource Library elements as independent project imports', () => {
+        render(<AssetsPanel manifest={{
+            version: 5,
+            requirements: [{ id: 'forest-scene', purpose: 'A navigable forest' }],
+            imports: [{
+                id: 'oak-variant-a',
+                source: { type: 'resource-library', pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb' },
+                status: 'available', root_path: 'assets/library/oak/oak.glb', local_files: ['assets/library/oak/oak.glb'],
+                selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['explicit-selection'],
+            }],
+        }} isLoading={false} />);
 
-        expect(screen.getByText('oak-glb')).toBeInTheDocument();
-        expect(screen.getByText(/Source Pack · fantasy-pack/)).toBeInTheDocument();
-        expect(screen.getByText(/v1\.2\.0/)).toBeInTheDocument();
+        expect(screen.getByText('oak-variant-a')).toBeInTheDocument();
+        expect(screen.getAllByText('assets/library/oak/oak.glb')).toHaveLength(2);
+        expect(screen.getByText(/fantasy-pack · v1\.2\.0/)).toBeInTheDocument();
+        expect(screen.getByText('A navigable forest')).toBeInTheDocument();
     });
 
     it('uses shadcn skeletons while asset data loads', () => {
-        render(
-            <AssetsPanel
-                manifest={null}
-                isLoading
-                onUpload={vi.fn()}
-            />
-        );
-
+        render(<AssetsPanel manifest={null} isLoading onUpload={vi.fn()} />);
         expect(screen.getByLabelText(/Loading asset/i)).toBeInTheDocument();
         expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     });
 
-    it('renders engine asset contracts with MCP integration metadata', () => {
-        render(
-            <AssetsPanel
-                manifest={{
-                    version: 1,
-                    project_target: {
-                        kind: 'game_engine',
-                        engine: 'unity',
-                        integration_mode: 'mcp',
-                        mcp_server: 'unity-mcp',
-                    },
-                    slots: [{
-                        id: 'player_model',
-                        name: 'Player model',
-                        type: 'model_3d',
-                        purpose: 'Playable character model',
-                        required: true,
-                        accepted_formats: ['glb', 'fbx'],
-                        recommended_specs: {
-                            poly_budget: '5k-15k tris',
-                            scale_unit: 'meters',
-                        },
-                        integration_provider: {
-                            type: 'mcp',
-                            server: 'unity-mcp',
-                            capabilities: ['import_asset'],
-                        },
-                    }],
-                }}
-                isLoading={false}
-                onUpload={vi.fn()}
-            />
-        );
+    it('shows authored compositions separately from imports and requirements', () => {
+        render(<AssetsPanel manifest={{
+            version: 5,
+            project_target: { platform: 'portable', runtime: 'custom-runtime' },
+            requirements: [{ id: 'play-space', name: 'Playable space' }],
+            imports: [{
+                id: 'tower-kit', source: { type: 'resource-library', pack_id: 'kit', pack_version: '2', element_id: 'tower' },
+                status: 'referenced', root_path: 'assets/library/tower.glb', local_files: ['assets/library/tower.glb'], selected_at: 'now', selection_reason: [],
+            }],
+            compositions: [{ id: 'level-one', kind: 'scene', status: 'assembled', members: [{ import_id: 'tower-kit', role: 'tower-variants' }], recipe: { path: 'game/level-one.scene' } }],
+        }} isLoading={false} />);
 
-        expect(screen.getByText('Player model')).toBeInTheDocument();
-        const scrollRegion = screen.getByText('Player model').closest('.overflow-y-auto');
-        expect(scrollRegion).toHaveClass('overflow-y-auto');
-        expect(scrollRegion).not.toHaveClass('scrollbar-hide');
-        expect(screen.getByText('Playable character model')).toBeInTheDocument();
-        expect(screen.getAllByText('MCP integration').length).toBeGreaterThan(0);
-        expect(screen.getByText('model_3d')).toBeInTheDocument();
-        expect(screen.getByText('glb · fbx')).toBeInTheDocument();
-        expect(screen.queryByText(/poly_budget: 5k-15k tris/)).not.toBeInTheDocument();
+        expect(screen.getByText('custom-runtime · File integration')).toBeInTheDocument();
+        expect(screen.getByText('scene · 1 members')).toBeInTheDocument();
+        expect(screen.getByText('game/level-one.scene')).toBeInTheDocument();
+        expect(screen.getByText('tower-kit')).toBeInTheDocument();
+        expect(screen.getByText('Playable space')).toBeInTheDocument();
     });
 
-    it('uploads a replacement file for a slot', async () => {
+    it('keeps engine integration metadata at project level instead of binding a requirement to a Pack element', () => {
+        render(<AssetsPanel manifest={{
+            version: 5,
+            project_target: { kind: 'game_engine', engine: 'custom-engine', integration_mode: 'mcp', mcp_server: 'engine-mcp' },
+            requirements: [{ id: 'player-character', name: 'Player character', purpose: 'Playable character', required: true }],
+        }} isLoading={false} />);
+
+        expect(screen.getByText('custom-engine · MCP integration')).toBeInTheDocument();
+        expect(screen.getByText('Player character')).toBeInTheDocument();
+        expect(screen.getByText('Playable character')).toBeInTheDocument();
+        expect(screen.queryByText(/pack-/i)).not.toBeInTheDocument();
+    });
+
+    it('allows a user-provided file for one requirement without presenting legacy library binding actions', async () => {
         const user = userEvent.setup();
         const onUpload = vi.fn(async () => undefined);
-
-        render(
-            <AssetsPanel
-                manifest={{
-                    version: 1,
-                    project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-                    slots: [{
-                        id: 'main_logo',
-                        name: 'Main logo',
-                        type: 'image_2d',
-                        purpose: 'Title logo',
-                        required: false,
-                    }],
-                }}
-                isLoading={false}
-                onUpload={onUpload}
-            />
-        );
+        render(<AssetsPanel manifest={{ version: 5, requirements: [{ id: 'main-logo', name: 'Main logo' }] }} isLoading={false} onUpload={onUpload} />);
 
         const file = new File(['logo'], 'logo.png', { type: 'image/png' });
         await user.upload(screen.getByLabelText('Upload replacement'), file);
-
-        expect(onUpload).toHaveBeenCalledWith('main_logo', file);
+        expect(onUpload).toHaveBeenCalledWith('main-logo', file);
+        expect(screen.queryByRole('button', { name: 'More asset actions' })).not.toBeInTheDocument();
     });
 
-    it('shows uploaded assets as pending integration and requests integration explicitly', async () => {
-        const user = userEvent.setup();
-        const onRequestIntegration = vi.fn();
-        const slot = {
-            id: 'bgm_game',
-            name: 'Game BGM',
-            type: 'audio',
-            purpose: 'Game background music',
-            status: 'uploaded' as const,
-            uploaded_files: ['client/public/audio/bgm/game.mp3'],
-        };
-
-        render(
-            <AssetsPanel
-                manifest={{
-                    version: 1,
-                    project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-                    slots: [slot],
-                }}
-                isLoading={false}
-                onUpload={vi.fn()}
-                onRequestIntegration={onRequestIntegration}
-            />
-        );
-
-        expect(screen.getByText('Pending integration')).toBeInTheDocument();
-        expect(screen.getByText('Uploaded, but not confirmed in runtime yet.')).toBeInTheDocument();
-
-        await user.click(screen.getByRole('button', { name: 'More asset actions' }));
-        await user.click(await screen.findByRole('menuitem', { name: 'Ask BeeGame to integrate' }));
-        expect(onRequestIntegration).toHaveBeenCalledWith(slot);
-    });
-
-    it('requests integration for all pending uploaded assets from the panel header', async () => {
-        const user = userEvent.setup();
-        const onRequestAllIntegration = vi.fn();
-        const slots = [
-            {
-                id: 'bgm_game',
-                name: 'Game BGM',
-                type: 'audio',
-                purpose: 'Game background music',
-                status: 'uploaded' as const,
-                uploaded_files: ['client/public/audio/bgm/game.mp3'],
-            },
-            {
-                id: 'logo',
-                name: 'Logo',
-                type: 'image_2d',
-                purpose: 'Title logo',
-                status: 'uploaded' as const,
-                uploaded_files: ['client/public/assets/logo.png'],
-            },
-        ];
-
-        render(
-            <AssetsPanel
-                manifest={{
-                    version: 1,
-                    project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-                    slots,
-                }}
-                isLoading={false}
-                onUpload={vi.fn()}
-                onRequestAllIntegration={onRequestAllIntegration}
-            />
-        );
-
-        await user.click(screen.getByRole('button', { name: 'Integrate all pending' }));
-        expect(onRequestAllIntegration).toHaveBeenCalledWith(slots);
-    });
-
-    it('asks the Agent to prepare missing capability tags before automatic selection', async () => {
+    it('asks Claude Code to explore, import and author without sending selected requirement ids', async () => {
         const user = userEvent.setup();
         const onRequestSelectionPreparation = vi.fn();
-        const slot = {
-            id: 'legacy_character',
-            purpose: 'Playable character',
-            resource_requirement: { category: 'models' },
-        };
+        render(<AssetsPanel manifest={{ version: 5, requirements: [{ id: 'level-art', purpose: 'Modular level art' }] }} isLoading={false} onRequestSelectionPreparation={onRequestSelectionPreparation} />);
 
-        render(
-            <AssetsPanel
-                manifest={{ version: 1, slots: [slot] }}
-                isLoading={false}
-                onRequestSelectionPreparation={onRequestSelectionPreparation}
-            />,
-        );
-
-        expect(screen.getByText('This slot needs capability tags or a project runtime format contract before BeeGame can safely select a library asset.')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Auto-select library assets' })).not.toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: 'Prepare matching' }));
-        expect(onRequestSelectionPreparation).toHaveBeenCalledWith([slot]);
-    });
-
-    it('does not offer library recovery actions for a slot without a pinned library binding', () => {
-        render(
-            <AssetsPanel
-                manifest={{ version: 1, slots: [{ id: 'unbound_slot', status: 'missing' }] }}
-                isLoading={false}
-                onReintegrate={vi.fn()}
-                onUnbind={vi.fn()}
-            />,
-        );
-
-        expect(screen.queryByRole('button', { name: 'More asset actions' })).not.toBeInTheDocument();
-        expect(screen.getByText('The project asset file is missing. Upload a replacement, choose a library candidate, or ask BeeGame to integrate it again.')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Ask agent to explore resources' }));
+        expect(onRequestSelectionPreparation).toHaveBeenCalledWith();
     });
 });

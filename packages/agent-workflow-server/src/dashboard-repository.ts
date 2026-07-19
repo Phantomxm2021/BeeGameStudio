@@ -210,6 +210,7 @@ const RUNTIME_SETTING_FIELDS: Array<keyof RuntimeSettingsConfig> = [
   'webBrowserToolEnabled',
   'bashClassifierEnabled',
   'mcpSkillsEnabled',
+  'resourceLibraryEnabled',
 ]
 
 export class ProjectQuotaExceededError extends Error {

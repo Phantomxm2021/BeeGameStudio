@@ -17,6 +17,8 @@ import {
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
   initializeBeeGameNativeQueryMode,
+  NativeExtraToolPermissionBroker,
+  NativeSandboxNetworkPermissionBroker,
   parseNativeTerminalTaskNotification,
   resolveBeeGameSkillReadRoots,
   type MutableAppState,
@@ -62,6 +64,143 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
         input: { host: 'registry.example', port: 443 },
       }),
     ])
+  })
+
+  test('coalesces concurrent sandbox requests for one exact network target', async () => {
+    let resolveDecision: ((value: { behavior: 'allow'; scope: 'once' }) => void) | undefined
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeSandboxNetworkPermissionBroker(request => {
+      requests.push(request)
+      return new Promise(resolve => {
+        resolveDecision = resolve
+      })
+    })
+
+    const decisions = [
+      broker.request({ host: 'Registry.Example', port: 443 }),
+      broker.request({ host: 'registry.example', port: 443 }),
+      broker.request({ host: 'registry.example', port: 443 }),
+    ]
+    expect(requests).toHaveLength(1)
+    resolveDecision?.({ behavior: 'allow', scope: 'once' })
+
+    expect(await Promise.all(decisions)).toEqual([true, true, true])
+    expect(requests[0]).toEqual(expect.objectContaining({
+      toolName: 'SandboxNetworkAccess',
+      input: { host: 'registry.example', port: 443 },
+    }))
+  })
+
+  test('keeps an exact sandbox host grant only for the current worker session', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeSandboxNetworkPermissionBroker(async request => {
+      requests.push(request)
+      return { behavior: 'allow', scope: 'session' }
+    })
+
+    expect(await broker.request({ host: 'registry.example', port: 443 })).toBe(true)
+    expect(await broker.request({ host: 'REGISTRY.EXAMPLE', port: 443 })).toBe(true)
+    expect(await broker.request({ host: 'registry.example', port: 80 })).toBe(true)
+    expect(requests).toHaveLength(2)
+
+    const separateSession = new NativeSandboxNetworkPermissionBroker(async request => {
+      requests.push(request)
+      return { behavior: 'deny' }
+    })
+    expect(await separateSession.request({ host: 'registry.example', port: 443 })).toBe(false)
+    expect(requests).toHaveLength(3)
+  })
+
+  test('restores read-only ResourceLibrary permission through ExecuteExtraTool without prompting', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeExtraToolPermissionBroker(() => async request => {
+      requests.push(request)
+      return { behavior: 'allow' }
+    })
+    const toolInput = {
+      tool_name: 'ResourceLibrary',
+      params: { action: 'browse_pack_elements', pack_id: 'pack-a', filters: { asset_kinds: ['model'] } },
+    }
+
+    expect(await broker.authorize({
+      toolName: 'ExecuteExtraTool',
+      toolInput,
+      toolUseID: 'read-resource',
+    })).toEqual(expect.objectContaining({
+      behavior: 'allow',
+      updatedInput: toolInput,
+    }))
+    expect(requests).toEqual([])
+  })
+
+  test('rejects an invented ResourceLibrary action with the supported contract', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeExtraToolPermissionBroker(() => async request => {
+      requests.push(request)
+      return { behavior: 'allow' }
+    })
+
+    expect(await broker.authorize({
+      toolName: 'ExecuteExtraTool',
+      toolInput: {
+        tool_name: 'ResourceLibrary',
+        params: { action: 'match', slot_id: 'primary-character' },
+      },
+      toolUseID: 'invalid-resource-action',
+    })).toEqual(expect.objectContaining({
+      behavior: 'deny',
+      message: 'Unsupported ResourceLibrary action "match". Allowed actions: inspect_project, browse_packs, inspect_pack, index_pack_elements, browse_pack_elements, import_elements, refresh_import_metadata, verify_integration.',
+    }))
+    expect(requests).toEqual([])
+  })
+
+  test('keeps a ResourceLibrary mutation grant scoped to this worker session', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = new NativeExtraToolPermissionBroker(() => async request => {
+      requests.push(request)
+      return { behavior: 'allow', scope: 'session' }
+    })
+    const toolInput = {
+      tool_name: 'ResourceLibrary',
+      params: {
+        action: 'import_elements',
+        selections: [{ import_id: 'primary-character', pack_id: 'pack-a', element_id: 'character-a', destination_path: 'assets/library/character' }],
+      },
+    }
+
+    expect((await broker.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-1' }))?.behavior).toBe('allow')
+    expect((await broker.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-2' }))?.behavior).toBe('allow')
+    expect(requests).toEqual([
+      expect.objectContaining({
+        toolName: 'ResourceLibrary',
+        input: toolInput.params,
+      }),
+    ])
+
+    const separateSession = new NativeExtraToolPermissionBroker(() => async request => {
+      requests.push(request)
+      return { behavior: 'deny' }
+    })
+    expect((await separateSession.authorize({ toolName: 'ExecuteExtraTool', toolInput, toolUseID: 'write-3' }))?.behavior).toBe('deny')
+    expect(requests).toHaveLength(2)
+  })
+
+  test('never treats a session ResourceLibrary grant as approval for another deferred tool', async () => {
+    const broker = new NativeExtraToolPermissionBroker(() => async () => ({
+      behavior: 'allow',
+      scope: 'session',
+    }))
+    await broker.authorize({
+      toolName: 'ExecuteExtraTool',
+      toolInput: { tool_name: 'ResourceLibrary', params: { action: 'import_elements', selections: [] } },
+      toolUseID: 'resource-write',
+    })
+
+    expect(await broker.authorize({
+      toolName: 'ExecuteExtraTool',
+      toolInput: { tool_name: 'UnrelatedDeferredTool', params: {} },
+      toolUseID: 'unrelated-write',
+    })).toBeUndefined()
   })
 
   test('fails at session startup when required native sandbox is unavailable', async () => {

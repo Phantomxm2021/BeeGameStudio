@@ -53,7 +53,7 @@ export function CreateResourcePackDialog({ open, onClose, onCreate }: Props) {
     }
     setSaving(true); setError('')
     try {
-      await onCreate({ name: name.trim(), style: styles.join(' / '), dimension, primaryCategory, gameTypes, categories: [], ...(description.trim() ? { description: description.trim() } : {}), ...(tags.trim() ? { tags: tags.split(',').map(value => value.trim()).filter(Boolean) } : {}), ...(version.trim() ? { version: version.trim() } : {}), ...(license.trim() ? { license: license.trim() } : {}), ...(author.trim() ? { author: author.trim() } : {}), ...(source.trim() ? { source: source.trim() } : {}), ...(licenseEvidence.trim() ? { licenseEvidence: licenseEvidence.trim() } : {}), ...(compatibleEngines.trim() ? { compatibleEngines: compatibleEngines.split(',').map(value => value.trim()).filter(Boolean) } : {}) })
+      await onCreate({ name: name.trim(), styles, dimension, primaryCategory, gameTypes, categories: [], ...(description.trim() ? { description: description.trim() } : {}), ...(tags.trim() ? { tags: tags.split(',').map(value => value.trim()).filter(Boolean) } : {}), ...(version.trim() ? { version: version.trim() } : {}), ...(license.trim() ? { license: license.trim() } : {}), ...(author.trim() ? { author: author.trim() } : {}), ...(source.trim() ? { source: source.trim() } : {}), ...(licenseEvidence.trim() ? { licenseEvidence: licenseEvidence.trim() } : {}), ...(compatibleEngines.trim() ? { compatibleEngines: compatibleEngines.split(',').map(value => value.trim()).filter(Boolean) } : {}) })
       onClose()
     } catch (cause) { setError(cause instanceof Error ? cause.message : '创建 Pack 失败') } finally { setSaving(false) }
   }

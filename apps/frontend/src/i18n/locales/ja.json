@@ -188,6 +188,7 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
+      "replanWithAgent": "Agent にリソース探索を依頼",
       "required": "Required",
       "optional": "Optional",
       "placeholder": "Placeholder",
@@ -200,7 +201,9 @@
       "target": "Target",
       "formats": "Formats",
       "specs": "Specs",
-      "noPurpose": "No purpose provided"
+      "noPurpose": "No purpose provided",
+      "compositions": "アセット構成",
+      "members": "メンバー"
     },
     "savedPrefixSeparator": ": "
   },
@@ -253,6 +256,12 @@
           "description": "MCP の skill:// リソースをスキル体系に含めます。",
           "note": "品質は MCP server のリソースに依存し、feature 起動が必要です。",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "リソースライブラリ",
+          "description": "プロジェクト Agent が管理対象のゲーム素材を検索・統合できるようにします。",
+          "note": "新しいセッションから有効です。サービス認証情報はサーバー内に保持されます。",
+          "scope": "newSession"
         }
       }
     },

@@ -87,4 +87,18 @@ describe('resource pack validation', () => {
       'Element usageTags must contain supported values',
     )
   })
+
+  test('validates typed asset metadata and semantic relations', () => {
+    const element = {
+      id: 'run', packId: 'pack-1', name: 'Run', path: 'animations/run.glb',
+      category: 'animation' as const, kind: 'animation', assetKind: 'animation-library' as const,
+      capabilities: ['contains-animations'] as const,
+      contentProfile: { packaging: 'self-contained' as const, components: [{ id: 'clip:0', kind: 'animation-clip' as const, roles: ['locomotion'], specs: { duration: 1.2 } }], inspection: { status: 'complete' as const, source: 'server' as const } },
+      relations: [{ kind: 'animation-for' as const, targetElementId: 'hero-rig', role: 'locomotion', required: true }],
+      specs: {}, dependencies: [], status: 'ready' as const,
+    }
+    expect(validateResourceElement(element)).toEqual(element)
+    expect(() => validateResourceElement({ ...element, capabilities: ['unknown'] })).toThrow('Element capabilities must contain supported values')
+    expect(() => validateResourceElement({ ...element, relations: [{ kind: 'animation-for', targetElementId: '' }] })).toThrow('Element relations must contain supported semantic relations')
+  })
 })

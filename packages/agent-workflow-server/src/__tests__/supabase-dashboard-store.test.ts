@@ -990,7 +990,7 @@ describe('SupabaseDashboardStore', () => {
     await expect(store.upsertAssetManifest(ownerId, 'project_1', {
       version: 1,
       project_target: { integration_mode: 'filesystem' },
-      slots: [{
+      requirements: [{
         id: 'main_logo',
         name: 'Main logo',
         type: 'image_2d',
@@ -999,7 +999,7 @@ describe('SupabaseDashboardStore', () => {
       }],
     })).resolves.toEqual(expect.objectContaining({
       version: 1,
-      slots: [
+      requirements: [
         expect.objectContaining({
           id: 'main_logo',
           uploaded_files: ['public/assets/logo.png'],
@@ -1008,7 +1008,7 @@ describe('SupabaseDashboardStore', () => {
     }))
     expect(await store.loadAssetManifest(ownerId, 'project_1')).toEqual(
       expect.objectContaining({
-        slots: [expect.objectContaining({ id: 'main_logo' })],
+        requirements: [expect.objectContaining({ id: 'main_logo' })],
       }),
     )
     await expect(store.upsertPreviewSnapshot(ownerId, 'project_1', {

@@ -12,7 +12,9 @@ import {
   type ApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
-import { RESOURCE_ASSET_MANIFEST_VOCABULARY } from '../../../beegame-resource-core/src/types'
+import {
+  RESOURCE_ASSET_MANIFEST_VOCABULARY,
+} from '@bee-game-studio/beegame-resource-core'
 import {
   refundCreditReservation,
   reserveCredits,
@@ -34,12 +36,14 @@ import {
   observeNativeDocumentReviewTaskNotification,
   observeNativeDocumentReviewToolEvent,
 } from './native-document-review-evidence'
+import { observeNativeResourceLibraryToolEvent } from './native-resource-library-evidence'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createProcessIsolatedQueryEngineRunner } from './query-engine-process-runner'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
+import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -225,6 +229,8 @@ export type BeeGameSessionRunnerStartInput = {
   cwd: string
   env: Record<string, string>
   approvedOutboundTargets: BeeGameApprovedOutboundTargets
+  /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
+  resourceSelectionConfig?: ResourceSelectionRuntimeConfig
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -282,6 +288,8 @@ export type DashboardPermissionRequest = {
 export type DashboardPermissionDecision = {
   behavior: 'allow' | 'deny'
   message?: string
+  /** Ephemeral approval scope. Never persisted across isolated sessions. */
+  scope?: 'once' | 'session'
 }
 
 type PendingPermission = DashboardPermissionRequest & {
@@ -417,6 +425,7 @@ export class BeeGameSessionManager {
     private readonly allowExternalRuntimeEnv = false,
     private readonly outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {},
     private readonly resolveOutboundTarget = resolveApprovedOutboundTarget,
+    private readonly resourceSelectionConfig?: ResourceSelectionRuntimeConfig,
   ) {
     this.dashboardDataRoot = resolveExistingPath(
       dashboardDataRoot?.trim() ||
@@ -745,7 +754,7 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
     return record.events
       .filter(event => event.id > after && !isThinkingProtocolControlEvent(event))
-      .map(event => ({ ...event }))
+      .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
   transcript(sessionId: string): Array<{
@@ -760,6 +769,7 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
     return record.events
       .filter(event => !isThinkingProtocolControlEvent(event))
+      .map(event => formatBeeGameEventForDisplay(event, record.language))
       .map(event => ({
         id: event.id,
         type: event.type,
@@ -988,6 +998,9 @@ export class BeeGameSessionManager {
         cwd: record.session.cwd,
         env,
         approvedOutboundTargets,
+        ...(this.resourceSelectionConfig && env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0'
+          ? { resourceSelectionConfig: this.resourceSelectionConfig }
+          : {}),
         ...(record.language ? { language: record.language } : {}),
         onNativeTaskNotification: notification =>
           this.observeNativeTaskNotification(record, notification),
@@ -1042,7 +1055,11 @@ export class BeeGameSessionManager {
       }
       if (record.session.status === 'running') {
         this.closeOpenThinkingLifecycle(record, 'turn_failed')
-        this.append(record, 'turn.failed', toErrorMessage(err))
+        this.append(
+          record,
+          'turn.failed',
+          formatRuntimeErrorForDisplay(toErrorMessage(err), record.language),
+        )
       }
     } finally {
       if (creditReservation && shouldRefundReservation) {
@@ -1223,6 +1240,7 @@ export class BeeGameSessionManager {
         toolUseID,
         toolName: pending.toolName,
         decision: decision.behavior,
+        scope: decision.scope ?? 'once',
         remember: Boolean(decision.remember),
       },
     )
@@ -1374,6 +1392,24 @@ export class BeeGameSessionManager {
       // Acceptance provenance is a deployment gate, never an Agent runtime
       // controller. Failure to persist it must not interrupt Claude Code.
       console.warn('[BeeGame] Failed to persist native delivery evidence', {
+        sessionId: record.session.id,
+        cause: error instanceof Error ? error.name : 'unknown_error',
+      })
+    }
+    try {
+      observeNativeResourceLibraryToolEvent({
+        dataRoot: this.dashboardDataRoot,
+        sessionId: record.session.id,
+        workspacePath: record.session.cwd,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        eventType: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })
+    } catch (error) {
+      // Resource provenance is passive evidence for library-first fallback.
+      // It must never alter or interrupt Claude Code's native tool lifecycle.
+      console.warn('[BeeGame] Failed to persist native resource query evidence', {
         sessionId: record.session.id,
         cause: error instanceof Error ? error.name : 'unknown_error',
       })
@@ -1867,19 +1903,23 @@ function isBeeGameSessionLanguage(
     value === 'pt'
 }
 
-function withAssetIntegrationContract(prompt: string): string {
+function withResourceAuthoringContract(prompt: string): string {
   return [
     prompt,
     '',
-    'Resource integration request:',
-    '- Treat assets/asset-manifest.json as the canonical project asset contract. Operate only on the requested slots and preserve their resource binding, Pack version, source element, and dependency provenance.',
+    'Resource exploration and authoring request:',
+    '- This is a fresh inspection-and-authoring pass requested by the user. Existing requirement, import and composition statuses, usage_evidence, runtime_event_ids, prior summaries, successful builds and successful unit tests are declarations or prior evidence; none proves that the current rendered result is complete or visually acceptable. Inspect the current implementation and observe the current revision in its target runtime before deciding that no work is needed.',
+    '- Treat assets/asset-manifest.json as the canonical project asset contract. Browse the Resource Library as a reusable catalog, not as one candidate list per requirement. Derive one explicit art-direction baseline from the approved documents, then choose any number of Packs and modular roots whose dimension, rendering style, shape language, material treatment, palette, scale and theme can form a coherent result. Cross-Pack composition is allowed; record the compatibility rationale and responsibility coverage for every selected Pack. Preserve each independent import, Pack version, source element, dependency closure and usage provenance.',
     '- Use the selected file\'s real format and extension. Never rename binary contents to satisfy an earlier requested extension, and choose project loaders from the actual integrated format.',
     '- Integrate the complete declared dependency closure, including external textures, materials, sidecar data, animation clips, fonts, or audio dependencies. Preserve relative references or update them explicitly; do not guess dependencies from one example filename.',
     '- Keep target paths project-relative and compatible with the project\'s own packaging and asset-base mechanism. Do not introduce root-relative runtime URLs when the target may be hosted below a base path.',
-    '- A copied file is not yet integrated. Update project code to reference the exact copied paths, run the affected build or package check, and verify observable runtime loading before marking a slot integrated.',
-    '- If the binding, format capability, dependency closure, or runtime evidence is incomplete, leave the slot pending or missing and report the exact blocker instead of silently substituting an incompatible asset.',
-    '- End with a non-empty user-facing result describing the slots changed, the files and dependencies integrated, the verification performed, and any unresolved blocker.',
-    `- Canonical manifest vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. delivery_mode is managed-file, embedded, or procedural. uploaded_files lists resource files only; target.path and integration_evidence.references have distinct meanings.`,
+    '- A copied file is inventory, not a finished game asset. Build the target-native scene, sprite/atlas setup, animation, UI, audio or effect assembly, reference the exact imported paths, and verify observable runtime loading before marking an import referenced or a composition integrated.',
+    '- If existing Resource Library imports predate the latest Pack analysis or have no technical_facts, call refresh_import_metadata once before composing. Use the refreshed objective facts with the target-native importer; never treat them as universal engine settings.',
+    '- If an import, format capability, dependency closure, composition recipe or runtime evidence is incomplete, report the exact blocker instead of silently substituting an incompatible asset.',
+    '- Treat current asset_format_capabilities as proven toolchain support, not an immutable ban list. Before discarding a high-coverage coherent Pack, evaluate a target-native loader or reliable project-owned conversion path; update capabilities only after that path works and is verified.',
+    '- Respect project_target.resource_library_usage as a user/admin preference, not a BeeGame selector state machine. Explore modular Pack coverage when useful, choose elements yourself, and author the target-native assembly. Never infer usage or compatibility from the target platform or filenames.',
+    '- Before claiming complete art integration, satisfy every required artistic responsibility with real import/composition/project references or leave it explicitly blocked. Optional decoration never substitutes for unresolved core scene, character, UI, VFX or audio responsibilities. verify_integration proves only structural consistency. Completion additionally requires current-revision target-runtime evidence that the selected assets load, are visible, are coherently framed and form the intended game-facing composition; invoke the native acceptance capability rather than substituting build success or self-authored event IDs. End with a non-empty user-facing result describing the imports added, the target-native compositions authored, the files and dependencies used, the runtime verification performed, and any unresolved blocker.',
+    `- Canonical manifest vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. requirements describe needs, imports record reusable source material, and compositions plus usage evidence record target-native authored results.`,
   ].join('\n')
 }
 
@@ -1900,10 +1940,10 @@ async function prepareBeeGamePromptInput(input: {
   const requestText = input.text || (images.length > 0 ? 'Analyze the attached image.' : '')
   const userInput = `${requestText}${documentContext}`
   // Ordinary Claude turns are forwarded without a hidden BeeGame task
-  // contract. Resource integration is a distinct, user-triggered platform
+  // contract. Resource authoring is a distinct, user-triggered platform
   // operation whose complete request is assembled here.
   const promptText = input.displayKind === 'asset_integration'
-    ? withAssetIntegrationContract(userInput)
+    ? withResourceAuthoringContract(userInput)
     : userInput
   if (images.length === 0) {
     return {
@@ -2008,6 +2048,188 @@ function getEmptyTurnMessage(language?: BeeGameSessionLanguage): string {
     default:
       return 'Claude Code ended the turn without a final response. The task may be incomplete; continue in the same session.'
   }
+}
+
+/**
+ * Converts a structured provider error envelope into readable chat text while
+ * leaving the original SDK message untouched in agent.raw.jsonl and payloads.
+ * Detection is based on the JSON shape, not provider names or message phrases.
+ */
+export function formatRuntimeErrorForDisplay(
+  value: string,
+  language?: BeeGameSessionLanguage,
+): string {
+  const text = value.trim()
+  const objectStart = text.indexOf('{')
+  const arrayStart = text.indexOf('[')
+  const jsonStart = objectStart < 0
+    ? arrayStart
+    : arrayStart < 0
+      ? objectStart
+      : Math.min(objectStart, arrayStart)
+  if (jsonStart < 0) return text
+  const prefix = text.slice(0, jsonStart).trim()
+  let envelope: unknown
+  try {
+    envelope = JSON.parse(text.slice(jsonStart)) as unknown
+  } catch {
+    return text
+  }
+  const status = findHttpStatus(prefix)
+  const hasErrorContainer = isObject(envelope) && Object.hasOwn(envelope, 'error')
+  if (!status && !hasErrorContainer) return text
+  const messages = collectStructuredMessages(envelope)
+  if (messages.length) return messages.join('\n\n')
+  const heading = prefix || runtimeErrorHeading(language)
+  const details = renderStructuredValue(envelope)
+  if (!details.length) return heading
+  const rendered = `${heading}\n\n${details.join('\n')}`
+  return rendered.length > 6_000 ? `${rendered.slice(0, 5_997)}...` : rendered
+}
+
+export function formatBeeGameEventForDisplay(
+  event: BeeGameEvent,
+  language?: BeeGameSessionLanguage,
+): BeeGameEvent {
+  if (
+    event.type !== 'assistant.message' &&
+    event.type !== 'turn.failed' &&
+    event.type !== 'session.failed'
+  ) return { ...event }
+  return {
+    ...event,
+    text: formatRuntimeErrorForDisplay(event.text, language),
+  }
+}
+
+function collectStructuredMessages(value: unknown, depth = 0): string[] {
+  if (depth > 6) return []
+  if (Array.isArray(value)) {
+    return deduplicateStrings(value.flatMap(item => collectStructuredMessages(item, depth + 1)))
+  }
+  if (!isObject(value)) return []
+  const direct = typeof value.message === 'string' && value.message.trim()
+    ? [value.message.trim()]
+    : []
+  const nested = Object.entries(value)
+    .filter(([key]) => key !== 'message')
+    .flatMap(([, item]) => collectStructuredMessages(item, depth + 1))
+  return deduplicateStrings([...direct, ...nested])
+}
+
+function deduplicateStrings(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
+function runtimeErrorHeading(language?: BeeGameSessionLanguage): string {
+  switch (language) {
+    case 'zh': return '请求失败'
+    case 'zh-TW': return '請求失敗'
+    case 'ja': return 'リクエストに失敗しました'
+    case 'ko': return '요청 실패'
+    case 'fr': return 'Échec de la requête'
+    case 'de': return 'Anfrage fehlgeschlagen'
+    case 'es': return 'Error en la solicitud'
+    case 'it': return 'Richiesta non riuscita'
+    case 'pt': return 'Falha na solicitação'
+    case 'en':
+    default: return 'Request failed'
+  }
+}
+
+function renderStructuredValue(
+  value: unknown,
+  depth = 0,
+  indent = '',
+): string[] {
+  if (depth > 4) return [`${indent}- …`]
+  if (Array.isArray(value)) {
+    if (!value.length) return [`${indent}- ${emptyValueLabel('array')}`]
+    const lines: string[] = []
+    for (const item of value.slice(0, 20)) {
+      if (isObject(item) || Array.isArray(item)) {
+        lines.push(`${indent}-`)
+        lines.push(...renderStructuredValue(item, depth + 1, `${indent}  `))
+      } else if (item !== null && item !== '') {
+        lines.push(`${indent}- ${escapeMarkdown(String(item))}`)
+      }
+    }
+    if (value.length > 20) lines.push(`${indent}- …`)
+    return lines
+  }
+  if (!isObject(value)) {
+    return value === null || value === ''
+      ? []
+      : [`${indent}- ${escapeMarkdown(String(value))}`]
+  }
+  const entries = Object.entries(value).filter(([, item]) => item !== null && item !== '')
+  if (!entries.length) return [`${indent}- ${emptyValueLabel('object')}`]
+  const lines: string[] = []
+  for (const [key, item] of entries.slice(0, 24)) {
+    const label = escapeMarkdown(humanizeJsonKey(key))
+    if (isObject(item) || Array.isArray(item)) {
+      lines.push(`${indent}- **${label}**`)
+      lines.push(...renderStructuredValue(item, depth + 1, `${indent}  `))
+    } else {
+      lines.push(`${indent}- **${label}:** ${escapeMarkdown(String(item))}`)
+    }
+  }
+  if (entries.length > 24) lines.push(`${indent}- …`)
+  return lines
+}
+
+function humanizeJsonKey(value: string): string {
+  let output = ''
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === '_' || character === '-') {
+      if (output && !output.endsWith(' ')) output += ' '
+      continue
+    }
+    const previous = value[index - 1]
+    if (
+      index > 0 &&
+      character >= 'A' && character <= 'Z' &&
+      previous >= 'a' && previous <= 'z' &&
+      !output.endsWith(' ')
+    ) output += ' '
+    output += character
+  }
+  const normalized = output.trim()
+  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : 'Value'
+}
+
+function escapeMarkdown(value: string): string {
+  const escapable = new Set(['\\', '*', '_', '[', ']', '<', '>', '`'])
+  let escaped = ''
+  for (const character of value) {
+    escaped += escapable.has(character) ? `\\${character}` : character
+  }
+  return escaped
+}
+
+function emptyValueLabel(kind: 'object' | 'array'): string {
+  return kind === 'array' ? 'Empty list' : 'No details'
+}
+
+function findHttpStatus(value: string): number | undefined {
+  let digits = ''
+  for (const character of value) {
+    if (character >= '0' && character <= '9') {
+      digits += character
+      continue
+    }
+    if (digits) {
+      const status = Number(digits)
+      if (status >= 400 && status <= 599) return status
+      digits = ''
+    }
+  }
+  if (digits) {
+    const status = Number(digits)
+    if (status >= 400 && status <= 599) return status
+  }
+  return undefined
 }
 
 function getSessionTranscriptPath(
@@ -3439,7 +3661,13 @@ function mapSDKMessageToEvent(record: SessionRecord, message: DashboardSDKMessag
     case 'user':
       return null
     case 'assistant':
-      return mapTextEvent('assistant.message', extractAssistantVisibleText(message))
+      return mapTextEvent(
+        'assistant.message',
+        formatRuntimeErrorForDisplay(
+          extractAssistantVisibleText(message),
+          record.language,
+        ),
+      )
     case 'partial_assistant':
       return mapTextEvent('assistant.partial', extractAssistantVisibleText(message))
     case 'stream_event':

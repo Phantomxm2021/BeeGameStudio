@@ -456,6 +456,12 @@
           "description": "Include MCP skill:// resources in the skill system.",
           "note": "Quality depends on the MCP server resources and requires feature startup.",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "Resource Library",
+          "description": "Let project agents search and integrate assets from the managed Resource Library.",
+          "note": "Applies to new sessions. Service credentials remain server-side and are never exposed to project commands.",
+          "scope": "newSession"
         }
       }
     },
@@ -652,6 +658,7 @@
     "permissionRiskGeneric": "May create files, install dependencies, or access the network",
     "permissionPendingPlaceholder": "Waiting for permission confirmation",
     "allowOnce": "Allow once",
+    "allowForSession": "Allow for session",
     "clarificationRequired": "Clarification Required",
     "approvalRequired": "Approval Required",
     "revisionRequired": "Revision Required",
@@ -878,15 +885,12 @@
       "uploading": "Uploading...",
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
-      "autoSelectLibrary": "Auto-select library assets",
-      "syncLibraryResources": "Sync library assets",
       "reintegrateLibrary": "Re-integrate library asset",
       "removeIntegration": "Remove integration",
       "removingIntegration": "Removing…",
       "removeIntegrationTitle": "Remove project integration?",
       "removeIntegrationDescription": "This removes the copied project files for this slot. The library binding remains, so you can re-integrate the pinned resource later.",
-      "autoSelecting": "Selecting…",
-      "prepareSelection": "Prepare matching",
+      "replanWithAgent": "Ask agent to explore resources",
       "unbind": "Disconnect",
       "unbinding": "Disconnecting…",
       "unbindTitle": "Disconnect library resource?",
@@ -918,7 +922,9 @@
       "integration": "Integration",
       "viewCandidates": "View candidates",
       "replaceResource": "Replace resource",
-      "noPurpose": "No purpose provided"
+      "noPurpose": "No purpose provided",
+      "compositions": "Asset compositions",
+      "members": "members"
     },
     "savedPrefixSeparator": ": "
   },

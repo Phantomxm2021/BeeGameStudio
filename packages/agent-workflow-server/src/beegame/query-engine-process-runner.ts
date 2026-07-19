@@ -208,6 +208,9 @@ function serializeStartInput(
     ...(input.language ? { language: input.language } : {}),
     cwd: input.cwd,
     env: input.env,
+    ...(input.resourceSelectionConfig
+      ? { resourceSelectionConfig: input.resourceSelectionConfig }
+      : {}),
     approvedOutboundTargets: Object.fromEntries(
       Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
         key,

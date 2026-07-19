@@ -9,7 +9,9 @@ describe('Supabase resource repository', () => {
       serviceRoleKey: 'secret-key',
       fetchImpl: async request => {
         requests.push(request instanceof Request ? request : new Request(request))
-        return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: ['adventure'], dimension: '2D', primary_category: '2d-art', categories: ['characters'], license: 'internal', version: '1.0.0', status: 'published', element_count: 2 }])
+        const url = request instanceof Request ? request.url : String(request)
+        if (url.includes('beegame_resource_elements')) return Response.json([{ pack_id: 'pack-1' }, { pack_id: 'pack-1' }])
+        return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: ['adventure'], dimension: '2D', primary_category: '2d-art', categories: ['characters'], license: 'internal', version: '1.0.0', status: 'published', element_count: 0 }])
       },
     })
     await expect(repository.listPacks()).resolves.toEqual([expect.objectContaining({ id: 'pack-1', primaryCategory: '2d-art', elementCount: 2 })])
@@ -18,13 +20,13 @@ describe('Supabase resource repository', () => {
   })
 
   test('normalizes relative signed Pack cover URLs before returning them to the browser', async () => {
-    let call = 0
     const repository = createSupabaseResourceRepository({
       baseUrl: 'https://supabase.test',
       serviceRoleKey: 'secret-key',
-      fetchImpl: async () => {
-        call += 1
-        if (call === 1) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'preview.png', element_count: 0 }])
+      fetchImpl: async request => {
+        const url = request instanceof Request ? request.url : String(request)
+        if (url.includes('beegame_resource_elements')) return Response.json([])
+        if (url.includes('beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'preview.png', element_count: 0 }])
         return Response.json({ signedURL: '/object/sign/beegame-resource-packs/pack-1/preview.png?token=short-lived' })
       },
     })
@@ -35,19 +37,20 @@ describe('Supabase resource repository', () => {
 
   test('does not duplicate a legacy Pack prefix when signing a cover path', async () => {
     const requests: string[] = []
-    let call = 0
     const repository = createSupabaseResourceRepository({
       baseUrl: 'https://supabase.test', serviceRoleKey: 'secret-key',
       fetchImpl: async request => {
-        call += 1
-        requests.push(String(request))
-        if (call === 1) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'pack-1/preview.png', element_count: 0 }])
+        const url = request instanceof Request ? request.url : String(request)
+        requests.push(url)
+        if (url.includes('beegame_resource_elements')) return Response.json([])
+        if (url.includes('beegame_resource_packs')) return Response.json([{ id: 'pack-1', name: 'Example Pack', style: 'Stylized', game_types: [], dimension: '2D', primary_category: '2d-art', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'pack-1/preview.png', element_count: 0 }])
         return Response.json({ signedURL: 'https://cdn.test/preview.png' })
       },
     })
     await repository.listPacks()
-    expect(requests[1]).toContain('/pack-1/preview.png')
-    expect(requests[1]).not.toContain('/pack-1/pack-1/')
+    const signedRequest = requests.find(url => url.includes('/storage/v1/object/sign/'))
+    expect(signedRequest).toContain('/pack-1/preview.png')
+    expect(signedRequest).not.toContain('/pack-1/pack-1/')
   })
 
   test('filters elements by Pack and category using encoded query values', async () => {
@@ -63,6 +66,30 @@ describe('Supabase resource repository', () => {
     await repository.listElements('pack/1', 'characters')
     expect(requests[0]?.url).toContain('pack_id=eq.pack%2F1')
     expect(requests[0]?.url).toContain('category=eq.characters')
+  })
+
+  test('derives exact structural dependencies for legacy Pack reads without mutating storage', async () => {
+    const repository = createSupabaseResourceRepository({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'secret-key',
+      fetchImpl: async request => {
+        const url = request instanceof Request ? request.url : String(request)
+        if (url.includes('beegame_resource_elements')) return Response.json([
+          { id: 'model', pack_id: 'pack-1', name: 'hero.fbx', path: 'Models/hero.fbx', category: 'models', kind: 'model', specs: { unresolvedTextureReferences: 'Textures\\base.png' }, dependencies: [], dependency_bindings: [], status: 'ready' },
+          { id: 'texture', pack_id: 'pack-1', name: 'base.png', path: 'Textures/base.png', category: 'textures', kind: 'image', specs: {}, dependencies: [], status: 'ready' },
+        ])
+        return Response.json([])
+      },
+    })
+
+    await expect(repository.listElements('pack-1')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'model',
+        specs: expect.objectContaining({ externalReferences: '["Textures/base.png"]', unresolvedTextureReferences: '' }),
+        dependencies: ['texture'],
+        dependencyBindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'texture', kind: 'image' }],
+      }),
+    ]))
   })
 
   test('persists a Pack primary category using the database column contract', async () => {

@@ -241,27 +241,11 @@ export interface BeeGameDeploymentPayload {
 
 export type BeeGameAssetIntegrationMode = 'filesystem' | 'mcp' | 'manual';
 
-export interface BeeGameAssetSlotPayload {
+export interface BeeGameAssetRequirementPayload {
   id: string;
   name?: string;
-  type?: string;
   purpose?: string;
   required?: boolean;
-  placeholder?: boolean;
-  accepted_formats?: string[];
-  recommended_specs?: Record<string, unknown>;
-  target?: {
-    path?: string;
-    integration_notes?: string;
-  };
-  integration_provider?: {
-    type?: BeeGameAssetIntegrationMode;
-    server?: string;
-    capabilities?: string[];
-  };
-  status?: 'placeholder' | 'uploaded' | 'integrated' | 'missing' | 'failed';
-  integration_error?: string;
-  uploaded_files?: string[];
   resource_requirement?: {
     category?: string;
     dimension?: '2D' | '3D' | 'agnostic';
@@ -269,93 +253,87 @@ export interface BeeGameAssetSlotPayload {
     styles?: string[];
     game_types?: string[];
     tags?: string[];
+    asset_kinds?: string[];
+    capabilities?: string[];
+    relations?: Array<{ kind: string; target_element_id?: string; role?: string }>;
     purpose?: string;
   };
-  resource_binding?: {
-    pack_id: string;
-    pack_version: string;
-    element_id: string;
-    element_path?: string;
-    source_url: string;
-    selected_at: string;
-    selection_reason: string[];
+  satisfied_by?: {
+    import_ids?: string[];
+    composition_ids?: string[];
+    project_references?: string[];
   };
-  updated_at?: string;
+  status?: 'planned' | 'satisfied' | 'blocked';
+}
+
+export interface BeeGameAssetImportPayload {
+  id: string;
+  source: {
+    type: 'resource-library' | 'user-upload' | 'project-authored';
+    pack_id?: string;
+    pack_version?: string;
+    element_id?: string;
+    element_path?: string;
+  };
+  status: 'available' | 'referenced' | 'failed';
+  root_path: string;
+  local_files: string[];
+  selected_at: string;
+  selection_reason: string[];
+  asset_kind?: string;
+  capabilities?: string[];
+  content_profile?: Record<string, unknown>;
+  dependencies?: Array<{
+    key: string;
+    parent_key: string;
+    element_id: string;
+    element_path: string;
+    reference_path: string;
+    local_path: string;
+    kind?: string;
+  }>;
+  usage_evidence?: { references?: string[]; runtime_event_ids?: string[] };
+  error?: string;
 }
 
 export interface BeeGameAssetManifestPayload {
   version: number;
   project_target?: {
+    platform?: string;
+    runtime?: string;
+    /** Legacy aliases remain readable for historical manifests. */
     kind?: string;
     engine?: string;
     integration_mode?: BeeGameAssetIntegrationMode;
     mcp_server?: string;
     asset_format_capabilities?: string[];
+    resource_library_usage?: 'optional' | 'preferred' | 'required';
   };
-  slots: BeeGameAssetSlotPayload[];
+  requirements: BeeGameAssetRequirementPayload[];
+  imports?: BeeGameAssetImportPayload[];
+  compositions?: Array<{
+    id: string;
+    kind: string;
+    required?: boolean;
+    assembly_mode?: 'direct' | 'composed';
+    members: Array<{ import_id?: string; requirement_id?: string; composition_id?: string; role: string; required?: boolean }>;
+    recipe?: { path?: string; notes?: string };
+    status?: 'planned' | 'assembled' | 'integrated' | 'failed';
+    integration_evidence?: { references?: string[]; runtime_event_ids?: string[] };
+  }>;
 }
 
 export interface BeeGameAssetUploadPayload {
   manifest: BeeGameAssetManifestPayload;
-  slot: BeeGameAssetSlotPayload;
+  requirement: BeeGameAssetRequirementPayload;
   path: string;
   message: string;
-}
-
-export interface BeeGameResourceBindingPayload {
-  manifest: BeeGameAssetManifestPayload;
-  slot: BeeGameAssetSlotPayload;
-  selection: { slotId: string; packId: string; packVersion: string; elementId: string; elementPath: string; score: number; reasons: string[] };
-  path?: string;
-}
-
-export interface BeeGameResourceCandidatePayload {
-  slotId: string;
-  packId: string;
-  packVersion: string;
-  elementId: string;
-  elementPath: string;
-  sourceUrl: string;
-  score: number;
-  reasons: string[];
 }
 
 export interface BeeGameResourcePackImpactPayload {
   packId: string;
   projectCount: number;
-  references: Array<{ projectId: string; projectName: string; slotId: string; packVersion: string; elementId: string; status?: string }>;
-}
-
-export interface BeeGameResourceIntegrationPayload {
-  manifest: BeeGameAssetManifestPayload;
-  slot: BeeGameAssetSlotPayload;
-  path?: string;
-}
-
-export interface BeeGameResourceIntegrationRemovalPayload {
-  manifest: BeeGameAssetManifestPayload;
-  slot: BeeGameAssetSlotPayload;
-  removed_paths: string[];
-}
-
-export interface BeeGameAutoResourceBindingPayload {
-  manifest: BeeGameAssetManifestPayload;
-  results: Array<{
-    slotId: string;
-    status: 'copied' | 'bound' | 'failed';
-    packId: string;
-    elementId: string;
-    path?: string;
-    error?: string;
-  }>;
-  unmatched_slot_ids: string[];
-  repaired_slot_ids?: string[];
-}
-
-export interface BeeGameResourceUnbindingPayload {
-  manifest: BeeGameAssetManifestPayload;
-  slot: BeeGameAssetSlotPayload;
-  retained_files: string[];
+  references: Array<{ projectId: string; projectName: string; importId: string; packVersion: string; elementId: string; status?: string }>;
 }
 
 export interface ExecutionEvidencePayload {
@@ -452,6 +430,7 @@ export interface PendingUserReviewItem extends ReviewBindingRef {
   gate_kind?: string;
   user_action_kind?: string;
   title?: string;
+  permission_tool_name?: string;
   artifact_id?: string;
   artifact_version?: number;
   artifact_type?: string;
@@ -728,6 +707,7 @@ export const normalizeApprovePlanPayload = (payload: ApprovePlanPayload): Approv
     workspace_path: normalized.workspace_path,
     workspace_ref: normalized.workspace_ref,
     feedback: normalized.feedback,
+    ...(payload.permission_scope ? { permission_scope: payload.permission_scope } : {}),
   };
 };
 
@@ -842,6 +822,7 @@ export interface ApprovePlanPayload extends ReviewBindingPayload {
   gate_id: string;
   action: 'approve' | 'revise' | 'reject';
   feedback?: string;
+  permission_scope?: 'once' | 'session';
 }
 
 export interface ApproveManifestPayload extends ReviewBindingPayload {
@@ -884,8 +865,7 @@ export const api = {
 
   requestProjectAction: (data: {
     project_id: string;
-    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair';
-    slotIds?: string[];
+    kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair';
   }) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.requestProjectAction(data);
     throw new Error('Structured project actions are only available for BeeGame projects');
@@ -1196,46 +1176,16 @@ export const api = {
     throw new Error('Project assets are only available for BeeGame projects');
   },
 
-  uploadProjectAsset: (projectId: string, slotId: string, file: File) => {
+  uploadProjectAsset: (projectId: string, requirementId: string, file: File) => {
     if (isBeeGameAdapterEnabled()) {
-      return beeGameAdapter.uploadProjectAsset(projectId, slotId, file);
+      return beeGameAdapter.uploadProjectAsset(projectId, requirementId, file);
     }
     throw new Error('Project asset upload is only available for BeeGame projects');
-  },
-
-  bindProjectResource: (projectId: string, slotId: string, requirement: Record<string, unknown>, selection?: { packId: string; elementId: string }) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.bindProjectResource(projectId, slotId, requirement, selection);
-    throw new Error('Project resource binding is only available for BeeGame projects');
-  },
-
-  getProjectResourceCandidates: (projectId: string, slotId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.getProjectResourceCandidates(projectId, slotId);
-    throw new Error('Project resource candidates are only available for BeeGame projects');
   },
 
   getResourcePackImpact: (packId: string) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.getResourcePackImpact(packId);
     throw new Error('Resource Pack impact analysis is only available for BeeGame projects');
-  },
-
-  integrateProjectResource: (projectId: string, slotId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.integrateProjectResource(projectId, slotId);
-    throw new Error('Project resource integration is only available for BeeGame projects');
-  },
-
-  autoBindProjectResources: (projectId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.autoBindProjectResources(projectId);
-    throw new Error('Automatic project resource binding is only available for BeeGame projects');
-  },
-
-  unbindProjectResource: (projectId: string, slotId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.unbindProjectResource(projectId, slotId);
-    throw new Error('Project resource unbinding is only available for BeeGame projects');
-  },
-
-  removeProjectResourceIntegration: (projectId: string, slotId: string) => {
-    if (isBeeGameAdapterEnabled()) return beeGameAdapter.removeProjectResourceIntegration(projectId, slotId);
-    throw new Error('Project resource integration removal is only available for BeeGame projects');
   },
 
   // ==================== Tasks & Review API ====================

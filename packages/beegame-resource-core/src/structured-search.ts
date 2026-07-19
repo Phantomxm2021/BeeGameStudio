@@ -8,15 +8,9 @@ export type ResourcePackStructuredQuery = {
   gameTypes?: readonly string[]
 }
 
-export type ResourcePackSemanticRanker = (
-  query: ResourcePackStructuredQuery,
-  candidates: readonly PackSummary[],
-) => Promise<ReadonlyMap<string, number>> | ReadonlyMap<string, number>
-
 /**
- * Structured metadata is the hard filter for library discovery. This does not
- * infer an asset's intent from a free-text prompt; a future semantic ranker may
- * reorder only the result set returned here.
+ * Structured metadata is an exact filter for administrative library browsing.
+ * It never infers intent, scores Packs, or chooses one for Claude Code.
  */
 export function searchResourcePacks(
   packs: readonly PackSummary[],
@@ -28,24 +22,6 @@ export function searchResourcePacks(
     matchesOne(query.statuses, pack.status) &&
     matchesAny(query.tags, pack.tags ?? []) &&
     matchesAny(query.gameTypes, pack.gameTypes),
-  )
-}
-
-/**
- * A semantic provider is deliberately post-filter only. It may improve the
- * order among compatible Packs, but cannot cause an incompatible Pack to be
- * returned. This keeps vector search an optional deployment capability.
- */
-export async function rankStructuredResourcePacks(
-  packs: readonly PackSummary[],
-  query: ResourcePackStructuredQuery,
-  semanticRanker?: ResourcePackSemanticRanker,
-): Promise<PackSummary[]> {
-  const candidates = searchResourcePacks(packs, query)
-  if (!semanticRanker || candidates.length < 2) return candidates
-  const scores = await semanticRanker(query, candidates)
-  return [...candidates].sort((left, right) =>
-    (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0) || left.name.localeCompare(right.name),
   )
 }
 

@@ -17,9 +17,9 @@ vi.mock('../../services/api', () => ({
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
         downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
-        getProjectAssets: vi.fn().mockResolvedValue({ version: 1, slots: [] }),
+        getProjectAssets: vi.fn().mockResolvedValue({ version: 5, requirements: [] }),
         uploadProjectAsset: vi.fn().mockResolvedValue({
-            manifest: { version: 1, slots: [] },
+            manifest: { version: 5, requirements: [] },
             message: 'Integrate uploaded asset',
         }),
         requestProjectAction: vi.fn().mockResolvedValue({ task_id: 'beegame_proj_1', state: 'running' }),
@@ -438,7 +438,7 @@ describe('RightSidebar tabs', () => {
         vi.mocked(api.getProjectAssets).mockResolvedValue({
             version: 1,
             project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-            slots: [{
+            requirements: [{
                 id: 'bgm_game',
                 name: 'Game BGM',
                 type: 'audio',
@@ -451,7 +451,7 @@ describe('RightSidebar tabs', () => {
             manifest: {
                 version: 1,
                 project_target: { kind: 'web', engine: 'react', integration_mode: 'filesystem' },
-                slots: [{
+                requirements: [{
                     id: 'bgm_game',
                     name: 'Game BGM',
                     type: 'audio',
@@ -489,19 +489,17 @@ describe('RightSidebar tabs', () => {
         expect(api.uploadProjectAsset).toHaveBeenCalledWith('proj_1', 'bgm_game', file);
         expect(onSendMessage).not.toHaveBeenCalled();
 
-        await user.click(screen.getByRole('button', { name: '更多资源操作' }));
-        await user.click(await screen.findByRole('menuitem', { name: '让 BeeGame 集成' }));
+        await user.click(screen.getByRole('button', { name: '让 Agent 探索资源' }));
         expect(api.requestProjectAction).toHaveBeenCalledWith({
             project_id: 'proj_1',
-            kind: 'asset_integrate',
-            slotIds: ['bgm_game'],
+            kind: 'asset_explore_library',
         });
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
     it('shows an empty asset contract message when a restored project has no manifest', async () => {
         const user = userEvent.setup();
-        vi.mocked(api.getProjectAssets).mockResolvedValue({ version: 1, slots: [] });
+        vi.mocked(api.getProjectAssets).mockResolvedValue({ version: 5, requirements: [] });
 
         render(
             <RightSidebar
@@ -532,7 +530,7 @@ describe('RightSidebar tabs', () => {
         vi.mocked(api.getProjectAssets)
             .mockResolvedValueOnce({
                 version: 1,
-                slots: [{
+                requirements: [{
                     id: 'bgm_game',
                     name: 'Game BGM',
                     type: 'audio',
@@ -583,7 +581,7 @@ describe('RightSidebar tabs', () => {
             if (projectId === 'proj_1') {
                 return {
                     version: 1,
-                    slots: [{
+                    requirements: [{
                         id: 'bgm_game',
                         name: 'Game BGM',
                         type: 'audio',
@@ -592,7 +590,7 @@ describe('RightSidebar tabs', () => {
                     }],
                 };
             }
-            return { version: 1, slots: [] };
+            return { version: 5, requirements: [] };
         });
         const baseProps = {
             lang: 'zh' as const,

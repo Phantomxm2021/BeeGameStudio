@@ -8,9 +8,14 @@ import {
   mapModelConfigToRuntime,
   type ModelProviderKind,
 } from '@bee-game-studio/agent-workflow'
-import { RESOURCE_ASSET_MANIFEST_VOCABULARY } from '../../beegame-resource-core/src/types'
+import {
+  RESOURCE_ASSET_MANIFEST_VOCABULARY,
+  RESOURCE_LIBRARY_USAGE,
+  type ResourceLibraryUsage,
+} from '../../beegame-resource-core/src/types'
 import {
   BeeGameSessionManager,
+  formatBeeGameEventForDisplay,
   deleteSessionArtifactsFromTranscript,
   getLatestRuntimeUsage,
   readSessionTranscriptFromDisk,
@@ -50,16 +55,15 @@ import {
 import { getNativeDeliveryState } from './beegame/native-delivery-state'
 import {
   readBeeGameAssetManifest,
-  bindBeeGameLibraryResourceInWorkspace,
-  unbindBeeGameLibraryResourceInWorkspace,
-  removeBeeGameAssetIntegrationInWorkspace,
-  integrateBeeGameLibraryResourceInWorkspace,
+  toCanonicalBeeGameAssetManifest,
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
-  type BeeGameAssetSlot,
-  effectiveAssetFormats,
 } from './beegame/asset-contracts'
-import type { ResourceSelectionRequirement, ResourceSelectionResult } from './beegame/resource-selection-client'
+import {
+  ProjectResourceApplication,
+  type ProjectResourceSelectionClient,
+} from './beegame/project-resource-application'
+import type { ResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import {
@@ -267,11 +271,8 @@ export type AgentWorkflowAppOptions = {
   skillsConfig?: BeeGameSkillsConfig | false
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
-  resourceSelectionClient?: {
-    select(requirements: ResourceSelectionRequirement[]): Promise<Array<ResourceSelectionResult>>
-    candidates?(requirement: ResourceSelectionRequirement): Promise<Array<ResourceSelectionResult>>
-    refreshBinding?(binding: { packId: string; packVersion: string; elementId: string; dependencies?: Array<{ key: string; elementId: string }> }): Promise<{ sourceUrl: string; dependencies: Array<{ key: string; sourceUrl: string }> }>
-  }
+  resourceSelectionClient?: ProjectResourceSelectionClient
+  resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
 }
 
 export const ROUTE_PERMISSION = {
@@ -292,6 +293,9 @@ export function createAgentWorkflowApp(
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
+  const projectResources = options.resourceSelectionClient
+    ? new ProjectResourceApplication(options.resourceSelectionClient)
+    : undefined
   app.onError((error, c) => {
     if (isPrivilegedConfigurationPath(c.req.path)) {
       return privilegedRouteError(c, c.req.path, error)
@@ -421,6 +425,7 @@ export function createAgentWorkflowApp(
     Boolean(supabaseRuntimeEnvClient),
     outboundTargetPolicyOptions,
     resolveOutboundTarget,
+    options.resourceSelectionRuntimeConfig,
   )
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
@@ -902,6 +907,9 @@ export function createAgentWorkflowApp(
       ...(typeof body.mcpSkillsEnabled === 'boolean'
         ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
         : {}),
+      ...(typeof body.resourceLibraryEnabled === 'boolean'
+        ? { resourceLibraryEnabled: body.resourceLibraryEnabled }
+        : {}),
     }
     const saved = await dashboardRepository.saveRuntimeSettings(
       c.req.raw,
@@ -1137,15 +1145,21 @@ export function createAgentWorkflowApp(
     const packId = c.req.param('packId')
     try {
       const projects = await dashboardRepository.listProjects(c.req.raw, user)
-      const impacts: Array<{ projectId: string; projectName: string; slotId: string; packVersion: string; elementId: string; status?: string }> = []
+      const impacts: Array<{ projectId: string; projectName: string; importId: string; packVersion: string; elementId: string; status?: string }> = []
       for (const project of projects) {
         if (!project.root_path) continue
         const workspacePath = await resolveSessionWorkspacePath(project.root_path, options.defaultWorkspacePath)
         const manifest = await readBeeGameAssetManifest(workspacePath)
-        for (const slot of manifest.slots) {
-          const binding = slot.resource_binding
-          if (!binding || binding.pack_id !== packId) continue
-          impacts.push({ projectId: project.id, projectName: project.name, slotId: slot.id, packVersion: binding.pack_version, elementId: binding.element_id, ...(slot.status ? { status: slot.status } : {}) })
+        for (const resourceImport of manifest.imports ?? []) {
+          if (resourceImport.source.type !== 'resource-library' || resourceImport.source.pack_id !== packId) continue
+          impacts.push({
+            projectId: project.id,
+            projectName: project.name,
+            importId: resourceImport.id,
+            packVersion: resourceImport.source.pack_version ?? '',
+            elementId: resourceImport.source.element_id ?? '',
+            status: resourceImport.status,
+          })
         }
       }
       return c.json({ packId, references: impacts, projectCount: new Set(impacts.map(item => item.projectId)).size })
@@ -1244,9 +1258,20 @@ export function createAgentWorkflowApp(
         beeGameSessions.metadata(session.id),
       )
 
+      const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
+        brief,
+        options.resourceSelectionRuntimeConfig &&
+            (await dashboardRepository.loadRuntimeSettings(c.req.raw, user)).resourceLibraryEnabled !== false
+          ? 'preferred'
+          : 'optional',
+      )
       void beeGameSessions.sendWithDisplay(
         session.id,
-        buildConfirmedBriefPrompt(brief, language),
+        buildConfirmedBriefPrompt(
+          brief,
+          language,
+          resourceLibraryUsage,
+        ),
         {
           displayText: idea,
           displayKind: 'confirmed_brief',
@@ -1386,6 +1411,7 @@ export function createAgentWorkflowApp(
     if (body.remember === true) {
       return c.json({ error: 'Persistent runtime permissions are not available through the Web API' }, 400)
     }
+    const permissionScope = body.scope === 'session' ? 'session' : 'once'
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, projectId, dashboardRepository)
       if (!project) return c.json({ error: 'Project not found' }, 404)
@@ -1405,6 +1431,7 @@ export function createAgentWorkflowApp(
           c.req.param('toolUseID'),
           {
             behavior: decision,
+            scope: permissionScope,
             remember: false,
             ...(typeof body.message === 'string'
               ? { message: body.message }
@@ -1426,6 +1453,7 @@ export function createAgentWorkflowApp(
             projectId,
             toolUseID: c.req.param('toolUseID'),
             decision,
+            scope: permissionScope,
             remember: body.remember === true,
           },
         }),
@@ -1702,16 +1730,16 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) {
-        if (!project.root_path) return c.json({ version: 1, slots: [] })
+        if (!project.root_path) return c.json({ version: 5, requirements: [], imports: [], compositions: [] })
         const workspacePath = await resolveSessionWorkspacePath(
           project.root_path,
           options.defaultWorkspacePath,
         )
-        return c.json(await readBeeGameAssetManifest(workspacePath))
+        return c.json(toCanonicalBeeGameAssetManifest(await readBeeGameAssetManifest(workspacePath)))
       }
       try {
         const manifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
-        return c.json(manifest)
+        return c.json(toCanonicalBeeGameAssetManifest(manifest))
       } catch (err) {
         if (sessionRef.live) {
           const manifest = await dashboardRepository.loadAssetManifest(
@@ -1719,7 +1747,7 @@ export function createAgentWorkflowApp(
             user,
             beeGameSessions.metadata(sessionRef.sessionId),
           )
-          if (manifest) return c.json(manifest)
+          if (manifest) return c.json(toCanonicalBeeGameAssetManifest(manifest))
         }
         return tracedRouteError(c, 'project.assets.list', err)
       }
@@ -1728,299 +1756,7 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.get('/api/projects/:id/assets/:slotId/resource-candidates', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!options.resourceSelectionClient?.candidates) return c.json({ error: 'Resource candidates are not configured' }, 503)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      const workspacePath = sessionRef?.workspacePath ?? (
-        project.root_path
-          ? await resolveSessionWorkspacePath(project.root_path, options.defaultWorkspacePath)
-          : undefined
-      )
-      if (!workspacePath) return c.json({ error: 'Project workspace not found' }, 404)
-      const slotId = c.req.param('slotId')
-      const manifest = await readBeeGameAssetManifest(workspacePath)
-      const slot = manifest.slots.find(item => item.id === slotId)
-      const requirement = slot ? resourceRequirementForSlot(slot, manifest.project_target) : undefined
-      if (!requirement) return c.json({ error: 'Asset slot has no library resource requirement' }, 422)
-      if (!requirement.acceptedFormats?.length) return c.json({ error: 'Target runtime asset format capabilities are required before resource selection' }, 422)
-      return c.json({ candidates: await options.resourceSelectionClient.candidates(requirement) })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Resource candidates failed' }, 400)
-    }
-  })
-
-  app.post('/api/projects/:id/assets/:slotId/resource-binding', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!options.resourceSelectionClient) return c.json({ error: 'Resource selection is not configured' }, 503)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      const body = await c.req.raw.json().catch(() => ({})) as { requirement?: ResourceSelectionRequirement; selection?: { packId?: string; elementId?: string } }
-      assertProjectWorkspaceMutationIdle(ensured.session)
-      const slotId = c.req.param('slotId')
-      const contractManifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
-      const contractSlot = contractManifest.slots.find(slot => slot.id === slotId)
-      const previousBinding = contractSlot?.resource_binding
-      // A browser may provide a requirement for an uncontracted slot, but it must
-      // never be able to relax or replace the requirement recorded in the project
-      // asset contract. Candidate IDs and signed URLs are always re-derived below.
-      const requirement = contractSlot ? resourceRequirementForSlot(contractSlot, contractManifest.project_target) : body.requirement
-      if (!requirement || requirement.slotId !== slotId) return c.json({ error: 'Asset requirement does not match slot' }, 400)
-      if (!requirement.acceptedFormats?.length) return c.json({ error: 'Target runtime asset format capabilities are required before resource selection' }, 422)
-      const selection = body.selection?.packId && body.selection.elementId
-        ? (await options.resourceSelectionClient.candidates?.(requirement) ?? []).find(candidate => candidate.packId === body.selection!.packId && candidate.elementId === body.selection!.elementId)
-        : (await options.resourceSelectionClient.select([requirement]))[0]
-      if (!selection) return c.json({ error: 'No compatible resource was found' }, 422)
-      const bound = await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId, {
-        pack_id: selection.packId,
-        pack_version: selection.packVersion,
-        element_id: selection.elementId,
-        ...toLibraryBinding(selection),
-      })
-      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, requirement.slotId)
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
-      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: result.path ? 'resource.copied' : 'resource.bound',
-        targetType: 'project_asset_slot',
-        targetId: `${c.req.param('id')}:${requirement.slotId}`,
-        metadata: {
-          packId: selection.packId,
-          packVersion: selection.packVersion,
-          elementId: selection.elementId,
-          reasons: selection.reasons,
-          previousBinding: previousBinding ? {
-            packId: previousBinding.pack_id,
-            packVersion: previousBinding.pack_version,
-            elementId: previousBinding.element_id,
-          } : null,
-          nextBinding: {
-            packId: selection.packId,
-            packVersion: selection.packVersion,
-            elementId: selection.elementId,
-          },
-          ...(result.path ? { path: result.path } : {}),
-        },
-      })
-      return c.json({ manifest: result.manifest, slot: result.slot, selection, ...(result.path ? { path: result.path } : {}), boundSlot: bound.slot })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Resource binding failed' }, 400)
-    }
-  })
-
-  app.post('/api/projects/:id/assets/:slotId/resource-integration', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      assertProjectWorkspaceMutationIdle(ensured.session)
-      const result = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
-      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: result.path ? 'resource.recopied' : 'resource.integration_requested',
-        targetType: 'project_asset_slot',
-        targetId: `${c.req.param('id')}:${c.req.param('slotId')}`,
-        metadata: {
-          packId: result.slot.resource_binding?.pack_id,
-          packVersion: result.slot.resource_binding?.pack_version,
-          elementId: result.slot.resource_binding?.element_id,
-          ...(result.path ? { path: result.path } : {}),
-        },
-      })
-      return c.json({ manifest: result.manifest, slot: result.slot, ...(result.path ? { path: result.path } : {}) })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Resource integration failed' }, 400)
-    }
-  })
-
-  app.delete('/api/projects/:id/assets/:slotId/resource-integration', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      assertProjectWorkspaceMutationIdle(ensured.session)
-      const result = await removeBeeGameAssetIntegrationInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
-      await appendAuditEventBestEffort('resource.integration_removed', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: 'resource.integration_removed',
-        targetType: 'project_asset_slot',
-        targetId: `${project.id}:${c.req.param('slotId')}`,
-        metadata: {
-          packId: result.slot.resource_binding?.pack_id,
-          packVersion: result.slot.resource_binding?.pack_version,
-          elementId: result.slot.resource_binding?.element_id,
-          removedPaths: result.removedPaths,
-        },
-      }))
-      return c.json({ manifest: result.manifest, slot: result.slot, removed_paths: result.removedPaths })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Resource integration removal failed' }, 400)
-    }
-  })
-
-  app.delete('/api/projects/:id/assets/:slotId/resource-binding', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      assertProjectWorkspaceMutationIdle(ensured.session)
-      const existing = (await readBeeGameAssetManifest(ensured.binding.workspacePath)).slots.find(slot => slot.id === c.req.param('slotId'))
-      if (!existing) return c.json({ error: 'Asset slot not found' }, 404)
-      const existingBinding = existing.resource_binding
-      if (!existingBinding) return c.json({ error: 'Asset slot has no library resource binding' }, 409)
-      const result = await unbindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, c.req.param('slotId'))
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), result.manifest)
-      await appendAuditEventBestEffort('resource.unbound', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
-        actorId: user.id,
-        action: 'resource.unbound',
-        targetType: 'project_asset_slot',
-        targetId: `${project.id}:${c.req.param('slotId')}`,
-        metadata: { packId: existingBinding.pack_id, packVersion: existingBinding.pack_version, elementId: existingBinding.element_id, retainedFiles: existing.uploaded_files ?? [] },
-      }))
-      return c.json({ manifest: result.manifest, slot: result.slot, retained_files: existing.uploaded_files ?? [] })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Resource unbinding failed' }, 400)
-    }
-  })
-
-  app.post('/api/projects/:id/assets/resource-bindings/auto', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'assets.upload')
-    if (forbidden) return c.json(forbidden, 403)
-    if (!options.resourceSelectionClient) return c.json({ error: 'Resource selection is not configured' }, 503)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user, project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot, assertPermittedModelConfigRuntime })
-      assertProjectWorkspaceMutationIdle(ensured.session)
-      const initialManifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
-      const repairableBindings = initialManifest.slots.filter(slot => slot.resource_binding && slot.status === 'missing')
-      const contractRequirements = initialManifest.slots
-        .filter(slot => !slot.resource_binding && slot.status !== 'integrated')
-        .map(slot => resourceRequirementForSlot(slot, initialManifest.project_target))
-        .filter((requirement): requirement is ResourceSelectionRequirement => Boolean(requirement))
-      // Automatic use must be fail-safe: a user can deliberately choose from
-      // broader candidates, but unattended binding requires explicit semantic
-      // capability tags in addition to media/format constraints.
-      const requirements = contractRequirements.filter(isSafeAutomaticResourceRequirement)
-      const skippedSlotIds = contractRequirements
-        .filter(requirement => !isSafeAutomaticResourceRequirement(requirement))
-        .map(requirement => requirement.slotId)
-      const selections = requirements.length
-        ? await options.resourceSelectionClient.select(requirements)
-        : []
-      const selectedSlotIds = new Set(selections.map(selection => selection.slotId))
-      const results: Array<{ slotId: string; status: 'copied' | 'bound' | 'failed'; packId: string; elementId: string; path?: string; error?: string }> = []
-
-      // Never silently replace a pinned resource when a project file was
-      // deleted. Restore the exact Pack/version/element already recorded in
-      // the binding, including its dependency closure.
-      for (const slot of repairableBindings) {
-        const binding = slot.resource_binding!
-        try {
-          const refreshBinding = options.resourceSelectionClient.refreshBinding
-          if (!refreshBinding) throw new Error('Pinned resource refresh is not configured')
-          const refreshed = await refreshBinding({
-            packId: binding.pack_id,
-            packVersion: binding.pack_version,
-            elementId: binding.element_id,
-            dependencies: binding.dependencies?.map(dependency => ({ key: dependency.key, elementId: dependency.element_id })),
-          })
-          const refreshedUrls = new Map(refreshed.dependencies.map(dependency => [dependency.key, dependency.sourceUrl]))
-          await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, slot.id, {
-            ...binding,
-            source_url: refreshed.sourceUrl,
-            ...(binding.dependencies?.length ? { dependencies: binding.dependencies.map(dependency => ({ ...dependency, source_url: refreshedUrls.get(dependency.key) || dependency.source_url })) } : {}),
-          })
-          const integration = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, slot.id)
-          results.push({ slotId: slot.id, status: integration.path ? 'copied' : 'bound', packId: binding.pack_id, elementId: binding.element_id, ...(integration.path ? { path: integration.path } : {}) })
-          await appendAuditEventBestEffort('resource.repaired', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
-            actorId: user.id,
-            action: integration.path ? 'resource.repaired' : 'resource.repair_requested',
-            targetType: 'project_asset_slot',
-            targetId: `${project.id}:${slot.id}`,
-            metadata: { packId: binding.pack_id, packVersion: binding.pack_version, elementId: binding.element_id, ...(integration.path ? { path: integration.path } : {}) },
-          }))
-        } catch (err) {
-          results.push({ slotId: slot.id, status: 'failed', packId: binding.pack_id, elementId: binding.element_id, error: toErrorMessage(err) })
-        }
-      }
-
-      for (const selection of selections) {
-        try {
-          await bindBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, selection.slotId, {
-            pack_id: selection.packId,
-            pack_version: selection.packVersion,
-            element_id: selection.elementId,
-            ...toLibraryBinding(selection),
-          })
-          const integration = await integrateBeeGameLibraryResourceInWorkspace(ensured.binding.workspacePath, selection.slotId)
-          const status = integration.path ? 'copied' : 'bound'
-          results.push({ slotId: selection.slotId, status, packId: selection.packId, elementId: selection.elementId, ...(integration.path ? { path: integration.path } : {}) })
-          await appendAuditEventBestEffort('resource.auto_bound', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
-            actorId: user.id,
-            action: integration.path ? 'resource.copied' : 'resource.bound',
-            targetType: 'project_asset_slot',
-            targetId: `${project.id}:${selection.slotId}`,
-            metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, reasons: selection.reasons, ...(integration.path ? { path: integration.path } : {}) },
-          }))
-        } catch (err) {
-          const message = toErrorMessage(err)
-          results.push({ slotId: selection.slotId, status: 'failed', packId: selection.packId, elementId: selection.elementId, error: message })
-          await appendAuditEventBestEffort('resource.integration_failed', () => dashboardRepository.appendAuditEvent(c.req.raw, user, {
-            actorId: user.id,
-            action: 'resource.integration_failed',
-            targetType: 'project_asset_slot',
-            targetId: `${project.id}:${selection.slotId}`,
-            metadata: { packId: selection.packId, packVersion: selection.packVersion, elementId: selection.elementId, error: message },
-          }))
-        }
-      }
-
-      const manifest = await readBeeGameAssetManifest(ensured.binding.workspacePath)
-      await dashboardRepository.upsertAssetManifest(c.req.raw, user, beeGameSessions.metadata(ensured.session.id), manifest)
-      return c.json({
-        manifest,
-        results,
-        repaired_slot_ids: repairableBindings.map(slot => slot.id),
-        unmatched_slot_ids: [...new Set([
-          ...skippedSlotIds,
-          ...requirements.map(requirement => requirement.slotId).filter(slotId => !selectedSlotIds.has(slotId)),
-        ])],
-      })
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Automatic resource binding failed' }, 400)
-    }
-  })
-
-  app.post('/api/projects/:id/assets/:slotId/upload', async c => {
+  app.post('/api/projects/:id/assets/:requirementId/upload', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
@@ -2043,7 +1779,7 @@ export function createAgentWorkflowApp(
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
-      const uploadedUrl = await dashboardRepository.uploadAssetFile(
+      await dashboardRepository.uploadAssetFile(
         c.req.raw,
         user,
         sessionMetadata,
@@ -2051,19 +1787,21 @@ export function createAgentWorkflowApp(
       )
       const result = await uploadBeeGameAsset(
         ensured.binding.workspacePath,
-        c.req.param('slotId'),
+        c.req.param('requirementId'),
         file,
-        uploadedUrl,
       )
       await dashboardRepository.upsertAssetManifest(c.req.raw, user, sessionMetadata, result.manifest)
-      return c.json(result)
+      return c.json({
+        ...result,
+        manifest: toCanonicalBeeGameAssetManifest(result.manifest),
+      })
     } catch (err) {
       const message = toErrorMessage(err)
       return tracedRouteError(
         c,
         'project.assets.upload',
         err,
-        message.startsWith('Asset slot not found') ? 404 : 400,
+        message.startsWith('Asset requirement not found') ? 404 : 400,
       )
     }
   })
@@ -2432,6 +2170,12 @@ export function createAgentWorkflowApp(
     beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      isResourceLibraryEnabled: async request =>
+        Boolean(options.resourceSelectionRuntimeConfig) &&
+        (await dashboardRepository.loadRuntimeSettings(
+          request,
+          getCurrentUser(request),
+        )).resourceLibraryEnabled !== false,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
       getAuthToken: getRequestAuthToken,
@@ -2519,6 +2263,12 @@ export function createAgentWorkflowApp(
     undefined,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      isResourceLibraryEnabled: async request =>
+        Boolean(options.resourceSelectionRuntimeConfig) &&
+        (await dashboardRepository.loadRuntimeSettings(
+          request,
+          getCurrentUser(request),
+        )).resourceLibraryEnabled !== false,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
       getAuthToken: getRequestAuthToken,
@@ -3554,7 +3304,7 @@ async function getBeeGameProjectRuntimeState(input: {
     beeGamePreviews: input.beeGamePreviews,
   })
   const assetManifest = await readBeeGameAssetManifest(sessionRef.workspacePath)
-    .catch(() => ({ version: 1 as const, slots: [], project_target: undefined }))
+    .catch(() => ({ version: 5 as const, requirements: [], imports: [], compositions: [], project_target: undefined }))
   const evidenceProvenance = input.dashboardDataRoot
     ? {
         dataRoot: input.dashboardDataRoot,
@@ -3681,7 +3431,7 @@ async function getProjectRuntimeEvents(input: {
       input.dashboardDataRoot,
     )
     return closeInterruptedTranscriptTurns(input.sessionId, transcript)
-      .map(event => ({
+      .map(event => formatBeeGameEventForDisplay({
         ...event,
         sessionId: event.sessionId || input.sessionId,
         createdAt: new Date(event.createdAt),
@@ -4162,6 +3912,7 @@ function registerBeeGameSessionRoutes(
   beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
+    isResourceLibraryEnabled: (request: Request) => Promise<boolean>
     assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getAuthToken: (request: Request) => string | undefined
@@ -4551,21 +4302,23 @@ function registerBeeGameSessionRoutes(
         c.req.query('workspacePath'),
       )
       const manifest = await readBeeGameAssetManifest(workspacePath)
-      if (!manifest.slots.length) {
+      if (!manifest.requirements.length) {
         const storedManifest = await options.loadAssetManifest(
           c.req.raw,
           beeGameSessions.metadata(c.req.param('id')),
         )
-        if (storedManifest?.slots.length) return c.json(storedManifest)
+        if (storedManifest?.requirements.length) {
+          return c.json(toCanonicalBeeGameAssetManifest(storedManifest))
+        }
       }
-      return c.json(manifest)
+      return c.json(toCanonicalBeeGameAssetManifest(manifest))
     } catch (err) {
       try {
         const manifest = await options.loadAssetManifest(
           c.req.raw,
           beeGameSessions.metadata(c.req.param('id')),
         )
-        if (manifest) return c.json(manifest)
+        if (manifest) return c.json(toCanonicalBeeGameAssetManifest(manifest))
       } catch (fallbackErr) {
         return tracedRouteError(c, 'beegame-session.assets.list', fallbackErr)
       }
@@ -4573,7 +4326,7 @@ function registerBeeGameSessionRoutes(
     }
   })
 
-  app.post(`${basePath}/:id/assets/:slotId/upload`, async c => {
+  app.post(`${basePath}/:id/assets/:requirementId/upload`, async c => {
     const forbidden = check(c.req.raw, ROUTE_PERMISSION.assetIntegration)
     if (forbidden) return c.json(forbidden, 403)
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
@@ -4595,19 +4348,21 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         c.req.query('workspacePath'),
       )
-      const uploadedUrl = await options.uploadAssetFile(
+      await options.uploadAssetFile(
         c.req.raw,
         sessionMetadata,
         file,
       )
       const result = await uploadBeeGameAsset(
         workspacePath,
-        c.req.param('slotId'),
+        c.req.param('requirementId'),
         file,
-        uploadedUrl,
       )
       await options.persistAssetManifest(c.req.raw, sessionMetadata, result.manifest)
-      return c.json(result)
+      return c.json({
+        ...result,
+        manifest: toCanonicalBeeGameAssetManifest(result.manifest),
+      })
     } catch (err) {
       return tracedRouteError(c, 'beegame-session.assets.upload', err)
     }
@@ -4947,7 +4702,17 @@ function registerBeeGameSessionRoutes(
       if (!idea) return c.json({ error: 'Missing field: brief.idea' }, 400)
       const languageValue = body.language ?? brief.language
       const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
-      const prompt = buildConfirmedBriefPrompt(brief, language)
+      const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
+        brief,
+        await options.isResourceLibraryEnabled(c.req.raw)
+          ? 'preferred'
+          : 'optional',
+      )
+      const prompt = buildConfirmedBriefPrompt(
+        brief,
+        language,
+        resourceLibraryUsage,
+      )
       return c.json(await beeGameSessions.sendWithDisplay(c.req.param('id'), prompt, {
         displayText: idea,
         displayKind: 'confirmed_brief',
@@ -4991,27 +4756,12 @@ function registerBeeGameSessionRoutes(
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const kind = typeof body.kind === 'string' ? body.kind : ''
       const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
-      if (kind === 'asset_integrate' || kind === 'asset_prepare_selection') {
-        const slotIds = Array.isArray(body.slotIds)
-          ? [...new Set(body.slotIds.filter((value): value is string => (
-              typeof value === 'string' && value.trim().length > 0
-            )).map(value => value.trim()))]
-          : []
-        if (slotIds.length === 0) return c.json({ error: 'Missing field: slotIds' }, 400)
+      if (kind === 'asset_explore_library') {
         const session = beeGameSessions.get(c.req.param('id'))
         if (!session) return c.json({ error: 'Session not found' }, 404)
-        const manifest = await readBeeGameAssetManifest(session.cwd)
-        const contractedSlotIds = new Set(manifest.slots.map(slot => slot.id))
-        if (slotIds.some(slotId => !contractedSlotIds.has(slotId))) {
-          return c.json({ error: 'Asset action contains slots outside the project contract' }, 422)
-        }
         return c.json(await beeGameSessions.sendWithDisplay(
           c.req.param('id'),
-          JSON.stringify({
-            kind: 'asset_integration_request',
-            action: kind === 'asset_integrate' ? 'integrate' : 'prepare_selection',
-            slot_ids: slotIds,
-          }, null, 2),
+          JSON.stringify({ kind: 'resource_library_exploration_request', action: 'explore_plan_import_and_author' }, null, 2),
           {
             displayText: getServerOwnedProjectActionLabel(kind, language),
             displayKind: 'asset_integration',
@@ -5113,12 +4863,14 @@ function registerBeeGameSessionRoutes(
     if (body.remember === true) {
       return c.json({ error: 'Persistent runtime permissions are not available through the Web API' }, 400)
     }
+    const permissionScope = body.scope === 'session' ? 'session' : 'once'
     try {
       const resolved = beeGameSessions.resolvePermission(
         c.req.param('id'),
         c.req.param('toolUseID'),
         {
           behavior: decision,
+          scope: permissionScope,
           remember: false,
           ...(typeof body.message === 'string'
             ? { message: body.message }
@@ -5134,6 +4886,7 @@ function registerBeeGameSessionRoutes(
           metadata: {
             toolUseID: c.req.param('toolUseID'),
             decision,
+            scope: permissionScope,
             remember: body.remember === true,
           },
         })
@@ -5256,7 +5009,11 @@ async function readTranscriptFromWorkspace(
     const recoveredEvents = closeInterruptedTranscriptTurns(
       sessionId,
       events,
-    )
+    ).map(event => formatBeeGameEventForDisplay({
+      ...event,
+      sessionId: event.sessionId || sessionId,
+      createdAt: new Date(event.createdAt),
+    }))
     return Response.json(
       after > 0
         ? recoveredEvents.filter(event => event.id > after)
@@ -5344,6 +5101,7 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
 function buildConfirmedBriefPrompt(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
+  defaultResourceLibraryUsage: ResourceLibraryUsage = 'optional',
 ): string {
   const documentLanguage = resolveConfirmedBriefLanguage(
     brief.documentLanguage,
@@ -5352,6 +5110,10 @@ function buildConfirmedBriefPrompt(
   const gameUserVisibleLanguage = resolveConfirmedBriefLanguage(
     brief.gameUserVisibleLanguage,
     language,
+  )
+  const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
+    brief,
+    defaultResourceLibraryUsage,
   )
   const confirmedBrief = JSON.stringify({
     kind: 'confirmed_build_brief',
@@ -5363,6 +5125,7 @@ function buildConfirmedBriefPrompt(
     confirmed_gdd: brief.confirmedGdd ?? null,
     build_source: brief.buildSource ?? null,
     analysis_id: brief.analysisId ?? null,
+    resource_library_usage: resourceLibraryUsage,
   }, null, 2)
   return [
     'Build and deliver the confirmed game project below.',
@@ -5377,19 +5140,42 @@ function buildConfirmedBriefPrompt(
     '',
     'Use the confirmed brief as the source of truth. Preserve every explicit user choice and constraint; do not silently replace the selected platform, engine, dimension, genre, visual style, input methods, or scope.',
     'Before implementation, create the complete project documentation baseline in this same native Claude Code task. Write each document to its canonical path as soon as it is ready so progress and review remain observable; do not hold completed documents for one final batch.',
-    'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and docs/ASSET_PLAN.md after the product and presentation requirements are defined; (4) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
+    'Follow the document dependency order: (1) docs/GDD.md; (2) docs/ART_DIRECTION.md, docs/UI_UX_SPEC.md, and docs/AUDIO_DESIGN.md, which may be developed concurrently after the GDD; (3) docs/TECHNICAL_DESIGN.md and an initial docs/ASSET_PLAN.md that defines asset responsibilities and compatibility requirements without inventing a sourcing outcome; (4) resolve Resource Library sourcing and finalize docs/ASSET_PLAN.md plus assets/asset-manifest.json; (5) docs/acceptance/gameplay-checklist.md after the preceding documents provide traceable requirements and player paths. If a concern is intentionally minimal or procedural, document that decision and its implementation implications instead of omitting the document.',
     'Together these documents must define the player-visible loop from launch through progress, win/fail and restart; controls for every selected input method; rules, state transitions and edge cases; presentation and asset requirements; a feasible technical design that traces each required behavior to an implementation responsibility; and observable acceptance paths with concrete actions and expected outcomes.',
     'Separate committed first-delivery scope from later ideas. Record necessary assumptions explicitly. Do not claim libraries, systems, assets or behavior that the implementation will not actually provide, and do not pad documents with generic template prose.',
     'Give every committed requirement and player path a stable identifier. For each player path, document the concrete player actions, observable expected results, and required evidence. In docs/acceptance/gameplay-checklist.md, represent every acceptance task as a Markdown checkbox whose text begins with that stable identifier, for example `- [ ] PP-001 Launch the game and observe the initial playable state.` Headings and ordinary bullet lists may explain a path but do not replace its checkbox task. Keep this platform-neutral and use the project documents own structure; do not introduce a BeeGame-specific game schema.',
-    `After docs/ASSET_PLAN.md is stable and before implementation, create assets/asset-manifest.json as the canonical machine-readable asset contract. Declare the selected project target and every committed asset responsibility, including procedural and embedded assets; use managed-file only for real file-backed slots. Derive target format capabilities from the selected project runtime, never from an available Pack. Use this canonical vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}. Keep the manifest consistent with ASSET_PLAN and the implementation; an intentionally empty external-resource set still requires an explicit valid manifest rather than silently bypassing the asset contract.`,
+    `After the initial docs/ASSET_PLAN.md defines asset responsibilities, create assets/asset-manifest.json as the canonical machine-readable asset contract. Set project_target.resource_library_usage to ${resourceLibraryUsage}. Derive project_target.asset_format_capabilities from the selected runtime's real native loaders and toolchain. Keep game requirements separate from the independent imported resource inventory. Represent scenes, characters, UI and other game-facing units as target-native compositions that may use any number of imports. Use this canonical vocabulary: ${JSON.stringify(RESOURCE_ASSET_MANIFEST_VOCABULARY)}.`,
+    resourceLibraryUsage === 'optional'
+      ? 'Choose each asset source deliberately. The Resource Library is available for exploration when it helps the approved art and gameplay plan.'
+      : `Before finalizing docs/ASSET_PLAN.md, use the native ResourceLibrary catalog actions to browse the published Pack collection and inspect available facets. Derive an explicit art-direction baseline from docs/ART_DIRECTION.md, then choose any number of Packs whose dimension, rendering style, shape language, material treatment, palette, scale and theme can produce one coherent game. Cross-Pack composition is allowed and often necessary for complete scene, character, UI, VFX and audio coverage; record each Pack's compatibility rationale and covered responsibilities. The confirmed Resource Library usage is ${resourceLibraryUsage}. Do not turn project requirements into one-element search slots. A requirement may use several Pack elements and one element may be shared by several target-native compositions. Do not let optional decoration hide unresolved core artistic responsibilities. If a strong candidate uses a currently unsupported format, evaluate a target-native loader or reliable project-owned conversion path before rejecting it, and report a precise blocker if neither is viable. If Pack metadata is insufficient, report that precise blocker instead of claiming the library is empty.`,
+    'Resource exploration before Reviewer READY is read-only. Do not integrate files or begin implementation until the approved resource and assembly plan is READY.',
     'Finish the complete document baseline before launching one native beegame-document-reviewer subagent in the foreground. Pass it the canonical confirmed brief, selected document language, and selected game user-visible language as explicit separate inputs, and do not modify project documents while that review is running. Every fresh Reviewer dispatch, including every re-review after findings are remediated, must repeat all three explicit inputs in that Agent call; never ask the Reviewer to recover or infer them from prior messages, project files, summaries, or transcripts. Do not begin implementation until the reviewer returns exactly one schema-valid terminal JSON object with verdict READY for that exact document revision. Empty output, malformed JSON, or JSON wrapped in prose is invalid and must never be inferred as READY. If it reports findings, finish all document corrections and obtain a new native Reviewer result dispatched after the changed document revision. Any result remains bound to the document revision observed at its original Agent dispatch, regardless of later messages or task retrieval, and cannot approve changed files. If the native runtime moves the reviewer to the background, allow its native terminal notification to resume this same session and use only the schema-valid terminal result linked to that Reviewer dispatch as approval evidence.',
     '',
-    'Plan and implement the project with applicable native Skills. Before independent validation, create and run the executable build, test, and runtime acceptance entrypoints appropriate to the selected project toolchain. Prefer the project\'s existing native test and runtime tools; add only the smallest missing harness needed for observable assertions, not a second application framework. These checks must contain observable assertions for the documented player paths wherever the project runtime can automate them; compilation or source inspection is not a substitute. Keep generated build and typecheck outputs outside authored source directories so stale generated siblings cannot shadow the current implementation. Do not postpone creation of a required test harness until the Validator discovers it is missing.',
+    'Plan and implement the project with applicable native Skills.',
+    ...(resourceLibraryUsage === 'optional'
+      ? []
+      : ['After Reviewer READY, explicitly choose the approved Resource elements and call ResourceLibrary import_elements once for the batch using stable import ids and target-appropriate project-relative destinations. Imports are independent inventory, not one-per-requirement bindings. BeeGame only copies and pins those elements plus their dependency closures; you remain responsible for project-native loading, placement, assembly and runtime verification.']),
+    'Before independent validation, create and run the executable build, test, and runtime acceptance entrypoints appropriate to the selected project toolchain. Prefer the project\'s existing native test and runtime tools; add only the smallest missing harness needed for observable assertions, not a second application framework. These checks must contain observable assertions for the documented player paths wherever the project runtime can automate them; compilation or source inspection is not a substitute. Keep generated build and typecheck outputs outside authored source directories so stale generated siblings cannot shadow the current implementation. Do not postpone creation of a required test harness until the Validator discovers it is missing.',
     'After all intended project edits and project-native checks are complete, invoke exactly one native beegame-acceptance-validator subagent in the foreground for that exact workspace revision, so any project-native runtime permission remains visible to the user. Do not change project files while that Validator is running and do not launch another Validator for the same unchanged revision. Use its terminal JSON directly. Empty output, malformed JSON, or JSON wrapped in prose is not a terminal result. If the native runtime moves it to the background, allow its native terminal notification to resume this same session and treat only the schema-valid terminal result linked to that Validator dispatch as acceptance evidence. Every result remains bound to the workspace revision observed at its original Agent dispatch, regardless of later messages or task retrieval. A blocked result remains blocked and must never be described as ready or delivered. If validation fails, repair only the observed findings first; after any project edit, launch a new foreground Validator for the changed revision and require one final complete player-path smoke pass. Never make a post-validation cleanup edit without validating that final revision. If no valid terminal Validator JSON is returned, continue the task until validation reaches a terminal passed, failed, or blocked result; do not claim completion from compilation, source inspection, or the implementation agent\'s own summary alone.',
     '',
     'Confirmed brief:',
     confirmedBrief,
   ].join('\n')
+}
+
+function resolveConfirmedResourceLibraryUsage(
+  brief: JsonObject,
+  fallback: ResourceLibraryUsage,
+): ResourceLibraryUsage {
+  const settings = isObject(brief.settings) ? brief.settings : undefined
+  const value = settings?.resourceLibraryUsage ??
+    settings?.resource_library_usage ??
+    brief.resourceLibraryUsage ??
+    brief.resource_library_usage
+  return typeof value === 'string' &&
+      (RESOURCE_LIBRARY_USAGE as readonly string[]).includes(value)
+    ? value as ResourceLibraryUsage
+    : fallback
 }
 
 function resolveConfirmedBriefLanguage(
@@ -5608,12 +5394,11 @@ function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string 
 }
 
 function getServerOwnedProjectActionLabel(
-  kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair',
+  kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair',
   language: BeeGameSessionLanguage,
 ): string {
   const isChinese = language === 'zh' || language === 'zh-TW'
-  if (kind === 'asset_integrate') return isChinese ? '集成所选资源' : 'Integrate selected assets'
-  if (kind === 'asset_prepare_selection') return isChinese ? '完善资源选择条件' : 'Prepare resource selection'
+  if (kind === 'asset_explore_library') return isChinese ? '让 Agent 探索资源库' : 'Ask agent to explore Resource Library'
   if (kind === 'deployment_failure_repair') return isChinese ? '修复发布验收' : 'Repair deployment acceptance'
   return isChinese ? '修复构建错误' : 'Repair build errors'
 }
@@ -5660,45 +5445,4 @@ function getHttpErrorMessage(body: JsonObject): string {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Request failed'
-}
-
-function resourceRequirementForSlot(slot: BeeGameAssetSlot, target?: BeeGameAssetManifest['project_target']): ResourceSelectionRequirement | undefined {
-  const requirement = slot.resource_requirement
-  if (!requirement) return undefined
-  return {
-    slotId: slot.id,
-    category: requirement.category,
-    dimension: requirement.dimension,
-    acceptedFormats: effectiveAssetFormats(slot, target),
-    styles: requirement.styles,
-    gameTypes: requirement.game_types,
-    tags: requirement.tags,
-    purpose: requirement.purpose,
-  }
-}
-
-function isSafeAutomaticResourceRequirement(
-  requirement: ResourceSelectionRequirement,
-): boolean {
-  return Boolean(requirement.tags?.length && requirement.acceptedFormats?.length)
-}
-
-function toLibraryBinding(selection: ResourceSelectionResult) {
-  return {
-    element_path: selection.elementPath,
-    source_url: selection.sourceUrl,
-    selected_at: new Date().toISOString(),
-    selection_reason: selection.reasons,
-    ...(selection.dependencies?.length ? {
-      dependencies: selection.dependencies.map(dependency => ({
-        key: dependency.key,
-        parent_key: dependency.parentKey,
-        element_id: dependency.elementId,
-        element_path: dependency.elementPath,
-        reference_path: dependency.referencePath,
-        source_url: dependency.sourceUrl,
-        ...(dependency.kind ? { kind: dependency.kind } : {}),
-      })),
-    } : {}),
-  }
 }

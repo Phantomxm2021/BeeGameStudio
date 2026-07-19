@@ -54,7 +54,10 @@ const server = Bun.serve({
       ? resolve(process.env.AGENT_WORKFLOW_WORKSPACE_PATH)
       : resolve(import.meta.dir, '..', 'Projects'),
     ...(resourceSelectionConfig
-      ? { resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig) }
+      ? {
+          resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig),
+          resourceSelectionRuntimeConfig: resourceSelectionConfig,
+        }
       : {}),
   }).fetch,
 })

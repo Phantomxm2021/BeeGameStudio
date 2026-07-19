@@ -1,18 +1,21 @@
-import type { PackSummary, ResourceCategory, ResourceElement, ResourceFolder, ResourcePack } from './types'
+import type { PackSummary, ResourceCatalogPack, ResourceCategory, ResourceElement, ResourceFolder, ResourcePack } from './types'
 import { validateResourceElement, validateResourcePack } from './validation'
 import { assertResourcePackPublishable } from './publish-readiness'
+import { resolveResourceElementMetadata } from './metadata-policy'
 
 export type { ResourceElement, ResourceFolder, ResourcePack } from './types'
 
 export type ResourceRepository = {
   listPacks(): Promise<PackSummary[]>
+  /** Pre-aggregated published Pack catalog; avoids loading every element. */
+  listCatalogPacks?(): Promise<ResourceCatalogPack[]>
   getPack(packId: string): Promise<PackSummary | undefined>
   listElements(packId: string, category?: ResourceCategory): Promise<ResourceElement[]>
   getElement(packId: string, elementId: string): Promise<ResourceElement | undefined>
   createPack(pack: ResourcePack, options?: { createdBy?: string }): Promise<ResourcePack>
   listFolders(packId: string): Promise<ResourceFolder[]>
-  createFolder(packId: string, input: { id: string; name: string; parentId?: string }): Promise<ResourceFolder>
-  updateFolder(packId: string, folderId: string, input: { name: string }): Promise<ResourceFolder | undefined>
+  createFolder(packId: string, input: { id: string; name: string; parentId?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder>
+  updateFolder(packId: string, folderId: string, input: { name?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder | undefined>
   deleteFolder(packId: string, folderId: string): Promise<boolean>
   updateElement(packId: string, elementId: string, input: Partial<ResourceElement>): Promise<ResourceElement | undefined>
   deleteElement(packId: string, elementId: string): Promise<boolean>
@@ -32,6 +35,10 @@ export function createInMemoryResourceRepository(input: {
     ...pack,
     elementCount: elements.filter(element => element.packId === pack.id).length,
   })
+  const resolvedElement = (element: ResourceElement): ResourceElement => {
+    const pack = packs.find(item => item.id === element.packId)
+    return pack ? resolveResourceElementMetadata(pack, folders.filter(folder => folder.packId === element.packId), element) : element
+  }
   return {
     async listPacks() {
       return packs.map(summary).sort((a, b) => a.name.localeCompare(b.name))
@@ -44,9 +51,11 @@ export function createInMemoryResourceRepository(input: {
       return elements
         .filter(element => element.packId === packId && (!category || element.category === category))
         .sort((a, b) => a.path.localeCompare(b.path))
+        .map(resolvedElement)
     },
     async getElement(packId, elementId) {
-      return elements.find(element => element.packId === packId && element.id === elementId)
+      const element = elements.find(element => element.packId === packId && element.id === elementId)
+      return element ? resolvedElement(element) : undefined
     },
     async createPack(pack) {
       const validated = validateResourcePack(pack)
@@ -61,14 +70,14 @@ export function createInMemoryResourceRepository(input: {
       if (input.parentId && !parent) throw new Error('Parent folder not found')
       const path = parent ? `${parent.path}/${input.name}` : input.name
       if (folders.some(folder => folder.packId === packId && folder.path === path)) throw new Error('Folder path already exists')
-      const folder = { id: input.id, packId, name: input.name, ...(input.parentId ? { parentId: input.parentId } : {}), path }
+      const folder = { id: input.id, packId, name: input.name, ...(input.parentId ? { parentId: input.parentId } : {}), path, ...(input.elementDefaults ? { elementDefaults: input.elementDefaults } : {}) }
       folders.push(folder)
       return folder
     },
     async updateFolder(packId, folderId, input) {
       const folder = folders.find(item => item.id === folderId && item.packId === packId)
       if (!folder) return undefined
-      const name = input.name.trim()
+      const name = input.name?.trim() ?? folder.name
       if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
       const oldPath = folder.path
       const parent = folder.parentId ? folders.find(item => item.id === folder.parentId && item.packId === packId) : undefined
@@ -78,6 +87,7 @@ export function createInMemoryResourceRepository(input: {
       for (const item of folders) if (item.packId === packId) item.path = replacePath(item.path)
       for (const item of elements) if (item.packId === packId) item.path = replacePath(item.path)
       folder.name = name
+      if (input.elementDefaults !== undefined) folder.elementDefaults = input.elementDefaults
       return folder
     },
     async deleteFolder(packId, folderId) {
@@ -110,7 +120,7 @@ export function createInMemoryResourceRepository(input: {
     async publishPack(packId) {
       const pack = packs.find(item => item.id === packId)
       if (!pack) throw new Error('Resource Pack not found')
-      assertResourcePackPublishable(pack, elements.filter((element) => element.packId === packId))
+      assertResourcePackPublishable(pack, elements.filter((element) => element.packId === packId).map(resolvedElement))
       const { deprecatedAt: _deprecatedAt, ...activePack } = pack
       const published = { ...activePack, status: 'published' as const }
       packs[packs.indexOf(pack)] = published

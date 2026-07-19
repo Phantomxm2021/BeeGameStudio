@@ -1,17 +1,28 @@
 import {
   RESOURCE_CATEGORIES,
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
   RESOURCE_DIMENSIONS,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
   RESOURCE_PACK_PRIMARY_CATEGORIES,
+  RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
+  browseResourcePackElements,
+  browseResourceCatalogPacks,
+  browseResourceCatalogPackSummaries,
+  ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
-  rankResourceCandidates,
+  resolveExactResourceElement,
   searchResourcePacks,
-  selectResourceCandidates,
   type ResourceDimension,
   type ResourceCategory,
+  type ResourceAssetKind,
+  type ResourceCapability,
+  type ResourceUsageTag,
   type ResourcePack,
+  type ResourceFolder,
   type ResourceRepository,
-  type ResourceSlotRequirement,
+  type ResourceCatalogRequest,
 } from '@bee-game-studio/beegame-resource-core'
 import {
   createConfiguredResourceUserResolver,
@@ -21,6 +32,7 @@ import {
   type ResourceUserContext,
   type ResourceUserResolver,
 } from './auth'
+import type { ResourceProcessingHandlers } from './resource-processing-jobs'
 
 export class ResourceLifecycleNotFoundError extends Error {}
 export class ResourceRequestValidationError extends Error {}
@@ -37,6 +49,7 @@ export type BeeGameResourceServerAppOptions = {
   uploadPackCover?: (packId: string, request: Request) => Promise<ResourcePack>
   addResourceElement?: (packId: string, request: Request) => Promise<unknown>
   updateResourceElement?: (packId: string, elementId: string, body: Record<string, unknown>) => Promise<unknown>
+  inspectResourceElement?: (packId: string, elementId: string) => Promise<unknown>
   deleteResourceElement?: (packId: string, elementId: string) => Promise<boolean>
   updateResourceFolder?: (packId: string, folderId: string, body: Record<string, unknown>) => Promise<unknown>
   deleteResourceFolder?: (packId: string, folderId: string) => Promise<boolean>
@@ -44,6 +57,7 @@ export type BeeGameResourceServerAppOptions = {
   inspectPackStorage?: (packId: string) => Promise<{ missingPaths: string[]; orphanPaths: string[] }>
   recordAuditEvent?: (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => Promise<void>
   serviceSelectionToken?: string
+  resourceProcessing?: Omit<ResourceProcessingHandlers, 'resumePending'>
 }
 
 export function createBeeGameResourceServerApp(
@@ -59,7 +73,14 @@ export function createBeeGameResourceServerApp(
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
-      const serviceSelectionRequest = request.method === 'POST' && (pathname === '/api/resource-selections' || pathname === '/api/resource-candidates' || pathname === '/api/resource-bindings/refresh') &&
+      const serviceSelectionRequest = (
+        (request.method === 'POST' && [
+          '/api/resource-catalog/packs',
+          '/api/resource-imports/resolve',
+        ].includes(pathname)) ||
+        (request.method === 'GET' && /^\/api\/resource-catalog\/packs\/[^/]+$/.test(pathname)) ||
+        (request.method === 'POST' && /^\/api\/resource-catalog\/packs\/[^/]+\/elements$/.test(pathname))
+      ) &&
         Boolean(options.serviceSelectionToken) && request.headers.get('x-beegame-resource-service-token') === options.serviceSelectionToken
       const user = options.currentUser ?? await resolveUser(request)
       if (!serviceSelectionRequest && !user) return corsResponse(jsonError(401, 'unauthorized', 'Authenticated resource user is required'), options.corsOrigin)
@@ -87,80 +108,75 @@ export function createBeeGameResourceServerApp(
           gameTypes: listQuery(url.searchParams, 'gameType'),
         }) }), options.corsOrigin)
       }
-      if (request.method === 'POST' && pathname === '/api/resource-selections') {
-        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource selection URLs are not configured'), options.corsOrigin)
-        let requirements: ResourceSlotRequirement[]
-        try {
-          requirements = parseSelectionRequirements(await request.json())
-        } catch (error) {
-          return corsResponse(jsonError(400, 'invalid_selection_request', error instanceof Error ? error.message : 'Invalid resource selection request'), options.corsOrigin)
+      if (request.method === 'POST' && pathname === '/api/resource-catalog/packs') {
+        const catalogRequest = parseCatalogRequest(await request.json())
+        if (options.repository.listCatalogPacks) {
+          return corsResponse(Response.json(browseResourceCatalogPackSummaries(await options.repository.listCatalogPacks(), catalogRequest)), options.corsOrigin)
         }
         const packs = await options.repository.listPacks()
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
-        const manifest = selectResourceCandidates(packs, elements, requirements)
-        const selections = await Promise.all(manifest.selections.map(async selection => ({
-          ...selection,
-          sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId),
-          dependencies: await Promise.all((selection.dependencies ?? []).map(async dependency => ({
-            ...dependency,
-            sourceUrl: await options.getElementResourceUrl!(selection.packId, dependency.elementId),
-          }))),
-        })))
-        return corsResponse(Response.json({ selections, unmatchedSlotIds: manifest.unmatchedSlotIds }), options.corsOrigin)
+        return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
       }
-      if (request.method === 'POST' && pathname === '/api/resource-bindings/refresh') {
-        if (!serviceSelectionRequest || !options.getElementResourceUrl) return corsResponse(jsonError(403, 'forbidden', 'Resource binding refresh is not allowed'), options.corsOrigin)
-        const body = await request.json().catch(() => undefined)
-        if (!body || typeof body !== 'object' || Array.isArray(body)) return corsResponse(jsonError(400, 'invalid_binding', 'A resource binding is required'), options.corsOrigin)
-        const binding = body as Record<string, unknown>
-        const packId = typeof binding.packId === 'string' ? binding.packId : ''
-        const packVersion = typeof binding.packVersion === 'string' ? binding.packVersion : ''
-        const elementId = typeof binding.elementId === 'string' ? binding.elementId : ''
-        if (!packId || !packVersion || !elementId) return corsResponse(jsonError(400, 'invalid_binding', 'Resource binding is incomplete'), options.corsOrigin)
+      const packElementsMatch = pathname.match(/^\/api\/resource-catalog\/packs\/([^/]+)\/elements$/)
+      if (request.method === 'POST' && packElementsMatch) {
+        const packId = decodeURIComponent(packElementsMatch[1])
+        const catalogRequest = parseCatalogRequest(await request.json())
         const pack = await options.repository.getPack(packId)
-        if (!pack || pack.version !== packVersion) return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'The pinned Pack version is no longer available'), options.corsOrigin)
-        const element = await options.repository.getElement(packId, elementId)
-        if (!element || element.status !== 'ready') return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'The pinned resource is no longer ready'), options.corsOrigin)
-        const dependencies = Array.isArray(binding.dependencies) ? binding.dependencies : []
-        const refreshedDependencies: Array<{ key: string; sourceUrl: string }> = []
-        for (const dependency of dependencies) {
-          if (!dependency || typeof dependency !== 'object' || Array.isArray(dependency)) return corsResponse(jsonError(400, 'invalid_binding', 'Resource dependency is invalid'), options.corsOrigin)
-          const value = dependency as Record<string, unknown>
-          const key = typeof value.key === 'string' ? value.key : ''
-          const dependencyElementId = typeof value.elementId === 'string' ? value.elementId : ''
-          if (!key || !dependencyElementId) return corsResponse(jsonError(400, 'invalid_binding', 'Resource dependency is incomplete'), options.corsOrigin)
-          const dependencyElement = await options.repository.getElement(packId, dependencyElementId)
-          if (!dependencyElement || dependencyElement.status !== 'ready') return corsResponse(jsonError(409, 'pinned_resource_unavailable', 'A pinned dependency is no longer ready'), options.corsOrigin)
-          refreshedDependencies.push({ key, sourceUrl: await options.getElementResourceUrl(packId, dependencyElementId) })
-        }
-        return corsResponse(Response.json({ sourceUrl: await options.getElementResourceUrl(packId, elementId), dependencies: refreshedDependencies }), options.corsOrigin)
+        if (!pack || pack.status !== 'published') return corsResponse(jsonError(404, 'not_found', 'Published Resource Pack not found'), options.corsOrigin)
+        const elements = await options.repository.listElements(packId)
+        return corsResponse(Response.json(browseResourcePackElements([pack], elements, packId, catalogRequest)), options.corsOrigin)
       }
-      if (request.method === 'POST' && pathname === '/api/resource-candidates') {
-        if (!serviceSelectionRequest || !options.getElementResourceUrl) return corsResponse(jsonError(403, 'forbidden', 'Resource candidate access is not allowed'), options.corsOrigin)
-        const requirements = parseSelectionRequirements(await request.json())
-        const requirement = requirements[0]
-        if (!requirement) return corsResponse(jsonError(400, 'invalid_selection_request', 'A resource requirement is required'), options.corsOrigin)
-        const packs = await options.repository.listPacks(); const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
-        const candidates = await Promise.all(
-          rankResourceCandidates(packs, elements, requirement).slice(0, 24).map(async selection => ({
-            ...selection,
-            sourceUrl: await options.getElementResourceUrl!(selection.packId, selection.elementId),
-            dependencies: await Promise.all(
-              (selection.dependencies ?? []).map(async dependency => ({
-                ...dependency,
-                sourceUrl: await options.getElementResourceUrl!(selection.packId, dependency.elementId),
-              })),
-            ),
-          })),
-        )
-        return corsResponse(Response.json({ candidates }), options.corsOrigin)
+      const explorePackMatch = pathname.match(/^\/api\/resource-catalog\/packs\/([^/]+)$/)
+      if (request.method === 'GET' && explorePackMatch) {
+        const packId = decodeURIComponent(explorePackMatch[1])
+        const pack = await options.repository.getPack(packId)
+        if (!pack || pack.status !== 'published') return corsResponse(jsonError(404, 'not_found', 'Published Resource Pack not found'), options.corsOrigin)
+        const [catalog, folders] = await Promise.all([
+          options.repository.listCatalogPacks?.(),
+          options.repository.listFolders(packId),
+        ])
+        const summary = catalog?.find(candidate => candidate.packId === packId)
+        return corsResponse(Response.json({ pack, folders, summary: summary ?? null }), options.corsOrigin)
+      }
+      if (request.method === 'POST' && pathname === '/api/resource-imports/resolve') {
+        if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Resource import URLs are not configured'), options.corsOrigin)
+        const requested = parseIntegrationSelections(await request.json())
+        const resolved = []
+        for (const selection of requested) {
+          const pack = await options.repository.getPack(selection.packId)
+          if (!pack || pack.status !== 'published') throw new ResourceRequestValidationError(`Published Resource Pack ${selection.packId} was not found`)
+          const elements = await options.repository.listElements(pack.id)
+          const element = elements.find(candidate => candidate.id === selection.elementId && candidate.status === 'ready')
+          if (!element) throw new ResourceRequestValidationError(`Ready Resource element ${selection.elementId} was not found in Pack ${pack.id}`)
+          if (pack.version !== selection.expectedPackVersion) {
+            throw new ResourceRequestValidationError(`Resource Pack ${pack.id} changed from version ${selection.expectedPackVersion} to ${pack.version}; inspect the Pack again before importing`)
+          }
+          const candidate = resolveExactResourceElement(pack, elements, element.id)
+          if (!candidate) throw new ResourceRequestValidationError(`Resource element ${selection.elementId} has an incomplete dependency closure`)
+          resolved.push({
+            ...candidate,
+            importId: selection.importId,
+            destinationPath: selection.destinationPath,
+            selectionReason: selection.selectionReason,
+            sourceUrl: await options.getElementResourceUrl(pack.id, element.id),
+            dependencies: await Promise.all((candidate.dependencies ?? []).map(async dependency => ({
+              ...dependency,
+              sourceUrl: await options.getElementResourceUrl!(pack.id, dependency.elementId),
+            }))),
+          })
+        }
+        return corsResponse(Response.json({ selections: resolved }), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-packs') {
         try {
           const body = await request.json() as Record<string, unknown>
+          assertElementDefaults(body.elementDefaults)
+          const styles = stringList(body.styles)
           const pack = await options.repository.createPack({
             id: typeof body.id === 'string' && body.id ? body.id : `pack-${crypto.randomUUID()}`,
-            name: String(body.name || ''), style: String(body.style || ''),
+            name: String(body.name || ''),
+            ...(styles?.length ? { styles } : {}),
+            style: styles?.join(' / ') || String(body.style || ''),
             gameTypes: Array.isArray(body.gameTypes) ? body.gameTypes.map(String) : [],
             dimension: body.dimension as ResourceDimension,
             primaryCategory: body.primaryCategory as ResourcePack['primaryCategory'],
@@ -173,6 +189,7 @@ export function createBeeGameResourceServerApp(
             ...(typeof body.author === 'string' && body.author.trim() ? { author: body.author.trim() } : {}),
             ...(typeof body.licenseEvidence === 'string' && body.licenseEvidence.trim() ? { licenseEvidence: body.licenseEvidence.trim() } : {}),
             ...(stringList(body.compatibleEngines) ? { compatibleEngines: stringList(body.compatibleEngines) } : {}),
+            ...(body.elementDefaults ? { elementDefaults: body.elementDefaults as ResourcePack['elementDefaults'] } : {}),
           }, { createdBy: user!.id })
           await audit({ actorId: user!.id, action: 'pack.created', packId: pack.id, metadata: { primaryCategory: pack.primaryCategory, dimension: pack.dimension } })
           return corsResponse(Response.json({ pack }, { status: 201 }), options.corsOrigin)
@@ -196,6 +213,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'PATCH' && patchMatch) {
         if (!options.updateResourcePack) return corsResponse(jsonError(503, 'not_configured', 'Resource updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
+        assertElementDefaults(body.elementDefaults)
         const pack = await options.updateResourcePack(decodeURIComponent(patchMatch[1]), body)
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'pack.updated', packId: decodeURIComponent(patchMatch[1]), metadata: { fields: Object.keys(body).sort() } })
@@ -214,6 +232,46 @@ export function createBeeGameResourceServerApp(
         await audit({ actorId: user!.id, action: 'pack.cover_uploaded', packId, metadata: { filename: file.name } })
         return corsResponse(Response.json({ pack }), options.corsOrigin)
       }
+      const processingCollectionMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/processing-jobs$/)
+      if (processingCollectionMatch && request.method === 'GET') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const job = await options.resourceProcessing.latest(decodeURIComponent(processingCollectionMatch[1]))
+        return corsResponse(Response.json({ job: job ?? null }), options.corsOrigin)
+      }
+      if (processingCollectionMatch && request.method === 'POST') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const body = await request.json().catch(() => ({})) as { elementIds?: unknown }
+        if (body.elementIds !== undefined && (!Array.isArray(body.elementIds) || body.elementIds.some(id => typeof id !== 'string' || !id.trim()))) {
+          return corsResponse(jsonError(400, 'invalid_processing_job', 'elementIds must contain valid resource element ids'), options.corsOrigin)
+        }
+        const packId = decodeURIComponent(processingCollectionMatch[1])
+        const job = await options.resourceProcessing.start(packId, body.elementIds as string[] | undefined)
+        await audit({ actorId: user!.id, action: 'processing.started', packId, metadata: { jobId: job.id, totalItems: job.totalItems } })
+        return corsResponse(Response.json({ job }, { status: 202 }), options.corsOrigin)
+      }
+      const processingJobMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/processing-jobs\/([^/]+)$/)
+      const processingRetryMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/processing-jobs\/([^/]+)\/retry$/)
+      if (processingRetryMatch && request.method === 'POST') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(processingRetryMatch[1]); const jobId = decodeURIComponent(processingRetryMatch[2])
+        const job = await options.resourceProcessing.retry(packId, jobId)
+        if (!job) return corsResponse(jsonError(404, 'not_found', 'Resource processing job not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'processing.retried', packId, metadata: { jobId } })
+        return corsResponse(Response.json({ job }), options.corsOrigin)
+      }
+      if (processingJobMatch && request.method === 'GET') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const job = await options.resourceProcessing.get(decodeURIComponent(processingJobMatch[1]), decodeURIComponent(processingJobMatch[2]))
+        return job ? corsResponse(Response.json({ job }), options.corsOrigin) : corsResponse(jsonError(404, 'not_found', 'Resource processing job not found'), options.corsOrigin)
+      }
+      if (processingJobMatch && request.method === 'DELETE') {
+        if (!options.resourceProcessing) return corsResponse(jsonError(503, 'not_configured', 'Resource processing is not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(processingJobMatch[1]); const jobId = decodeURIComponent(processingJobMatch[2])
+        const job = await options.resourceProcessing.cancel(packId, jobId)
+        if (!job) return corsResponse(jsonError(404, 'not_found', 'Resource processing job not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'processing.cancelled', packId, metadata: { jobId } })
+        return corsResponse(Response.json({ job }), options.corsOrigin)
+      }
       const folderMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/folders$/)
       if (folderMatch && request.method === 'GET') {
         try {
@@ -224,10 +282,11 @@ export function createBeeGameResourceServerApp(
       }
       if (folderMatch && request.method === 'POST') {
         try {
-          const body = await request.json() as { id?: string; name?: string; parentId?: string }
+          const body = await request.json() as { id?: string; name?: string; parentId?: string; elementDefaults?: unknown }
           if (!body.name) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
+          assertElementDefaults(body.elementDefaults)
           const packId = decodeURIComponent(folderMatch[1])
-          const folder = await options.repository.createFolder(packId, { id: body.id || `folder-${crypto.randomUUID()}`, name: body.name, parentId: body.parentId })
+          const folder = await options.repository.createFolder(packId, { id: body.id || `folder-${crypto.randomUUID()}`, name: body.name, parentId: body.parentId, ...(body.elementDefaults ? { elementDefaults: body.elementDefaults as ResourceFolder['elementDefaults'] } : {}) })
           await audit({ actorId: user!.id, action: 'folder.created', packId, metadata: { folderId: folder.id, path: folder.path } })
           return corsResponse(Response.json({ folder }, { status: 201 }), options.corsOrigin)
         } catch (error) {
@@ -238,9 +297,12 @@ export function createBeeGameResourceServerApp(
       if (folderPatchMatch && request.method === 'PATCH') {
         const packId = decodeURIComponent(folderPatchMatch[1])
         const folderId = decodeURIComponent(folderPatchMatch[2])
-        const body = await request.json() as { name?: unknown }
-        if (typeof body.name !== 'string' || !body.name.trim()) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
-        const folder = (options.updateResourceFolder ? await options.updateResourceFolder(packId, folderId, { name: body.name }) : await options.repository.updateFolder(packId, folderId, { name: body.name })) as { path?: string } | undefined
+        const body = await request.json() as { name?: unknown; elementDefaults?: unknown }
+        if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) return corsResponse(jsonError(400, 'invalid_folder', 'Folder name is required'), options.corsOrigin)
+        assertElementDefaults(body.elementDefaults)
+        if (body.name === undefined && body.elementDefaults === undefined) return corsResponse(jsonError(400, 'invalid_folder', 'Folder update is empty'), options.corsOrigin)
+        const update = { ...(typeof body.name === 'string' ? { name: body.name } : {}), ...(body.elementDefaults !== undefined ? { elementDefaults: body.elementDefaults as ResourceFolder['elementDefaults'] } : {}) }
+        const folder = (options.updateResourceFolder ? await options.updateResourceFolder(packId, folderId, update) : await options.repository.updateFolder(packId, folderId, update)) as { path?: string } | undefined
         if (!folder) return corsResponse(jsonError(404, 'not_found', 'Resource folder not found'), options.corsOrigin)
         await audit({ actorId: user!.id, action: 'folder.updated', packId, metadata: { folderId, path: folder.path } })
         return corsResponse(Response.json({ folder }), options.corsOrigin)
@@ -296,6 +358,16 @@ export function createBeeGameResourceServerApp(
       }
       const elementPatchMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)$/)
       const elementUrlMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)\/resource-url$/)
+      const elementInspectionMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/elements\/([^/]+)\/inspection$/)
+      if (request.method === 'POST' && elementInspectionMatch) {
+        if (!options.inspectResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element inspection is not configured'), options.corsOrigin)
+        const packId = decodeURIComponent(elementInspectionMatch[1])
+        const elementId = decodeURIComponent(elementInspectionMatch[2])
+        const element = await options.inspectResourceElement(packId, elementId)
+        if (!element) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        await audit({ actorId: user!.id, action: 'element.inspected', packId, elementId })
+        return corsResponse(Response.json({ element }), options.corsOrigin)
+      }
       if (request.method === 'GET' && elementUrlMatch) {
         if (!options.getElementResourceUrl) return corsResponse(jsonError(503, 'not_configured', 'Element resource URLs are not configured'), options.corsOrigin)
         const packId = decodeURIComponent(elementUrlMatch[1])
@@ -307,9 +379,15 @@ export function createBeeGameResourceServerApp(
         if (!options.updateResourceElement) return corsResponse(jsonError(503, 'not_configured', 'Resource element updates are not configured'), options.corsOrigin)
         const body = await request.json() as Record<string, unknown>
         assertElementUsageTags(body)
-        const element = await options.updateResourceElement(decodeURIComponent(elementPatchMatch[1]), decodeURIComponent(elementPatchMatch[2]), body)
-        if (!element) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
-        await audit({ actorId: user!.id, action: 'element.updated', packId: decodeURIComponent(elementPatchMatch[1]), elementId: decodeURIComponent(elementPatchMatch[2]), metadata: { fields: Object.keys(body).sort() } })
+        assertElementAssetMetadata(body)
+        const packId = decodeURIComponent(elementPatchMatch[1])
+        const elementId = decodeURIComponent(elementPatchMatch[2])
+        const saved = await options.updateResourceElement(packId, elementId, body)
+        if (!saved) return corsResponse(jsonError(404, 'not_found', 'Resource element not found'), options.corsOrigin)
+        // Return the repository view so inherited Pack/folder metadata is
+        // visible immediately after an explicit element update.
+        const element = await options.repository.getElement(packId, elementId) ?? saved
+        await audit({ actorId: user!.id, action: 'element.updated', packId, elementId, metadata: { fields: Object.keys(body).sort() } })
         return corsResponse(Response.json({ element }), options.corsOrigin)
       }
       if (request.method === 'DELETE' && elementPatchMatch) {
@@ -331,6 +409,9 @@ export function createBeeGameResourceServerApp(
         }
         if (error instanceof ResourceRequestValidationError) {
           return corsResponse(jsonError(400, 'invalid_request', error.message), options.corsOrigin)
+        }
+        if (error instanceof ResourceCatalogCursorError) {
+          return corsResponse(jsonError(400, 'invalid_cursor', error.message), options.corsOrigin)
         }
         return corsResponse(jsonError(500, 'resource_lifecycle_failed', error instanceof Error ? error.message : 'Resource lifecycle operation failed'), options.corsOrigin)
       }
@@ -380,52 +461,160 @@ function parseCategory(value: string | null): ResourceCategory | undefined {
     : undefined
 }
 
-function parseSelectionRequirements(value: unknown): ResourceSlotRequirement[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Selection request must be an object')
-  const requirements = (value as Record<string, unknown>).requirements
-  if (!Array.isArray(requirements) || requirements.length === 0) throw new ResourceRequestValidationError('At least one resource requirement is required')
-  return requirements.map((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} is invalid`)
-    const record = entry as Record<string, unknown>
-    const slotId = typeof record.slotId === 'string' ? record.slotId.trim() : ''
-    if (!slotId) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} slotId is required`)
-    const category = typeof record.category === 'string' && (RESOURCE_CATEGORIES as readonly string[]).includes(record.category)
-      ? record.category as ResourceCategory
-      : undefined
-    if (record.category !== undefined && !category) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} category is unsupported`)
-    const dimension = typeof record.dimension === 'string' && (RESOURCE_DIMENSIONS as readonly string[]).includes(record.dimension)
-      ? record.dimension as ResourceDimension
-      : undefined
-    if (record.dimension !== undefined && !dimension) throw new ResourceRequestValidationError(`Resource requirement ${index + 1} dimension is unsupported`)
-    const tags = validatedUsageTags(record.tags, `Resource requirement ${index + 1}`)
-    return {
-      slotId,
-      ...(category ? { category } : {}),
-      ...(dimension ? { dimension } : {}),
-      ...(stringList(record.acceptedFormats) ? { acceptedFormats: stringList(record.acceptedFormats)! } : {}),
-      ...(stringList(record.styles) ? { styles: stringList(record.styles)! } : {}),
-      ...(stringList(record.gameTypes) ? { gameTypes: stringList(record.gameTypes)! } : {}),
-      ...(tags ? { tags } : {}),
-      ...(typeof record.purpose === 'string' && record.purpose.trim() ? { purpose: record.purpose.trim() } : {}),
-    }
+function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResourceRequestValidationError('Resource catalog request must be an object')
+  }
+  const record = value as Record<string, unknown>
+  const filtersValue = record.filters
+  if (filtersValue !== undefined && (!filtersValue || typeof filtersValue !== 'object' || Array.isArray(filtersValue))) {
+    throw new ResourceRequestValidationError('Resource catalog filters must be an object')
+  }
+  const filters = (filtersValue ?? {}) as Record<string, unknown>
+  const packIds = stringList(filters.packIds)
+  const dimensions = validatedEnumList(filters.dimensions, RESOURCE_DIMENSIONS, 'Resource catalog dimensions') as ResourceDimension[] | undefined
+  const primaryCategories = validatedEnumList(filters.primaryCategories, RESOURCE_PACK_PRIMARY_CATEGORIES, 'Resource catalog primaryCategories') as ResourcePack['primaryCategory'][] | undefined
+  const categories = validatedEnumList(filters.categories, RESOURCE_CATEGORIES, 'Resource catalog categories') as ResourceCategory[] | undefined
+  const styles = stringList(filters.styles)
+  const gameTypes = stringList(filters.gameTypes)
+  const packTags = stringList(filters.packTags)
+  const usageTags = validatedEnumList(filters.usageTags, RESOURCE_USAGE_TAGS, 'Resource catalog usageTags') as ResourceUsageTag[] | undefined
+  const assetKinds = validatedEnumList(filters.assetKinds, RESOURCE_ASSET_KINDS, 'Resource catalog assetKinds') as ResourceAssetKind[] | undefined
+  const capabilities = validatedEnumList(filters.capabilities, RESOURCE_CAPABILITIES, 'Resource catalog capabilities') as ResourceCapability[] | undefined
+  const formats = stringList(filters.formats)?.map(format => format.replace(/^\./, '').toLocaleLowerCase())
+  if (record.cursor !== undefined && typeof record.cursor !== 'string') {
+    throw new ResourceRequestValidationError('Resource catalog cursor must be a string')
+  }
+  const limit = optionalBoundedInteger(record.limit, 'limit', 1, 64)
+  return {
+    filters: {
+      ...(packIds ? { packIds } : {}),
+      ...(dimensions ? { dimensions } : {}),
+      ...(primaryCategories ? { primaryCategories } : {}),
+      ...(categories ? { categories } : {}),
+      ...(styles ? { styles } : {}),
+      ...(gameTypes ? { gameTypes } : {}),
+      ...(packTags ? { packTags } : {}),
+      ...(usageTags ? { usageTags } : {}),
+      ...(assetKinds ? { assetKinds } : {}),
+      ...(capabilities ? { capabilities } : {}),
+      ...(formats ? { formats } : {}),
+    },
+    ...(typeof record.cursor === 'string' && record.cursor ? { cursor: record.cursor } : {}),
+    ...(limit ? { limit } : {}),
+  }
+}
+
+function parseIntegrationSelections(value: unknown): Array<{ importId: string; packId: string; expectedPackVersion: string; elementId: string; destinationPath?: string; selectionReason: string[] }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Resource import request must be an object')
+  const selections = (value as Record<string, unknown>).selections
+  if (!Array.isArray(selections) || selections.length === 0) throw new ResourceRequestValidationError('At least one explicit Resource element selection is required')
+  if (selections.length > 64) throw new ResourceRequestValidationError('At most 64 Resource elements may be resolved at once')
+  return selections.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} is invalid`)
+    const record = value as Record<string, unknown>
+    const importId = requiredString(record.importId, `Resource import selection ${index + 1} importId`)
+    const packId = requiredString(record.packId, `Resource import selection ${index + 1} packId`)
+    const expectedPackVersion = requiredString(record.expectedPackVersion, `Resource import selection ${index + 1} expectedPackVersion`)
+    const elementId = requiredString(record.elementId, `Resource import selection ${index + 1} elementId`)
+    const selectionReason = Array.isArray(record.selectionReason)
+      ? record.selectionReason.map(item => requiredString(item, `Resource import selection ${index + 1} selectionReason`))
+      : []
+    if (!selectionReason.length) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} selectionReason is required`)
+    const destinationPath = typeof record.destinationPath === 'string' && record.destinationPath.trim() ? record.destinationPath.trim() : undefined
+    return { importId, packId, expectedPackVersion, elementId, ...(destinationPath ? { destinationPath } : {}), selectionReason }
   })
 }
 
-function validatedUsageTags(value: unknown, label: string): string[] | undefined {
+function optionalBoundedInteger(value: unknown, name: string, minimum: number, maximum: number): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || Number(value) < minimum || Number(value) > maximum) throw new ResourceRequestValidationError(`${name} must be an integer from ${minimum} to ${maximum}`)
+  return Number(value)
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new ResourceRequestValidationError(`${name} is required`)
+  return value.trim()
+}
+
+function validatedEnumList(
+  value: unknown,
+  allowed: readonly string[],
+  label: string,
+): string[] | undefined {
   const values = stringList(value)
   if (!values) return undefined
-  if (values.some(value => !(RESOURCE_USAGE_TAGS as readonly string[]).includes(value))) {
-    throw new ResourceRequestValidationError(`${label} tags contain unsupported values`)
+  if (values.some(item => !allowed.includes(item))) {
+    throw new ResourceRequestValidationError(`${label} contain unsupported values`)
   }
   return values
 }
 
 function assertElementUsageTags(body: Record<string, unknown>): void {
+  if (Object.hasOwn(body, 'usageTagsMode') && !['inherit', 'override', 'manual-only'].includes(String(body.usageTagsMode))) {
+    throw new ResourceRequestValidationError('Element usageTagsMode is unsupported')
+  }
   if (!Object.hasOwn(body, 'usageTags')) return
   const value = body.usageTags
   if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string' || !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag))) {
     throw new ResourceRequestValidationError('Element usageTags must contain supported values')
   }
+}
+
+function assertElementDefaults(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Element defaults must be an object')
+  const usageTags = (value as Record<string, unknown>).usageTags
+  if (usageTags !== undefined && (!Array.isArray(usageTags) || usageTags.some(tag => typeof tag !== 'string' || !(RESOURCE_USAGE_TAGS as readonly string[]).includes(tag)))) {
+    throw new ResourceRequestValidationError('Element default usageTags must contain supported values')
+  }
+}
+
+function assertElementAssetMetadata(body: Record<string, unknown>): void {
+  if (Object.hasOwn(body, 'assetKind') &&
+      body.assetKind !== null &&
+      (typeof body.assetKind !== 'string' || !(RESOURCE_ASSET_KINDS as readonly string[]).includes(body.assetKind))) {
+    throw new ResourceRequestValidationError('Element assetKind is unsupported')
+  }
+  if (Object.hasOwn(body, 'capabilities')) {
+    const value = body.capabilities
+    if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !(RESOURCE_CAPABILITIES as readonly string[]).includes(item))) {
+      throw new ResourceRequestValidationError('Element capabilities must contain supported values')
+    }
+  }
+  if (Object.hasOwn(body, 'contentProfile') && !isContentProfileUpdate(body.contentProfile)) {
+    throw new ResourceRequestValidationError('Element contentProfile must contain inspected logical-asset contents')
+  }
+  if (Object.hasOwn(body, 'relations')) {
+    const value = body.relations
+    if (!Array.isArray(value) || value.some(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return true
+      const relation = item as Record<string, unknown>
+      return typeof relation.kind !== 'string' ||
+        !(RESOURCE_RELATION_KINDS as readonly string[]).includes(relation.kind) ||
+        typeof relation.targetElementId !== 'string' || !relation.targetElementId.trim() ||
+        (relation.role !== undefined && (typeof relation.role !== 'string' || !relation.role.trim())) ||
+        (relation.required !== undefined && typeof relation.required !== 'boolean')
+    })) {
+      throw new ResourceRequestValidationError('Element relations must contain supported semantic relations')
+    }
+  }
+}
+
+function isContentProfileUpdate(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const profile = value as Record<string, unknown>
+  if (!['self-contained', 'external-dependencies', 'unknown'].includes(String(profile.packaging))) return false
+  if (!Array.isArray(profile.components) || profile.components.some(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return true
+    const component = item as Record<string, unknown>
+    return typeof component.id !== 'string' || !component.id.trim() ||
+      typeof component.kind !== 'string' || !(RESOURCE_EMBEDDED_COMPONENT_KINDS as readonly string[]).includes(component.kind)
+  })) return false
+  if (!profile.inspection || typeof profile.inspection !== 'object' || Array.isArray(profile.inspection)) return false
+  const inspection = profile.inspection as Record<string, unknown>
+  return ['complete', 'partial', 'unavailable'].includes(String(inspection.status)) &&
+    ['server', 'client', 'admin'].includes(String(inspection.source))
 }
 
 function stringList(value: unknown): string[] | undefined {

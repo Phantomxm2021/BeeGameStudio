@@ -1696,6 +1696,7 @@ const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
   'webBrowserToolEnabled',
   'bashClassifierEnabled',
   'mcpSkillsEnabled',
+  'resourceLibraryEnabled',
 ]
 
 function normalizeRuntimeSettings(value: unknown): RuntimeSettingsConfig {
@@ -2103,7 +2104,7 @@ function normalizeAssetManifest(value: unknown): BeeGameAssetManifest {
   try {
     return normalizeBeeGameAssetManifest(value)
   } catch {
-    return { version: 1, slots: [] }
+    return { version: 5, requirements: [] }
   }
 }
 

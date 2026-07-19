@@ -1,23 +1,37 @@
-import { createInMemoryResourceRepository, type PackSummary, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
+import { createInMemoryResourceRepository, type PackSummary, type ResourceElement, type ResourceFolder, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
 import { resolveBeeGameResourceListenOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
-import { inspectUploadedResource } from './resource-inspection'
+import { contentProfileFromInspection, inspectUploadedResource } from './resource-inspection'
+import { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
+import { createSubprocessModelProcessor } from './model-processing'
+import { externalReferencesFromInspection, reconcileResourceDependencySpecs, resolveResourceDependencyBindings } from './resource-dependency-bindings'
 
 export { createBeeGameResourceServerApp } from './app'
 export type { BeeGameResourceServerAppOptions } from './app'
+export { createSupabaseResourceProcessingHandlers } from './resource-processing-jobs'
+export type { ResourceProcessingFailure, ResourceProcessingHandlers, ResourceProcessingJob, ResourceProcessingJobStatus } from './resource-processing-jobs'
+export { createSubprocessModelProcessor } from './model-processing'
+export type { ResourceInspectionFacts, ResourceModelProcessor } from './model-processing'
 
 if (import.meta.main) {
   await loadResourceSupabaseEnv()
   const { host, port } = resolveBeeGameResourceListenOptions()
   const baseUrl = process.env.BEEGAME_SUPABASE_URL
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+  const modelProcessor = process.env.BEEGAME_RESOURCE_MODEL_PROCESSOR_ENABLED === '0' ? undefined : createSubprocessModelProcessor()
+  const inspectResourceElement = baseUrl && serviceRoleKey ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor }) : undefined
+  const resourceProcessing = baseUrl && serviceRoleKey && inspectResourceElement
+    ? createSupabaseResourceProcessingHandlers({ baseUrl, serviceRoleKey, inspectElement: inspectResourceElement })
+    : undefined
   const app = createBeeGameResourceServerApp({
     repository: createConfiguredResourceRepository(),
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
     ...(baseUrl && serviceRoleKey ? { canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey }) } : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey }) : {}),
     ...(baseUrl && serviceRoleKey ? createSupabaseResourceAuthoringHandlers({ baseUrl, serviceRoleKey }) : {}),
+    ...(inspectResourceElement ? { inspectResourceElement } : {}),
+    ...(resourceProcessing ? { resourceProcessing } : {}),
     ...(baseUrl && serviceRoleKey ? { inspectPackStorage: createSupabaseResourceStorageInspector({ baseUrl, serviceRoleKey }) } : {}),
     ...(baseUrl && serviceRoleKey ? { recordAuditEvent: createSupabaseResourceAuditWriter({ baseUrl, serviceRoleKey }) } : {}),
     addResourceElement: baseUrl && serviceRoleKey ? async (packId, request) => {
@@ -32,17 +46,115 @@ if (import.meta.main) {
       const uploaded = await fetch(storageUrl, { method: 'POST', headers, body: await file.arrayBuffer() })
       if (!uploaded.ok) throw new Error('Element storage upload failed')
       const row = buildElementUploadRow(storagePackId, category, file, `${storagePackId}-${crypto.randomUUID()}`, relativePath, filename)
-      row.specs = { ...(row.specs as Record<string, unknown>), ...await inspectUploadedResource(file) }
+      const inspection = await inspectUploadedResource(file)
+      row.specs = { ...(row.specs as Record<string, unknown>), ...inspection }
+      const contentProfile = contentProfileFromInspection(inspection)
+      row.content_profile = contentProfile
+      row.capabilities = capabilitiesFromContentProfile(contentProfile)
       const saved = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/beegame_resource_elements`, { method: 'POST', headers: { apikey: serviceRoleKey, authorization: `Bearer ${serviceRoleKey}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify(row) })
       if (!saved.ok) { await fetch(storageUrl, { method: 'DELETE', headers }); throw new Error('Element metadata persistence failed') }
       return toResourceElement((await saved.json() as Array<Record<string, unknown>>)[0])
     } : undefined,
   })
   const server = Bun.serve({ hostname: host, port, fetch: app.fetch })
+  if (resourceProcessing) await resourceProcessing.resumePending().catch(error => console.warn('Resource processing recovery failed:', error))
   console.log(`BeeGame resource server listening on http://${host}:${server.port}`)
 }
 
-type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string }
+function capabilitiesFromContentProfile(profile: NonNullable<ResourceElement['contentProfile']>): ResourceElement['capabilities'] {
+  const kinds = new Set(profile.components.map(component => component.kind))
+  return [
+    kinds.has('skeleton') ? 'rigged' : undefined,
+    kinds.has('skeleton') ? 'skinned' : undefined,
+    kinds.has('animation-clip') ? 'contains-animations' : undefined,
+    kinds.has('material') ? 'contains-materials' : undefined,
+    kinds.has('texture') ? 'contains-textures' : undefined,
+    kinds.has('morph-target') ? 'morph-targets' : undefined,
+  ].filter((value): value is NonNullable<ResourceElement['capabilities']>[number] => Boolean(value))
+}
+
+const INSPECTION_DERIVED_CAPABILITIES = new Set<string>([
+  'rigged', 'skinned', 'contains-animations', 'contains-materials',
+  'contains-textures', 'morph-targets',
+] as const)
+
+/**
+ * Rebuilds objective metadata for an existing Storage object. Authored roles
+ * survive when the inspector returns the same stable component id and kind;
+ * subject matter and gameplay purpose are never inferred from filenames.
+ */
+export function createSupabaseResourceReinspectionHandler(options: SupabaseAuthoringOptions) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const baseUrl = options.baseUrl.replace(/\/+$/, '')
+  const storageBucket = options.storageBucket ?? 'beegame-resource-packs'
+  const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
+  return async (packId: string, elementId: string): Promise<ResourceElement | undefined> => {
+    const metadata = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`, { headers })
+    if (!metadata.ok) throw new Error(`Resource inspection metadata lookup failed (${metadata.status})`)
+    const current = (await metadata.json() as Array<Record<string, unknown>>)[0]
+    if (!current) return undefined
+    const relativePath = safeRelativeStoragePath(String(current.path || ''), 'Resource element path')
+    const objectPath = `${safeStorageComponent(packId, 'Pack id')}/${relativePath}`
+    const object = await fetchImpl(`${baseUrl}/storage/v1/object/${storageBucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`, { headers })
+    if (!object.ok) throw new Error(`Resource inspection download failed (${object.status})`)
+    const currentSpecs = current.specs && typeof current.specs === 'object' && !Array.isArray(current.specs)
+      ? current.specs as ResourceElement['specs']
+      : {}
+    const mimeType = object.headers.get('content-type') || (typeof currentSpecs.mimeType === 'string' ? currentSpecs.mimeType : 'application/octet-stream')
+    const file = new File([await object.arrayBuffer()], String(current.name || relativePath.split('/').pop() || elementId), { type: mimeType })
+    const inspection = await inspectUploadedResource(file, { modelProcessor: options.modelProcessor })
+    const references = [...new Set([
+      ...externalReferencesFromInspection(inspection.externalReferences),
+      ...externalReferencesFromInspection(inspection.unresolvedTextureReferences),
+    ])]
+    if (references.length) inspection.externalReferences = JSON.stringify(references)
+    const inspectedProfile = contentProfileFromInspection(inspection)
+    const previousProfile = current.content_profile && typeof current.content_profile === 'object' && !Array.isArray(current.content_profile)
+      ? current.content_profile as NonNullable<ResourceElement['contentProfile']>
+      : undefined
+    const authoredRoles = new Map(
+      (previousProfile?.components ?? [])
+        .filter(component => component.roles?.length)
+        .map(component => [`${component.kind}:${component.id}`, component.roles] as const),
+    )
+    const contentProfile = {
+      ...inspectedProfile,
+      components: inspectedProfile.components.map(component => ({
+        ...component,
+        ...(authoredRoles.get(`${component.kind}:${component.id}`)
+          ? { roles: authoredRoles.get(`${component.kind}:${component.id}`) }
+          : {}),
+      })),
+    }
+    const existingCapabilities = Array.isArray(current.capabilities)
+      ? current.capabilities.filter((value): value is NonNullable<ResourceElement['capabilities']>[number] => typeof value === 'string' && !INSPECTION_DERIVED_CAPABILITIES.has(value))
+      : []
+    const packElementsResponse = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&select=id,path,kind`, { headers })
+    if (!packElementsResponse.ok) throw new Error(`Resource dependency lookup failed (${packElementsResponse.status})`)
+    const packElements = await packElementsResponse.json() as Array<{ id: string; path: string; kind: string }>
+    const dependencyBindings = resolveResourceDependencyBindings(relativePath, references, packElements)
+    const dependencySpecs = reconcileResourceDependencySpecs({ ...currentSpecs, ...inspection }, references, dependencyBindings)
+    const body = {
+      specs: dependencySpecs,
+      content_profile: contentProfile,
+      capabilities: [...new Set([...existingCapabilities, ...(capabilitiesFromContentProfile(contentProfile) ?? [])])],
+      dependencies: [...new Set(dependencyBindings.map(binding => binding.dependencyElementId))],
+      dependency_bindings: dependencyBindings,
+      ...(current.asset_kind ? {} : { asset_kind: defaultAssetKind(inferElementKind(file)) ?? null }),
+    }
+    const saved = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' },
+      body: JSON.stringify(body),
+    })
+    if (!saved.ok) throw new Error(`Resource inspection persistence failed (${saved.status})`)
+    const row = (await saved.json() as Array<Record<string, unknown>>)[0]
+    if (!row) throw new Error('Resource inspection persistence returned no element')
+    return toResourceElement(row)
+  }
+}
+
+type SupabaseAuthoringOptions = { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation; storageBucket?: string; modelProcessor?: import('./model-processing').ResourceModelProcessor }
 
 export function createSupabaseResourceAuditWriter(options: { baseUrl: string; serviceRoleKey: string; fetchImpl?: FetchImplementation }) {
   const fetchImpl = options.fetchImpl ?? fetch
@@ -156,7 +268,7 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     throw new Error(`Resource storage deletion failed (${response.status})${failure.detail}`)
   }
   type ElementRow = Record<string, unknown> & { id: string; pack_id: string; name: string; path: string }
-  type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string }
+  type FolderRow = { id: string; pack_id: string; name: string; parent_id?: string | null; path: string; element_defaults?: ResourceFolder['elementDefaults'] | null }
   const updateElement = async (packId: string, elementId: string, body: Record<string, unknown>) => {
     const current = (await getRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(elementId)}&pack_id=eq.${encodeURIComponent(packId)}&select=*`))[0]
     if (!current) return undefined
@@ -186,8 +298,9 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
       const folder = folders.find((item) => item.id === folderId)
       if (!folder) return undefined
-      const name = String(body.name || '').trim()
+      const name = Object.hasOwn(body, 'name') ? String(body.name || '').trim() : folder.name
       if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
+      const elementDefaults = Object.hasOwn(body, 'elementDefaults') ? body.elementDefaults : folder.element_defaults ?? {}
       const parent = folder.parent_id ? folders.find((item) => item.id === folder.parent_id) : undefined
       const nextPath = parent ? `${parent.path}/${name}` : name
       if (folders.some((item) => item.id !== folderId && item.path === nextPath)) throw new Error('Folder path already exists')
@@ -197,13 +310,13 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
       const moves = elements.map((item) => ({ from: item.path, to: replacePath(item.path) }))
       try {
         for (const move of moves) await moveObject(storagePath(packId, move.from), storagePath(packId, move.to))
-        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name } : {}), path: replacePath(item.path) })
+        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name, element_defaults: elementDefaults } : {}), path: replacePath(item.path) })
         for (const item of elements) await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { path: replacePath(item.path) })
       } catch (error) {
         for (const move of [...moves].reverse()) await moveObject(storagePath(packId, move.to), storagePath(packId, move.from)).catch(() => undefined)
         throw error
       }
-      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath }
+      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath, ...(elementDefaults && typeof elementDefaults === 'object' ? { elementDefaults: elementDefaults as ResourceFolder['elementDefaults'] } : {}) }
     },
     deleteResourceFolder: async (packId: string, folderId: string) => {
       const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
@@ -264,25 +377,29 @@ function trimPath(value: string): string {
 export function toElementRow(body: Record<string, unknown>): Record<string, unknown> {
   const editable: Record<string, string> = {
     name: 'name', path: 'path', category: 'category', kind: 'kind', preview: 'preview', specs: 'specs',
-    usageTags: 'usage_tags', dependencies: 'dependencies', dependencyBindings: 'dependency_bindings', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
+    usageTags: 'usage_tags', usageTagsMode: 'usage_tags_mode', assetKind: 'asset_kind', capabilities: 'capabilities', contentProfile: 'content_profile', relations: 'relations', dependencies: 'dependencies', dependencyBindings: 'dependency_bindings', status: 'status', styleOverride: 'style_override', dimensionOverride: 'dimension_override',
   }
   const row: Record<string, unknown> = {}
   for (const [key, column] of Object.entries(editable)) {
     if (Object.hasOwn(body, key)) row[column] = body[key]
+  }
+  if (Object.hasOwn(body, 'usageTags') && !Object.hasOwn(body, 'usageTagsMode')) {
+    row.usage_tags_mode = Array.isArray(body.usageTags) && body.usageTags.length ? 'override' : 'manual-only'
   }
   return row
 }
 
 export function toPackUpdateRow(body: Record<string, unknown>): Record<string, unknown> {
   const editable: Record<string, string> = {
-    name: 'name', style: 'style', gameTypes: 'game_types', dimension: 'dimension',
+    name: 'name', styles: 'styles', gameTypes: 'game_types', dimension: 'dimension',
     primaryCategory: 'primary_category', categories: 'categories', license: 'license', version: 'version',
-    description: 'description', tags: 'tags', source: 'source', author: 'author', licenseEvidence: 'license_evidence', compatibleEngines: 'compatible_engines', deprecatedAt: 'deprecated_at',
+    description: 'description', tags: 'tags', source: 'source', author: 'author', licenseEvidence: 'license_evidence', compatibleEngines: 'compatible_engines', deprecatedAt: 'deprecated_at', elementDefaults: 'element_defaults',
   }
   const row: Record<string, unknown> = {}
   for (const [input, column] of Object.entries(editable)) {
     if (Object.hasOwn(body, input)) row[column] = body[input]
   }
+  if (Object.hasOwn(body, 'styles') && Array.isArray(body.styles)) row.style = body.styles.map(String).join(' / ')
   return row
 }
 
@@ -305,6 +422,7 @@ export function inferElementKind(file: File): string {
 
 export function buildElementUploadRow(packId: string, category: string, file: File, id = `${packId}-${crypto.randomUUID()}`, path = `${category}/${file.name}`, name = file.name): Record<string, unknown> {
   const kind = inferElementKind(file)
+  const assetKind = defaultAssetKind(kind)
   const preview = previewDescriptor(kind, path)
   return {
     id,
@@ -313,6 +431,15 @@ export function buildElementUploadRow(packId: string, category: string, file: Fi
     path,
     category,
     kind,
+    ...(assetKind ? { asset_kind: assetKind } : {}),
+    usage_tags_mode: 'inherit',
+    capabilities: [],
+    content_profile: {
+      packaging: 'unknown',
+      components: [],
+      inspection: { status: 'unavailable', source: 'server' },
+    },
+    relations: [],
     ...(preview ? { preview } : {}),
     specs: {
       size: file.size,
@@ -323,6 +450,14 @@ export function buildElementUploadRow(packId: string, category: string, file: Fi
     dependencies: [],
     status: 'ready',
   }
+}
+
+function defaultAssetKind(kind: string): 'model' | 'audio-clip' | 'font' | 'image' | undefined {
+  if (kind === 'model') return 'model'
+  if (kind === 'audio') return 'audio-clip'
+  if (kind === 'font') return 'font'
+  if (kind === 'image') return 'image'
+  return undefined
 }
 
 function previewDescriptor(kind: string, path: string): { kind: 'image' | 'model' | 'audio' | 'document'; path: string } | undefined {
@@ -469,7 +604,30 @@ function normalizeSupabaseSignedObjectUrl(baseUrl: string, signedURL: string): s
 }
 
 export function toResourcePack(row: Record<string, unknown>): PackSummary {
-  return { id: String(row.id), name: String(row.name), style: String(row.style), gameTypes: Array.isArray(row.game_types) ? row.game_types.map(String) : [], dimension: row.dimension as ResourcePack['dimension'], primaryCategory: row.primary_category as ResourcePack['primaryCategory'], categories: Array.isArray(row.categories) ? row.categories as ResourcePack['categories'] : [], license: String(row.license), version: String(row.version), status: row.status as ResourcePack['status'], ...(typeof row.cover_path === 'string' ? { coverPath: row.cover_path } : {}), elementCount: typeof row.element_count === 'number' ? row.element_count : 0 }
+  const styles = Array.isArray(row.styles) ? row.styles.map(String).filter(Boolean) : String(row.style || '').split('/').map(value => value.trim()).filter(Boolean)
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    style: styles.join(' / '),
+    styles,
+    gameTypes: Array.isArray(row.game_types) ? row.game_types.map(String) : [],
+    dimension: row.dimension as ResourcePack['dimension'],
+    primaryCategory: row.primary_category as ResourcePack['primaryCategory'],
+    categories: Array.isArray(row.categories) ? row.categories as ResourcePack['categories'] : [],
+    license: String(row.license),
+    version: String(row.version),
+    status: row.status as ResourcePack['status'],
+    ...(typeof row.description === 'string' && row.description ? { description: row.description } : {}),
+    ...(Array.isArray(row.tags) && row.tags.length ? { tags: row.tags.map(String) } : {}),
+    ...(typeof row.source === 'string' && row.source ? { source: row.source } : {}),
+    ...(typeof row.author === 'string' && row.author ? { author: row.author } : {}),
+    ...(typeof row.license_evidence === 'string' && row.license_evidence ? { licenseEvidence: row.license_evidence } : {}),
+    ...(Array.isArray(row.compatible_engines) && row.compatible_engines.length ? { compatibleEngines: row.compatible_engines.map(String) } : {}),
+    ...(typeof row.deprecated_at === 'string' && row.deprecated_at ? { deprecatedAt: row.deprecated_at } : {}),
+    ...(typeof row.cover_path === 'string' ? { coverPath: row.cover_path } : {}),
+    ...(row.element_defaults && typeof row.element_defaults === 'object' && !Array.isArray(row.element_defaults) ? { elementDefaults: row.element_defaults as ResourcePack['elementDefaults'] } : {}),
+    elementCount: typeof row.element_count === 'number' ? row.element_count : 0,
+  }
 }
 
 export function toResourceElement(row: Record<string, unknown>): ResourceElement {
@@ -479,6 +637,11 @@ export function toResourceElement(row: Record<string, unknown>): ResourceElement
     ...(row.preview && typeof row.preview === 'object' ? { preview: row.preview as ResourceElement['preview'] } : {}),
     specs: row.specs && typeof row.specs === 'object' ? row.specs as ResourceElement['specs'] : {},
     ...(Array.isArray(row.usage_tags) && row.usage_tags.length ? { usageTags: row.usage_tags.map(String) as ResourceElement['usageTags'] } : {}),
+    ...(typeof row.usage_tags_mode === 'string' ? { usageTagsMode: row.usage_tags_mode as ResourceElement['usageTagsMode'] } : {}),
+    ...(typeof row.asset_kind === 'string' ? { assetKind: row.asset_kind as ResourceElement['assetKind'] } : {}),
+    ...(Array.isArray(row.capabilities) && row.capabilities.length ? { capabilities: row.capabilities.map(String) as ResourceElement['capabilities'] } : {}),
+    ...(row.content_profile && typeof row.content_profile === 'object' ? { contentProfile: row.content_profile as ResourceElement['contentProfile'] } : {}),
+    ...(Array.isArray(row.relations) && row.relations.length ? { relations: row.relations as ResourceElement['relations'] } : {}),
     dependencies: Array.isArray(row.dependencies) ? row.dependencies.map(String) : [],
     ...(Array.isArray(row.dependency_bindings) && row.dependency_bindings.length ? { dependencyBindings: row.dependency_bindings as ResourceElement['dependencyBindings'] } : {}),
     status: row.status as ResourceElement['status'],

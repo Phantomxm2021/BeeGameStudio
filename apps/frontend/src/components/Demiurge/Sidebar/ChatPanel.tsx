@@ -47,7 +47,8 @@ interface ChatPanelProps {
     onApprovePlan?: (
         review: ReviewBindingPayload & { gate_id: string },
         feedback?: string,
-        action?: 'approve' | 'revise' | 'reject'
+        action?: 'approve' | 'revise' | 'reject',
+        permissionScope?: 'once' | 'session'
     ) => Promise<void>;
     approvalState: {
         gateId: string | null;
@@ -123,6 +124,13 @@ const getBeeGamePermissionCommand = (review: ReviewDisplayModel | undefined | nu
 const getBeeGamePermissionTarget = (review: ReviewDisplayModel | undefined | null): string => {
     const artifact = getObjectField(review, 'artifact');
     const input = getObjectField(artifact, 'input');
+    if (review?.permission_tool_name === 'SandboxNetworkAccess') {
+        const host = getObjectField(input, 'host');
+        const port = getObjectField(input, 'port');
+        if (typeof host === 'string' && host.trim()) {
+            return typeof port === 'number' ? `${host.trim()}:${port}` : host.trim();
+        }
+    }
     const path = getObjectField(input, 'path') || getObjectField(input, 'file_path') || getObjectField(input, 'notebook_path');
     return typeof path === 'string' ? path.trim() : '';
 };
@@ -153,6 +161,8 @@ const BeeGamePermissionPanel = ({
         || formatReviewSummary(review);
     const isAllowPending = isApprovalActionPending(approvalState, review.gate_id, 'approve');
     const isDenyPending = isApprovalActionPending(approvalState, review.gate_id, 'revise');
+    const isNetworkPermission = review.permission_tool_name === 'SandboxNetworkAccess';
+    const supportsSessionPermission = isNetworkPermission || review.permission_tool_name === 'ResourceLibrary';
 
     return (
         <section
@@ -188,7 +198,7 @@ const BeeGamePermissionPanel = ({
                     <div className="type-footnote text-zinc-300">{text.permissionRiskGeneric}</div>
                 </div>
             </div>
-            <div className="grid gap-2 border-t border-white/10 px-5 pb-5 pt-1 min-[420px]:grid-cols-2">
+            <div className={`grid gap-2 border-t border-white/10 px-5 pb-5 pt-1 ${supportsSessionPermission ? 'min-[520px]:grid-cols-3' : 'min-[420px]:grid-cols-2'}`}>
                 <button
                     type="button"
                     onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'revise')}
@@ -199,12 +209,22 @@ const BeeGamePermissionPanel = ({
                 </button>
                 <button
                     type="button"
-                    onClick={() => onApprovePlan?.(toApprovalPayload(review))}
+                    onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'approve', 'once')}
                     disabled={isAllowPending}
                     className="type-button flex min-h-11 items-center justify-center rounded-2xl bg-emerald-600 text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-55"
                 >
                     {isAllowPending ? text.submitting : text.allowOnce}
                 </button>
+                {supportsSessionPermission ? (
+                    <button
+                        type="button"
+                        onClick={() => onApprovePlan?.(toApprovalPayload(review), undefined, 'approve', 'session')}
+                        disabled={isAllowPending}
+                        className="type-button flex min-h-11 items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-400/10 px-3 text-emerald-200 transition-colors hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                        {isAllowPending ? text.submitting : text.allowForSession}
+                    </button>
+                ) : null}
             </div>
         </section>
     );

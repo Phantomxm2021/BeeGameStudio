@@ -1695,6 +1695,7 @@ function normalizeRuntimeSettings(config: RuntimeSettingsConfig): Required<Runti
         webBrowserToolEnabled: config.webBrowserToolEnabled ?? false,
         bashClassifierEnabled: config.bashClassifierEnabled ?? false,
         mcpSkillsEnabled: config.mcpSkillsEnabled ?? false,
+        resourceLibraryEnabled: config.resourceLibraryEnabled ?? true,
     };
 }
 
@@ -2712,6 +2713,7 @@ function getRuntimeCapabilityItems(copy: RuntimeCapabilityCopy): RuntimeSettings
         'webBrowserToolEnabled',
         'bashClassifierEnabled',
         'mcpSkillsEnabled',
+        'resourceLibraryEnabled',
     ].map((key) => ({
         key: key as keyof RuntimeSettingsConfig,
         ...copy.items[key as keyof RuntimeSettingsConfig],

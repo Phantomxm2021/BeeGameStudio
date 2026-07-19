@@ -1,13 +1,7 @@
 import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
-  BeeGameResourceBindingPayload,
-  BeeGameResourceCandidatePayload,
   BeeGameResourcePackImpactPayload,
-  BeeGameResourceIntegrationPayload,
-  BeeGameResourceIntegrationRemovalPayload,
-  BeeGameAutoResourceBindingPayload,
-  BeeGameResourceUnbindingPayload,
   BeeGameDeploymentPayload,
   BeeGamePreviewPayload,
   ContinueTaskResponse,
@@ -489,14 +483,12 @@ export const beeGameAdapter = {
 
   async requestProjectAction(data: {
     project_id: string;
-    kind: 'asset_integrate' | 'asset_prepare_selection' | 'build_error_repair' | 'deployment_failure_repair';
-    slotIds?: string[];
+    kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair';
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const language = resolveProjectSessionLanguage(data.project_id, '');
     await postJson(`/api/beegame-sessions/${encodeURIComponent(handle.session.id)}/action`, {
       kind: data.kind,
-      ...(data.slotIds?.length ? { slotIds: data.slotIds } : {}),
       language,
     });
     return {
@@ -581,11 +573,13 @@ export const beeGameAdapter = {
     gate_id: string;
     action: 'approve' | 'revise' | 'reject';
     feedback?: string;
+    permission_scope?: 'once' | 'session';
   }): Promise<{ ok: boolean }> {
     const decision = data.action === 'approve' ? 'allow' : 'deny';
     await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`, {
       decision,
       remember: false,
+      scope: data.permission_scope ?? 'once',
       ...(data.feedback ? { message: data.feedback } : {}),
     });
     return { ok: true };
@@ -715,57 +709,19 @@ export const beeGameAdapter = {
 
   async uploadProjectAsset(
     projectId: string,
-    slotId: string,
+    requirementId: string,
     file: File,
   ): Promise<BeeGameAssetUploadPayload> {
     const form = new FormData();
     form.set('file', file);
     return postForm<BeeGameAssetUploadPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/upload`,
+      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(requirementId)}/upload`,
       form,
     );
   },
 
-  async getProjectResourceCandidates(projectId: string, slotId: string): Promise<BeeGameResourceCandidatePayload[]> {
-    const result = await getJson<{ candidates: BeeGameResourceCandidatePayload[] }>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-candidates`)
-    return result.candidates
-  },
-
   async getResourcePackImpact(packId: string): Promise<BeeGameResourcePackImpactPayload> {
     return getJson<BeeGameResourcePackImpactPayload>(`/api/resource-packs/${encodeURIComponent(packId)}/impact`)
-  },
-
-  async bindProjectResource(projectId: string, slotId: string, requirement: Record<string, unknown>, selection?: { packId: string; elementId: string }): Promise<BeeGameResourceBindingPayload> {
-    return postJson<BeeGameResourceBindingPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
-      { requirement, ...(selection ? { selection } : {}) },
-    );
-  },
-
-  async integrateProjectResource(projectId: string, slotId: string): Promise<BeeGameResourceIntegrationPayload> {
-    return postJson<BeeGameResourceIntegrationPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-integration`,
-      {},
-    );
-  },
-
-  async autoBindProjectResources(projectId: string): Promise<BeeGameAutoResourceBindingPayload> {
-    return postJson<BeeGameAutoResourceBindingPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/resource-bindings/auto`,
-      {},
-    );
-  },
-
-  async unbindProjectResource(projectId: string, slotId: string): Promise<BeeGameResourceUnbindingPayload> {
-    return deleteJson<BeeGameResourceUnbindingPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-binding`,
-    );
-  },
-
-  async removeProjectResourceIntegration(projectId: string, slotId: string): Promise<BeeGameResourceIntegrationRemovalPayload> {
-    return deleteJson<BeeGameResourceIntegrationRemovalPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(slotId)}/resource-integration`,
-    );
   },
 
 };
@@ -2014,6 +1970,7 @@ function permissionEventToReview(event: BeeGameEvent, binding: ProjectSessionBin
     gate_kind: 'beegame_permission',
     user_action_kind: 'approve',
     title: summary.title,
+    permission_tool_name: toolName,
     status: 'awaiting_approval',
     artifact_type: 'beegame_permission',
     ready_for_user_approval: true,

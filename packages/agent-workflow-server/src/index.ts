@@ -18,7 +18,10 @@ if (import.meta.main) {
     fetch: createAgentWorkflowApp({
       modelConfigStore: {},
       ...(resourceSelectionConfig
-        ? { resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig) }
+        ? {
+            resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig),
+            resourceSelectionRuntimeConfig: resourceSelectionConfig,
+          }
         : {}),
     }).fetch,
   })

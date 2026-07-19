@@ -26,6 +26,7 @@ export type RuntimeSettingsConfig = {
   webBrowserToolEnabled?: boolean
   bashClassifierEnabled?: boolean
   mcpSkillsEnabled?: boolean
+  resourceLibraryEnabled?: boolean
 }
 
 export type RuntimeSettingsStoreOptions = {
@@ -45,6 +46,7 @@ const BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
   'webBrowserToolEnabled',
   'bashClassifierEnabled',
   'mcpSkillsEnabled',
+  'resourceLibraryEnabled',
 ]
 
 export function getDefaultRuntimeSettingsStoreDir(): string {
@@ -117,6 +119,9 @@ export function mapRuntimeSettingsToEnv(
   }
   if (config.mcpSkillsEnabled !== undefined) {
     env.FEATURE_MCP_SKILLS = config.mcpSkillsEnabled ? '1' : '0'
+  }
+  if (config.resourceLibraryEnabled !== undefined) {
+    env.BEEGAME_RESOURCE_LIBRARY_ENABLED = config.resourceLibraryEnabled ? '1' : '0'
   }
   return env
 }

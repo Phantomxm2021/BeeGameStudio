@@ -297,7 +297,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const canIntegrateAssets = hasPermission('assets.integrate') && !isProjectInteractionLocked;
     const canExportProject = hasPermission('project.export');
     const projectTargetLabel = String(
-        projectStatus?.project_target?.engine || projectStatus?.project_target?.kind || '',
+        projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || projectStatus?.project_target?.engine || projectStatus?.project_target?.kind || '',
     ).trim();
 
     const hasUnfinishedTasks = useMemo(() => {

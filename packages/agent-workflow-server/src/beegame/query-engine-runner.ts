@@ -26,10 +26,22 @@ import {
   parseNativeTerminalTaskNotification,
   type BeeGameNativeTaskNotification,
 } from './native-task-notification'
+import {
+  normalizeResourceLibraryCall,
+  RESOURCE_LIBRARY_ACTIONS,
+  type ResourceLibraryAction,
+} from './native-resource-library-call'
+import { createNativeResourceLibraryTool } from './native-resource-library-tool'
+import { createResourceSelectionClient } from './resource-selection-client'
 
 export { parseNativeTerminalTaskNotification } from './native-task-notification'
 
 type DynamicModule = Record<string, unknown>
+
+// Platform service traffic is intentionally separate from model/provider
+// traffic. The endpoint is supplied by server configuration, never by a model
+// or project, and its credential remains in this closure rather than env.
+const PLATFORM_SERVICE_FETCH = globalThis.fetch
 
 type QueryEngineLike = {
   submitMessage(
@@ -219,20 +231,179 @@ export async function initializeBeeGameNativeSandbox(
   }
   if (!sandboxManager.isSandboxingEnabled()) return
 
-  await sandboxManager.initialize(async hostPattern => {
-    if (!requestPermission) return false
-    const toolUseID = randomUUID()
-    const decision = await requestPermission({
-      toolUseID,
+  const permissionBroker = new NativeSandboxNetworkPermissionBroker(
+    requestPermission,
+  )
+  await sandboxManager.initialize(hostPattern =>
+    permissionBroker.request(hostPattern),
+  )
+}
+
+/**
+ * Adapts Claude's connection-level sandbox callback to a human permission
+ * surface. Package managers commonly open several connections to one host at
+ * once; presenting each socket as a separate user decision is neither useful
+ * nor equivalent to the native TUI. Grants remain exact and worker-local.
+ */
+export class NativeSandboxNetworkPermissionBroker {
+  private readonly allowedForSession = new Set<string>()
+  private readonly inFlight = new Map<string, Promise<boolean>>()
+
+  constructor(
+    private readonly requestPermission?: BeeGameSessionRunnerStartInput['requestPermission'],
+  ) {}
+
+  request(hostPattern: { host: string; port?: number }): Promise<boolean> {
+    const host = hostPattern.host.trim().toLowerCase()
+    if (!host || !this.requestPermission) return Promise.resolve(false)
+    const key = `${host}:${hostPattern.port ?? '*'}`
+    if (this.allowedForSession.has(key)) return Promise.resolve(true)
+
+    const pending = this.inFlight.get(key)
+    if (pending) return pending
+
+    const request = this.requestPermission({
+      toolUseID: randomUUID(),
       toolName: 'SandboxNetworkAccess',
-      message: `Allow network connection to ${hostPattern.host}?`,
+      message: `Allow network connection to ${host}?`,
       input: {
-        host: hostPattern.host,
+        host,
         ...(hostPattern.port !== undefined ? { port: hostPattern.port } : {}),
       },
+    }).then(decision => {
+      const allowed = decision.behavior === 'allow'
+      if (allowed && decision.scope === 'session') {
+        this.allowedForSession.add(key)
+      }
+      return allowed
+    }).finally(() => {
+      this.inFlight.delete(key)
     })
-    return decision.behavior === 'allow'
-  })
+
+    this.inFlight.set(key, request)
+    return request
+  }
+}
+
+type DelegatedResourceLibraryCall = {
+  action: ResourceLibraryAction
+  input: Record<string, unknown>
+}
+
+/**
+ * Restores the target tool's permission semantics when Claude Code invokes a
+ * deferred ResourceLibrary tool through ExecuteExtraTool. A session grant is
+ * intentionally scoped to ResourceLibrary mutations in this worker and never
+ * grants the ExecuteExtraTool wrapper itself.
+ */
+export class NativeExtraToolPermissionBroker {
+  private readonly allowedForSession = new Set<string>()
+  private readonly inFlight = new Map<string, Promise<PermissionDecision>>()
+
+  constructor(
+    private readonly getRequestPermission: () =>
+      | BeeGameSessionRunnerStartInput['requestPermission']
+      | undefined,
+  ) {}
+
+  authorize(input: {
+    toolName: string
+    toolInput: Record<string, unknown>
+    toolUseID: string
+  }): Promise<PermissionDecision | undefined> {
+    const normalized = normalizeResourceLibraryCall(input.toolName, input.toolInput)
+    if (!normalized) return Promise.resolve(undefined)
+    if (!normalized.validAction) {
+      const received = normalized.action ? ` "${normalized.action}"` : ''
+      return Promise.resolve({
+        behavior: 'deny',
+        message: `Unsupported ResourceLibrary action${received}. Allowed actions: ${RESOURCE_LIBRARY_ACTIONS.join(', ')}.`,
+        decisionReason: {
+          type: 'other',
+          reason: 'beegame_invalid_resource_library_action',
+        },
+        toolUseID: input.toolUseID,
+      })
+    }
+    const delegated: DelegatedResourceLibraryCall = {
+      action: normalized.validAction,
+      input: normalized.input,
+    }
+    if (delegated.action !== 'import_elements') {
+      return Promise.resolve({
+        behavior: 'allow',
+        updatedInput: input.toolInput,
+        decisionReason: {
+          type: 'other',
+          reason: 'beegame_read_only_resource_library',
+        },
+        toolUseID: input.toolUseID,
+      })
+    }
+
+    const capabilityKey = 'ResourceLibrary:project-mutation'
+    if (this.allowedForSession.has(capabilityKey)) {
+      return Promise.resolve({
+        behavior: 'allow',
+        updatedInput: input.toolInput,
+        decisionReason: {
+          type: 'other',
+          reason: 'beegame_session_resource_library_grant',
+        },
+        toolUseID: input.toolUseID,
+      })
+    }
+
+    const pending = this.inFlight.get(capabilityKey)
+    if (pending) return pending.then(decision => ({ ...decision, toolUseID: input.toolUseID }))
+    const requestPermission = this.getRequestPermission()
+    if (!requestPermission) {
+      return Promise.resolve({
+        behavior: 'deny',
+        message: 'Dashboard permission channel is unavailable.',
+        decisionReason: {
+          type: 'other',
+          reason: 'dashboard_permission_context_missing',
+        },
+        toolUseID: input.toolUseID,
+      })
+    }
+
+    const request = requestPermission({
+      toolUseID: input.toolUseID,
+      toolName: 'ResourceLibrary',
+      message: `Allow ${Array.isArray(delegated.input.selections) ? delegated.input.selections.length : 0} explicitly selected Resource Library element(s) to be copied into this project?`,
+      input: delegated.input,
+    }).then(decision => {
+      if (decision.behavior === 'allow' && decision.scope === 'session') {
+        this.allowedForSession.add(capabilityKey)
+      }
+      if (decision.behavior === 'allow') {
+        return {
+          behavior: 'allow' as const,
+          updatedInput: input.toolInput,
+          decisionReason: {
+            type: 'other',
+            reason: 'dashboard_permission_approved',
+          },
+          toolUseID: input.toolUseID,
+        }
+      }
+      return {
+        behavior: 'deny' as const,
+        message: decision.message ?? 'Denied from dashboard',
+        decisionReason: {
+          type: 'other',
+          reason: 'dashboard_permission_denied',
+        },
+        toolUseID: input.toolUseID,
+      }
+    }).finally(() => {
+      this.inFlight.delete(capabilityKey)
+    })
+    this.inFlight.set(capabilityKey, request)
+    return request
+  }
 }
 
 export async function resolveBeeGameSkillReadRoots(
@@ -436,7 +607,19 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       skillReadRoots,
       this.input.cwd,
     )
-    const tools = call(toolsModule, 'getTools', permissionContext)
+    const nativeTools = call(toolsModule, 'getTools', permissionContext) as unknown[]
+    const resourceTool = this.input.resourceSelectionConfig
+      ? createNativeResourceLibraryTool({
+          buildTool: definition => call(toolModule, 'buildTool', definition),
+          workspacePath: this.input.cwd,
+          client: createResourceSelectionClient({
+            ...this.input.resourceSelectionConfig,
+            fetchImpl: PLATFORM_SERVICE_FETCH,
+          }),
+          fetchImpl: PLATFORM_SERVICE_FETCH,
+        })
+      : undefined
+    const tools = resourceTool ? [...nativeTools, resourceTool] : nativeTools
     const [commands, discoveredAgentDefinitions] = await Promise.all([
       callAsync(commandsModule, 'getCommands', this.input.cwd),
       callAsync(agentsModule, 'getAgentDefinitionsWithOverrides', this.input.cwd),
@@ -447,6 +630,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       toolPermissionContext: permissionContext,
     }
     this.appState = appState
+    const extraToolPermissionBroker = new NativeExtraToolPermissionBroker(
+      () => this.input.requestPermission ?? this.currentSubmitInput?.requestPermission,
+    )
     const canUseTool = async (
       tool: unknown,
       toolInput: Record<string, unknown>,
@@ -456,6 +642,12 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
       const toolName = getToolName(tool)
+      const delegatedDecision = await extraToolPermissionBroker.authorize({
+        toolName,
+        toolInput,
+        toolUseID,
+      })
+      if (delegatedDecision) return delegatedDecision
       const result = (await callAsync(
         permissionsModule,
         'hasPermissionsToUseTool',
@@ -900,6 +1092,11 @@ type BeeGameResumeConversation = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function stringField(value: Record<string, unknown>, key: string): string {
+  const field = value[key]
+  return typeof field === 'string' ? field.trim() : ''
 }
 
 async function canWriteBeeGameConfigDir(): Promise<boolean> {

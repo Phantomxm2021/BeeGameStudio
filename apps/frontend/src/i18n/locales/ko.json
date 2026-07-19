@@ -188,6 +188,7 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
+      "replanWithAgent": "Agent에게 리소스 탐색 요청",
       "required": "Required",
       "optional": "Optional",
       "placeholder": "Placeholder",
@@ -200,7 +201,9 @@
       "target": "Target",
       "formats": "Formats",
       "specs": "Specs",
-      "noPurpose": "No purpose provided"
+      "noPurpose": "No purpose provided",
+      "compositions": "에셋 구성",
+      "members": "멤버"
     },
     "savedPrefixSeparator": ": "
   },
@@ -253,6 +256,12 @@
           "description": "MCP의 skill:// 리소스를 스킬 시스템에 포함합니다.",
           "note": "품질은 MCP server 리소스에 달려 있으며 feature 시작이 필요합니다.",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "리소스 라이브러리",
+          "description": "프로젝트 Agent가 관리형 게임 리소스를 검색하고 통합할 수 있게 합니다.",
+          "note": "새 세션부터 적용되며 서비스 자격 증명은 서버에만 보관됩니다.",
+          "scope": "newSession"
         }
       }
     },

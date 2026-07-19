@@ -1,9 +1,76 @@
 import { describe, expect, test } from 'bun:test'
-import { buildElementUploadRow, createSupabaseResourceAuthoringHandlers, createSupabaseResourceLifecycleHandlers, createSupabaseResourceStorageInspector, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
+import { buildElementUploadRow, createSupabaseResourceAuthoringHandlers, createSupabaseResourceLifecycleHandlers, createSupabaseResourceReinspectionHandler, createSupabaseResourceStorageInspector, sanitizeStorageBasename, toElementRow, toResourceElement } from '../index'
 
 const packRow = { id: 'pack-1', name: 'Pack', style: 'Stylized', game_types: [], dimension: 'agnostic', primary_category: 'world-scene', categories: [], license: 'internal', version: '1.0.0', status: 'draft', cover_path: 'cover/new.png' }
 
 describe('Supabase resource lifecycle handlers', () => {
+  test('reinspects an existing logical root while preserving authored component roles', async () => {
+    let persisted: Record<string, unknown> | undefined
+    const current = {
+      id: 'element-root', pack_id: 'pack-1', name: 'hero.gltf', path: 'models/hero.gltf',
+      category: 'models', kind: 'model', specs: { source: 'legacy' }, usage_tags: ['character'],
+      asset_kind: null, capabilities: ['collision', 'contains-animations'], relations: [], dependencies: [], dependency_bindings: [], status: 'ready',
+      content_profile: { packaging: 'self-contained', components: [{ id: 'animation-clip:0', kind: 'animation-clip', roles: ['locomotion'] }], inspection: { status: 'complete', source: 'admin' } },
+    }
+    const handler = createSupabaseResourceReinspectionHandler({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/storage/v1/object/')) return new Response(JSON.stringify({ meshes: [{}], skins: [{}], animations: [{}], materials: [{}] }), { headers: { 'content-type': 'model/gltf+json' } })
+        if (init?.method === 'PATCH') {
+          persisted = JSON.parse(String(init.body)) as Record<string, unknown>
+          return Response.json([{ ...current, ...persisted }])
+        }
+        if (url.includes('select=id,path,kind')) return Response.json([current])
+        return Response.json([current])
+      },
+    })
+
+    const result = await handler('pack-1', 'element-root')
+
+    expect(result).toEqual(expect.objectContaining({
+      assetKind: 'model',
+      capabilities: expect.arrayContaining(['collision', 'rigged', 'skinned', 'contains-animations', 'contains-materials']),
+      contentProfile: expect.objectContaining({ components: expect.arrayContaining([
+        expect.objectContaining({ id: 'animation-clip:0', roles: ['locomotion'] }),
+      ]) }),
+    }))
+    expect(persisted?.specs).toEqual(expect.objectContaining({ source: 'legacy', meshCount: 1, skinCount: 1, animationCount: 1 }))
+  })
+
+  test('persists deterministic model dependency bindings discovered during inspection', async () => {
+    let persisted: Record<string, unknown> | undefined
+    const current = {
+      id: 'model', pack_id: 'pack-1', name: 'hero.fbx', path: 'Models/hero.fbx', category: 'models', kind: 'model',
+      specs: { unresolvedTextureReferences: 'Textures\\base.png' }, capabilities: [], relations: [], dependencies: [], dependency_bindings: [], status: 'ready',
+    }
+    const handler = createSupabaseResourceReinspectionHandler({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      modelProcessor: async () => ({ inspectionStatus: 'complete', unresolvedTextureReferences: 'Textures\\base.png' }),
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        if (url.includes('/storage/v1/object/')) return new Response('Kaydara FBX Binary  \0\x1a\0', { headers: { 'content-type': 'application/octet-stream' } })
+        if (url.includes('select=id,path,kind')) return Response.json([
+          { id: 'model', path: 'Models/hero.fbx', kind: 'model' },
+          { id: 'texture', path: 'Textures/base.png', kind: 'image' },
+        ])
+        if (init?.method === 'PATCH') {
+          persisted = JSON.parse(String(init.body)) as Record<string, unknown>
+          return Response.json([{ ...current, ...persisted }])
+        }
+        return Response.json([current])
+      },
+    })
+
+    await handler('pack-1', 'model')
+
+    expect(persisted).toEqual(expect.objectContaining({
+      dependencies: ['texture'],
+      dependency_bindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'texture', kind: 'image' }],
+    }))
+    expect(persisted?.specs).toEqual(expect.objectContaining({ externalReferences: '["Textures/base.png"]', unresolvedTextureReferences: '' }))
+  })
+
   test('recursively deletes a folder, its descendants, and their Storage-backed elements', async () => {
     const storageDeletes: string[] = []
     const metadataDeletes: string[] = []
@@ -402,6 +469,6 @@ describe('Supabase resource lifecycle handlers', () => {
   })
 
   test('preserves null to clear an element style override', () => {
-    expect(toElementRow({ styleOverride: null, usageTags: ['character'] })).toEqual({ style_override: null, usage_tags: ['character'] })
+    expect(toElementRow({ styleOverride: null, usageTags: ['character'] })).toEqual({ style_override: null, usage_tags: ['character'], usage_tags_mode: 'override' })
   })
 })

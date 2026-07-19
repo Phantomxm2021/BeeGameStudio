@@ -44,6 +44,6 @@ describe('EditResourcePackDialog', () => {
     await user.click(screen.getAllByRole('button', { name: '添加' })[1])
     await user.click(screen.getByRole('button', { name: '保存 Pack' }))
 
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ style: 'Pixel / Fantasy / Low Poly', gameTypes: ['RPG', 'Survival'] })))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ styles: ['Pixel', 'Fantasy', 'Low Poly'], gameTypes: ['RPG', 'Survival'] })))
   })
 })

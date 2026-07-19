@@ -105,6 +105,39 @@ describe('native document review evidence', () => {
     expect(current(workspace).state).toBe('current')
   })
 
+  test('makes a review stale when canonical imports or target-native compositions change', async () => {
+    workspace = await createWorkspace()
+    await mkdir(join(workspace, 'assets'), { recursive: true })
+    const manifestPath = join(workspace, 'assets', 'asset-manifest.json')
+    const base = {
+      version: 5,
+      project_target: { asset_format_capabilities: ['glb'] },
+      requirements: [{ id: 'play-space', purpose: 'A playable authored space' }],
+      imports: [{
+        id: 'wall-kit',
+        source: { type: 'resource-library', pack_id: 'kit', pack_version: '1', element_id: 'wall' },
+        asset_kind: 'model',
+        root_path: 'assets/library/wall.glb',
+        local_files: ['assets/library/wall.glb'],
+        status: 'available',
+      }],
+      compositions: [],
+    }
+    await writeFile(manifestPath, JSON.stringify(base))
+    recordReady(workspace)
+    await writeFile(manifestPath, JSON.stringify({
+      ...base,
+      compositions: [{
+        id: 'level-one',
+        kind: 'scene',
+        members: [{ import_id: 'wall-kit', role: 'modular-walls' }],
+        recipe: { path: 'src/game/level-one.ts' },
+      }],
+    }))
+
+    expect(current(workspace).state).toBe('stale')
+  })
+
   test('records READY for the exact reviewed document revision', async () => {
     workspace = await createWorkspace()
     recordReady(workspace)

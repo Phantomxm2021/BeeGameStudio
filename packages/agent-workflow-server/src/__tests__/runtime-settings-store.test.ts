@@ -236,12 +236,14 @@ describe('runtime settings store', () => {
         webBrowserToolEnabled: false,
         bashClassifierEnabled: false,
         mcpSkillsEnabled: false,
+        resourceLibraryEnabled: false,
       }, { dataDir })
 
       expect(env.FEATURE_TREE_SITTER_BASH).toBe('0')
       expect(env.FEATURE_WEB_BROWSER_TOOL).toBe('0')
       expect(env.FEATURE_BASH_CLASSIFIER).toBe('0')
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
+      expect(env.BEEGAME_RESOURCE_LIBRARY_ENABLED).toBe('0')
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
     }

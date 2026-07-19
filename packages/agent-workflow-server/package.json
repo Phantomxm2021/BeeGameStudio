@@ -20,9 +20,11 @@
   "dependencies": {
     "@bee-game-studio/agent-workflow": "workspace:*",
     "@bee-game-studio/beegame-billing-core": "workspace:*",
+    "@bee-game-studio/beegame-resource-core": "workspace:*",
     "@bee-game-studio/beegame-skills-core": "workspace:*",
     "@bee-game-studio/security-core": "workspace:*",
     "@bee-game-studio/workflow-engine": "workspace:*",
-    "hono": "^4.12.15"
+    "hono": "^4.12.15",
+    "zod": "^4.3.6"
   }
 }

@@ -247,6 +247,57 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('作用范围')).not.toBeInTheDocument();
     });
 
+    it('offers an explicit session-scoped choice for sandbox network access', async () => {
+        const user = userEvent.setup();
+        const networkReview: PendingUserReviewItem = {
+            ...beeGamePermissionReview,
+            gate_id: 'network_permission',
+            title: 'SandboxNetworkAccess permission',
+            permission_tool_name: 'SandboxNetworkAccess',
+            artifact: { input: { host: 'registry.example', port: 443 } },
+        };
+        const { onApprovePlan } = renderChatPanel({
+            actionReview: networkReview,
+            pendingReviews: [networkReview],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        expect(screen.getByText('registry.example:443')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
+        expect(onApprovePlan).toHaveBeenCalledWith(
+            expect.objectContaining({ gate_id: 'network_permission' }),
+            undefined,
+            'approve',
+            'session',
+        );
+    });
+
+    it('offers a scoped session grant for Resource Library mutations', async () => {
+        const user = userEvent.setup();
+        const resourceReview: PendingUserReviewItem = {
+            ...beeGamePermissionReview,
+            gate_id: 'resource_library_permission',
+            title: 'ResourceLibrary permission',
+            permission_tool_name: 'ResourceLibrary',
+            artifact: { input: { action: 'browse_packs' } },
+        };
+        const { onApprovePlan } = renderChatPanel({
+            actionReview: resourceReview,
+            pendingReviews: [resourceReview],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
+        expect(onApprovePlan).toHaveBeenCalledWith(
+            expect.objectContaining({ gate_id: 'resource_library_permission' }),
+            undefined,
+            'approve',
+            'session',
+        );
+    });
+
     it('uses the BeeGame dock styling for the normal composer', () => {
         renderChatPanel({
             actionReview: undefined,

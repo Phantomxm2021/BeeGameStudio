@@ -29,7 +29,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
     return value === key ? fallbackCopy[key] ?? key : value
   }
   const [name, setName] = useState(pack.name)
-  const [styles, setStyles] = useState<string[]>(() => pack.style.split('/').map((value) => value.trim()).filter(Boolean))
+  const [styles, setStyles] = useState<string[]>(() => pack.styles?.length ? [...pack.styles] : pack.style.split('/').map((value) => value.trim()).filter(Boolean))
   const [dimension, setDimension] = useState(pack.dimension)
   const [gameTypes, setGameTypes] = useState<string[]>(() => [...(pack.gameTypes || [])])
   const [primaryCategory, setPrimaryCategory] = useState<ResourcePackPrimaryCategory>(pack.primaryCategory)
@@ -59,7 +59,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
     try {
       if (cover) await onUploadCover(cover)
       await onSave({
-        name: name.trim(), style: styles.join(' / '), dimension, primaryCategory, gameTypes,
+        name: name.trim(), styles, dimension, primaryCategory, gameTypes,
         description: description.trim(), tags: splitList(tags), source: source.trim(), author: author.trim(),
         license: license.trim(), licenseEvidence: licenseEvidence.trim(), compatibleEngines: splitList(compatibleEngines), version: version.trim(),
       })

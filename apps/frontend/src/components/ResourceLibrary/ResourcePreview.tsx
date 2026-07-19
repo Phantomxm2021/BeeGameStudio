@@ -53,10 +53,12 @@ type ResourcePreviewProps = {
   onMetrics?: (metrics: ModelMetrics) => void
   materialTextureBindings?: MaterialTextureBindings
   textureUrls?: Readonly<Record<string, string>>
+  externalResourceUrls?: Readonly<Record<string, string>>
+  externalReferences?: readonly string[]
   onPreviewError?: (error: Error) => void
 }
 
-export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls, onPreviewError }: ResourcePreviewProps) {
+export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls, externalResourceUrls, externalReferences, onPreviewError }: ResourcePreviewProps) {
   const renderer = renderPreview(element)
   const extension = extensionFor(element)
 
@@ -66,7 +68,7 @@ export function ResourcePreview({ element, url, onMetrics, materialTextureBindin
   if (renderer === 'font') return <FontPreview url={url} element={element} onPreviewError={onPreviewError} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
   if (renderer === 'text') return <SafeTextPreview url={url} onPreviewError={onPreviewError} />
-  if (renderer === 'model') return <ModelPreview url={url} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} />
+  if (renderer === 'model') return <ModelPreview url={url} sourcePath={element.path} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} externalResourceUrls={externalResourceUrls} externalReferences={externalReferences} />
   return <DocumentCard element={element} url={url} />
 }
 

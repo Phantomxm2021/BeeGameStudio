@@ -118,6 +118,7 @@ export interface ReviewDisplayModel {
   gate_id: string;
   type?: string;
   title?: string;
+  permission_tool_name?: string;
   task_id?: string | null;
   gate_kind?: string;
   user_action_kind?: string;
@@ -326,6 +327,7 @@ export const toReviewDisplayModel = (review: PendingUserReviewItem): ReviewDispl
   gate_id: trimString(review.gate_id),
   type: trimString(review.type) || undefined,
   title: trimString(review.title) || undefined,
+  permission_tool_name: trimString(review.permission_tool_name) || undefined,
   task_id: trimString(review.task_id) || undefined,
   gate_kind: trimString(review.gate_kind) || undefined,
   user_action_kind: trimString(review.user_action_kind) || undefined,

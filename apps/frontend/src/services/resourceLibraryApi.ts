@@ -15,6 +15,7 @@ export type ResourcePackSummary = {
   id: string
   name: string
   style: string
+  styles?: readonly string[]
   gameTypes?: readonly string[]
   dimension: '2D' | '3D' | 'agnostic'
   primaryCategory: ResourcePackPrimaryCategory
@@ -30,12 +31,13 @@ export type ResourcePackSummary = {
   licenseEvidence?: string
   compatibleEngines?: readonly string[]
   deprecatedAt?: string
+  elementDefaults?: { usageTags?: readonly string[] }
   elementCount: number
 }
 
 export type CreateResourcePackInput = {
   name: string
-  style: string
+  styles: string[]
   dimension: '2D' | '3D' | 'agnostic'
   primaryCategory: ResourcePackPrimaryCategory
   gameTypes: string[]
@@ -49,11 +51,12 @@ export type CreateResourcePackInput = {
   licenseEvidence?: string
   compatibleEngines?: string[]
   deprecatedAt?: string
+  elementDefaults?: { usageTags?: readonly string[] }
 }
 
 export type UpdateResourcePackInput = Partial<Pick<
   CreateResourcePackInput,
-  'name' | 'style' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version' | 'description' | 'tags' | 'source' | 'author' | 'licenseEvidence' | 'compatibleEngines' | 'deprecatedAt'
+  'name' | 'styles' | 'dimension' | 'primaryCategory' | 'gameTypes' | 'categories' | 'license' | 'version' | 'description' | 'tags' | 'source' | 'author' | 'licenseEvidence' | 'compatibleEngines' | 'deprecatedAt' | 'elementDefaults'
 >>
 
 export type ResourceElement = {
@@ -66,6 +69,16 @@ export type ResourceElement = {
   preview?: { kind: string; path: string }
   specs: Record<string, string | number | boolean | null>
   usageTags?: readonly string[]
+  usageTagsMode?: 'inherit' | 'override' | 'manual-only'
+  usageTagsSource?: 'element' | 'folder' | 'pack' | 'none'
+  assetKind?: string | null
+  capabilities?: readonly string[]
+  contentProfile?: {
+    packaging: 'self-contained' | 'external-dependencies' | 'unknown'
+    components: readonly { id: string; kind: string; name?: string; roles?: readonly string[]; specs?: Record<string, string | number | boolean>; skeletonSignature?: string }[]
+    inspection: { status: 'complete' | 'partial' | 'unavailable'; source: 'server' | 'client' | 'admin'; inspectedAt?: string; inspectorVersion?: string }
+  }
+  relations?: readonly { kind: string; targetElementId: string; role?: string; required?: boolean }[]
   dependencies: readonly string[]
   dependencyBindings?: readonly { referencePath: string; dependencyElementId: string; kind?: string }[]
   status: string
@@ -73,10 +86,11 @@ export type ResourceElement = {
   dimensionOverride?: '2D' | '3D' | 'agnostic'
 }
 
-export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string }
+export type ResourceFolder = { id: string; packId: string; name: string; parentId?: string; path: string; elementDefaults?: { usageTags?: readonly string[] } }
 
 export type ResourcePublishIssue = { code: string; message: string; elementId?: string }
 export type ResourcePublishReadiness = { blocking: readonly ResourcePublishIssue[]; warnings: readonly ResourcePublishIssue[]; canPublish: boolean }
+export type ResourceProcessingJob = { id: string; packId: string; kind: 'inspect-elements'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; totalItems: number; completedItems: number; failedItems: number; failures?: readonly { elementId: string; error: string }[]; createdAt: string; updatedAt: string }
 export type ResourceElementUploadOptions = {
   signal?: AbortSignal;
   onProgress?: (loaded: number, total: number) => void;
@@ -193,13 +207,13 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       const result = await request<{ folders: ResourceFolder[] }>(`/api/resource-packs/${encodeURIComponent(packId)}/folders`)
       return result.folders
     },
-    async createFolder(packId: string, input: { id?: string; name: string; parentId?: string }): Promise<ResourceFolder> {
+    async createFolder(packId: string, input: { id?: string; name: string; parentId?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder creation failed (${response.status})`, response.status, result.error?.code || 'resource_folder_create_failed')
       return result.folder
     },
-    async updateFolder(packId: string, folderId: string, input: { name: string }): Promise<ResourceFolder> {
+    async updateFolder(packId: string, folderId: string, input: { name?: string; elementDefaults?: ResourceFolder['elementDefaults'] }): Promise<ResourceFolder> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/folders/${encodeURIComponent(folderId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       const result = await response.json() as { folder?: ResourceFolder; error?: { code?: string; message?: string } }
       if (!response.ok || !result.folder) throw new ResourceLibraryApiError(result.error?.message || `Folder update failed (${response.status})`, response.status, result.error?.code || 'resource_folder_update_failed')
@@ -238,6 +252,38 @@ export function createResourceLibraryApi(fetchImpl: ResourceFetch = authenticate
       const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
       if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element update failed (${response.status})`, response.status, result.error?.code || 'element_update_failed')
       return result.element
+    },
+    async inspectElement(packId: string, elementId: string): Promise<ResourceElement> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}/inspection`, { method: 'POST' })
+      const result = await response.json() as { element?: ResourceElement; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.element) throw new ResourceLibraryApiError(result.error?.message || `Element inspection failed (${response.status})`, response.status, result.error?.code || 'element_inspection_failed')
+      return result.element
+    },
+    async startProcessingJob(packId: string, elementIds?: string[]): Promise<ResourceProcessingJob> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(elementIds?.length ? { elementIds } : {}) }) })
+      const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing failed (${response.status})`, response.status, result.error?.code || 'resource_processing_failed')
+      return result.job
+    },
+    async getLatestProcessingJob(packId: string): Promise<ResourceProcessingJob | undefined> {
+      const result = await request<{ job: ResourceProcessingJob | null }>(`/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs`)
+      return result.job ?? undefined
+    },
+    async getProcessingJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
+      const result = await request<{ job: ResourceProcessingJob }>(`/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}`)
+      return result.job
+    },
+    async retryProcessingJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
+      const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing retry failed (${response.status})`, response.status, result.error?.code || 'resource_processing_retry_failed')
+      return result.job
+    },
+    async cancelProcessingJob(packId: string, jobId: string): Promise<ResourceProcessingJob> {
+      const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/processing-jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+      const result = await response.json() as { job?: ResourceProcessingJob; error?: { code?: string; message?: string } }
+      if (!response.ok || !result.job) throw new ResourceLibraryApiError(result.error?.message || `Resource processing cancellation failed (${response.status})`, response.status, result.error?.code || 'resource_processing_cancel_failed')
+      return result.job
     },
     async deleteElement(packId: string, elementId: string): Promise<void> {
       const response = await fetchImpl(`${baseUrl}/api/resource-packs/${encodeURIComponent(packId)}/elements/${encodeURIComponent(elementId)}`, { method: 'DELETE' })

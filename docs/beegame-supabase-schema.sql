@@ -291,6 +291,7 @@ create table if not exists public.beegame_resource_packs (
   id text primary key,
   name text not null,
   style text not null,
+  styles text[] not null default '{}',
   primary_category text not null default 'mixed' check (primary_category in ('2d-art', '3d-assets', 'animation-rig', 'ui-kit', 'vfx', 'audio', 'fonts', 'world-scene', 'mixed')),
   game_types jsonb not null default '[]'::jsonb,
   dimension text not null check (dimension in ('2D', '3D', 'agnostic')),
@@ -298,8 +299,16 @@ create table if not exists public.beegame_resource_packs (
   license text not null,
   version text not null,
   status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
+  element_defaults jsonb not null default '{}'::jsonb,
   cover_path text,
   element_count integer not null default 0 check (element_count >= 0),
+  description text,
+  tags text[] not null default '{}',
+  source text,
+  author text,
+  license_evidence text,
+  compatible_engines text[] not null default '{}',
+  deprecated_at timestamptz,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -314,6 +323,12 @@ create table if not exists public.beegame_resource_elements (
   kind text not null,
   preview jsonb,
   specs jsonb not null default '{}'::jsonb,
+  usage_tags text[] not null default '{}',
+  usage_tags_mode text not null default 'inherit' check (usage_tags_mode in ('inherit', 'override', 'manual-only')),
+  asset_kind text,
+  capabilities text[] not null default '{}',
+  content_profile jsonb,
+  relations jsonb not null default '[]'::jsonb,
   dependencies jsonb not null default '[]'::jsonb,
   dependency_bindings jsonb not null default '[]'::jsonb,
   status text not null default 'ready' check (status in ('ready', 'hidden', 'archived')),
@@ -330,16 +345,178 @@ create table if not exists public.beegame_resource_folders (
   name text not null,
   parent_id text references public.beegame_resource_folders(id) on delete cascade,
   path text not null,
+  element_defaults jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (pack_id, path)
 );
+
+create table if not exists public.beegame_resource_processing_jobs (
+  id text primary key,
+  pack_id text not null references public.beegame_resource_packs(id) on delete cascade,
+  kind text not null check (kind in ('inspect-elements')),
+  status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  total_items integer not null default 0 check (total_items >= 0),
+  completed_items integer not null default 0 check (completed_items >= 0),
+  failed_items integer not null default 0 check (failed_items >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_resource_processing_items (
+  id text primary key,
+  job_id text not null references public.beegame_resource_processing_jobs(id) on delete cascade,
+  element_id text not null references public.beegame_resource_elements(id) on delete cascade,
+  status text not null check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  attempts integer not null default 0 check (attempts >= 0),
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (job_id, element_id)
+);
+
+create index if not exists beegame_resource_processing_jobs_pack_status_idx
+  on public.beegame_resource_processing_jobs (pack_id, status, created_at desc);
+create index if not exists beegame_resource_processing_items_job_status_idx
+  on public.beegame_resource_processing_items (job_id, status, created_at);
+
+alter table public.beegame_resource_packs
+  add column if not exists element_defaults jsonb not null default '{}'::jsonb;
+alter table public.beegame_resource_packs
+  add column if not exists styles text[] not null default '{}';
+alter table public.beegame_resource_packs
+  add column if not exists description text,
+  add column if not exists tags text[] not null default '{}',
+  add column if not exists source text,
+  add column if not exists author text,
+  add column if not exists license_evidence text,
+  add column if not exists compatible_engines text[] not null default '{}',
+  add column if not exists deprecated_at timestamptz;
+update public.beegame_resource_packs
+set styles = array(
+  select btrim(value)
+  from unnest(string_to_array(style, '/')) as value
+  where btrim(value) <> ''
+)
+where cardinality(styles) = 0 and btrim(style) <> '';
+
+create or replace view public.beegame_resource_pack_catalog
+with (security_invoker = true)
+as
+select
+  p.id as pack_id,
+  p.version as pack_version,
+  p.name as pack_name,
+  p.style,
+  case when cardinality(p.styles) > 0 then p.styles else array[p.style] end as styles,
+  array(select jsonb_array_elements_text(p.game_types)) as game_types,
+  p.dimension,
+  p.primary_category,
+  coalesce(array_agg(distinct e.category) filter (where e.id is not null), '{}') as categories,
+  coalesce(p.tags, '{}') as tags,
+  count(e.id)::integer as ready_element_count,
+  coalesce(array_agg(distinct e.asset_kind) filter (where e.asset_kind is not null), '{}') as asset_kinds,
+  coalesce(array(select distinct unnest(e2.usage_tags) from public.beegame_resource_elements e2 where e2.pack_id = p.id and e2.status = 'ready'), '{}') as usage_tags,
+  coalesce(array(select distinct unnest(e3.capabilities) from public.beegame_resource_elements e3 where e3.pack_id = p.id and e3.status = 'ready'), '{}') as capabilities,
+  coalesce(array_agg(distinct lower(reverse(split_part(reverse(e.path), '.', 1)))) filter (where e.id is not null and e.path like '%.%'), '{}') as formats,
+  p.description,
+  p.license,
+  p.author,
+  p.source,
+  coalesce(p.compatible_engines, '{}') as compatible_engines
+from public.beegame_resource_packs p
+left join public.beegame_resource_elements e on e.pack_id = p.id and e.status = 'ready'
+where p.status = 'published'
+group by p.id;
+alter table public.beegame_resource_folders
+  add column if not exists element_defaults jsonb not null default '{}'::jsonb;
+alter table public.beegame_resource_elements
+  add column if not exists usage_tags_mode text not null default 'inherit';
+update public.beegame_resource_elements
+set usage_tags_mode = 'override'
+where usage_tags_mode = 'inherit' and cardinality(usage_tags) > 0;
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_usage_tags_mode_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_usage_tags_mode_check
+  check (usage_tags_mode in ('inherit', 'override', 'manual-only'));
 
 alter table public.beegame_resource_elements
   drop constraint if exists beegame_resource_elements_status_check;
 alter table public.beegame_resource_elements
   add constraint beegame_resource_elements_status_check
   check (status in ('queued', 'uploading', 'ready', 'failed', 'hidden', 'archived'));
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_asset_kind_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_asset_kind_check
+  check (asset_kind is null or asset_kind in (
+    'image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas', 'frame-animation',
+    'tileset', 'tilemap', 'mesh', 'model', 'scene', 'material', 'rig', 'animation-clip',
+    'animation-library', 'ui-document', 'ui-screen', 'font', 'audio-clip', 'audio-cue',
+    'audio-bank', 'music', 'ambience', 'voice', 'vfx', 'shader', 'physical-material',
+    'collider', 'input-profile', 'data'
+  ));
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_capabilities_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_capabilities_check
+  check (capabilities <@ array[
+    'alpha', 'tileable', 'nine-slice', 'sprite-slicing', 'frame-sequence', 'atlas-regions',
+    'tile-collision', 'skinned', 'rigged', 'contains-animations', 'contains-materials',
+    'contains-textures', 'morph-targets',
+    'lod', 'collision', 'navigation', 'modular', 'connection-points', 'scene-layout',
+    'spawn-markers', 'objective-markers', 'ui-states', 'focus-navigation', 'safe-area',
+    'particle', 'flipbook', 'trail', 'spatial-audio', 'loop-points', 'audio-variants',
+    'physical-properties', 'ragdoll', 'input-actions', 'touch-controls', 'gamepad-controls'
+  ]::text[]);
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_content_profile_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_content_profile_check
+  check (
+    content_profile is null or (
+      jsonb_typeof(content_profile) = 'object'
+      and content_profile ?& array['packaging', 'components', 'inspection']
+      and content_profile->>'packaging' in ('self-contained', 'external-dependencies', 'unknown')
+      and jsonb_typeof(content_profile->'components') = 'array'
+      and jsonb_typeof(content_profile->'inspection') = 'object'
+      and content_profile->'inspection' ?& array['status', 'source']
+      and content_profile->'inspection'->>'status' in ('complete', 'partial', 'unavailable')
+      and content_profile->'inspection'->>'source' in ('server', 'client', 'admin')
+    )
+  );
+
+create or replace function public.beegame_valid_resource_relations(value jsonb)
+returns boolean language sql immutable as $$
+  select jsonb_typeof(value) = 'array' and not exists (
+    select 1 from jsonb_array_elements(value) relation
+    where jsonb_typeof(relation) <> 'object'
+       or coalesce(relation->>'kind', '') not in (
+         'uses-texture', 'uses-material', 'uses-rig', 'animation-for', 'collision-for',
+         'lod-of', 'variant-of', 'component-of', 'audio-for', 'vfx-for'
+       )
+       or coalesce(relation->>'targetElementId', '') = ''
+       or (relation ? 'role' and coalesce(relation->>'role', '') = '')
+       or (relation ? 'required' and jsonb_typeof(relation->'required') <> 'boolean')
+  );
+$$;
+
+alter table public.beegame_resource_elements
+  drop constraint if exists beegame_resource_elements_relations_check;
+alter table public.beegame_resource_elements
+  add constraint beegame_resource_elements_relations_check
+  check (public.beegame_valid_resource_relations(relations));
+
+create index if not exists beegame_resource_elements_asset_kind_idx
+  on public.beegame_resource_elements (pack_id, asset_kind);
+create index if not exists beegame_resource_elements_capabilities_idx
+  on public.beegame_resource_elements using gin (capabilities);
+create index if not exists beegame_resource_elements_relations_idx
+  on public.beegame_resource_elements using gin (relations);
 
 create index if not exists beegame_resource_folders_pack_parent_idx
   on public.beegame_resource_folders (pack_id, parent_id, path);
@@ -1963,6 +2140,8 @@ alter table public.beegame_assets enable row level security;
 alter table public.beegame_resource_packs enable row level security;
 alter table public.beegame_resource_elements enable row level security;
 alter table public.beegame_resource_folders enable row level security;
+alter table public.beegame_resource_processing_jobs enable row level security;
+alter table public.beegame_resource_processing_items enable row level security;
 alter table public.beegame_resource_dependencies enable row level security;
 alter table public.beegame_previews enable row level security;
 alter table public.beegame_deployments enable row level security;
@@ -2087,6 +2266,16 @@ create policy "resource element platform owner access" on public.beegame_resourc
 
 drop policy if exists "resource folder platform owner access" on public.beegame_resource_folders;
 create policy "resource folder platform owner access" on public.beegame_resource_folders
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource processing job platform owner access" on public.beegame_resource_processing_jobs;
+create policy "resource processing job platform owner access" on public.beegame_resource_processing_jobs
+  for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+drop policy if exists "resource processing item platform owner access" on public.beegame_resource_processing_items;
+create policy "resource processing item platform owner access" on public.beegame_resource_processing_items
   for all using (public.beegame_is_platform_owner())
   with check (public.beegame_is_platform_owner());
 

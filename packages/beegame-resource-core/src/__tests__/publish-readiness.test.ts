@@ -8,7 +8,7 @@ const pack: ResourcePack = {
 }
 const ready: ResourceElement = {
   id: 'tree', packId: 'forest', name: 'Tree', path: 'models/tree.glb', category: 'models', kind: 'model',
-  specs: { size: 1024, mimeType: 'model/gltf-binary' }, usageTags: ['environment'], dependencies: [], status: 'ready',
+  assetKind: 'model', contentProfile: { packaging: 'self-contained', components: [{ id: 'mesh:0', kind: 'mesh' }], inspection: { status: 'complete', source: 'server' } }, specs: { size: 1024, mimeType: 'model/gltf-binary' }, usageTags: ['environment'], dependencies: [], status: 'ready',
 }
 
 describe('resource pack publish readiness', () => {
@@ -47,6 +47,25 @@ describe('resource pack publish readiness', () => {
     ]))
   })
 
+  test('does not require semantic usage tags on dependency-only files', () => {
+    const report = evaluateResourcePackPublishReadiness(pack, [{
+      ...ready,
+      dependencies: ['texture'],
+      dependencyBindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'texture' }],
+    }, {
+      ...ready,
+      id: 'texture',
+      name: 'base.png',
+      path: 'Textures/base.png',
+      kind: 'image',
+      assetKind: 'image',
+      contentProfile: undefined,
+      usageTags: [],
+    }])
+
+    expect(report.blocking.map(issue => issue.code)).not.toContain('usage_tags_missing')
+  })
+
   test('requires each detected external reference to be mapped to a ready dependency', () => {
     const dependent = {
       ...ready,
@@ -60,5 +79,33 @@ describe('resource pack publish readiness', () => {
 
     const resolved = evaluateResourcePackPublishReadiness(pack, [{ ...dependent, dependencyBindings: [{ referencePath: 'materials/paint.bin', dependencyElementId: 'paint' }] }, { ...ready, id: 'paint', path: 'materials/paint.bin' }])
     expect(resolved.blocking.map(issue => issue.code)).not.toContain('external_dependency_unmapped')
+  })
+
+  test('compares exporter references and mappings using portable normalized paths', () => {
+    const report = evaluateResourcePackPublishReadiness(pack, [{
+      ...ready,
+      specs: {
+        ...ready.specs,
+        externalReferences: JSON.stringify(['Textures\\paint.png']),
+        unresolvedTextureReferences: 'Textures\\paint.png',
+      },
+      dependencies: ['paint'],
+      dependencyBindings: [{ referencePath: 'Textures/paint.png', dependencyElementId: 'paint' }],
+    }, { ...ready, id: 'paint', path: 'Textures/paint.png' }])
+
+    expect(report.blocking.map(issue => issue.code)).not.toContain('external_dependency_unmapped')
+    expect(report.blocking.map(issue => issue.code)).not.toContain('unresolved_texture')
+  })
+
+  test('blocks a required semantic relation whose target is missing or not ready', () => {
+    const report = evaluateResourcePackPublishReadiness(pack, [{
+      ...ready,
+      id: 'run',
+      assetKind: 'animation-clip',
+      relations: [{ kind: 'animation-for', targetElementId: 'hero-rig', required: true }],
+    }])
+    expect(report.blocking).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'semantic_relation_missing', elementId: 'run' }),
+    ]))
   })
 })

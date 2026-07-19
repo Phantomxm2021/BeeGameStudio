@@ -1,70 +1,134 @@
 import { describe, expect, test } from 'bun:test'
-import { createInMemoryResourceRepository } from '@bee-game-studio/beegame-resource-core'
+import {
+  createInMemoryResourceRepository,
+  type ResourceElement,
+  type ResourcePack,
+  type ResourceUsageTag,
+} from '@bee-game-studio/beegame-resource-core'
 import { createBeeGameResourceServerApp } from '../app'
 
-describe('resource selection route', () => {
-  test('returns signed published resource selections for valid requirements', async () => {
+const pack: ResourcePack = {
+  id: 'modular-kit', name: 'Modular Kit', style: 'Stylized', gameTypes: ['Action'],
+  dimension: '3D' as const, primaryCategory: '3d-assets', categories: ['models'],
+  license: 'internal', version: '1.0.0', status: 'published' as const,
+}
+
+describe('agentic resource exploration routes', () => {
+  test('returns an unsigned Pack catalog without authored requirement roles', async () => {
+    const app = appFor({
+      packs: [pack],
+      elements: [
+        element('ground', 'models/ground.glb', ['terrain']),
+        element('tower', 'models/tower.glb', ['building']),
+      ],
+    })
+    const response = await post(app, '/api/resource-catalog/packs', { filters: { dimensions: ['3D'], formats: ['glb'] } })
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0]).toEqual(expect.objectContaining({ packId: pack.id, readyElementCount: 2 }))
+    expect(body.items[0]).not.toHaveProperty('roles')
+    expect(body.facets.usageTags).toEqual(['building', 'terrain'])
+    expect(JSON.stringify(body)).not.toContain('sourceUrl')
+  })
+
+  test('returns reusable elements only from the Pack chosen by the Agent', async () => {
+    const app = appFor({ packs: [pack], elements: [{ ...element('ground', 'models/ground.glb', ['terrain']), specs: { boundsSizeY: 3, hasTextureCoordinates: true } }] })
+    const response = await post(app, `/api/resource-catalog/packs/${pack.id}/elements`, {
+      filters: { usageTags: ['terrain'], formats: ['glb'] },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(expect.objectContaining({
+      items: [expect.objectContaining({ packId: pack.id, elementId: 'ground', technicalFacts: { boundsSizeY: 3, hasTextureCoordinates: true } })],
+    }))
+  })
+
+  test('resolves signed dependency closures only for explicit selections', async () => {
     const repository = createInMemoryResourceRepository({
-      packs: [{ id: 'fantasy', name: 'Fantasy', style: 'Fantasy', gameTypes: ['RPG'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'published' }],
-      elements: [{ id: 'oak', packId: 'fantasy', name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, usageTags: ['vegetation'], dependencies: [], status: 'ready' }],
+      packs: [pack],
+      elements: [
+        {
+          ...element('scene', 'models/scene.glb', ['scene']), specs: { boundsSizeX: 8, hasNormals: true },
+          dependencies: ['texture'],
+          dependencyBindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'texture' }],
+        },
+        { ...element('texture', 'textures/base.png', ['terrain']), category: 'textures', kind: 'image' },
+      ],
     })
     const app = createBeeGameResourceServerApp({
       repository,
       currentUser: { id: 'admin', role: 'owner' },
-      getElementResourceUrl: async () => 'https://storage.example/signed-oak',
+      getElementResourceUrl: async path => `https://storage.example/${path}`,
     })
-
-    const response = await app.fetch(new Request('http://resource.test/api/resource-selections', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requirements: [{ slotId: 'environment.tree', category: 'models', dimension: '3D', acceptedFormats: ['glb'], styles: ['Fantasy'], tags: ['vegetation'] }] }),
-    }))
+    const response = await post(app, '/api/resource-imports/resolve', {
+      selections: [{ importId: 'scene-root', packId: pack.id, expectedPackVersion: pack.version, elementId: 'scene', selectionReason: ['Primary scene kit'] }],
+    })
 
     expect(response.status).toBe(200)
-    expect((await response.json()).selections).toEqual([expect.objectContaining({ packId: 'fantasy', elementId: 'oak', sourceUrl: 'https://storage.example/signed-oak' })])
-  })
-
-  test('does not return a draft Pack element', async () => {
-    const repository = createInMemoryResourceRepository({
-      packs: [{ id: 'draft', name: 'Draft', style: 'Fantasy', gameTypes: ['RPG'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
-      elements: [{ id: 'oak', packId: 'draft', name: 'Oak', path: 'models/oak.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }],
-    })
-    const app = createBeeGameResourceServerApp({ repository, currentUser: { id: 'admin', role: 'owner' }, getElementResourceUrl: async () => 'unexpected' })
-
-    const response = await app.fetch(new Request('http://resource.test/api/resource-selections', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requirements: [{ slotId: 'tree', category: 'models' }] }),
+    const body = await response.json()
+    expect(body.selections).toHaveLength(1)
+    expect(body.selections[0]).toEqual(expect.objectContaining({
+      importId: 'scene-root', elementId: 'scene', sourceUrl: expect.stringContaining('https://storage.example/'),
+      technicalFacts: { boundsSizeX: 8, hasNormals: true },
     }))
-
-    expect((await response.json()).selections).toEqual([])
+    expect(body.selections[0].dependencies).toHaveLength(1)
+    expect(body.selections[0].dependencies[0]).toEqual(expect.objectContaining({
+      elementId: 'texture', referencePath: 'Textures/base.png', sourceUrl: expect.stringContaining('https://storage.example/'),
+    }))
   })
 
-  test('rejects unrecognized project usage tags instead of silently yielding no match', async () => {
+  test('does not expose draft Packs during exploration', async () => {
+    const app = appFor({
+      packs: [{ ...pack, status: 'draft' as const }],
+      elements: [element('ground', 'models/ground.glb', ['terrain'])],
+    })
+    const response = await post(app, `/api/resource-catalog/packs/${pack.id}/elements`, { filters: { formats: ['glb'] } })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: expect.objectContaining({ code: 'not_found' }) })
+  })
+
+  test('permits a service token only for exploration and explicit resolution', async () => {
     const app = createBeeGameResourceServerApp({
       repository: createInMemoryResourceRepository({ packs: [], elements: [] }),
-      currentUser: { id: 'admin', role: 'owner' },
-      getElementResourceUrl: async () => 'https://storage.example/unused',
+      currentUser: { id: 'viewer', role: 'viewer' },
+      serviceSelectionToken: 'resource-service-token',
+      getElementResourceUrl: async () => 'unused',
     })
-
-    const response = await app.fetch(new Request('http://resource.test/api/resource-selections', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requirements: [{ slotId: 'slot', tags: ['unclassified-free-text'] }] }),
-    }))
-
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: { code: 'invalid_selection_request', message: 'Resource requirement 1 tags contain unsupported values' } })
-  })
-
-  test('permits the dedicated workflow service token only for resource selection', async () => {
-    const repository = createInMemoryResourceRepository({ packs: [], elements: [] })
-    const app = createBeeGameResourceServerApp({
-      repository, currentUser: { id: 'viewer', role: 'viewer' }, serviceSelectionToken: 'resource-service-token', getElementResourceUrl: async () => 'unexpected',
-    })
-    const selection = await app.fetch(new Request('http://resource.test/api/resource-selections', {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-beegame-resource-service-token': 'resource-service-token' }, body: JSON.stringify({ requirements: [{ slotId: 'tree' }] }),
-    }))
+    const exploration = await post(app, '/api/resource-catalog/packs/empty/elements', { filters: { formats: ['glb'] } }, 'resource-service-token')
     const management = await app.fetch(new Request('http://resource.test/api/resource-packs', {
       headers: { 'x-beegame-resource-service-token': 'resource-service-token' },
     }))
-    expect(selection.status).toBe(200)
+
+    expect(exploration.status).toBe(404)
     expect(management.status).toBe(403)
   })
 })
+
+function appFor(seed: Parameters<typeof createInMemoryResourceRepository>[0]) {
+  return createBeeGameResourceServerApp({
+    repository: createInMemoryResourceRepository(seed),
+    currentUser: { id: 'admin', role: 'owner' },
+    getElementResourceUrl: async path => `https://storage.example/${path}`,
+  })
+}
+
+function element(id: string, path: string, usageTags: ResourceUsageTag[]): ResourceElement {
+  return {
+    id, packId: pack.id, name: id, path, category: 'models', kind: 'model',
+    assetKind: 'model' as const, specs: {}, usageTags, dependencies: [], status: 'ready' as const,
+  }
+}
+
+function post(app: ReturnType<typeof createBeeGameResourceServerApp>, path: string, body: unknown, token?: string) {
+  return app.fetch(new Request(`http://resource.test${path}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { 'x-beegame-resource-service-token': token } : {}),
+    },
+    body: JSON.stringify(body),
+  }))
+}

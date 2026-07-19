@@ -828,6 +828,7 @@ describe('SettingsMenu model settings', () => {
             webBrowserToolEnabled: false,
             bashClassifierEnabled: false,
             mcpSkillsEnabled: false,
+            resourceLibraryEnabled: true,
         });
 
         renderSettings({ onClose });
@@ -1022,6 +1023,7 @@ describe('SettingsMenu model settings', () => {
             webBrowserToolEnabled: false,
             bashClassifierEnabled: false,
             mcpSkillsEnabled: false,
+            resourceLibraryEnabled: true,
         });
         saveWebToolsConfig.mockResolvedValue({
             webSearchAdapter: 'tavily',
@@ -1051,6 +1053,7 @@ describe('SettingsMenu model settings', () => {
             webBrowserToolEnabled: false,
             bashClassifierEnabled: false,
             mcpSkillsEnabled: false,
+            resourceLibraryEnabled: true,
         }));
         expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
     });

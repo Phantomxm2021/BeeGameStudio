@@ -43,8 +43,11 @@ describe('native delivery agents', () => {
       expect(validator).toContain('named test and assertions actually exercise')
       expect(validator).toContain('generated siblings in authored source directories')
       expect(validator).toContain('assets/asset-manifest.json')
-      expect(validator).toContain('runtime asset load failure')
-      expect(validator).toContain('runtime_event_ids only as navigation declarations')
+      expect(validator).toContain('Runtime asset evidence must be observed during this Validator run')
+      expect(validator).toContain('dependency closures')
+      expect(validator).toContain('do not reconstruct or second-guess candidate ranking')
+      expect(validator).toContain('fixed Pack version')
+      expect(validator).toContain('Do not infer compatibility from platform or filenames')
 
       const validatorFrontmatter = readMaterializedFrontmatter(validator)
       expect(validatorFrontmatter.has('background')).toBe(false)
@@ -65,7 +68,10 @@ describe('native delivery agents', () => {
       expect(reviewer).toContain('legacy or invented root shapes')
       expect(reviewer).toContain('whose task text begins with its stable machine-readable identifier')
       expect(reviewer).toContain('asset_format_capabilities to be one flat array of format strings')
-      expect(reviewer).toContain('does not change the approved design contract by itself')
+      expect(reviewer).toContain('project_target.resource_library_usage')
+      expect(reviewer).toContain('Under required usage')
+      expect(reviewer).toContain('Resource Library results are alternatives chosen by Claude Code')
+      expect(reviewer).toContain('mutable integration state is validated later')
     } finally {
       await rm(dataDir, { recursive: true, force: true })
     }

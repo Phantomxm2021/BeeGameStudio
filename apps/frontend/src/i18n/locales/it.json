@@ -188,6 +188,7 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
+      "replanWithAgent": "Chiedi all’agente di esplorare le risorse",
       "required": "Required",
       "optional": "Optional",
       "placeholder": "Placeholder",
@@ -200,7 +201,9 @@
       "target": "Target",
       "formats": "Formats",
       "specs": "Specs",
-      "noPurpose": "No purpose provided"
+      "noPurpose": "No purpose provided",
+      "compositions": "Composizioni di risorse",
+      "members": "membri"
     },
     "savedPrefixSeparator": ": "
   },
@@ -253,6 +256,12 @@
           "description": "Include risorse MCP skill:// nel sistema skill.",
           "note": "La qualità dipende dalle risorse del MCP server e richiede feature all’avvio.",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "Libreria risorse",
+          "description": "Consente agli agenti di cercare e integrare risorse di gioco gestite.",
+          "note": "Vale per le nuove sessioni; le credenziali restano esclusivamente sul server.",
+          "scope": "newSession"
         }
       }
     },

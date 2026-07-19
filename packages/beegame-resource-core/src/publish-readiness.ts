@@ -26,6 +26,10 @@ export function evaluateResourcePackPublishReadiness(
   const warnings: ResourcePublishIssue[] = []
   const activeElements = elements.filter((element) => element.status !== 'archived')
   const readyElements = activeElements.filter((element) => element.status === 'ready')
+  const dependencyElementIds = new Set(activeElements.flatMap(element => [
+    ...element.dependencies,
+    ...(element.dependencyBindings ?? []).map(binding => binding.dependencyElementId),
+  ]))
 
   if (!pack.license.trim() || ['unassigned', 'unknown', 'none'].includes(pack.license.trim().toLowerCase())) {
     blocking.push({ code: 'license_missing', message: 'Pack license must be recorded before publishing' })
@@ -40,12 +44,15 @@ export function evaluateResourcePackPublishReadiness(
     if (['queued', 'uploading', 'failed'].includes(element.status)) {
       blocking.push({ code: 'element_not_ready', message: `Element ${element.name} is not ready`, elementId: element.id })
     }
-    const unresolvedTextures = element.specs.unresolvedTextureReferences
-    if (typeof unresolvedTextures === 'string' && unresolvedTextures.trim()) {
+    const externalReferences = externalReferencePaths(element.specs.externalReferences)
+    const boundReferences = new Set((element.dependencyBindings ?? []).flatMap(binding => {
+      const normalized = normalizeExternalReferencePath(binding.referencePath)
+      return normalized ? [normalized] : []
+    }))
+    const unresolvedTextures = externalReferencePaths(element.specs.unresolvedTextureReferences)
+    if (unresolvedTextures.some(reference => !boundReferences.has(reference))) {
       blocking.push({ code: 'unresolved_texture', message: `Element ${element.name} has unresolved texture references`, elementId: element.id })
     }
-    const externalReferences = externalReferencePaths(element.specs.externalReferences, element.specs.textureReferences, element.specs.materialReferences)
-    const boundReferences = new Set((element.dependencyBindings ?? []).map(binding => binding.referencePath))
     if (externalReferences.some(reference => !boundReferences.has(reference))) {
       blocking.push({ code: 'external_dependency_unmapped', message: `Element ${element.name} has external file references without dependency mappings`, elementId: element.id })
     }
@@ -55,8 +62,14 @@ export function evaluateResourcePackPublishReadiness(
     if (element.status === 'ready' && (typeof element.specs.mimeType !== 'string' || !element.specs.mimeType.trim())) {
       warnings.push({ code: 'mime_type_missing', message: `Element ${element.name} has no recorded MIME type`, elementId: element.id })
     }
-    if (element.status === 'ready' && !element.usageTags?.length) {
+    if (element.status === 'ready' && !dependencyElementIds.has(element.id) && !element.usageTags?.length) {
       blocking.push({ code: 'usage_tags_missing', message: `Element ${element.name} has no declared usage tags`, elementId: element.id })
+    }
+    if (element.status === 'ready' && !element.assetKind) {
+      warnings.push({ code: 'asset_kind_missing', message: `Element ${element.name} has no typed asset kind`, elementId: element.id })
+    }
+    if (element.status === 'ready' && element.kind === 'model' && (!element.contentProfile || element.contentProfile.inspection.status !== 'complete')) {
+      warnings.push({ code: 'content_profile_incomplete', message: `Element ${element.name} has not been fully inspected as a logical asset`, elementId: element.id })
     }
     if (element.specs.previewStatus === 'failed') {
       warnings.push({ code: 'preview_failed', message: `Element ${element.name} preview generation failed`, elementId: element.id })
@@ -85,6 +98,13 @@ export function evaluateResourcePackPublishReadiness(
         blocking.push({ code: 'dependency_binding_unlisted', message: `Element ${element.name} has a dependency mapping that is not declared in its dependency list`, elementId: element.id })
       }
     }
+    for (const relation of element.relations ?? []) {
+      if (!ids.has(relation.targetElementId)) {
+        blocking.push({ code: 'semantic_relation_missing', message: `Element ${element.name} has a semantic relation to a missing element`, elementId: element.id })
+      } else if (relation.required !== false && !readyIds.has(relation.targetElementId)) {
+        blocking.push({ code: 'semantic_relation_not_ready', message: `Element ${element.name} requires a semantic relation that is not ready`, elementId: element.id })
+      }
+    }
   }
 
   const seenPaths = new Map<string, string>()
@@ -110,13 +130,27 @@ function externalReferencePaths(...values: unknown[]): string[] {
     if (typeof value !== 'string' || !value.trim()) continue
     try {
       const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) references.push(...parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())))
-      else references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean))
+      if (Array.isArray(parsed)) references.push(...parsed.flatMap(item => typeof item === 'string' ? [normalizeExternalReferencePath(item)] : []).filter((item): item is string => Boolean(item)))
+      else references.push(...value.split(' · ').map(normalizeExternalReferencePath).filter((item): item is string => Boolean(item)))
     } catch {
-      references.push(...value.split(' · ').map(item => item.trim()).filter(Boolean))
+      references.push(...value.split(' · ').map(normalizeExternalReferencePath).filter((item): item is string => Boolean(item)))
     }
   }
   return [...new Set(references)]
+}
+
+function normalizeExternalReferencePath(value: string): string | undefined {
+  const source = value.trim().split('\\').join('/')
+  if (!source || source.startsWith('/') || source.includes(':')) return undefined
+  const parts: string[] = []
+  for (const part of source.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!parts.length) return undefined
+      parts.pop()
+    } else parts.push(part)
+  }
+  return parts.join('/') || undefined
 }
 
 export function assertResourcePackPublishable(pack: ResourcePack, elements: readonly ResourceElement[]): ResourcePublishReadiness {

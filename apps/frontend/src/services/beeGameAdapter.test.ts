@@ -2068,7 +2068,7 @@ describe('beeGameAdapter prompt rules', () => {
       '/api/projects/project_permission/permissions/tool_question',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ decision: 'allow', remember: false }),
+        body: JSON.stringify({ decision: 'allow', remember: false, scope: 'once' }),
       }),
     );
   });
@@ -3370,15 +3370,15 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/projects/project_runtime/assets' && !init?.method) {
         return jsonResponse({
-          version: 1,
-          slots: [{ id: 'title_logo', name: 'Title logo' }],
+          version: 5,
+          requirements: [{ id: 'title_logo', name: 'Title logo' }],
         });
       }
       if (path === '/api/projects/project_runtime/assets/title_logo/upload' && init?.method === 'POST') {
         return jsonResponse({
           path: 'public/assets/title-logo.png',
-          slot: { id: 'title_logo' },
-          manifest: { version: 1, slots: [{ id: 'title_logo' }] },
+          requirement: { id: 'title_logo' },
+          manifest: { version: 5, requirements: [{ id: 'title_logo' }] },
         });
       }
       if (path.includes('/api/beegame-sessions/') && (path.includes('/preview') || path.includes('/deployments') || path.includes('/assets'))) {
@@ -3407,7 +3407,7 @@ describe('beeGameAdapter prompt rules', () => {
     expect(deployments).toEqual([]);
     expect(deployment.url).toBe('/deployments/deploy_project/');
     expect(rollback.url).toBe('/deployments/deploy_rollback/');
-    expect(assets.slots[0]?.id).toBe('title_logo');
+    expect(assets.requirements[0]?.id).toBe('title_logo');
     expect(upload.path).toBe('public/assets/title-logo.png');
   });
 

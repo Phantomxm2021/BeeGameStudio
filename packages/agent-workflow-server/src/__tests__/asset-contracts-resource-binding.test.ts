@@ -1,66 +1,46 @@
 import { describe, expect, test } from 'bun:test'
-import { bindBeeGameLibraryResource, bindBeeGameLibraryResourceInWorkspace, effectiveAssetFormats, integrateBeeGameLibraryResourceInWorkspace, normalizeBeeGameAssetManifest, readBeeGameAssetManifest, removeBeeGameAssetIntegrationInWorkspace, unbindBeeGameLibraryResource } from '../beegame/asset-contracts'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import {
+  effectiveAssetFormats,
+  importBeeGameLibraryResourceInWorkspace,
+  normalizeBeeGameAssetManifest,
+  readBeeGameAssetManifest,
+  uploadBeeGameAsset,
+} from '../beegame/asset-contracts'
 
-describe('BeeGame resource bindings', () => {
-  test('intersects explicit slot formats with the target runtime format contract', () => {
+describe('BeeGame resource contract migration', () => {
+  test('intersects explicit requirement formats with the target runtime format contract', () => {
     const manifest = normalizeBeeGameAssetManifest({
       version: 1,
       project_target: { asset_format_capabilities: ['glb', 'png', 'ogg'] },
-      slots: [{ id: 'slot-1', resource_requirement: { accepted_formats: ['fbx', 'glb'] } }],
+      slots: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['fbx', 'glb'] } }],
     })
-
-    expect(effectiveAssetFormats(manifest.slots[0]!, manifest.project_target)).toEqual(['glb'])
+    expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual(['glb'])
   })
 
-  test('does not permit automatic format selection without project target capabilities', () => {
+  test('does not claim technical compatibility without project target capabilities', () => {
     const manifest = normalizeBeeGameAssetManifest({
       version: 1,
-      slots: [{ id: 'slot-1', resource_requirement: { accepted_formats: ['glb'] } }],
+      slots: [{ id: 'requirement-1', resource_requirement: { accepted_formats: ['glb'] } }],
     })
-
-    expect(effectiveAssetFormats(manifest.slots[0]!, manifest.project_target)).toEqual([])
+    expect(effectiveAssetFormats(manifest.requirements[0]!, manifest.project_target)).toEqual([])
   })
 
-  test('binds a library selection without replacing the project target or user uploads', () => {
+  test('preserves structured requirements without inferring semantics from an id or label', () => {
     const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
-      slots: [{ id: 'environment.tree', target: { path: 'assets/environment' }, uploaded_files: ['assets/environment/placeholder.png'] }],
-    })
-
-    const result = bindBeeGameLibraryResource(manifest, 'environment.tree', {
-      pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb',
-      source_url: 'https://storage.example/signed-oak', selected_at: '2026-07-11T00:00:00.000Z',
-      selection_reason: ['category:models', 'style:Fantasy'],
-    })
-
-    expect(result.slot).toEqual(expect.objectContaining({
-      target: { path: 'assets/environment' }, uploaded_files: ['assets/environment/placeholder.png'],
-      resource_binding: expect.objectContaining({ element_id: 'oak-glb' }),
-    }))
-    expect(result.manifest.slots[0]?.resource_binding?.pack_id).toBe('fantasy-pack')
-  })
-
-  test('preserves explicit selection requirements without inferring them from a slot name', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
-      slots: [{
-        id: 'slot-1',
-        name: 'Display label',
+      version: 5,
+      requirements: [{
+        id: 'requirement-1', name: 'Display label',
         resource_requirement: {
-          category: 'models',
-          dimension: '3D',
-          accepted_formats: ['glb', 'fbx'],
-          styles: ['Stylized'],
-          game_types: ['Adventure'],
-          purpose: 'Player traversal obstacle',
+          category: 'models', dimension: '3D', accepted_formats: ['glb', 'fbx'],
+          styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle',
         },
       }],
+      imports: [], compositions: [],
     })
-
-    expect(manifest.slots[0]?.resource_requirement).toEqual({
+    expect(manifest.requirements[0]?.resource_requirement).toEqual({
       category: 'models', dimension: '3D', accepted_formats: ['glb', 'fbx'],
       styles: ['Stylized'], game_types: ['Adventure'], purpose: 'Player traversal obstacle',
     })
@@ -68,215 +48,140 @@ describe('BeeGame resource bindings', () => {
 
   test('keeps only canonical resource usage tags in a project requirement', () => {
     const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
-      slots: [{ id: 'slot-1', resource_requirement: { category: 'models', tags: ['character', 'unclassified-free-text'] } }],
+      version: 5,
+      requirements: [{ id: 'requirement-1', resource_requirement: { category: 'models', tags: ['character', 'free-text'] } }],
+      imports: [], compositions: [],
     })
-
-    expect(manifest.slots[0]?.resource_requirement).toEqual({ category: 'models', accepted_formats: [], styles: [], game_types: [], tags: ['character'], purpose: undefined })
+    expect(manifest.requirements[0]?.resource_requirement).toEqual({ category: 'models', accepted_formats: [], styles: [], game_types: [], tags: ['character'], purpose: undefined })
   })
 
   test('normalizes legacy slot dictionaries without inventing metadata from their keys', () => {
     const manifest = normalizeBeeGameAssetManifest({
-      version: '1.1.0',
-      integration_mode: 'filesystem',
+      version: '1.1.0', integration_mode: 'filesystem',
       slots: {
-        player_placeholder: {
-          slot_id: 'player_placeholder',
-          purpose: 'Player character model',
-          target_path: 'assets/models/player.fbx',
-          status: 'placeholder',
-          resource_requirement: { tags: ['character'], accepted_formats: ['fbx'] },
+        old_key: {
+          slot_id: 'player-placeholder', purpose: 'Player character model', target_path: 'assets/models/player.fbx',
+          status: 'placeholder', resource_requirement: { tags: ['character'], accepted_formats: ['fbx'] },
         },
       },
     })
-
     expect(manifest.project_target?.integration_mode).toBe('filesystem')
-    expect(manifest.slots).toEqual([expect.objectContaining({
-      id: 'player_placeholder',
-      target: expect.objectContaining({ path: 'assets/models/player.fbx' }),
+    expect(manifest.requirements).toEqual([expect.objectContaining({
+      id: 'player-placeholder', target: expect.objectContaining({ path: 'assets/models/player.fbx' }),
       resource_requirement: expect.objectContaining({ tags: ['character'], accepted_formats: ['fbx'] }),
     })])
   })
 
-  test('migrates explicit legacy replacement contracts without guessing an unsupported category', () => {
+  test('migrates a historical slot binding into an independent import exactly once', () => {
     const manifest = normalizeBeeGameAssetManifest({
-      version: '1.0.0',
-      integration_mode: 'filesystem',
-      assets: {
-        character: {
-          slot_id: 'hero-model',
-          purpose: 'Playable character',
-          status: 'placeholder',
-          replacement: {
-            target_path: 'assets/models/hero.glb',
-            resource_requirement: {
-              category: '3d_character',
-              accepted_formats: ['glb'],
-              styles: ['Stylized'],
-              game_types: ['Adventure'],
-              purpose: 'Rigged player character',
-            },
-          },
+      version: 4,
+      slots: [{
+        id: 'hero', status: 'integrated', uploaded_files: ['assets/models/hero.glb'],
+        integration_evidence: { runtime_event_ids: ['runtime.hero.loaded'] },
+        resource_binding: {
+          pack_id: 'character-pack', pack_version: '2.0.0', element_id: 'hero-root', element_path: 'models/hero.glb',
+          source_url: 'https://storage.invalid/signed', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['explicit-selection'],
         },
-      },
+      }],
     })
-
-    expect(manifest.project_target?.integration_mode).toBe('filesystem')
-    expect(manifest.slots).toEqual([expect.objectContaining({
-      id: 'hero-model',
-      target: expect.objectContaining({ path: 'assets/models/hero.glb' }),
-      resource_requirement: {
-        category: undefined,
-        accepted_formats: ['glb'],
-        styles: ['Stylized'],
-        game_types: ['Adventure'],
-        purpose: 'Rigged player character',
-      },
+    expect(manifest.imports).toEqual([expect.objectContaining({
+      id: 'legacy.hero', status: 'referenced', root_path: 'assets/models/hero.glb',
+      source: expect.objectContaining({ type: 'resource-library', pack_id: 'character-pack', element_id: 'hero-root' }),
     })])
   })
 
-  test('rejects an unknown asset slot', () => {
-    expect(() => bindBeeGameLibraryResource({ version: 1, slots: [] }, 'missing', {
-      pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://storage.example/signed-oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],
-    })).toThrow('Asset slot not found: missing')
-  })
-
-  test('unbinds library provenance without deleting integrated project files', () => {
-    const manifest = normalizeBeeGameAssetManifest({
-      version: 1,
-      slots: [{ id: 'slot-1', status: 'integrated', uploaded_files: ['assets/models/tree.glb'], resource_binding: {
-        pack_id: 'library-pack', pack_version: '1.0.0', element_id: 'tree', source_url: 'https://resource.example/tree.glb', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],
-      } }],
-    })
-    const result = unbindBeeGameLibraryResource(manifest, 'slot-1')
-    expect(result.slot.resource_binding).toBeUndefined()
-    expect(result.slot.uploaded_files).toEqual(['assets/models/tree.glb'])
-    expect(result.slot.status).toBe('integrated')
-  })
-
-  test('persists a resource binding in the project asset manifest', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-binding-'))
+  test('records a user upload as an import instead of creating a Pack binding on the requirement', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-user-import-'))
     try {
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, slots: [{ id: 'tree' }] }))
-      await bindBeeGameLibraryResourceInWorkspace(workspace, 'tree', {
-        pack_id: 'fantasy-pack', pack_version: '1.2.0', element_id: 'oak-glb', source_url: 'https://storage.example/signed-oak', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: ['category:models'],
-      })
-      expect(JSON.parse(await readFile(join(workspace, 'assets/asset-manifest.json'), 'utf8')).slots[0].resource_binding.element_id).toBe('oak-glb')
+      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
+        version: 5,
+        project_target: { asset_format_capabilities: ['png'] },
+        requirements: [{ id: 'title-art', resource_requirement: { accepted_formats: ['png'] } }],
+        imports: [], compositions: [],
+      }))
+      const result = await uploadBeeGameAsset(workspace, 'title-art', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'title.png'))
+      expect(result.manifest.imports).toEqual([expect.objectContaining({ id: 'upload.title-art', source: { type: 'user-upload' }, status: 'available' })])
+      expect(result.requirement.resource_binding).toBeUndefined()
+      const persisted = JSON.parse(await readFile(join(workspace, 'assets/asset-manifest.json'), 'utf8'))
+      expect(persisted).toEqual(expect.objectContaining({ version: 5, imports: [expect.objectContaining({ id: 'upload.title-art' })] }))
+      expect(persisted.requirements[0].satisfied_by.import_ids).toEqual(['upload.title-art'])
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
   })
 
-  test('marks a bound slot missing when its copied library file was removed', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-missing-'))
+  test('marks a migrated import failed when its recorded project file no longer exists', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-missing-import-'))
     try {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{
-          id: 'slot-1', status: 'integrated', target: { path: 'assets/models/item.glb' },
-          resource_binding: { pack_id: 'library', pack_version: '1', element_id: 'item', source_url: 'https://storage.example/item', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] },
-        }],
+        version: 4,
+        slots: [{ id: 'item', status: 'integrated', uploaded_files: ['assets/models/item.glb'] }],
       }))
       const manifest = await readBeeGameAssetManifest(workspace)
-      expect(manifest.slots[0]).toEqual(expect.objectContaining({ status: 'missing', placeholder: true }))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
+      expect(manifest.imports?.[0]).toEqual(expect.objectContaining({ status: 'failed', error: expect.any(String) }))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
-  test('marks a manually uploaded slot missing when its declared target was removed', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-manual-resource-missing-'))
+  test('reuses a byte-identical dependency shared by several Pack elements', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-shared-dependency-'))
     try {
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{ id: 'slot-1', status: 'integrated', target: { path: 'public/assets/item.dat' }, uploaded_files: ['public/assets/item.dat'] }],
+        version: 5,
+        project_target: { asset_format_capabilities: ['fbx', 'png'] },
+        requirements: [], imports: [], compositions: [],
       }))
-      const manifest = await readBeeGameAssetManifest(workspace)
-      expect(manifest.slots[0]).toEqual(expect.objectContaining({ status: 'missing', placeholder: true, integration_error: expect.any(String) }))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
+      const fetchImpl = async (input: RequestInfo | URL) => new Response(
+        String(input).includes('texture') ? new Uint8Array([0x89, 0x50, 0x4e, 0x47]) : new Uint8Array([1, 2, 3]),
+      )
+      const dependency = {
+        key: 'texture', parent_key: 'root', element_id: 'texture-id', element_path: 'Textures/shared.png',
+        reference_path: 'Textures/shared.png', source_url: 'https://signed.example/texture', kind: 'texture',
+      }
+      await importBeeGameLibraryResourceInWorkspace(workspace, {
+        id: 'model-a', destination_path: 'assets/kit', pack_id: 'pack-a', pack_version: '1.0.0',
+        element_id: 'model-a-id', element_path: 'models/a.fbx', source_url: 'https://signed.example/model-a', dependencies: [dependency],
+      }, fetchImpl)
+      const result = await importBeeGameLibraryResourceInWorkspace(workspace, {
+        id: 'model-b', destination_path: 'assets/kit', pack_id: 'pack-a', pack_version: '1.0.0',
+        element_id: 'model-b-id', element_path: 'models/b.fbx', source_url: 'https://signed.example/model-b', dependencies: [dependency],
+      }, fetchImpl)
+
+      expect(result.resourceImport.local_files).toContain('assets/kit/Textures/shared.png')
+      await expect(readFile(join(workspace, 'assets/kit/Textures/shared.png'))).resolves.toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
-  test('removes recorded project integration files while preserving the pinned library binding', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-remove-resource-integration-'))
+  test('refuses to overwrite a shared dependency with different bytes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-conflicting-dependency-'))
     try {
-      await Bun.write(join(workspace, 'public/assets/item.glb'), new Uint8Array([1, 2, 3]))
       await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{
-          id: 'slot-1', status: 'uploaded', placeholder: false, uploaded_files: ['public/assets/item.glb'],
-          resource_binding: { pack_id: 'library', pack_version: '1', element_id: 'item', source_url: 'https://storage.example/item', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] },
-        }],
+        version: 5,
+        project_target: { asset_format_capabilities: ['fbx', 'png'] },
+        requirements: [], imports: [], compositions: [],
       }))
-
-      const result = await removeBeeGameAssetIntegrationInWorkspace(workspace, 'slot-1')
-
-      expect(result.removedPaths).toEqual(['public/assets/item.glb'])
-      expect(result.slot).toEqual(expect.objectContaining({ status: 'placeholder', placeholder: true, uploaded_files: [], resource_binding: expect.objectContaining({ element_id: 'item' }) }))
-      expect(await Bun.file(join(workspace, 'public/assets/item.glb')).exists()).toBe(false)
-    } finally { await rm(workspace, { recursive: true, force: true }) }
-  })
-
-  test('copies a bound filesystem resource and keeps the slot pending real project integration', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-integration-'))
-    try {
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, project_target: { asset_format_capabilities: ['glb'] }, slots: [{ id: 'tree', target: { path: 'assets/environment' }, integration_provider: { type: 'filesystem' } }] }))
-      await bindBeeGameLibraryResourceInWorkspace(workspace, 'tree', { pack_id: 'fantasy', pack_version: '1', element_id: 'oak', source_url: 'https://storage.example/oak.glb', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] })
-      const result = await integrateBeeGameLibraryResourceInWorkspace(workspace, 'tree', async () => new Response(new Uint8Array([1, 2, 3])))
-      expect(result.slot.status).toBe('uploaded')
-      await expect(readFile(join(workspace, 'assets/environment/oak.glb'))).resolves.toEqual(Buffer.from([1, 2, 3]))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
-  })
-
-  test('preserves the selected resource extension instead of disguising a GLB as an FBX target', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-format-'))
-    try {
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, project_target: { asset_format_capabilities: ['glb'] }, slots: [{ id: 'hero', target: { path: 'assets/models/hero.fbx' }, integration_provider: { type: 'filesystem' } }] }))
-      await bindBeeGameLibraryResourceInWorkspace(workspace, 'hero', { pack_id: 'library', pack_version: '1', element_id: 'hero-glb', element_path: 'models/hero.glb', source_url: 'https://storage.example/sign/opaque-token', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] })
-      const result = await integrateBeeGameLibraryResourceInWorkspace(workspace, 'hero', async () => new Response(new Uint8Array([1, 2, 3])))
-
-      expect(result.path).toBe('assets/models/hero.glb')
-      expect(result.slot.target?.path).toBe('assets/models/hero.glb')
-      await expect(readFile(join(workspace, 'assets/models/hero.glb'))).resolves.toEqual(Buffer.from([1, 2, 3]))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
-  })
-
-  test('rejects a library binary whose self-identifying format contradicts its declared path', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-format-mismatch-'))
-    try {
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, project_target: { asset_format_capabilities: ['mp3'] }, slots: [{ id: 'sound', target: { path: 'assets/sound.mp3' }, integration_provider: { type: 'filesystem' } }] }))
-      await bindBeeGameLibraryResourceInWorkspace(workspace, 'sound', { pack_id: 'library', pack_version: '1', element_id: 'sound', element_path: 'audio/sound.mp3', source_url: 'https://storage.example/sound', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] })
-      await expect(integrateBeeGameLibraryResourceInWorkspace(workspace, 'sound', async () => new Response(new TextEncoder().encode('OggS')))).rejects.toThrow('Resource binary format mismatch')
-    } finally { await rm(workspace, { recursive: true, force: true }) }
-  })
-
-  test('downgrades a legacy integrated slot when its copied binary contradicts its extension', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-legacy-contract-mismatch-'))
-    try {
-      await Bun.write(join(workspace, 'assets/models/item.fbx'), new TextEncoder().encode('glTF'))
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{ id: 'item', status: 'integrated', target: { path: 'assets/models/item.fbx' }, uploaded_files: ['assets/models/item.fbx'] }],
-      }))
-      const manifest = await readBeeGameAssetManifest(workspace)
-      expect(manifest.slots[0]).toEqual(expect.objectContaining({
-        status: 'failed',
-        integration_error: 'File format mismatch: expected .fbx, found glb',
-      }))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
-  })
-
-  test('copies a selected dependency closure into its declared relative layout', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-dependency-closure-'))
-    try {
-      await Bun.write(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ version: 1, project_target: { asset_format_capabilities: ['glb', 'png'] }, slots: [{ id: 'scene', target: { path: 'assets/models/scene.glb' }, integration_provider: { type: 'filesystem' } }] }))
-      await bindBeeGameLibraryResourceInWorkspace(workspace, 'scene', {
-        pack_id: 'library', pack_version: '1', element_id: 'scene', element_path: 'models/scene.glb', source_url: 'https://storage.example/scene.glb', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [],
-        dependencies: [{ key: 'root.0', parent_key: 'root', element_id: 'surface', element_path: 'materials/surface.png', reference_path: 'materials/surface.png', source_url: 'https://storage.example/surface.png' }],
-      })
-      const result = await integrateBeeGameLibraryResourceInWorkspace(workspace, 'scene', async input => {
-        const url = String(input)
-        return new Response(url.endsWith('surface.png') ? new Uint8Array([0x89, 0x50, 0x4e, 0x47]) : new Uint8Array([1, 2, 3]))
-      })
-      expect(result.slot.uploaded_files).toEqual(expect.arrayContaining(['assets/models/scene.glb', 'assets/models/materials/surface.png']))
-      await expect(readFile(join(workspace, 'assets/models/materials/surface.png'))).resolves.toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
-    } finally { await rm(workspace, { recursive: true, force: true }) }
+      let textureVersion = 1
+      const fetchImpl = async (input: RequestInfo | URL) => new Response(
+        String(input).includes('texture') ? new Uint8Array([0x89, 0x50, 0x4e, textureVersion]) : new Uint8Array([1, 2, 3]),
+      )
+      const dependency = {
+        key: 'texture', parent_key: 'root', element_id: 'texture-id', element_path: 'Textures/shared.png',
+        reference_path: 'Textures/shared.png', source_url: 'https://signed.example/texture', kind: 'texture',
+      }
+      await importBeeGameLibraryResourceInWorkspace(workspace, {
+        id: 'model-a', destination_path: 'assets/kit', pack_id: 'pack-a', pack_version: '1.0.0',
+        element_id: 'model-a-id', element_path: 'models/a.fbx', source_url: 'https://signed.example/model-a', dependencies: [dependency],
+      }, fetchImpl)
+      textureVersion = 2
+      await expect(importBeeGameLibraryResourceInWorkspace(workspace, {
+        id: 'model-b', destination_path: 'assets/kit', pack_id: 'pack-a', pack_version: '1.0.0',
+        element_id: 'model-b-id', element_path: 'models/b.fbx', source_url: 'https://signed.example/model-b', dependencies: [dependency],
+      }, fetchImpl)).rejects.toThrow('already exists with different content')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 })

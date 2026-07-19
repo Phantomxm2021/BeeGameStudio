@@ -79,14 +79,28 @@ describe('ResourcePackExplorer', () => {
     const onUpload = vi.fn()
     const onRenameFolder = vi.fn()
     const onDeleteFolder = vi.fn()
+    const onInspectAll = vi.fn()
     const persistedTree: ExplorerNode = { ...tree, children: [{ ...tree.children![0], folder: { id: 'models', packId: 'pack-1', name: 'Models', path: 'Models' } }] }
-    render(<ResourcePackExplorer tree={persistedTree} onElement={vi.fn()} onCreateFolder={onCreateFolder} onUploadToFolder={onUpload} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} labels={{ newFolder: 'New folder', upload: 'Upload files', rename: 'Rename', delete: 'Delete' }} />)
+    render(<ResourcePackExplorer tree={persistedTree} onElement={vi.fn()} onCreateFolder={onCreateFolder} onUploadToFolder={onUpload} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onInspectAll={onInspectAll} labels={{ newFolder: 'New folder', upload: 'Upload files', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete' }} />)
     fireEvent.contextMenu(screen.getByRole('tree'))
     expect(screen.getByText('New folder')).toBeInTheDocument()
     expect(screen.getByText('Upload files')).toBeInTheDocument()
+    expect(screen.getByText('Inspect unprocessed files')).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.contextMenu(screen.getByRole('treeitem', { name: 'Models' }))
     expect(screen.getByText('Rename')).toBeInTheDocument()
     expect(screen.getByText('Delete')).toBeInTheDocument()
+  })
+
+  test('offers explicit reinspection for an existing file', async () => {
+    const user = userEvent.setup()
+    const onInspectElement = vi.fn()
+    render(<ResourcePackExplorer tree={tree} onElement={vi.fn()} onInspectElement={onInspectElement} />)
+    await user.click(screen.getByRole('treeitem', { name: 'Models' }))
+
+    fireEvent.contextMenu(screen.getByRole('treeitem', { name: 'knight.glb' }))
+    await user.click(screen.getByText('Reinspect'))
+
+    expect(onInspectElement).toHaveBeenCalledWith(knight)
   })
 })

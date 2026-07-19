@@ -42,8 +42,23 @@ describe('in-memory resource repository', () => {
 
   test('lists elements by Pack and category', async () => {
     const repository = createInMemoryResourceRepository({ packs: [pack], elements: [element] })
-    await expect(repository.listElements('pack-1', 'characters')).resolves.toEqual([element])
+    await expect(repository.listElements('pack-1', 'characters')).resolves.toEqual([
+      { ...element, usageTagsMode: 'override', usageTagsSource: 'element' },
+    ])
     await expect(repository.listElements('pack-1', 'ui')).resolves.toEqual([])
+  })
+
+  test('resolves Pack and closest-folder usage defaults without changing technical metadata', async () => {
+    const repository = createInMemoryResourceRepository({
+      packs: [{ ...pack, elementDefaults: { usageTags: ['prop'] } }],
+      elements: [{ ...element, usageTags: undefined, usageTagsMode: 'inherit', path: 'characters/heroes/idle.png' }],
+    })
+    await repository.createFolder('pack-1', { id: 'characters', name: 'characters', elementDefaults: { usageTags: ['npc'] } })
+    await repository.createFolder('pack-1', { id: 'heroes', name: 'heroes', parentId: 'characters', elementDefaults: { usageTags: ['character'] } })
+
+    await expect(repository.getElement('pack-1', 'element-1')).resolves.toEqual(expect.objectContaining({
+      usageTags: ['character'], usageTagsMode: 'inherit', usageTagsSource: 'folder', kind: 'sprite-sheet',
+    }))
   })
 
   test('returns undefined for an unknown Pack', async () => {

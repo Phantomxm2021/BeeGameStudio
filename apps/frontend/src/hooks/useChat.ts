@@ -118,7 +118,8 @@ export interface UseChatReturn {
   approvePlan: (
     review: { gate_id: string; artifact_id?: string; artifact_version?: number; checkpoint_id?: string; commit_sha?: string; workspace_path?: string; workspace_ref?: string; binding?: ReviewBindingPayload },
     feedback?: string,
-    action?: 'approve' | 'revise' | 'reject'
+    action?: 'approve' | 'revise' | 'reject',
+    permissionScope?: 'once' | 'session'
   ) => Promise<void>;
 
   /**
@@ -1001,7 +1002,8 @@ export const useChat = ({
   const approvePlan = useCallback(async (
     review: ReviewBindingPayload & { gate_id: string; binding?: ReviewBindingPayload },
     feedback?: string,
-    action: 'approve' | 'revise' | 'reject' = 'approve'
+    action: 'approve' | 'revise' | 'reject' = 'approve',
+    permissionScope: 'once' | 'session' = 'once'
   ) => {
     const reviewSnapshot = pendingReviews.find((item) => String(item?.gate_id || '').trim() === String(review.gate_id || '').trim());
     try {
@@ -1032,7 +1034,8 @@ export const useChat = ({
         commit_sha: binding.commit_sha ?? review.commit_sha,
         workspace_path: binding.workspace_path ?? review.workspace_path ?? review.workspace_ref,
         workspace_ref: binding.workspace_ref ?? review.workspace_ref ?? review.workspace_path,
-        feedback
+        feedback,
+        permission_scope: permissionScope,
       }));
 
       removePendingReview(review.gate_id);

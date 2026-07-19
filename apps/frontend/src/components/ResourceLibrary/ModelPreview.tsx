@@ -17,20 +17,27 @@ export type ModelMetrics = {
   textureReferences: string[]
   unresolvedTextureReferences: string[]
   bounds: { width: number; height: number; depth: number }
+  components: Array<{
+    id: string
+    kind: 'mesh' | 'skinned-mesh' | 'skeleton' | 'animation-clip' | 'material' | 'texture' | 'morph-target'
+    name?: string
+    specs?: Record<string, string | number | boolean>
+  }>
 }
 
 type LoadedModel = {
   object: THREE.Object3D
   animations: THREE.AnimationClip[]
-  /** Only direct FBX loads need a neutral material for unresolved external textures. */
-  applyMissingTextureFallback: boolean
 }
 
 type ModelPreviewProps = {
   url: string
+  sourcePath: string
   extension: string
   materialTextureBindings?: MaterialTextureBindings
   textureUrls?: Readonly<Record<string, string>>
+  externalResourceUrls?: Readonly<Record<string, string>>
+  externalReferences?: readonly string[]
   onMetrics?: (metrics: ModelMetrics) => void | Promise<void>
   onMetricsError?: (error: Error) => void
 }
@@ -285,16 +292,37 @@ function referenceBasename(reference: string): string {
   }
 }
 
-export function calculateModelMetrics(object: THREE.Object3D, unresolvedTextureReferences: readonly string[] = []): ModelMetrics {
+export function calculateModelMetrics(
+  object: THREE.Object3D,
+  unresolvedTextureReferences: readonly string[] = [],
+  animations: readonly THREE.AnimationClip[] = [],
+): ModelMetrics {
   let triangles = 0
   let vertices = 0
   const materials = new Set<THREE.Material>()
   const textures = new Set<string>()
+  const components: ModelMetrics['components'] = []
+  const skeletons = new Map<string, THREE.Skeleton>()
+  let meshIndex = 0
   object.traverse(node => {
     if (!(node instanceof THREE.Mesh)) return
     const position = node.geometry.getAttribute('position')
     vertices += position?.count ?? 0
     triangles += node.geometry.index ? node.geometry.index.count / 3 : (position?.count ?? 0) / 3
+    const skinned = node instanceof THREE.SkinnedMesh
+    components.push({
+      id: `mesh:${meshIndex++}`,
+      kind: skinned ? 'skinned-mesh' : 'mesh',
+      ...(node.name ? { name: node.name } : {}),
+      specs: {
+        vertices: position?.count ?? 0,
+        triangles: Math.floor(node.geometry.index ? node.geometry.index.count / 3 : (position?.count ?? 0) / 3),
+      },
+    })
+    if (skinned) skeletons.set(node.skeleton.uuid, node.skeleton)
+    for (const [name, targetIndex] of Object.entries(node.morphTargetDictionary ?? {})) {
+      components.push({ id: `morph:${meshIndex - 1}:${targetIndex}`, kind: 'morph-target', name })
+    }
     const meshMaterials = Array.isArray(node.material) ? node.material : [node.material]
     meshMaterials.forEach(material => {
       materials.add(material)
@@ -305,16 +333,30 @@ export function calculateModelMetrics(object: THREE.Object3D, unresolvedTextureR
       }
     })
   })
+  for (const [index, skeleton] of [...skeletons.values()].entries()) {
+    components.push({ id: `skeleton:${index}`, kind: 'skeleton', specs: { jointCount: skeleton.bones.length } })
+  }
+  for (const [index, clip] of animations.entries()) {
+    components.push({
+      id: `animation:${index}`,
+      kind: 'animation-clip',
+      ...(clip.name ? { name: clip.name } : {}),
+      specs: { duration: clip.duration, trackCount: clip.tracks.length },
+    })
+  }
+  for (const [index, material] of [...materials].entries()) components.push({ id: `material:${index}`, kind: 'material', ...(material.name ? { name: material.name } : {}) })
+  for (const [index, texture] of [...textures].entries()) components.push({ id: `texture:${index}`, kind: 'texture', name: texture })
   const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
   return {
     triangles: Math.floor(triangles),
     vertices,
     materialCount: materials.size,
-    materialSlots: [...materials].map((material, index) => material.name || `Material ${index + 1}`),
+    materialSlots: [...new Set([...materials].map((material, index) => material.name || `Material ${index + 1}`))],
     textureReferences: [...textures],
-    unresolvedTextureReferences: [...new Set(unresolvedTextureReferences.map(referenceBasename))]
+    unresolvedTextureReferences: [...new Set(unresolvedTextureReferences.map(normalizeExternalReference))]
       .filter(reference => !textures.has(reference)),
     bounds: { width: size.x, height: size.y, depth: size.z },
+    components,
   }
 }
 
@@ -386,68 +428,209 @@ export function normalizeModelPreviewError(reason: unknown): Error {
   return new Error(typeof reason === 'string' && reason.trim() ? reason : 'Unknown model loading error')
 }
 
-async function loadModel(url: string, extension: string, onUnresolvedTexture?: (reference: string) => void): Promise<LoadedModel> {
+const neutralTextureDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9WQAAAABJRU5ErkJggg=='
+
+async function loadModel(url: string, extension: string, options: { sourcePath: string; externalResourceUrls: Readonly<Record<string, string>>; onUnresolvedTexture: (reference: string) => void }): Promise<LoadedModel> {
   const normalized = extension.toLowerCase()
+  const manager = createModelLoadingManager(url, options.externalResourceUrls, options.onUnresolvedTexture)
   if (normalized === 'glb' || normalized === 'gltf') {
-    const gltf = await new GLTFLoader().loadAsync(url)
-    return { object: gltf.scene, animations: gltf.animations, applyMissingTextureFallback: false }
+    const gltf = await new GLTFLoader(manager).loadAsync(url)
+    return { object: gltf.scene, animations: gltf.animations }
   }
   if (normalized === 'obj') {
-    const object = await new OBJLoader().loadAsync(url)
-    return { object, animations: modelAnimations(object), applyMissingTextureFallback: false }
+    const object = await new OBJLoader(manager).loadAsync(url)
+    return { object, animations: modelAnimations(object) }
   }
   if (normalized === 'fbx') {
-    const manager = new THREE.LoadingManager()
-    manager.setURLModifier((requestedUrl) => {
-      if (requestedUrl !== url) onUnresolvedTexture?.(requestedUrl)
-      return requestedUrl
-    })
     try {
-      const object = await new FBXLoader(manager).loadAsync(url)
-      return { object, animations: modelAnimations(object), applyMissingTextureFallback: true }
-    } catch (threeError) {
-      return loadFbxWithAssimpFallback(url, threeError)
+      return await loadFbxWithAssimp(url, options.sourcePath, options.externalResourceUrls, options.onUnresolvedTexture)
+    } catch (assimpError) {
+      try {
+        const object = await new FBXLoader(manager).loadAsync(url)
+        return { object, animations: modelAnimations(object) }
+      } catch (threeError) {
+        const primary = normalizeModelPreviewError(threeError)
+        const fallback = normalizeModelPreviewError(assimpError)
+        throw new Error(`FBX loader failed (${primary.message}); GLB preview conversion failed (${fallback.message})`)
+      }
     }
   }
   throw new Error('Unsupported model format')
 }
 
 /**
- * FBX is an interchange format with many exporter-specific variants. When the
- * browser's lightweight loader rejects one, convert only that preview request
- * to a canonical GLB through Assimp's WebAssembly build. The source FBX stays
- * untouched in the Pack.
+ * FBX is an interchange format with many exporter-specific variants and
+ * material connections Three.js cannot represent. Convert the preview copy to
+ * canonical GLB with its explicitly bound dependency closure. The source FBX
+ * stays untouched in the Pack; Three's loader remains a geometry fallback.
  */
-async function loadFbxWithAssimpFallback(url: string, originalError: unknown): Promise<LoadedModel> {
+async function loadFbxWithAssimp(
+  url: string,
+  sourcePath: string,
+  externalResourceUrls: Readonly<Record<string, string>>,
+  onUnresolvedTexture: (reference: string) => void,
+): Promise<LoadedModel> {
   const response = await fetch(url)
-  if (!response.ok) throw normalizeModelPreviewError(originalError)
-  try {
-    const [{ default: createAssimp }, bytes] = await Promise.all([
-      import('assimpjs'),
-      response.arrayBuffer(),
-    ])
-    const assimp = await createAssimp({ locateFile: () => assimpWasmUrl })
-    const files = new assimp.FileList()
-    files.AddFile('preview.fbx', new Uint8Array(bytes))
-    const converted = assimp.ConvertFileList(files, 'glb2')
-    if (!converted.IsSuccess() || converted.FileCount() < 1) {
-      throw new Error(converted.GetErrorCode() || 'Assimp could not convert this FBX')
-    }
-    const glb = converted.GetFile(0).GetContent()
-    const glbBytes = new Uint8Array(glb.byteLength)
-    glbBytes.set(glb)
-    const blobUrl = URL.createObjectURL(new Blob([glbBytes.buffer], { type: 'model/gltf-binary' }))
-    try {
-      const gltf = await new GLTFLoader().loadAsync(blobUrl)
-      return { object: gltf.scene, animations: gltf.animations, applyMissingTextureFallback: false }
-    } finally {
-      URL.revokeObjectURL(blobUrl)
-    }
-  } catch (fallbackError) {
-    const primary = normalizeModelPreviewError(originalError)
-    const fallback = normalizeModelPreviewError(fallbackError)
-    throw new Error(`FBX loader failed (${primary.message}); GLB preview conversion failed (${fallback.message})`)
+  if (!response.ok) throw new Error(`Unable to download FBX (${response.status})`)
+  const [{ default: createAssimp }, bytes, dependencies] = await Promise.all([
+    import('assimpjs'),
+    response.arrayBuffer(),
+    Promise.all(Object.entries(externalResourceUrls).map(async ([reference, dependencyUrl]) => {
+      const dependency = await fetch(dependencyUrl)
+      if (!dependency.ok) throw new Error(`Unable to download model dependency (${dependency.status}): ${reference}`)
+      return [reference, new Uint8Array(await dependency.arrayBuffer())] as const
+    })),
+  ])
+  const assimp = await createAssimp({ locateFile: () => assimpWasmUrl })
+  const files = new assimp.FileList()
+  const virtualModelPath = normalizeVirtualPath(sourcePath) || 'preview.fbx'
+  files.AddFile(virtualModelPath, new Uint8Array(bytes))
+  const virtualFiles = new Map<string, Uint8Array>()
+  for (const [reference, content] of dependencies) {
+    const resolved = resolveVirtualDependencyPath(virtualModelPath, reference)
+    if (resolved && !virtualFiles.has(resolved)) virtualFiles.set(resolved, content)
+    const basename = referenceBasename(normalizeExternalReference(reference))
+    if (basename && !virtualFiles.has(basename)) virtualFiles.set(basename, content)
   }
+  for (const [name, content] of virtualFiles) files.AddFile(name, content)
+  const converted = assimp.ConvertFileList(files, 'glb2')
+  if (!converted.IsSuccess() || converted.FileCount() < 1) {
+    throw new Error(converted.GetErrorCode() || 'Assimp could not convert this FBX')
+  }
+  const glb = converted.GetFile(0).GetContent()
+  const glbBytes = new Uint8Array(glb.byteLength)
+  glbBytes.set(glb)
+  const blobUrl = URL.createObjectURL(new Blob([glbBytes.buffer], { type: 'model/gltf-binary' }))
+  const localDependencyUrls = Object.fromEntries(dependencies.map(([reference, content]) => [
+    reference,
+    URL.createObjectURL(new Blob([content.slice().buffer], { type: mediaTypeForReference(reference) })),
+  ]))
+  try {
+    // Assimp can legally emit a GLB that still references external images. In
+    // that case GLTFLoader resolves the authored URI against the temporary
+    // Blob URL (for example `blob:.../Textures\\base.png`). Route those
+    // requests through the same explicit Pack dependency map as every other
+    // model loader instead of letting the browser request a nonexistent Blob.
+    // The dependency bytes are already downloaded for Assimp's virtual file
+    // system. Reuse those exact bytes for GLTFLoader instead of downloading
+    // every signed Storage URL again. Besides avoiding duplicate traffic, this
+    // removes cross-origin/image-decoder differences between the two stages.
+    const manager = createModelLoadingManager(blobUrl, localDependencyUrls, onUnresolvedTexture)
+    const gltf = await new GLTFLoader(manager).loadAsync(blobUrl)
+    annotateAuthoredGltfTextureNames(gltf.scene, gltf.parser)
+    return { object: gltf.scene, animations: gltf.animations }
+  } finally {
+    URL.revokeObjectURL(blobUrl)
+    Object.values(localDependencyUrls).forEach(dependencyUrl => URL.revokeObjectURL(dependencyUrl))
+  }
+}
+
+function mediaTypeForReference(reference: string): string {
+  const extension = referenceBasename(normalizeExternalReference(reference)).split('.').pop()?.toLowerCase()
+  if (extension === 'png') return 'image/png'
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'webp') return 'image/webp'
+  if (extension === 'gif') return 'image/gif'
+  if (extension === 'avif') return 'image/avif'
+  if (extension === 'ktx2') return 'image/ktx2'
+  return 'application/octet-stream'
+}
+
+type GltfParserMetadata = {
+  associations?: Map<unknown, { textures?: number }>
+  json?: {
+    textures?: Array<{ source?: number; name?: string }>
+    images?: Array<{ uri?: string; name?: string }>
+  }
+}
+
+/** Preserve the authored external reference as inspectable texture metadata. */
+export function annotateAuthoredGltfTextureNames(object: THREE.Object3D, parser: unknown): void {
+  const metadata = parser as GltfParserMetadata
+  const associations = metadata.associations
+  const textures = metadata.json?.textures
+  const images = metadata.json?.images
+  if (!associations || !textures || !images) return
+  object.traverse(node => {
+    if (!(node instanceof THREE.Mesh)) return
+    const materials = Array.isArray(node.material) ? node.material : [node.material]
+    for (const material of materials) for (const value of Object.values(material)) {
+      if (!(value instanceof THREE.Texture) || value.name) continue
+      const textureIndex = associations.get(value)?.textures
+      const imageIndex = typeof textureIndex === 'number' ? textures[textureIndex]?.source : undefined
+      const image = typeof imageIndex === 'number' ? images[imageIndex] : undefined
+      const reference = image?.name || image?.uri
+      if (reference) value.name = normalizeExternalReference(reference)
+    }
+  })
+}
+
+export function resolveModelExternalResourceUrl(requestedUrl: string, modelUrl: string, externalResourceUrls: Readonly<Record<string, string>>): string | undefined {
+  const requestedReference = externalReferenceForRequest(requestedUrl, modelUrl)
+  if (!requestedReference) return undefined
+  const normalizedEntries = Object.entries(externalResourceUrls).map(([reference, resourceUrl]) => [normalizeExternalReference(reference), resourceUrl] as const)
+  const exact = normalizedEntries.find(([reference]) => reference === requestedReference)
+  if (exact) return exact[1]
+  const basename = referenceBasename(requestedReference)
+  const basenameMatches = normalizedEntries.filter(([reference]) => referenceBasename(reference) === basename)
+  return basenameMatches.length === 1 ? basenameMatches[0][1] : undefined
+}
+
+function createModelLoadingManager(modelUrl: string, externalResourceUrls: Readonly<Record<string, string>>, onUnresolvedTexture: (reference: string) => void): THREE.LoadingManager {
+  const manager = new THREE.LoadingManager()
+  manager.setURLModifier(requestedUrl => {
+    if (sameResourceUrl(requestedUrl, modelUrl) || requestedUrl.startsWith('data:')) return requestedUrl
+    const mapped = resolveModelExternalResourceUrl(requestedUrl, modelUrl, externalResourceUrls)
+    if (mapped) return mapped
+    onUnresolvedTexture(externalReferenceForRequest(requestedUrl, modelUrl) || requestedUrl)
+    return neutralTextureDataUrl
+  })
+  return manager
+}
+
+function externalReferenceForRequest(requestedUrl: string, modelUrl: string): string | undefined {
+  try {
+    const modelResource = unwrapBlobResourceUrl(modelUrl)
+    const modelBase = new URL('.', modelResource)
+    const requested = unwrapBlobResourceUrl(new URL(requestedUrl, modelBase).href)
+    if (requested.origin === modelBase.origin && requested.pathname.startsWith(modelBase.pathname)) {
+      return normalizeExternalReference(decodeURIComponent(requested.pathname.slice(modelBase.pathname.length)))
+    }
+    return normalizeExternalReference(decodeURIComponent(requested.pathname))
+  } catch {
+    return normalizeExternalReference(requestedUrl)
+  }
+}
+
+function unwrapBlobResourceUrl(resourceUrl: string): URL {
+  const parsed = new URL(resourceUrl)
+  return parsed.protocol === 'blob:' ? new URL(parsed.pathname) : parsed
+}
+
+function sameResourceUrl(left: string, right: string): boolean {
+  try { return new URL(left, right).href === new URL(right).href } catch { return left === right }
+}
+
+function normalizeExternalReference(reference: string): string {
+  const parts = reference.split('\\').join('/').split('/')
+  const normalized: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') normalized.pop()
+    else normalized.push(part)
+  }
+  return normalized.join('/')
+}
+
+function normalizeVirtualPath(path: string): string {
+  return normalizeExternalReference(path)
+}
+
+function resolveVirtualDependencyPath(modelPath: string, reference: string): string | undefined {
+  const normalizedReference = reference.split('\\').join('/')
+  if (!normalizedReference || normalizedReference.startsWith('/') || normalizedReference.includes(':')) return referenceBasename(normalizeExternalReference(normalizedReference))
+  const modelDirectory = modelPath.split('/').slice(0, -1)
+  return normalizeVirtualPath([...modelDirectory, ...normalizedReference.split('/')].join('/')) || undefined
 }
 
 export function modelAnimations(object: THREE.Object3D): THREE.AnimationClip[] {
@@ -455,7 +638,7 @@ export function modelAnimations(object: THREE.Object3D): THREE.AnimationClip[] {
   return Array.isArray(animations) ? animations : []
 }
 
-export function ModelPreview({ url, extension, materialTextureBindings = {}, textureUrls = {}, onMetrics, onMetricsError }: ModelPreviewProps) {
+export function ModelPreview({ url, sourcePath, extension, materialTextureBindings = {}, textureUrls = {}, externalResourceUrls = {}, externalReferences = [], onMetrics, onMetricsError }: ModelPreviewProps) {
   const host = useRef<HTMLDivElement>(null)
   const onMetricsRef = useRef(onMetrics)
   const onMetricsErrorRef = useRef(onMetricsError)
@@ -477,6 +660,7 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
   const [isLooping, setIsLooping] = useState(false)
   const [timelineTime, setTimelineTime] = useState(0)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('albedo')
+  const externalReferencesKey = JSON.stringify(externalReferences.map(normalizeExternalReference))
 
   useEffect(() => { onMetricsRef.current = onMetrics }, [onMetrics])
   useEffect(() => { onMetricsErrorRef.current = onMetricsError }, [onMetricsError])
@@ -550,7 +734,8 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
     let frame = 0
     let active = true
     let lastTimelineUpdate = 0
-    const clock = new THREE.Clock()
+    const timer = new THREE.Timer()
+    timer.connect(document)
 
     const resize = () => {
       const { width, height } = container.getBoundingClientRect()
@@ -558,9 +743,10 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
       camera.aspect = (width || 1) / (height || 1)
       camera.updateProjectionMatrix()
     }
-    const draw = () => {
+    const draw = (timestamp: DOMHighResTimeStamp) => {
+      timer.update(timestamp)
       if (mixer && isPlayingRef.current) {
-        mixer.update(clock.getDelta())
+        mixer.update(timer.getDelta())
         const clipDuration = activeClipRef.current?.duration
         const now = performance.now()
         if (clipDuration && now - lastTimelineUpdate > 80) {
@@ -586,18 +772,20 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
       renderer.render(scene, camera)
       frame = requestAnimationFrame(draw)
     }
-    resize(); draw()
+    resize(); frame = requestAnimationFrame(draw)
     const observer = new ResizeObserver(resize)
     observer.observe(container)
 
-    const unresolvedTextures = new Set<string>()
-    loadModel(url, extension, (reference) => unresolvedTextures.add(reference))
+    const boundReferences = new Set(Object.keys(externalResourceUrls).map(normalizeExternalReference))
+    const normalizedExternalReferences = JSON.parse(externalReferencesKey) as string[]
+    const unresolvedTextures = new Set(normalizedExternalReferences.filter(reference => reference && !boundReferences.has(reference)))
+    loadModel(url, extension, { sourcePath, externalResourceUrls, onUnresolvedTexture: (reference) => unresolvedTextures.add(normalizeExternalReference(reference)) })
       .then(async loaded => {
         if (!active) {
           disposeObject(loaded.object)
           return
         }
-        if (loaded.applyMissingTextureFallback) applyMissingTextureFallback(loaded.object, [...unresolvedTextures])
+        if (unresolvedTextures.size) applyMissingTextureFallback(loaded.object, [...unresolvedTextures])
         enableVertexColors(loaded.object)
         await applyBoundBaseColorTextures(loaded.object, materialTextureBindings, textureUrls).catch(() => undefined)
         model = loaded.object
@@ -639,7 +827,7 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
         camera.lookAt(center)
         controls.update()
         if (onMetricsRef.current) {
-          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, loaded.applyMissingTextureFallback ? [...unresolvedTextures] : [])).then(metricsError => {
+          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, [...unresolvedTextures], loaded.animations)).then(metricsError => {
             if (!metricsError || !active) return
             setError('模型信息保存失败，请重试。')
             onMetricsErrorRef.current?.(metricsError)
@@ -657,6 +845,7 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
     return () => {
       active = false
       cancelAnimationFrame(frame)
+      timer.dispose()
       observer.disconnect()
       controls.dispose()
       mixer?.stopAllAction()
@@ -674,9 +863,13 @@ export function ModelPreview({ url, extension, materialTextureBindings = {}, tex
       sky.geometry.dispose()
       sky.material.dispose()
       renderer.dispose()
+      // dispose() releases GPU resources but browsers may retain the context
+      // itself. Explicitly lose it so StrictMode remounts and model switching
+      // cannot exhaust the per-page WebGL context limit.
+      renderer.forceContextLoss()
       renderer.domElement.remove()
     }
-  }, [extension, materialTextureBindings, textureUrls, url])
+  }, [extension, externalReferencesKey, externalResourceUrls, materialTextureBindings, sourcePath, textureUrls, url])
 
   const activeDuration = animations[selectedAnimation]?.duration ?? 0
   const timelineProgress = activeDuration > 0 ? Math.min(Math.max(timelineTime / activeDuration, 0), 1) * 100 : 0

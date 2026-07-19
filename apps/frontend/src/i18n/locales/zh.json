@@ -456,6 +456,12 @@
           "description": "把 MCP 暴露的 skill:// 资源纳入技能体系。",
           "note": "效果取决于 MCP server 的资源质量，需要 feature 启动。",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "资源库",
+          "description": "允许项目 Agent 从托管资源库检索并接入游戏素材。",
+          "note": "对新会话生效；服务凭证只保留在服务端，不会暴露给项目命令。",
+          "scope": "newSession"
         }
       }
     },
@@ -652,6 +658,7 @@
     "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
     "permissionPendingPlaceholder": "等待权限确认",
     "allowOnce": "允许本次",
+    "allowForSession": "当前会话允许",
     "clarificationRequired": "需要澄清",
     "approvalRequired": "需要批准",
     "revisionRequired": "需要修订",
@@ -878,15 +885,12 @@
       "uploading": "上传中...",
       "requestIntegration": "让 BeeGame 集成",
       "verifyIntegration": "重新集成 / 验证",
-      "autoSelectLibrary": "自动选择资源库资源",
-      "syncLibraryResources": "同步资源库资源",
       "reintegrateLibrary": "重新接入资源库",
       "removeIntegration": "移除集成",
       "removingIntegration": "正在移除…",
       "removeIntegrationTitle": "移除项目集成？",
       "removeIntegrationDescription": "这会移除该资源槽已复制到项目中的文件，但保留资源库绑定；之后仍可重新接入已锁定的资源。",
-      "autoSelecting": "正在选择…",
-      "prepareSelection": "准备资源匹配",
+      "replanWithAgent": "让 Agent 探索资源",
       "unbind": "解除资源库绑定",
       "unbinding": "正在解除…",
       "unbindTitle": "解除资源库绑定？",
@@ -918,7 +922,9 @@
       "integration": "集成方式",
       "viewCandidates": "查看候选",
       "replaceResource": "替换资源",
-      "noPurpose": "未提供用途说明"
+      "noPurpose": "未提供用途说明",
+      "compositions": "资源组合",
+      "members": "个成员"
     },
     "savedPrefixSeparator": "："
   },

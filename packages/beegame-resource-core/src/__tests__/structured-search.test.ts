@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { rankStructuredResourcePacks, searchResourcePacks } from '../structured-search'
+import { searchResourcePacks } from '../structured-search'
 import type { PackSummary } from '../types'
 
 const packs: PackSummary[] = [
@@ -11,10 +11,5 @@ describe('structured resource Pack search', () => {
   test('applies metadata constraints without free-text inference', () => {
     expect(searchResourcePacks(packs, { dimensions: ['3D'], tags: ['OUTDOOR'], gameTypes: ['Adventure'], statuses: ['published'] }).map(pack => pack.id)).toEqual(['forest'])
     expect(searchResourcePacks(packs, { primaryCategories: ['ui-kit'], statuses: ['published'] })).toEqual([])
-  })
-
-  test('allows semantic ranking only after hard constraints have removed incompatible Packs', async () => {
-    const ranked = await rankStructuredResourcePacks(packs, { dimensions: ['3D'] }, async () => new Map([['ui', 100], ['forest', 1]]))
-    expect(ranked.map(pack => pack.id)).toEqual(['forest'])
   })
 })

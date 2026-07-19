@@ -1,17 +1,35 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, open, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { RESOURCE_CATEGORIES, RESOURCE_USAGE_TAGS, type ResourceUsageTag } from '../../../beegame-resource-core/src/types'
+import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_CATEGORIES,
+  RESOURCE_COMPOSITION_KINDS,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
+  RESOURCE_RELATION_KINDS,
+  RESOURCE_LIBRARY_USAGE,
+  RESOURCE_USAGE_TAGS,
+  type ResourceAssetKind,
+  type ResourceCapability,
+  type ResourceCompositionKind,
+  type ResourceEmbeddedComponentKind,
+  type ResourceRelationKind,
+  type ResourceLibraryUsage,
+  type ResourceUsageTag,
+} from '@bee-game-studio/beegame-resource-core'
 
 export type BeeGameAssetIntegrationMode = 'filesystem' | 'mcp' | 'manual'
 
 export type BeeGameAssetProjectTarget = {
-  kind?: string
-  engine?: string
+  platform?: string
+  runtime?: string
   integration_mode?: BeeGameAssetIntegrationMode
   mcp_server?: string
   /** Formats supported by the project target, never inferred from a Pack. */
   asset_format_capabilities?: string[]
+  /** Availability preference supplied to the authoring Agent, not a selector state machine. */
+  resource_library_usage?: ResourceLibraryUsage
 }
 
 export type BeeGameAssetIntegrationProvider = {
@@ -44,6 +62,46 @@ export type BeeGameResourceBindingDependency = {
   kind?: string
 }
 
+export type BeeGameResourceImportDependency = {
+  key: string
+  parent_key: string
+  element_id: string
+  element_path: string
+  reference_path: string
+  local_path: string
+  kind?: string
+}
+
+/**
+ * One independently imported Resource Library root. Imports are project
+ * inventory, not requirement fulfillment records: the same import may be used
+ * by several target-native compositions and one composition may use many
+ * imports.
+ */
+export type BeeGameResourceImport = {
+  id: string
+  source: {
+    type: 'resource-library' | 'user-upload' | 'project-authored'
+    pack_id?: string
+    pack_version?: string
+    element_id?: string
+    element_path?: string
+  }
+  status: 'available' | 'referenced' | 'failed'
+  root_path: string
+  local_files: string[]
+  selected_at: string
+  selection_reason: string[]
+  asset_kind?: string
+  capabilities?: string[]
+  content_profile?: Record<string, unknown>
+  /** Objective source-file facts. Target-native importers own their interpretation. */
+  technical_facts?: Record<string, string | number | boolean>
+  dependencies?: BeeGameResourceImportDependency[]
+  usage_evidence?: { references?: string[]; runtime_event_ids?: string[] }
+  error?: string
+}
+
 /**
  * The machine-readable matching contract for one project asset slot. This is
  * deliberately independent of the project's target engine: the project target
@@ -56,7 +114,24 @@ export type BeeGameResourceRequirement = {
   styles?: string[]
   game_types?: string[]
   tags?: ResourceUsageTag[]
+  asset_kinds?: ResourceAssetKind[]
+  capabilities?: ResourceCapability[]
+  subresources?: BeeGameSubresourceRequirement[]
+  relations?: BeeGameResourceRelationRequirement[]
   purpose?: string
+}
+
+export type BeeGameSubresourceRequirement = {
+  kind: ResourceEmbeddedComponentKind
+  role?: string
+  skeleton_signature?: string
+}
+
+export type BeeGameResourceRelationRequirement = {
+  kind: ResourceRelationKind
+  /** Resolve against a resource already pinned in this project. */
+  target_element_id?: string
+  role?: string
 }
 
 export function effectiveAssetFormats(
@@ -95,26 +170,55 @@ export type BeeGameAssetSlot = {
   uploaded_files?: string[]
   uploaded_urls?: string[]
   resource_requirement?: BeeGameResourceRequirement
+  satisfied_by?: { import_ids?: string[]; composition_ids?: string[]; project_references?: string[] }
   resource_binding?: BeeGameResourceBinding
+  integration_evidence?: { references?: string[]; runtime_event_ids?: string[] }
   integration_error?: string
   updated_at?: string
+}
+
+export type BeeGameAssetCompositionMember = {
+  /** Independent imported asset used by the target-native recipe. */
+  import_id?: string
+  /** Project requirement satisfied or represented by this member. */
+  requirement_id?: string
+  /** Nested target-native composition. */
+  composition_id?: string
+  role: string
+  required?: boolean
+}
+
+export type BeeGameAssetComposition = {
+  id: string
+  kind: ResourceCompositionKind
+  required?: boolean
+  members: BeeGameAssetCompositionMember[]
+  assembly_mode?: 'direct' | 'composed'
+  recipe?: { path?: string; notes?: string }
+  status?: 'planned' | 'assembled' | 'integrated' | 'failed'
+  integration_evidence?: { references?: string[]; runtime_event_ids?: string[] }
 }
 
 export type BeeGameAssetManifest = {
   version: number
   project_target?: BeeGameAssetProjectTarget
-  slots: BeeGameAssetSlot[]
+  /** Game responsibilities. Independent imports may satisfy several requirements. */
+  requirements: BeeGameAssetSlot[]
+  /** Independent project inventory selected by Claude Code. */
+  imports?: BeeGameResourceImport[]
+  compositions?: BeeGameAssetComposition[]
 }
 
 export type BeeGameAssetUploadResult = {
   manifest: BeeGameAssetManifest
-  slot: BeeGameAssetSlot
+  requirement: BeeGameAssetSlot
   path: string
   message: string
 }
 
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 const ASSET_UPLOAD_ROOT = 'assets/uploads'
+const CURRENT_ASSET_MANIFEST_VERSION = 5
 
 export async function readBeeGameAssetManifest(
   workspacePath: string,
@@ -122,7 +226,7 @@ export async function readBeeGameAssetManifest(
   const root = normalizeWorkspacePath(workspacePath)
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
   if (!existsSync(manifestPath)) {
-    return { version: 1, slots: [] }
+    return { version: CURRENT_ASSET_MANIFEST_VERSION, requirements: [] }
   }
   const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
   return reconcileAssetContractFiles(root, normalizeBeeGameAssetManifest(parsed))
@@ -130,200 +234,259 @@ export async function readBeeGameAssetManifest(
 
 export async function uploadBeeGameAsset(
   workspacePath: string,
-  slotId: string,
+  requirementId: string,
   file: File,
-  uploadedUrl?: string,
 ): Promise<BeeGameAssetUploadResult> {
   const root = normalizeWorkspacePath(workspacePath)
   const manifest = await readBeeGameAssetManifest(root)
-  const normalizedSlotId = normalizeSlotId(slotId)
-  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
-  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
-  const slot = manifest.slots[slotIndex]
+  const normalizedSlotId = normalizeSlotId(requirementId)
+  const slotIndex = manifest.requirements.findIndex(requirement => requirement.id === normalizedSlotId)
+  if (slotIndex < 0) throw new Error(`Asset requirement not found: ${normalizedSlotId}`)
+  const slot = manifest.requirements[slotIndex]
   assertAssetFormatAllowed(file.name, slot, manifest.project_target)
   const targetPath = resolveUploadTarget(root, slot, file.name)
   await mkdir(resolve(targetPath, '..'), { recursive: true })
   const bytes = new Uint8Array(await file.arrayBuffer())
   await writeFile(targetPath, bytes)
   const relativePath = normalizeRelativePath(root, targetPath)
+  const importId = `upload.${normalizeImportId(slot.id)}`
+  const resourceImport: BeeGameResourceImport = {
+    id: importId,
+    source: { type: 'user-upload' },
+    status: 'available',
+    root_path: relativePath,
+    local_files: [relativePath],
+    selected_at: new Date().toISOString(),
+    selection_reason: ['user-provided-for-requirement'],
+  }
   const updatedSlot: BeeGameAssetSlot = {
     ...slot,
-    status: 'uploaded',
-    placeholder: false,
-    uploaded_files: [...new Set([...(slot.uploaded_files ?? []), relativePath])],
-    ...(uploadedUrl
-      ? { uploaded_urls: [...new Set([...(slot.uploaded_urls ?? []), uploadedUrl])] }
-      : {}),
+    status: 'placeholder',
+    placeholder: true,
+    satisfied_by: {
+      ...(slot.satisfied_by ?? {}),
+      import_ids: [...new Set([...(slot.satisfied_by?.import_ids ?? []).filter(id => id !== importId), importId])],
+    },
     updated_at: new Date().toISOString(),
   }
-  manifest.slots[slotIndex] = updatedSlot
+  manifest.requirements[slotIndex] = updatedSlot
+  manifest.imports = [...(manifest.imports ?? []).filter(entry => entry.id !== importId), resourceImport]
   await writeAssetManifest(root, manifest)
   return {
     manifest,
-    slot: updatedSlot,
+    requirement: updatedSlot,
     path: relativePath,
     message: buildUploadMessage(updatedSlot, relativePath, manifest.project_target),
   }
 }
 
-export function bindBeeGameLibraryResource(
-  manifest: BeeGameAssetManifest,
-  slotId: string,
-  binding: BeeGameResourceBinding,
-): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
-  const normalizedSlotId = normalizeSlotId(slotId)
-  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
-  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
-  const validatedBinding = normalizeResourceBinding(binding)
-  if (!validatedBinding) throw new Error('Invalid resource binding')
-  const slot = { ...manifest.slots[slotIndex], resource_binding: validatedBinding, updated_at: new Date().toISOString() }
-  const slots = [...manifest.slots]
-  slots[slotIndex] = slot
-  return { manifest: { ...manifest, slots }, slot }
-}
-
-export async function bindBeeGameLibraryResourceInWorkspace(
-  workspacePath: string,
-  slotId: string,
-  binding: BeeGameResourceBinding,
-): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const result = bindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId, binding)
-  await writeAssetManifest(root, result.manifest)
-  return result
-}
-
-/** Removes the library provenance only; copied project files deliberately remain intact. */
-export function unbindBeeGameLibraryResource(
-  manifest: BeeGameAssetManifest,
-  slotId: string,
-): { manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot } {
-  const normalizedSlotId = normalizeSlotId(slotId)
-  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
-  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
-  const { resource_binding: _binding, ...slotWithoutBinding } = manifest.slots[slotIndex]
-  const slot: BeeGameAssetSlot = { ...slotWithoutBinding, updated_at: new Date().toISOString() }
-  const slots = [...manifest.slots]
-  slots[slotIndex] = slot
-  return { manifest: { ...manifest, slots }, slot }
-}
-
-export async function unbindBeeGameLibraryResourceInWorkspace(
-  workspacePath: string,
-  slotId: string,
-): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot }> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const result = unbindBeeGameLibraryResource(await readBeeGameAssetManifest(root), slotId)
-  await writeAssetManifest(root, result.manifest)
-  return result
+export type BeeGameResolvedResourceImportInput = {
+  id: string
+  destination_path: string
+  pack_id: string
+  pack_version: string
+  element_id: string
+  element_path: string
+  source_url: string
+  selection_reason?: string[]
+  asset_kind?: string
+  capabilities?: string[]
+  content_profile?: Record<string, unknown>
+  technical_facts?: Record<string, string | number | boolean>
+  dependencies?: Array<{
+    key: string
+    parent_key: string
+    element_id: string
+    element_path: string
+    reference_path: string
+    source_url: string
+    kind?: string
+  }>
 }
 
 /**
- * Removes only files that this asset contract recorded as copied into the
- * project. The library binding is intentionally retained so the same pinned
- * Pack version can be re-integrated later without reselecting an asset.
+ * Copy one explicitly chosen logical root into the project inventory. No
+ * requirement or slot is involved; Claude Code decides where and how the
+ * resulting import is used by target-native scene/code authoring.
  */
-export async function removeBeeGameAssetIntegrationInWorkspace(
+export async function importBeeGameLibraryResourceInWorkspace(
   workspacePath: string,
-  slotId: string,
-): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot; removedPaths: string[] }> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  const normalizedSlotId = normalizeSlotId(slotId)
-  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
-  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
-  const slot = manifest.slots[slotIndex]
-  const relativePaths = [...new Set(slot.uploaded_files ?? [])]
-  if (!relativePaths.length) throw new Error(`Asset slot has no copied integration files: ${normalizedSlotId}`)
-
-  const targets = relativePaths.map(path => ({ path, target: resolveInsideWorkspace(root, path) }))
-  const removedPaths: string[] = []
-  for (const { path, target } of targets) {
-    if (!existsSync(target)) continue
-    await rm(target, { force: true })
-    removedPaths.push(path)
-  }
-
-  const { integration_error: _integrationError, ...slotWithoutIntegrationError } = slot
-  const updatedSlot: BeeGameAssetSlot = {
-    ...slotWithoutIntegrationError,
-    status: 'placeholder',
-    placeholder: true,
-    uploaded_files: [],
-    uploaded_urls: [],
-    updated_at: new Date().toISOString(),
-  }
-  manifest.slots[slotIndex] = updatedSlot
-  await writeAssetManifest(root, manifest)
-  return { manifest, slot: updatedSlot, removedPaths }
-}
-
-export async function integrateBeeGameLibraryResourceInWorkspace(
-  workspacePath: string,
-  slotId: string,
+  input: BeeGameResolvedResourceImportInput,
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = fetch,
-): Promise<{ manifest: BeeGameAssetManifest; slot: BeeGameAssetSlot; path?: string }> {
+): Promise<{ manifest: BeeGameAssetManifest; resourceImport: BeeGameResourceImport }> {
   const root = normalizeWorkspacePath(workspacePath)
   const manifest = await readBeeGameAssetManifest(root)
-  const normalizedSlotId = normalizeSlotId(slotId)
-  const slotIndex = manifest.slots.findIndex(slot => slot.id === normalizedSlotId)
-  if (slotIndex < 0) throw new Error(`Asset slot not found: ${normalizedSlotId}`)
-  const slot = manifest.slots[slotIndex]
-  const binding = slot.resource_binding
-  if (!binding) throw new Error(`Asset slot has no library resource binding: ${normalizedSlotId}`)
-  const mode = slot.integration_provider?.type || manifest.project_target?.integration_mode || 'filesystem'
-  if (mode !== 'filesystem') return { manifest, slot }
-  const filename = boundResourceFilename(binding)
-  assertAssetFormatAllowed(filename, slot, manifest.project_target)
-  const targetPath = resolveUploadTarget(root, slot, filename)
-  const response = await fetchImpl(binding.source_url)
+  const importId = normalizeImportId(input.id)
+  if (!importId) throw new Error('Resource import id is required')
+  if ((manifest.imports ?? []).some(entry => entry.id === importId)) throw new Error(`Resource import already exists: ${importId}`)
+  const filename = sanitizeFilename(input.element_path)
+  assertFilenameFormatAllowed(filename, normalizeFormats(manifest.project_target?.asset_format_capabilities))
+  const targetPath = resolveImportTarget(root, input.destination_path, filename)
+  if (existsSync(targetPath)) throw new Error(`Resource import target already exists: ${normalizeRelativePath(root, targetPath)}`)
+
+  const response = await fetchImpl(input.source_url)
   if (!response.ok) throw new Error(`Resource download failed (${response.status})`)
   const bytes = new Uint8Array(await response.arrayBuffer())
   const declaredFormat = extensionOf(filename)
   const detectedFormat = detectResourceBinaryFormat(bytes)
   if (detectedFormat && declaredFormat && !formatsAgree(declaredFormat, detectedFormat)) {
-    throw new Error(
-      `Resource binary format mismatch: library declares .${declaredFormat}, received ${detectedFormat}`,
-    )
+    throw new Error(`Resource binary format mismatch: library declares .${declaredFormat}, received ${detectedFormat}`)
   }
-  await mkdir(resolve(targetPath, '..'), { recursive: true })
-  await writeFile(targetPath, bytes)
-  const relativePath = normalizeRelativePath(root, targetPath)
-  const copiedDependencyPaths = await copyBoundResourceDependencies(
+
+  const dependencyInput: BeeGameResourceBinding = {
+    pack_id: input.pack_id,
+    pack_version: input.pack_version,
+    element_id: input.element_id,
+    element_path: input.element_path,
+    source_url: input.source_url,
+    selected_at: new Date().toISOString(),
+    selection_reason: input.selection_reason ?? [],
+    dependencies: input.dependencies?.map(dependency => ({
+      key: dependency.key,
+      parent_key: dependency.parent_key,
+      element_id: dependency.element_id,
+      element_path: dependency.element_path,
+      reference_path: dependency.reference_path,
+      source_url: dependency.source_url,
+      ...(dependency.kind ? { kind: dependency.kind } : {}),
+    })),
+  }
+  const pendingDependencies = await prepareBoundResourceDependencies(
     root,
     targetPath,
-    binding,
+    dependencyInput,
     fetchImpl,
     normalizeFormats(manifest.project_target?.asset_format_capabilities),
   )
-  // Copying a binary makes it available to the project, but it cannot prove
-  // that engine/runtime code references it. The Agent is responsible for that
-  // final step and can then set the contract to `integrated` with evidence.
-  const updatedSlot: BeeGameAssetSlot = {
-    ...slot,
-    // A copied GLB remains a GLB. Never write a binary under a requested FBX
-    // filename just because the contract allowed both formats.
-    ...(slot.target?.path !== relativePath ? { target: { ...slot.target, path: relativePath } } : {}),
-    resource_binding: detectedFormat && binding.content_format !== detectedFormat
-      ? { ...binding, content_format: detectedFormat }
-      : binding,
-    status: 'uploaded', placeholder: false,
-    uploaded_files: [...new Set([...(slot.uploaded_files ?? []), relativePath, ...copiedDependencyPaths])], updated_at: new Date().toISOString(),
+  const allTargets = [targetPath, ...pendingDependencies.map(dependency => dependency.targetPath)]
+  const duplicateTarget = allTargets.find((target, index) => allTargets.indexOf(target) !== index)
+  if (duplicateTarget) throw new Error(`Resource import dependency target is duplicated: ${normalizeRelativePath(root, duplicateTarget)}`)
+  const dependenciesToWrite: typeof pendingDependencies = []
+  for (const dependency of pendingDependencies) {
+    if (!existsSync(dependency.targetPath)) {
+      dependenciesToWrite.push(dependency)
+      continue
+    }
+    const existingBytes = new Uint8Array(await readFile(dependency.targetPath))
+    if (!bytesEqual(existingBytes, dependency.bytes)) {
+      throw new Error(`Resource import dependency target already exists with different content: ${normalizeRelativePath(root, dependency.targetPath)}`)
+    }
   }
-  manifest.slots[slotIndex] = updatedSlot
-  await writeAssetManifest(root, manifest)
-  return { manifest, slot: updatedSlot, path: relativePath }
+
+  const rollbackFiles = await commitResourceWrites([
+    { targetPath, bytes },
+    ...dependenciesToWrite.map(dependency => ({ targetPath: dependency.targetPath, bytes: dependency.bytes })),
+  ])
+  const rootPath = normalizeRelativePath(root, targetPath)
+  const dependencies = (input.dependencies ?? []).map(dependency => {
+    const copied = pendingDependencies.find(candidate => candidate.key === dependency.key)
+    return {
+      key: dependency.key,
+      parent_key: dependency.parent_key,
+      element_id: dependency.element_id,
+      element_path: dependency.element_path,
+      reference_path: dependency.reference_path,
+      local_path: copied ? normalizeRelativePath(root, copied.targetPath) : normalizeRelativePath(root, resolveDependencyTarget(root, dirname(targetPath), dependency.reference_path)),
+      ...(dependency.kind ? { kind: dependency.kind } : {}),
+    }
+  })
+  const resourceImport: BeeGameResourceImport = {
+    id: importId,
+    source: {
+      type: 'resource-library',
+      pack_id: input.pack_id,
+      pack_version: input.pack_version,
+      element_id: input.element_id,
+      element_path: input.element_path,
+    },
+    status: 'available',
+    root_path: rootPath,
+    local_files: [rootPath, ...pendingDependencies.map(dependency => normalizeRelativePath(root, dependency.targetPath))],
+    selected_at: new Date().toISOString(),
+    selection_reason: input.selection_reason ?? [],
+    ...(input.asset_kind ? { asset_kind: input.asset_kind } : {}),
+    ...(input.capabilities?.length ? { capabilities: input.capabilities } : {}),
+    ...(input.content_profile ? { content_profile: input.content_profile } : {}),
+    ...(input.technical_facts ? { technical_facts: input.technical_facts } : {}),
+    ...(dependencies.length ? { dependencies } : {}),
+  }
+  const updatedManifest: BeeGameAssetManifest = {
+    ...manifest,
+    version: Math.max(CURRENT_ASSET_MANIFEST_VERSION, manifest.version),
+    imports: [...(manifest.imports ?? []), resourceImport],
+  }
+  try {
+    await writeAssetManifest(root, updatedManifest)
+  } catch (error) {
+    await rollbackFiles()
+    throw error
+  }
+  return { manifest: updatedManifest, resourceImport }
 }
 
-async function copyBoundResourceDependencies(
+export type BeeGameResolvedResourceMetadataUpdate = {
+  import_id: string
+  pack_id: string
+  pack_version: string
+  element_id: string
+  asset_kind?: string
+  capabilities?: string[]
+  content_profile?: Record<string, unknown>
+  technical_facts?: Record<string, string | number | boolean>
+}
+
+/**
+ * Refresh objective catalog metadata for roots that are already present in a
+ * project. This never selects a replacement, downloads a file, changes usage
+ * evidence, or interprets target-runtime settings.
+ */
+export async function refreshBeeGameLibraryImportMetadataInWorkspace(
+  workspacePath: string,
+  updates: readonly BeeGameResolvedResourceMetadataUpdate[],
+): Promise<{ manifest: BeeGameAssetManifest; refreshedImportIds: string[] }> {
+  const root = normalizeWorkspacePath(workspacePath)
+  const manifest = await readBeeGameAssetManifest(root)
+  const updatesById = new Map(updates.map(update => [update.import_id, update]))
+  const refreshedImportIds: string[] = []
+  const imports = (manifest.imports ?? []).map(resourceImport => {
+    const update = updatesById.get(resourceImport.id)
+    if (!update || resourceImport.source.type !== 'resource-library') return resourceImport
+    if (
+      resourceImport.source.pack_id !== update.pack_id ||
+      resourceImport.source.pack_version !== update.pack_version ||
+      resourceImport.source.element_id !== update.element_id
+    ) return resourceImport
+    refreshedImportIds.push(resourceImport.id)
+    return {
+      ...resourceImport,
+      ...(update.asset_kind ? { asset_kind: update.asset_kind } : {}),
+      ...(update.capabilities ? { capabilities: [...update.capabilities] } : {}),
+      ...(update.content_profile ? { content_profile: update.content_profile } : {}),
+      ...(update.technical_facts ? { technical_facts: { ...update.technical_facts } } : {}),
+    }
+  })
+  const updatedManifest = { ...manifest, imports }
+  if (refreshedImportIds.length) await writeAssetManifest(root, updatedManifest)
+  return { manifest: updatedManifest, refreshedImportIds }
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false
+  }
+  return true
+}
+
+async function prepareBoundResourceDependencies(
   root: string,
   rootTargetPath: string,
   binding: BeeGameResourceBinding,
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   allowedFormats: readonly string[],
-): Promise<string[]> {
+): Promise<Array<{ key: string; targetPath: string; bytes: Uint8Array }>> {
   const targets = new Map<string, string>([['root', rootTargetPath]])
-  const copied: string[] = []
+  const pending: Array<{ key: string; targetPath: string; bytes: Uint8Array }> = []
   for (const dependency of binding.dependencies ?? []) {
     assertFilenameFormatAllowed(dependency.element_path, allowedFormats)
     const parentTarget = targets.get(dependency.parent_key)
@@ -337,12 +500,45 @@ async function copyBoundResourceDependencies(
     if (detectedFormat && declaredFormat && !formatsAgree(declaredFormat, detectedFormat)) {
       throw new Error(`Resource dependency binary format mismatch for ${dependency.element_path}`)
     }
-    await mkdir(resolve(targetPath, '..'), { recursive: true })
-    await writeFile(targetPath, bytes)
     targets.set(dependency.key, targetPath)
-    copied.push(normalizeRelativePath(root, targetPath))
+    pending.push({ key: dependency.key, targetPath, bytes })
   }
-  return copied
+  return pending
+}
+
+async function commitResourceWrites(
+  writes: Array<{ targetPath: string; bytes: Uint8Array }>,
+): Promise<() => Promise<void>> {
+  const snapshots: Array<{
+    targetPath: string
+    previous?: Uint8Array
+  }> = []
+  try {
+    for (const write of writes) {
+      const previous = existsSync(write.targetPath)
+        ? new Uint8Array(await readFile(write.targetPath))
+        : undefined
+      snapshots.push({ targetPath: write.targetPath, ...(previous ? { previous } : {}) })
+      await mkdir(resolve(write.targetPath, '..'), { recursive: true })
+      await writeFile(write.targetPath, write.bytes)
+    }
+  } catch (error) {
+    await rollbackResourceWrites(snapshots)
+    throw error
+  }
+  return () => rollbackResourceWrites(snapshots)
+}
+
+async function rollbackResourceWrites(
+  snapshots: Array<{ targetPath: string; previous?: Uint8Array }>,
+): Promise<void> {
+  for (const snapshot of snapshots.reverse()) {
+    if (snapshot.previous) {
+      await writeFile(snapshot.targetPath, snapshot.previous)
+    } else {
+      await rm(snapshot.targetPath, { force: true })
+    }
+  }
 }
 
 function resolveDependencyTarget(root: string, parentDirectory: string, referencePath: string): string {
@@ -358,7 +554,10 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
     throw new Error('Invalid asset manifest')
   }
   const record = value as Record<string, unknown>
-  const slots = Array.isArray(record.slots)
+  const canonicalRequirements = Array.isArray(record.requirements) ? record.requirements : undefined
+  const requirements = canonicalRequirements
+    ? canonicalRequirements.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
+    : Array.isArray(record.slots)
     ? record.slots.map(slot => normalizeAssetSlot(slot)).filter(Boolean) as BeeGameAssetSlot[]
     // Older generated manifests used an object keyed by slot id. Preserve the
     // explicit entries without deriving new semantics from their keys.
@@ -366,11 +565,124 @@ export function normalizeBeeGameAssetManifest(value: unknown): BeeGameAssetManif
       ? normalizeNestedAssetSlots(record.slots)
       : normalizeCategorizedAssetSlots(record.categories)
         .concat(normalizeNestedAssetSlots(record.assets ?? record.resources))
+  const explicitImports = normalizeResourceImports(record.imports)
   return {
     version: normalizeManifestVersion(record.version),
     project_target: normalizeProjectTarget(record.project_target ?? record),
-    slots,
+    requirements,
+    imports: mergeResourceImports(explicitImports, requirements.map(migrateLegacySlotImport).filter((entry): entry is BeeGameResourceImport => Boolean(entry))),
+    compositions: normalizeAssetCompositions(record.compositions),
   }
+}
+
+function normalizeResourceImports(value: unknown): BeeGameResourceImport[] {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeResourceImport).filter((entry): entry is BeeGameResourceImport => Boolean(entry))
+}
+
+function normalizeResourceImport(value: unknown): BeeGameResourceImport | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const source = objectValue(record.source)
+  const id = trimString(record.id)
+  const sourceType = source?.type === 'resource-library' || source?.type === 'user-upload' || source?.type === 'project-authored' ? source.type : undefined
+  const packId = trimString(source?.pack_id)
+  const packVersion = trimString(source?.pack_version)
+  const elementId = trimString(source?.element_id)
+  const elementPath = trimString(source?.element_path)
+  const rootPath = trimString(record.root_path)
+  const selectedAt = trimString(record.selected_at)
+  if (!id || !sourceType || !rootPath || !selectedAt) return undefined
+  if (sourceType === 'resource-library' && (!packId || !packVersion || !elementId || !elementPath)) return undefined
+  const status = record.status === 'referenced' || record.status === 'failed' ? record.status : 'available'
+  const evidence = objectValue(record.usage_evidence)
+  const contentProfile = objectValue(record.content_profile)
+  const technicalFacts = primitiveRecord(record.technical_facts)
+  return {
+    id,
+    source: {
+      type: sourceType,
+      ...(packId ? { pack_id: packId } : {}),
+      ...(packVersion ? { pack_version: packVersion } : {}),
+      ...(elementId ? { element_id: elementId } : {}),
+      ...(elementPath ? { element_path: elementPath } : {}),
+    },
+    status,
+    root_path: rootPath,
+    local_files: stringArray(record.local_files),
+    selected_at: selectedAt,
+    selection_reason: stringArray(record.selection_reason),
+    ...(trimString(record.asset_kind) ? { asset_kind: trimString(record.asset_kind) } : {}),
+    ...(stringArray(record.capabilities).length ? { capabilities: stringArray(record.capabilities) } : {}),
+    ...(contentProfile ? { content_profile: contentProfile } : {}),
+    ...(technicalFacts ? { technical_facts: technicalFacts } : {}),
+    ...(Array.isArray(record.dependencies) ? { dependencies: record.dependencies.map(normalizeImportDependency).filter((entry): entry is BeeGameResourceImportDependency => Boolean(entry)) } : {}),
+    ...(evidence ? { usage_evidence: { references: stringArray(evidence.references), runtime_event_ids: stringArray(evidence.runtime_event_ids) } } : {}),
+    ...(trimString(record.error) ? { error: trimString(record.error) } : {}),
+  }
+}
+
+function primitiveRecord(value: unknown): Record<string, string | number | boolean> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const entries = Object.entries(value).filter((entry): entry is [string, string | number | boolean] => {
+    const item = entry[1]
+    return typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))
+  })
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+function mergeResourceImports(explicit: BeeGameResourceImport[], migrated: BeeGameResourceImport[]): BeeGameResourceImport[] {
+  const byId = new Map(explicit.map(entry => [entry.id, entry]))
+  for (const entry of migrated) if (!byId.has(entry.id)) byId.set(entry.id, entry)
+  return [...byId.values()]
+}
+
+function migrateLegacySlotImport(slot: BeeGameAssetSlot): BeeGameResourceImport | undefined {
+  const files = slot.uploaded_files ?? []
+  const rootPath = files[0] || slot.target?.path
+  if (!rootPath || (!slot.resource_binding && !files.length)) return undefined
+  const id = `legacy.${normalizeImportId(slot.id)}`
+  const binding = slot.resource_binding
+  return {
+    id,
+    source: binding ? {
+      type: 'resource-library',
+      pack_id: binding.pack_id,
+      pack_version: binding.pack_version,
+      element_id: binding.element_id,
+      element_path: binding.element_path || basename(rootPath),
+    } : { type: 'user-upload' },
+    status: slot.status === 'integrated' && Boolean(slot.integration_evidence?.references?.length || slot.integration_evidence?.runtime_event_ids?.length)
+      ? 'referenced'
+      : 'available',
+    root_path: rootPath,
+    local_files: files.length ? files : [rootPath],
+    selected_at: binding?.selected_at || slot.updated_at || new Date(0).toISOString(),
+    selection_reason: binding?.selection_reason ?? ['legacy-project-migration'],
+    ...(binding?.dependencies?.length ? { dependencies: binding.dependencies.map(dependency => ({
+      key: dependency.key,
+      parent_key: dependency.parent_key,
+      element_id: dependency.element_id,
+      element_path: dependency.element_path,
+      reference_path: dependency.reference_path,
+      local_path: files.find(path => path.endsWith(dependency.reference_path.split('\\').join('/'))) || dependency.reference_path,
+      ...(dependency.kind ? { kind: dependency.kind } : {}),
+    })) } : {}),
+    ...(slot.integration_evidence ? { usage_evidence: slot.integration_evidence } : {}),
+  }
+}
+
+function normalizeImportDependency(value: unknown): BeeGameResourceImportDependency | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const key = trimString(record.key)
+  const parentKey = trimString(record.parent_key)
+  const elementId = trimString(record.element_id)
+  const elementPath = trimString(record.element_path)
+  const referencePath = trimString(record.reference_path)
+  const localPath = trimString(record.local_path)
+  if (!key || !parentKey || !elementId || !elementPath || !referencePath || !localPath) return undefined
+  return { key, parent_key: parentKey, element_id: elementId, element_path: elementPath, reference_path: referencePath, local_path: localPath, ...(trimString(record.kind) ? { kind: trimString(record.kind) } : {}) }
 }
 
 /**
@@ -382,7 +694,7 @@ async function reconcileAssetContractFiles(
   root: string,
   manifest: BeeGameAssetManifest,
 ): Promise<BeeGameAssetManifest> {
-  const slots = await Promise.all(manifest.slots.map(async slot => {
+  const requirements = await Promise.all(manifest.requirements.map(async slot => {
     // The manifest is only a record of an integration attempt; it cannot be
     // used as proof that a local file still exists. Reconcile every uploaded
     // or integrated slot against its declared target, whether it originated
@@ -423,7 +735,38 @@ async function reconcileAssetContractFiles(
     }
     return slot
   }))
-  return { ...manifest, slots }
+  const imports = await Promise.all((manifest.imports ?? []).map(async resourceImport => {
+    const localFiles = [...new Set(resourceImport.local_files ?? [])]
+    const missing = localFiles.filter(path => {
+      try { return !existsSync(resolveInsideWorkspace(root, path)) } catch { return true }
+    })
+    if (missing.length) {
+      return {
+        ...resourceImport,
+        status: 'failed' as const,
+        error: 'One or more imported project asset files are missing.',
+      }
+    }
+    for (const localPath of localFiles) {
+      const declaredFormat = extensionOf(localPath)
+      if (!declaredFormat) continue
+      try {
+        const bytes = await readResourceSignature(resolveInsideWorkspace(root, localPath))
+        const detectedFormat = detectResourceBinaryFormat(bytes)
+        if (detectedFormat && !formatsAgree(declaredFormat, detectedFormat)) {
+          return {
+            ...resourceImport,
+            status: 'failed' as const,
+            error: `File format mismatch: expected .${declaredFormat}, found ${detectedFormat}`,
+          }
+        }
+      } catch {
+        return { ...resourceImport, status: 'failed' as const, error: 'Imported project asset could not be read.' }
+      }
+    }
+    return resourceImport
+  }))
+  return { ...manifest, requirements, imports }
 }
 
 function expectedAssetPaths(root: string, slot: BeeGameAssetSlot): string[] {
@@ -476,6 +819,8 @@ function normalizeAssetSlot(
   const legacySpecs = collectLegacySpecs(record)
   const formats = stringArray(record.accepted_formats)
   const legacyFormats = normalizeLegacyFormats(record.format)
+  const satisfiedBy = objectValue(record.satisfied_by)
+  const evidence = objectValue(record.integration_evidence)
   return {
     id,
     name: trimString(record.name),
@@ -500,7 +845,9 @@ function normalizeAssetSlot(
     uploaded_files: stringArray(record.uploaded_files),
     uploaded_urls: stringArray(record.uploaded_urls),
     resource_requirement: normalizeResourceRequirement(record.resource_requirement ?? replacement.resource_requirement),
+    ...(satisfiedBy ? { satisfied_by: { import_ids: stringArray(satisfiedBy.import_ids), composition_ids: stringArray(satisfiedBy.composition_ids), project_references: stringArray(satisfiedBy.project_references) } } : {}),
     resource_binding: normalizeResourceBinding(record.resource_binding),
+    ...(evidence ? { integration_evidence: { references: stringArray(evidence.references), runtime_event_ids: stringArray(evidence.runtime_event_ids) } } : {}),
     integration_error: trimString(record.integration_error),
     updated_at: trimString(record.updated_at),
   }
@@ -519,8 +866,20 @@ function normalizeResourceRequirement(value: unknown): BeeGameResourceRequiremen
   const tags = stringArray(record.tags).filter((tag): tag is ResourceUsageTag =>
     (RESOURCE_USAGE_TAGS as readonly string[]).includes(tag),
   )
+  const assetKinds = stringArray(record.asset_kinds ?? record.assetKinds).filter((kind): kind is ResourceAssetKind =>
+    (RESOURCE_ASSET_KINDS as readonly string[]).includes(kind),
+  )
+  const capabilities = stringArray(record.capabilities).filter((capability): capability is ResourceCapability =>
+    (RESOURCE_CAPABILITIES as readonly string[]).includes(capability),
+  )
+  const subresources = Array.isArray(record.subresources)
+    ? record.subresources.map(normalizeSubresourceRequirement).filter((entry): entry is BeeGameSubresourceRequirement => Boolean(entry))
+    : []
+  const relations = Array.isArray(record.relations)
+    ? record.relations.map(normalizeResourceRelationRequirement).filter((relation): relation is BeeGameResourceRelationRequirement => Boolean(relation))
+    : []
   const purpose = trimString(record.purpose)
-  if (!category && !dimension && !acceptedFormats.length && !styles.length && !gameTypes.length && !tags.length && !purpose) return undefined
+  if (!category && !dimension && !acceptedFormats.length && !styles.length && !gameTypes.length && !tags.length && !assetKinds.length && !capabilities.length && !subresources.length && !relations.length && !purpose) return undefined
   return {
     category: category || undefined,
     dimension,
@@ -528,7 +887,92 @@ function normalizeResourceRequirement(value: unknown): BeeGameResourceRequiremen
     styles,
     game_types: gameTypes,
     ...(tags.length ? { tags } : {}),
+    ...(assetKinds.length ? { asset_kinds: assetKinds } : {}),
+    ...(capabilities.length ? { capabilities } : {}),
+    ...(subresources.length ? { subresources } : {}),
+    ...(relations.length ? { relations } : {}),
     purpose: purpose || undefined,
+  }
+}
+
+function normalizeSubresourceRequirement(value: unknown): BeeGameSubresourceRequirement | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const kind = trimString(record.kind) ?? ''
+  if (!(RESOURCE_EMBEDDED_COMPONENT_KINDS as readonly string[]).includes(kind)) return undefined
+  const role = trimString(record.role)
+  const signature = trimString(record.skeleton_signature ?? record.skeletonSignature)
+  return {
+    kind: kind as ResourceEmbeddedComponentKind,
+    ...(role ? { role } : {}),
+    ...(signature ? { skeleton_signature: signature } : {}),
+  }
+}
+
+function normalizeResourceRelationRequirement(value: unknown): BeeGameResourceRelationRequirement | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const kind = trimString(record.kind) ?? ''
+  if (!(RESOURCE_RELATION_KINDS as readonly string[]).includes(kind)) return undefined
+  const targetElementId = trimString(record.target_element_id ?? record.targetElementId)
+  const role = trimString(record.role)
+  return {
+    kind: kind as ResourceRelationKind,
+    ...(targetElementId ? { target_element_id: targetElementId } : {}),
+    ...(role ? { role } : {}),
+  }
+}
+
+function normalizeAssetCompositions(value: unknown): BeeGameAssetComposition[] {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeAssetComposition).filter((composition): composition is BeeGameAssetComposition => Boolean(composition))
+}
+
+function normalizeAssetComposition(value: unknown): BeeGameAssetComposition | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const id = trimString(record.id)
+  const kind = trimString(record.kind) ?? ''
+  if (!id || !(RESOURCE_COMPOSITION_KINDS as readonly string[]).includes(kind) || !Array.isArray(record.members)) return undefined
+  const members = record.members.map(normalizeCompositionMember).filter((member): member is BeeGameAssetCompositionMember => Boolean(member))
+  if (!members.length) return undefined
+  const recipe = objectValue(record.recipe)
+  const evidence = objectValue(record.integration_evidence)
+  const normalizedStatus = trimString(record.status) ?? ''
+  const assemblyMode = record.assembly_mode === 'direct' || record.assemblyMode === 'direct'
+    ? 'direct'
+    : record.assembly_mode === 'composed' || record.assemblyMode === 'composed'
+      ? 'composed'
+      : 'composed'
+  const status = ['planned', 'assembled', 'integrated', 'failed'].includes(normalizedStatus)
+    ? normalizedStatus as BeeGameAssetComposition['status']
+    : undefined
+  return {
+    id,
+    kind: kind as ResourceCompositionKind,
+    required: record.required !== false,
+    members,
+    ...(assemblyMode ? { assembly_mode: assemblyMode } : {}),
+    ...(recipe ? { recipe: { path: trimString(recipe.path), notes: trimString(recipe.notes) } } : {}),
+    ...(status ? { status } : {}),
+    ...(evidence ? { integration_evidence: { references: stringArray(evidence.references), runtime_event_ids: stringArray(evidence.runtime_event_ids) } } : {}),
+  }
+}
+
+function normalizeCompositionMember(value: unknown): BeeGameAssetCompositionMember | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const importId = trimString(record.import_id ?? record.importId)
+  const requirementId = trimString(record.requirement_id ?? record.requirementId ?? record.slot_id ?? record.slotId)
+  const compositionId = trimString(record.composition_id ?? record.compositionId)
+  const role = trimString(record.role)
+  if ((!importId && !requirementId && !compositionId) || !role) return undefined
+  return {
+    ...(importId ? { import_id: importId } : {}),
+    ...(requirementId ? { requirement_id: requirementId } : {}),
+    ...(compositionId ? { composition_id: compositionId } : {}),
+    role,
+    required: record.required !== false,
   }
 }
 
@@ -559,6 +1003,7 @@ function normalizeResourceBinding(value: unknown): BeeGameResourceBinding | unde
     pack_version: packVersion,
     element_id: elementId,
     ...(trimString(record.element_path) ? { element_path: trimString(record.element_path) } : {}),
+    ...(trimString(record.content_format) ? { content_format: trimString(record.content_format) } : {}),
     source_url: sourceUrl,
     selected_at: selectedAt,
     selection_reason: stringArray(record.selection_reason),
@@ -634,12 +1079,28 @@ function normalizeProjectTarget(value: unknown): BeeGameAssetProjectTarget | und
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   return {
-    kind: trimString(record.kind) || trimString(record.platform),
-    engine: trimString(record.engine),
+    platform: trimString(record.platform) || trimString(record.kind),
+    runtime: trimString(record.runtime) || trimString(record.engine),
     integration_mode: normalizeIntegrationMode(record.integration_mode),
     mcp_server: trimString(record.mcp_server),
     asset_format_capabilities: stringArray(record.asset_format_capabilities ?? record.supported_asset_formats),
+    resource_library_usage: normalizeResourceLibraryUsage(record.resource_library_usage ?? migrateLegacyResourceUsage(record.resource_sourcing_policy)),
   }
+}
+
+function normalizeResourceLibraryUsage(value: unknown): ResourceLibraryUsage | undefined {
+  const usage = trimString(value)
+  return usage && (RESOURCE_LIBRARY_USAGE as readonly string[]).includes(usage)
+    ? usage as ResourceLibraryUsage
+    : undefined
+}
+
+function migrateLegacyResourceUsage(value: unknown): ResourceLibraryUsage | undefined {
+  const legacy = trimString(value)
+  if (legacy === 'library_required') return 'required'
+  if (legacy === 'library_first') return 'preferred'
+  if (legacy === 'author_choice') return 'optional'
+  return undefined
 }
 
 function assertAssetFormatAllowed(filename: string, slot: BeeGameAssetSlot, target?: BeeGameAssetProjectTarget): void {
@@ -667,11 +1128,14 @@ function normalizeIntegrationMode(value: unknown): BeeGameAssetIntegrationMode |
 function normalizeManifestVersion(value: unknown): number {
   const parsed = typeof value === 'string'
     ? Number.parseInt(value, 10)
-    : Number(value || 1)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+    : Number(value || CURRENT_ASSET_MANIFEST_VERSION)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : CURRENT_ASSET_MANIFEST_VERSION
 }
 
 function normalizeSlotStatus(value: unknown): BeeGameAssetSlot['status'] {
+  if (value === 'satisfied') return 'integrated'
+  if (value === 'blocked') return 'missing'
+  if (value === 'planned') return 'placeholder'
   return value === 'uploaded' ||
     value === 'integrated' ||
     value === 'implemented' ||
@@ -719,16 +1183,15 @@ function resolveUploadTarget(root: string, slot: BeeGameAssetSlot, filename: str
   return resolveInsideWorkspace(root, join(ASSET_UPLOAD_ROOT, slot.id, normalizedFilename))
 }
 
-function boundResourceFilename(binding: BeeGameResourceBinding): string {
-  const elementPath = trimString(binding.element_path)
-  if (elementPath) return sanitizeFilename(elementPath)
-  try {
-    const filename = basename(new URL(binding.source_url).pathname)
-    if (filename) return sanitizeFilename(filename)
-  } catch {
-    // Preserve backwards compatibility with historical signed URLs.
+function resolveImportTarget(root: string, destinationPath: string, filename: string): string {
+  const destination = trimString(destinationPath)
+  if (!destination || !isConcreteRelativePath(destination)) throw new Error('Resource import destination_path must be a concrete project-relative path')
+  const sourceExtension = extname(filename).toLowerCase()
+  const destinationExtension = extname(destination).toLowerCase()
+  if (destinationExtension && sourceExtension && destinationExtension !== sourceExtension) {
+    throw new Error(`Resource import destination extension must remain .${sourceExtension.slice(1)}`)
   }
-  return sanitizeFilename(binding.element_id)
+  return resolveInsideWorkspace(root, destinationExtension ? destination : join(destination, filename))
 }
 
 function extensionOf(filename: string): string {
@@ -760,7 +1223,41 @@ function formatsAgree(declaredFormat: string, detectedFormat: string): boolean {
 async function writeAssetManifest(root: string, manifest: BeeGameAssetManifest): Promise<void> {
   const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
   await mkdir(resolve(manifestPath, '..'), { recursive: true })
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+  await writeFile(manifestPath, `${JSON.stringify(toCanonicalBeeGameAssetManifest(manifest), null, 2)}\n`, 'utf8')
+}
+
+export function toCanonicalBeeGameAssetManifest(manifest: BeeGameAssetManifest): Record<string, unknown> {
+  const migratedImports = manifest.requirements.map(migrateLegacySlotImport).filter((entry): entry is BeeGameResourceImport => Boolean(entry))
+  const imports = mergeResourceImports(manifest.imports ?? [], migratedImports)
+  return {
+    version: Math.max(CURRENT_ASSET_MANIFEST_VERSION, manifest.version),
+    ...(manifest.project_target ? { project_target: manifest.project_target } : {}),
+    requirements: manifest.requirements.map(slot => {
+      const satisfiedBy = {
+        import_ids: [...new Set([...(slot.satisfied_by?.import_ids ?? []), ...(migrateLegacySlotImport(slot) ? [`legacy.${normalizeImportId(slot.id)}`] : [])])],
+        composition_ids: slot.satisfied_by?.composition_ids ?? [],
+        project_references: [...new Set([...(slot.satisfied_by?.project_references ?? []), ...(slot.integration_evidence?.references ?? [])])],
+      }
+      return {
+        id: slot.id,
+        ...(slot.name ? { name: slot.name } : {}),
+        ...(slot.purpose ? { purpose: slot.purpose } : {}),
+        required: slot.required !== false,
+        ...(slot.resource_requirement ? { resource_requirement: slot.resource_requirement } : {}),
+        ...(satisfiedBy.import_ids.length || satisfiedBy.composition_ids.length || satisfiedBy.project_references.length ? { satisfied_by: satisfiedBy } : {}),
+        status: slot.status === 'integrated' ? 'satisfied' : slot.status === 'failed' || slot.status === 'missing' ? 'blocked' : 'planned',
+      }
+    }),
+    imports,
+    compositions: manifest.compositions ?? [],
+  }
+}
+
+export async function writeBeeGameAssetManifest(
+  workspacePath: string,
+  manifest: BeeGameAssetManifest,
+): Promise<void> {
+  await writeAssetManifest(normalizeWorkspacePath(workspacePath), manifest)
 }
 
 function buildUploadMessage(
@@ -773,11 +1270,11 @@ function buildUploadMessage(
     ? ` Use the configured MCP integration${slot.integration_provider?.server ? ` (${slot.integration_provider.server})` : ''} if it is available.`
     : ' Use normal project files and commands to integrate it.'
   return [
-    `Asset uploaded for slot "${slot.id}".`,
+    `Asset imported for requirement "${slot.id}".`,
     `File: ${path}.`,
     slot.purpose ? `Purpose: ${slot.purpose}.` : '',
     slot.target?.integration_notes ? `Integration notes: ${slot.target.integration_notes}.` : '',
-    'The upload is not considered integrated until the project references it and it is verified in runtime.',
+    'The import remains available inventory until target-native project code or a composition references it and runtime verification succeeds.',
     `${provider} Update project references, validate that the asset works in the game, and update assets/asset-manifest.json with the real integration status.`,
   ].filter(Boolean).join(' ')
 }
@@ -808,6 +1305,10 @@ function isConcreteRelativePath(path: string): boolean {
 }
 
 function normalizeSlotId(value: string): string {
+  return value.trim().replace(/[^A-Za-z0-9_.:-]+/g, '_')
+}
+
+function normalizeImportId(value: string): string {
   return value.trim().replace(/[^A-Za-z0-9_.:-]+/g, '_')
 }
 

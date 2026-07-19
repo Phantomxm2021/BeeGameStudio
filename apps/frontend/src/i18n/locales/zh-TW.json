@@ -385,6 +385,12 @@
           "description": "把 MCP 暴露的 skill:// 資源納入技能體系。",
           "note": "效果取決於 MCP server 的資源品質，需要 feature 啟動。",
           "scope": "restart"
+        },
+        "resourceLibraryEnabled": {
+          "label": "資源庫",
+          "description": "允許專案 Agent 從託管資源庫搜尋並接入遊戲素材。",
+          "note": "對新工作階段生效；服務憑證只保留在伺服器端。",
+          "scope": "newSession"
         }
       }
     },
@@ -672,6 +678,7 @@
       "unbindDescription": "這只會移除資源庫關聯，已複製到專案中的檔案將保持不變。",
       "cancel": "取消",
       "integrateAllPending": "整合所有待處理",
+      "replanWithAgent": "讓 Agent 探索資源",
       "required": "必需",
       "optional": "可選",
       "placeholder": "Placeholder",
@@ -684,7 +691,9 @@
       "target": "目標",
       "formats": "格式",
       "specs": "規格",
-      "noPurpose": "未提供用途說明"
+      "noPurpose": "未提供用途說明",
+      "compositions": "資源組合",
+      "members": "個成員"
     },
     "savedPrefixSeparator": "："
   },

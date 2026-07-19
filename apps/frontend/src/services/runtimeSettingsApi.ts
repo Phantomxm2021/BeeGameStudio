@@ -8,6 +8,7 @@ export type RuntimeSettingsConfig = {
   webBrowserToolEnabled?: boolean;
   bashClassifierEnabled?: boolean;
   mcpSkillsEnabled?: boolean;
+  resourceLibraryEnabled?: boolean;
 };
 
 export const getRuntimeSettings = (): Promise<RuntimeSettingsConfig> => (

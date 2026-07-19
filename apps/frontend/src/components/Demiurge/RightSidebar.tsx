@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
-import { api, type BeeGameAssetManifestPayload, type BeeGameAssetSlotPayload, type BeeGameAutoResourceBindingPayload, type ReviewBindingPayload } from '../../services/api';
+import { api, type BeeGameAssetManifestPayload, type ReviewBindingPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -28,29 +28,6 @@ const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachment
     }
     return uniqueAttachments;
 };
-
-function formatAssetLibrarySyncFeedback(result: BeeGameAutoResourceBindingPayload, lang: Language): { message: string; tone: 'success' | 'warning' | 'error' } {
-    const copied = result.results.filter(item => item.status === 'copied').length;
-    const failed = result.results.filter(item => item.status === 'failed').length;
-    const repaired = result.repaired_slot_ids?.length ?? 0;
-    const unmatched = result.unmatched_slot_ids.length;
-    const isZh = lang === 'zh' || lang === 'zh-TW';
-    if (failed) {
-        return { tone: 'error', message: isZh ? `${failed} 个资源未能同步；请查看对应资源槽。` : `${failed} asset slot(s) could not be synchronized; check the affected slots.` };
-    }
-    if (copied || repaired) {
-        const summary = isZh
-            ? `已同步 ${copied} 个资源${repaired ? `，并修复 ${repaired} 个缺失的资源库文件` : ''}。`
-            : `Synchronized ${copied} asset(s)${repaired ? ` and repaired ${repaired} missing library asset(s)` : ''}.`;
-        return { tone: unmatched ? 'warning' : 'success', message: unmatched ? `${summary} ${isZh ? `${unmatched} 个槽位未找到兼容候选。` : `${unmatched} slot(s) have no compatible candidate.`}` : summary };
-    }
-    return {
-        tone: unmatched ? 'warning' : 'success',
-        message: isZh
-            ? (unmatched ? `${unmatched} 个槽位未找到兼容候选。` : '没有需要同步的资源。')
-            : (unmatched ? `${unmatched} slot(s) have no compatible candidate.` : 'No assets need synchronization.'),
-    };
-}
 
 interface RightSidebarProps {
     projectId: string;
@@ -130,10 +107,7 @@ export function RightSidebar({
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
-    const [uploadingAssetSlotId, setUploadingAssetSlotId] = useState<string | null>(null);
-    const [reintegratingAssetSlotId, setReintegratingAssetSlotId] = useState<string | null>(null);
-    const [isAutoBindingResources, setIsAutoBindingResources] = useState(false);
-    const [assetOperationFeedback, setAssetOperationFeedback] = useState<{ message: string; tone: 'success' | 'warning' | 'error' } | null>(null);
+    const [uploadingAssetRequirementId, setUploadingAssetRequirementId] = useState<string | null>(null);
     const [isComposing, setIsComposing] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewContent, setPreviewContent] = useState('');
@@ -162,9 +136,8 @@ export function RightSidebar({
 
     useEffect(() => {
         setAssetManifest(null);
-        setUploadingAssetSlotId(null);
+        setUploadingAssetRequirementId(null);
         setIsAssetsLoading(false);
-        setAssetOperationFeedback(null);
     }, [projectId]);
 
     // Derived Data
@@ -262,84 +235,22 @@ export function RightSidebar({
         }
     };
 
-    const handleUploadAsset = async (slotId: string, file: File) => {
+    const handleUploadAsset = async (requirementId: string, file: File) => {
         if (!canMutateAssets) return;
-        setUploadingAssetSlotId(slotId);
+        setUploadingAssetRequirementId(requirementId);
         try {
-            const result = await api.uploadProjectAsset(projectId, slotId, file);
+            const result = await api.uploadProjectAsset(projectId, requirementId, file);
             setAssetManifest(result.manifest);
         } finally {
-            setUploadingAssetSlotId(null);
+            setUploadingAssetRequirementId(null);
         }
     };
 
-    const handleRequestAssetIntegration = (slot: BeeGameAssetSlotPayload) => {
+    const handleRequestSelectionPreparation = () => {
         if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
         void api.requestProjectAction({
             project_id: projectId,
-            kind: 'asset_integrate',
-            slotIds: [slot.id],
-        });
-    };
-
-    const handleReintegrateLibraryResource = async (slotId: string) => {
-        if (!canMutateAssets) return;
-        setReintegratingAssetSlotId(slotId);
-        try {
-            const result = await api.integrateProjectResource(projectId, slotId);
-            setAssetManifest(result.manifest);
-        } finally {
-            setReintegratingAssetSlotId(null);
-        }
-    };
-
-    const handleAutoBindLibraryResources = async () => {
-        if (!canMutateAssets) return;
-        setIsAutoBindingResources(true);
-        try {
-            const result = await api.autoBindProjectResources(projectId);
-            setAssetManifest(result.manifest);
-            setAssetOperationFeedback(formatAssetLibrarySyncFeedback(result, lang));
-        } catch (error) {
-            setAssetOperationFeedback({ message: error instanceof Error ? error.message : String(error), tone: 'error' });
-        } finally {
-            setIsAutoBindingResources(false);
-        }
-    };
-
-    const handleUnbindLibraryResource = async (slotId: string) => {
-        if (!canMutateAssets) return;
-        const result = await api.unbindProjectResource(projectId, slotId);
-        setAssetManifest(result.manifest);
-    };
-    const handleRemoveLibraryIntegration = async (slotId: string) => {
-        if (!canMutateAssets) return;
-        const result = await api.removeProjectResourceIntegration(projectId, slotId);
-        setAssetManifest(result.manifest);
-    };
-    const handleResourceCandidates = async (slot: BeeGameAssetSlotPayload) => api.getProjectResourceCandidates(projectId, slot.id);
-    const handleBindResourceCandidate = async (slot: BeeGameAssetSlotPayload, candidate: { packId: string; elementId: string }) => {
-        if (!canMutateAssets) throw new Error('Project assets cannot be changed while the runtime is active');
-        const result = await api.bindProjectResource(projectId, slot.id, slot.resource_requirement || {}, candidate);
-        setAssetManifest(result.manifest);
-    };
-
-
-    const handleRequestAllAssetIntegration = (slots: BeeGameAssetSlotPayload[]) => {
-        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
-        void api.requestProjectAction({
-            project_id: projectId,
-            kind: 'asset_integrate',
-            slotIds: slots.map(slot => slot.id),
-        });
-    };
-
-    const handleRequestSelectionPreparation = (slots: BeeGameAssetSlotPayload[]) => {
-        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
-        void api.requestProjectAction({
-            project_id: projectId,
-            kind: 'asset_prepare_selection',
-            slotIds: slots.map(slot => slot.id),
+            kind: 'asset_explore_library',
         });
     };
 
@@ -478,8 +389,8 @@ export function RightSidebar({
                                             {documentProgress.filter(item => item.status === 'ready').length}/{documentProgress.length}
                                         </span>
                                     ) : null}
-                                    {variant === 'beegame' && tab === 'assets' && assetManifest?.slots.length ? (
-                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.slots.length}</span>
+                                    {variant === 'beegame' && tab === 'assets' && assetManifest?.requirements.length ? (
+                                        <span className="type-caption-2 ml-2 rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">{assetManifest.requirements.length}</span>
                                     ) : null}
                                     {activeTab === tab && (
                                         <div className={variant === 'beegame' ? 'absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-300' : 'absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 dark:bg-zinc-100'} />
@@ -559,19 +470,8 @@ export function RightSidebar({
                             <AssetsPanel
                                 manifest={assetManifest}
                                 isLoading={isAssetsLoading}
-                                isUploadingSlotId={uploadingAssetSlotId}
-                                isReintegratingSlotId={reintegratingAssetSlotId}
-                                isAutoBinding={isAutoBindingResources}
-                                autoBindFeedback={assetOperationFeedback}
+                                isUploadingRequirementId={uploadingAssetRequirementId}
                                 onUpload={canMutateAssets ? handleUploadAsset : undefined}
-                                onReintegrate={canMutateAssets ? handleReintegrateLibraryResource : undefined}
-                                onRemoveIntegration={canMutateAssets ? handleRemoveLibraryIntegration : undefined}
-                                onAutoBind={canMutateAssets ? handleAutoBindLibraryResources : undefined}
-                                onUnbind={canMutateAssets ? handleUnbindLibraryResource : undefined}
-                                onCandidates={canUploadAssets ? handleResourceCandidates : undefined}
-                                onBindCandidate={canMutateAssets ? handleBindResourceCandidate : undefined}
-                                onRequestIntegration={canSendMessage && canIntegrateAssets ? handleRequestAssetIntegration : undefined}
-                                onRequestAllIntegration={canSendMessage && canIntegrateAssets ? handleRequestAllAssetIntegration : undefined}
                                 onRequestSelectionPreparation={canSendMessage && canIntegrateAssets ? handleRequestSelectionPreparation : undefined}
                                 lang={lang}
                             />

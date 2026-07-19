@@ -40,6 +40,7 @@ import {
 } from '../beegame/native-acceptance-evidence'
 import { recordNativeDocumentReviewForTest } from '../beegame/native-document-review-evidence'
 import { getObservedNativeDocumentReview } from '../beegame/native-document-review-evidence'
+import type { ProjectResourceSelectionClient } from '../beegame/project-resource-application'
 
 const testDashboardRoots: string[] = []
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
@@ -965,18 +966,20 @@ describe('beegame session routes', () => {
       await buildManager.sendWithDisplay(
         buildSession.id,
         JSON.stringify({
-          kind: 'asset_integration_request',
-          action: 'integrate',
-          slot_ids: ['slot-one'],
+          kind: 'resource_library_exploration_request',
+          action: 'explore_plan_import_and_author',
         }),
         { displayKind: 'asset_integration', taskType: 'asset_integration' },
       )
       await waitFor(() => submittedPrompts.length >= 4)
       await waitFor(() => buildManager.get(buildSession.id)?.turnStatus === 'idle')
-      expect(submittedPrompts[3]).toContain('Resource integration request:')
+      expect(submittedPrompts[3]).toContain('Resource exploration and authoring request:')
       expect(submittedPrompts[3]).toContain('complete declared dependency closure')
       expect(submittedPrompts[3]).toContain('real format and extension')
       expect(submittedPrompts[3]).toContain('observable runtime loading')
+      expect(submittedPrompts[3]).toContain('fresh inspection-and-authoring pass')
+      expect(submittedPrompts[3]).toContain('refresh_import_metadata')
+      expect(submittedPrompts[3]).toContain('proves only structural consistency')
       expect(submittedPrompts[3]).toContain('non-empty user-facing result')
       expect(submittedPrompts[3]).not.toContain('Existing project change request:')
       await expect(stat(join(buildWorkspace, 'docs', 'delivery-contract.json'))).rejects.toThrow()
@@ -1144,6 +1147,10 @@ describe('beegame session routes', () => {
           lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4),
         }
       },
+      {
+        baseUrl: 'https://resources.runtime.test',
+        serviceToken: 'resource-service-secret',
+      },
     )
 
     try {
@@ -1163,6 +1170,11 @@ describe('beegame session routes', () => {
         GEMINI_BASE_URL: expect.objectContaining({ url: new URL('https://gemini.runtime.test') }),
         GROK_BASE_URL: expect.objectContaining({ url: new URL('https://grok.runtime.test') }),
       }))
+      expect(starts[0]?.resourceSelectionConfig).toEqual({
+        baseUrl: 'https://resources.runtime.test',
+        serviceToken: 'resource-service-secret',
+      })
+      expect(starts[0]?.env).not.toHaveProperty('BEEGAME_RESOURCE_SERVICE_TOKEN')
       expect(resolvedUrls).toHaveLength(4)
     } finally {
       await rm(workspace, { recursive: true, force: true })
@@ -2427,7 +2439,10 @@ describe('beegame session routes', () => {
               gameplay: 'One canonical playable rules description.',
               coreGameplayHypothesis: 'One canonical playable rules description.',
             },
-            settings: { dimension: '3D' },
+            settings: {
+              dimension: '3D',
+              resourceLibraryUsage: 'preferred',
+            },
             confirmedGdd: '# Approved design',
           },
         }),
@@ -2440,6 +2455,12 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('Build and deliver the confirmed game project below.')
       expect(submitted).toContain('"document_language": "zh"')
       expect(submitted).toContain('"game_user_visible_language": "en"')
+      expect(submitted).toContain('"resource_library_usage": "preferred"')
+      expect(submitted).toContain('use the native ResourceLibrary catalog actions')
+      expect(submitted).toContain('Derive project_target.asset_format_capabilities from the selected runtime')
+      expect(submitted).toContain('browse the published Pack collection')
+      expect(submitted).toContain('Do not turn project requirements into one-element search slots')
+      expect(submitted).toContain('After Reviewer READY, explicitly choose the approved Resource elements and call ResourceLibrary import_elements')
       expect(submitted).toContain('Simplified Chinese')
       expect(submitted).toContain('Write all player-visible game text in English.')
       expect(submitted).toContain('Treat document language and player-visible game language as separate confirmed requirements')
@@ -2454,8 +2475,10 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('must repeat all three explicit inputs in that Agent call')
       expect(submitted).toContain('beegame-acceptance-validator')
       expect(submitted).toContain('assets/asset-manifest.json')
-      expect(submitted).toContain('"rootFields":["version","project_target","slots"]')
-      expect(submitted).toContain('procedural and embedded assets')
+      expect(submitted).toContain('"rootFields":["version","project_target","requirements","imports","compositions"]')
+      expect(submitted).toContain('Derive an explicit art-direction baseline')
+      expect(submitted).toContain('Cross-Pack composition is allowed')
+      expect(submitted).toContain('Do not let optional decoration hide unresolved core artistic responsibilities')
       expect(submitted).toContain('JSON wrapped in prose is invalid')
       expect(submitted).toContain('executable build, test, and runtime acceptance entrypoints')
       expect(submitted).toContain('add only the smallest missing harness')
@@ -3146,6 +3169,11 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
       currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+      resourceSelectionClient: createEmptyResourceSelectionClient(),
+      resourceSelectionRuntimeConfig: {
+        baseUrl: 'https://resources.runtime.test',
+        serviceToken: 'resource-service-secret',
+      },
     })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Primary LLM',
@@ -3167,6 +3195,7 @@ describe('beegame session routes', () => {
           webBrowserToolEnabled: true,
           bashClassifierEnabled: true,
           mcpSkillsEnabled: true,
+          resourceLibraryEnabled: true,
         }),
       })
       expect(settingsRes.status).toBe(200)
@@ -3204,8 +3233,14 @@ describe('beegame session routes', () => {
         FEATURE_WEB_BROWSER_TOOL: '1',
         FEATURE_BASH_CLASSIFIER: '1',
         FEATURE_MCP_SKILLS: '1',
+        BEEGAME_RESOURCE_LIBRARY_ENABLED: '1',
       }))
       expect(fake.starts[0]?.env).not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      expect(fake.starts[0]?.resourceSelectionConfig).toEqual({
+        baseUrl: 'https://resources.runtime.test',
+        serviceToken: 'resource-service-secret',
+      })
+      expect(fake.starts[0]?.env).not.toHaveProperty('BEEGAME_RESOURCE_SERVICE_TOKEN')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).toContain('.runtime/app')
       expect(fake.starts[0]?.env.CLAUDE_CONFIG_DIR).not.toMatch(/claude/i)
       await expect(readFile(
@@ -4754,8 +4789,8 @@ describe('beegame session routes', () => {
         active_agents: ['claude-code'],
         acceptance: expect.objectContaining({ status: 'not_run' }),
         project_target: expect.objectContaining({
-          kind: 'native',
-          engine: 'custom-engine',
+          platform: 'native',
+          runtime: 'custom-engine',
         }),
       }))
       expect(state.context).toEqual(expect.objectContaining({
@@ -5054,7 +5089,7 @@ describe('beegame session routes', () => {
       const assetsRes = await app.request(`/api/projects/${projectId}/assets`)
       expect(assetsRes.status).toBe(200)
       expect(await assetsRes.json()).toEqual(expect.objectContaining({
-        slots: [expect.objectContaining({ id: 'title_logo' })],
+        requirements: [expect.objectContaining({ id: 'title_logo' })],
       }))
 
       const form = new FormData()
@@ -5127,105 +5162,19 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('automatically binds contract-defined resources without inferring asset categories', async () => {
-    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auto-resource-binding-'))
-    const workspace = join(projectsRoot, 'auto-bound-project')
-    const app = createAgentWorkflowApp({
-      sessionRunner: createFakeRunner().runner,
-      defaultWorkspacePath: projectsRoot,
-      resourceSelectionClient: {
-        select: async requirements => requirements.map(requirement => ({
-          slotId: requirement.slotId,
-          packId: 'library-pack',
-          packVersion: '1.0.0',
-          elementId: 'library-model',
-          elementPath: 'models/library-model.glb',
-          sourceUrl: 'https://resource.example/signed/library-model.glb',
-          score: 100,
-          reasons: ['category:models', 'status:ready'],
-        })),
-      },
-    })
-    try {
-      await mkdir(join(workspace, 'assets'), { recursive: true })
-      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-        version: 1,
-        project_target: { integration_mode: 'mcp', asset_format_capabilities: ['glb'] },
-        slots: [{
-          id: 'slot-1',
-          name: 'A deliberately unrelated label',
-            resource_requirement: { category: 'models', dimension: '3D', accepted_formats: ['glb'], tags: ['environment'] },
-        }],
-      }))
-      const projectId = 'project_auto_resource_binding'
-      const projectRes = await app.request('/api/projects', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: projectId, name: 'Auto Resource Binding', root_path: workspace, created_at: Date.now() }),
-      })
-      expect(projectRes.status).toBe(200)
-
-      const response = await app.request(`/api/projects/${projectId}/assets/resource-bindings/auto`, { method: 'POST' })
-      expect(response.status).toBe(200)
-      expect(await response.json()).toEqual(expect.objectContaining({
-        results: [expect.objectContaining({ slotId: 'slot-1', status: 'bound', packId: 'library-pack' })],
-        unmatched_slot_ids: [],
-      }))
-      const manifest = JSON.parse(await readFile(join(workspace, 'assets', 'asset-manifest.json'), 'utf8'))
-      expect(manifest.slots[0].resource_binding).toEqual(expect.objectContaining({
-        pack_id: 'library-pack', element_id: 'library-model',
-      }))
-    } finally {
-      await rm(projectsRoot, { recursive: true, force: true })
-    }
-  })
-
-  test('leaves an untagged automatic resource slot unmatched instead of choosing a generic format match', async () => {
-    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-auto-resource-safety-'))
-    const workspace = join(projectsRoot, 'safe-auto-bound-project')
-    let selectionCalls = 0
-    const app = createAgentWorkflowApp({
-      sessionRunner: createFakeRunner().runner,
-      defaultWorkspacePath: projectsRoot,
-      resourceSelectionClient: {
-        select: async () => {
-          selectionCalls += 1
-          return []
-        },
-      },
-    })
-    try {
-      await mkdir(join(workspace, 'assets'), { recursive: true })
-      await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{ id: 'unclassified-model', resource_requirement: { category: 'models', accepted_formats: ['glb'] } }],
-      }))
-      const projectId = 'project_auto_resource_safety'
-      await app.request('/api/projects', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: projectId, name: 'Safe Auto Resource Binding', root_path: workspace, created_at: Date.now() }),
-      })
-
-      const response = await app.request(`/api/projects/${projectId}/assets/resource-bindings/auto`, { method: 'POST' })
-
-      expect(response.status).toBe(200)
-      expect(await response.json()).toEqual(expect.objectContaining({ results: [], unmatched_slot_ids: ['unclassified-model'] }))
-      expect(selectionCalls).toBe(0)
-    } finally {
-      await rm(projectsRoot, { recursive: true, force: true })
-    }
-  })
-
   test('reports only the current user projects bound to a Pack version', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-resource-impact-'))
     const workspace = join(projectsRoot, 'impact-project')
     const app = createAgentWorkflowApp({ sessionRunner: createFakeRunner().runner, defaultWorkspacePath: projectsRoot })
     try {
       await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'tree.glb'), new Uint8Array([1, 2, 3]))
       await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-        version: 1,
-        slots: [{ id: 'hero', status: 'integrated', resource_binding: { pack_id: 'forest-pack', pack_version: '2.0.0', element_id: 'tree', source_url: 'https://resource.example/tree', selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] } }],
+        version: 5,
+        project_target: { asset_format_capabilities: ['glb'] },
+        requirements: [],
+        imports: [{ id: 'tree-a', source: { type: 'resource-library', pack_id: 'forest-pack', pack_version: '2.0.0', element_id: 'tree', element_path: 'tree.glb' }, status: 'available', root_path: 'assets/tree.glb', local_files: ['assets/tree.glb'], selected_at: '2026-07-11T00:00:00.000Z', selection_reason: [] }],
+        compositions: [],
       }))
       const projectId = 'project_resource_impact'
       const created = await app.request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: projectId, name: 'Impact Project', root_path: workspace, created_at: Date.now() }) })
@@ -5233,36 +5182,18 @@ describe('beegame session routes', () => {
 
       const response = await app.request('/api/resource-packs/forest-pack/impact')
       expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ packId: 'forest-pack', projectCount: 1, references: [expect.objectContaining({ projectId, slotId: 'hero', packVersion: '2.0.0', elementId: 'tree', status: 'integrated' })] })
+      expect(await response.json()).toEqual({ packId: 'forest-pack', projectCount: 1, references: [expect.objectContaining({ projectId, importId: 'tree-a', packVersion: '2.0.0', elementId: 'tree', status: 'available' })] })
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
   })
 
-  test('only binds a resource candidate re-derived from the project asset contract', async () => {
+  test('does not expose the removed requirement-slot Resource binding API', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-explicit-resource-candidate-'))
     const workspace = join(projectsRoot, 'explicit-resource-project')
-    const candidateRequirements: Array<{ slotId: string; category?: string }> = []
-    const candidate = {
-      slotId: 'slot-1',
-      packId: 'library-pack',
-      packVersion: '1.0.0',
-      elementId: 'library-model',
-      elementPath: 'models/library-model.glb',
-      sourceUrl: 'https://resource.example/signed/library-model.glb',
-      score: 100,
-      reasons: ['category:models', 'status:ready'],
-    }
     const app = createAgentWorkflowApp({
       sessionRunner: createFakeRunner().runner,
       defaultWorkspacePath: projectsRoot,
-      resourceSelectionClient: {
-        select: async () => [candidate],
-        candidates: async requirement => {
-          candidateRequirements.push(requirement)
-          return [{ ...candidate, slotId: requirement.slotId }]
-        },
-      },
     })
     try {
       await mkdir(join(workspace, 'assets'), { recursive: true })
@@ -5282,33 +5213,12 @@ describe('beegame session routes', () => {
       })
       expect(projectRes.status).toBe(200)
 
-      const candidatesRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-candidates`)
-      expect(candidatesRes.status).toBe(200)
-      expect(await candidatesRes.json()).toEqual({ candidates: [candidate] })
-      const sessionsAfterRead = await app.request('/api/beegame-sessions')
-      expect(await sessionsAfterRead.json()).toEqual([])
-
       const bindRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-binding`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          // This conflicting client requirement must be ignored in favour of the contract.
-          requirement: { slotId: 'slot-1', category: 'audio', accepted_formats: ['wav'] },
-          selection: { packId: candidate.packId, elementId: candidate.elementId },
-        }),
+        body: JSON.stringify({ selection: { packId: 'library-pack', elementId: 'library-model' } }),
       })
-      expect(bindRes.status).toBe(200)
-      expect(await bindRes.json()).toEqual(expect.objectContaining({
-        selection: expect.objectContaining({ packId: candidate.packId, elementId: candidate.elementId }),
-      }))
-      expect(candidateRequirements.at(-1)).toEqual(expect.objectContaining({ slotId: 'slot-1', category: 'models' }))
-
-      const forgedRes = await app.request(`/api/projects/${projectId}/assets/slot-1/resource-binding`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ selection: { packId: candidate.packId, elementId: 'forged-element' } }),
-      })
-      expect(forgedRes.status).toBe(422)
+      expect(bindRes.status).toBe(404)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -5362,12 +5272,9 @@ describe('beegame session routes', () => {
         project_target: expect.objectContaining({
           integration_mode: 'filesystem',
         }),
-        slots: [
+        requirements: [
           expect.objectContaining({
             id: 'hero_background',
-            target: expect.objectContaining({
-              path: 'public/assets/hero-background.png',
-            }),
           }),
         ],
       }))
@@ -6410,7 +6317,12 @@ describe('beegame session routes', () => {
         `/api/beegame-sessions/${ensured.session.id}/assets`,
       )
       expect(assetsRes.status).toBe(200)
-      expect(await assetsRes.json()).toEqual({ version: 1, slots: [] })
+      expect(await assetsRes.json()).toEqual({
+        version: 5,
+        requirements: [],
+        imports: [],
+        compositions: [],
+      })
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -6462,13 +6374,8 @@ describe('beegame session routes', () => {
           integration_mode: 'mcp',
           mcp_server: 'engine-mcp',
         }),
-        slots: [expect.objectContaining({
+        requirements: [expect.objectContaining({
           id: 'player_model',
-          type: 'model_3d',
-          integration_provider: expect.objectContaining({
-            type: 'mcp',
-            server: 'engine-mcp',
-          }),
         })],
       }))
     } finally {
@@ -6536,30 +6443,22 @@ describe('beegame session routes', () => {
       const assetsRes = await app.request('/api/projects/project_categorized_assets/assets')
 
       expect(assetsRes.status).toBe(200)
-      expect(await assetsRes.json()).toEqual(expect.objectContaining({
-        project_target: expect.objectContaining({
-          kind: 'web',
-          engine: 'react-three-fiber',
-          integration_mode: 'filesystem',
-        }),
-        slots: [
-          expect.objectContaining({
-            id: 'grass_top',
-            type: 'textures_2d',
-            purpose: 'Block face textures',
-            target: expect.objectContaining({ path: 'public/textures/grass_top.png' }),
-            recommended_specs: expect.objectContaining({ description: '16x16 PNG' }),
-            status: 'placeholder',
-          }),
-          expect.objectContaining({
-            id: 'sfx_break_block',
-            type: 'audio',
-            purpose: 'Sound effects',
-            target: expect.objectContaining({ path: 'public/audio/sfx/break_block.ogg' }),
-            recommended_specs: expect.objectContaining({ description: 'OGG Vorbis' }),
-            status: 'missing',
-          }),
-        ],
+      const assets = await assetsRes.json()
+      expect(assets.project_target).toEqual(expect.objectContaining({
+        platform: 'web',
+        runtime: 'react-three-fiber',
+        integration_mode: 'filesystem',
+      }))
+      expect(assets.requirements).toHaveLength(2)
+      expect(assets.requirements[0]).toEqual(expect.objectContaining({
+        id: 'grass_top',
+        purpose: 'Block face textures',
+        status: 'planned',
+      }))
+      expect(assets.requirements[1]).toEqual(expect.objectContaining({
+        id: 'sfx_break_block',
+        purpose: 'Sound effects',
+        status: 'blocked',
       }))
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
@@ -6645,7 +6544,7 @@ describe('beegame session routes', () => {
 
       expect(assetsRes.status).toBe(200)
       expect(await assetsRes.json()).toEqual(expect.objectContaining({
-        slots: [expect.objectContaining({ id: 'main_logo' })],
+        requirements: [expect.objectContaining({ id: 'main_logo' })],
       }))
       expect(assetRows).toEqual([])
     } finally {
@@ -6907,17 +6806,13 @@ describe('beegame session routes', () => {
       expect(storageUploads[0]?.url).toContain(
         '/storage/v1/object/beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
       )
-      expect(payload.slot.uploaded_urls).toEqual([
-        expect.stringContaining(
-          'supabase://beegame-assets/projects/00000000-0000-0000-0000-000000000002/project_asset_storage/',
-        ),
-      ])
-      expect(manifest.slots[0].uploaded_urls).toEqual(payload.slot.uploaded_urls)
+      expect(payload.manifest.imports).toEqual([expect.objectContaining({
+        id: 'upload.main_logo', source: { type: 'user-upload' }, status: 'available',
+      })])
+      expect(manifest.requirements[0].satisfied_by.import_ids).toEqual(['upload.main_logo'])
+      expect(manifest.imports).toEqual([expect.objectContaining({ id: 'upload.main_logo' })])
       expect(assetRows.at(-1)?.manifest).toEqual(expect.objectContaining({
-        slots: [expect.objectContaining({
-          id: 'main_logo',
-          uploaded_urls: payload.slot.uploaded_urls,
-        })],
+        imports: [expect.objectContaining({ id: 'upload.main_logo' })],
       }))
     } finally {
       globalThis.fetch = originalFetch
@@ -8724,6 +8619,13 @@ describe('beegame session routes', () => {
             text: 'Sample game is ready.',
             createdAt: '2026-06-21T00:00:02.000Z',
           }),
+          JSON.stringify({
+            id: 3,
+            sessionId,
+            type: 'assistant.message',
+            text: '429 {"error":{"code":"limited","message":"Try again later."}}',
+            createdAt: '2026-06-21T00:00:03.000Z',
+          }),
         ].join('\n'),
         'utf8',
       )
@@ -8739,6 +8641,11 @@ describe('beegame session routes', () => {
           id: 2,
           type: 'assistant.message',
           text: 'Sample game is ready.',
+        }),
+        expect.objectContaining({
+          id: 3,
+          type: 'assistant.message',
+          text: 'Try again later.',
         }),
       ])
     } finally {
@@ -8895,6 +8802,19 @@ function passingNativeAcceptanceEvidence() {
     { kind: 'asset', source: 'packaged assets', result: 'passed', detail: 'Required assets loaded at runtime.' },
     { kind: 'skill', source: 'beegame-game-acceptance', result: 'passed', detail: 'The acceptance Skill was invoked.' },
   ]
+}
+
+function createEmptyResourceSelectionClient(): ProjectResourceSelectionClient {
+  return {
+    browsePacks: async () => ({ items: [], total: 0, facets: emptyResourceCatalogFacets() }),
+    browsePackElements: async () => ({ items: [], total: 0, facets: emptyResourceCatalogFacets() }),
+    inspectPack: async packId => ({ pack: { id: packId }, folders: [], elements: [] }),
+    resolveSelections: async () => [],
+  }
+}
+
+function emptyResourceCatalogFacets() {
+  return { dimensions: [], primaryCategories: [], categories: [], styles: [], gameTypes: [], packTags: [], usageTags: [], assetKinds: [], capabilities: [], formats: [] }
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {

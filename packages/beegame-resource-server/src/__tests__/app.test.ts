@@ -72,6 +72,57 @@ describe('resource service app', () => {
     ]))
   })
 
+  test('updates folder semantic defaults without requiring a rename', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [{ id: 'policy-pack', name: 'Policy', style: 'Stylized', gameTypes: ['action'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],
+      elements: [{ id: 'asset', packId: 'policy-pack', name: 'asset.glb', path: 'models/asset.glb', category: 'models', kind: 'model', specs: {}, dependencies: [], status: 'ready' }],
+    })
+    await localRepository.createFolder('policy-pack', { id: 'models', name: 'models' })
+    const app = createBeeGameResourceServerApp({ repository: localRepository, currentUser: { id: 'admin', role: 'owner', permissions: ['resources.manage'] } })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/policy-pack/folders/models', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ elementDefaults: { usageTags: ['environment'] } }),
+    }))
+
+    expect(response.status).toBe(200)
+    await expect(localRepository.getElement('policy-pack', 'asset')).resolves.toEqual(expect.objectContaining({ usageTags: ['environment'], usageTagsSource: 'folder' }))
+  })
+
+  test('creates and resumes an audited persistent processing job', async () => {
+    const now = '2026-07-19T00:00:00.000Z'
+    const job = { id: 'job-1', packId: 'pack-1', kind: 'inspect-elements' as const, status: 'queued' as const, totalItems: 1, completedItems: 0, failedItems: 0, createdAt: now, updatedAt: now }
+    const events: Array<{ action: string }> = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      resourceProcessing: { start: async () => job, latest: async () => job, get: async () => job, retry: async () => job, cancel: async () => ({ ...job, status: 'cancelled' }) },
+      recordAuditEvent: async event => { events.push(event) },
+    })
+    const created = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/processing-jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ elementIds: ['element-1'] }) }))
+    const restored = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/processing-jobs'))
+
+    expect(created.status).toBe(202)
+    await expect(created.json()).resolves.toEqual({ job })
+    await expect(restored.json()).resolves.toEqual({ job })
+    expect(events).toContainEqual(expect.objectContaining({ action: 'processing.started' }))
+  })
+
+  test('reinspects an existing element through an explicit audited route', async () => {
+    const events: Array<{ action: string; elementId?: string }> = []
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      inspectResourceElement: async (_packId, elementId) => ({ ...await repository.getElement('pack-1', elementId), contentProfile: { packaging: 'self-contained', components: [], inspection: { status: 'complete', source: 'server' } } }),
+      recordAuditEvent: async event => { events.push(event) },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/elements/element-1/inspection', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ element: expect.objectContaining({ id: 'element-1', contentProfile: expect.objectContaining({ packaging: 'self-contained' }) }) })
+    expect(events).toEqual([expect.objectContaining({ action: 'element.inspected', elementId: 'element-1' })])
+  })
+
   test('deletes a non-empty folder recursively through the browser route', async () => {
     const localRepository = createInMemoryResourceRepository({
       packs: [{ id: 'folder-pack', name: 'Folders', style: 'Stylized', gameTypes: ['adventure'], dimension: '3D', primaryCategory: '3d-assets', categories: ['models'], license: 'internal', version: '1.0.0', status: 'draft' }],

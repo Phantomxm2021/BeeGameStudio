@@ -358,24 +358,53 @@ function digestibleAssetContract(source: string): string {
   try {
     const manifest = JSON.parse(source) as unknown
     if (!isRecord(manifest)) return source
-    const slots = Array.isArray(manifest.slots)
-      ? manifest.slots.map(slot => {
-          if (!isRecord(slot)) return slot
+    const requirementsSource = Array.isArray(manifest.requirements)
+      ? manifest.requirements
+      : manifest.slots
+    const requirements = Array.isArray(requirementsSource)
+      ? requirementsSource.map(requirement => {
+          if (!isRecord(requirement)) return requirement
           return {
-            id: slot.id,
-            required: slot.required,
-            delivery_mode: slot.delivery_mode,
-            category: slot.category,
-            dimension: slot.dimension,
-            target: slot.target,
-            resource_requirement: slot.resource_requirement,
+            id: requirement.id,
+            name: requirement.name,
+            purpose: requirement.purpose,
+            required: requirement.required,
+            resource_requirement: requirement.resource_requirement,
           }
         }).sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
-      : manifest.slots
+      : requirementsSource
+    const imports = Array.isArray(manifest.imports)
+      ? manifest.imports.map(resourceImport => {
+          if (!isRecord(resourceImport)) return resourceImport
+          return {
+            id: resourceImport.id,
+            source: resourceImport.source,
+            asset_kind: resourceImport.asset_kind,
+            root_path: resourceImport.root_path,
+            local_files: resourceImport.local_files,
+            dependencies: resourceImport.dependencies,
+          }
+        }).sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+      : manifest.imports
+    const compositions = Array.isArray(manifest.compositions)
+      ? manifest.compositions.map(composition => {
+          if (!isRecord(composition)) return composition
+          return {
+            id: composition.id,
+            kind: composition.kind,
+            required: composition.required,
+            assembly_mode: composition.assembly_mode,
+            members: composition.members,
+            recipe: composition.recipe,
+          }
+        }).sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+      : manifest.compositions
     return stableJson({
       version: manifest.version,
       project_target: manifest.project_target,
-      slots,
+      requirements,
+      imports,
+      compositions,
     })
   } catch {
     return source
@@ -445,15 +474,16 @@ function appendResult(
   const readiness = report.verdict === 'READY'
     ? auditDocumentReadiness(input.workspacePath)
     : undefined
-  const effectiveReport: NativeDocumentReviewReport = readiness && !readiness.valid
+  const deterministicIssues = readiness?.issues ?? []
+  const effectiveReport: NativeDocumentReviewReport = deterministicIssues.length
     ? {
         reviewerId: DOCUMENT_REVIEWER_AGENT_TYPE,
         verdict: 'NEEDS_REVISION',
         summary: [
           'Deterministic project-contract checks rejected the Reviewer READY result.',
-          ...readiness.issues,
+          ...deterministicIssues,
         ].join(' '),
-        findings: readiness.issues.map(detail => ({
+        findings: deterministicIssues.map(detail => ({
           source: 'deterministic project-contract audit',
           detail,
         })),

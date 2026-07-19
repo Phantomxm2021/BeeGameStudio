@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { renderPreview } from './ResourcePreview'
-import { applyMissingTextureFallback, applyPreviewMaterialMode, applyTextureTransform, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, enableVertexColors, modelAnimations, normalizeModelPreviewError, persistModelMetrics, restartAnimationAction, snapshotTextureTransform } from './ModelPreview'
+import { annotateAuthoredGltfTextureNames, applyMissingTextureFallback, applyPreviewMaterialMode, applyTextureTransform, calculateModelMetrics, configureProceduralSky, createProceduralSkyScene, enableVertexColors, modelAnimations, normalizeModelPreviewError, persistModelMetrics, resolveModelExternalResourceUrl, restartAnimationAction, snapshotTextureTransform } from './ModelPreview'
 
 describe('renderPreview', () => {
   test('selects media and model renderers from the element kind', () => {
@@ -45,7 +45,70 @@ describe('renderPreview', () => {
       materialCount: 1,
       materialSlots: ['Painted metal'],
       textureReferences: ['albedo.png'],
+      components: expect.arrayContaining([
+        expect.objectContaining({ kind: 'mesh' }),
+        expect.objectContaining({ kind: 'material', name: 'Painted metal' }),
+        expect.objectContaining({ kind: 'texture', name: 'albedo.png' }),
+      ]),
     })
+  })
+
+  test('resolves a loader request only through an explicit dependency binding', () => {
+    const modelUrl = 'https://storage.test/object/sign/pack/models/ship.fbx?token=model'
+    const textureUrl = 'https://storage.test/object/sign/pack/textures/texture-a.png?token=texture'
+    expect(resolveModelExternalResourceUrl(
+      'https://storage.test/object/sign/pack/models/texture-a.png',
+      modelUrl,
+      { 'Textures/texture-a.png': textureUrl },
+    )).toBe(textureUrl)
+    expect(resolveModelExternalResourceUrl(
+      'https://storage.test/object/sign/pack/models/texture-a.png',
+      modelUrl,
+      { 'SetA/texture-a.png': 'https://storage.test/a', 'SetB/texture-a.png': 'https://storage.test/b' },
+    )).toBeUndefined()
+  })
+
+  test('resolves external images retained by an Assimp GLB against explicit dependencies', () => {
+    const modelUrl = 'blob:http://127.0.0.1:62173/686e096c-ae55-40bb-8cba-9fd31c86895d'
+    const textureUrl = 'https://storage.test/object/sign/pack/textures/base.png?token=texture'
+
+    expect(resolveModelExternalResourceUrl(
+      'blob:http://127.0.0.1:62173/Textures\\base.png',
+      modelUrl,
+      { 'Textures/base.png': textureUrl },
+    )).toBe(textureUrl)
+  })
+
+  test('preserves authored external texture paths and deduplicates material slots', () => {
+    const first = new THREE.MeshStandardMaterial({ name: 'Shared' })
+    const second = new THREE.MeshStandardMaterial({ name: 'Shared' })
+    const object = new THREE.Group()
+    object.add(new THREE.Mesh(new THREE.BoxGeometry(), first), new THREE.Mesh(new THREE.BoxGeometry(), second))
+    const metrics = calculateModelMetrics(object, ['Textures/texture-a.png', 'Textures/texture-a.png'])
+    expect(metrics.materialSlots).toEqual(['Shared'])
+    expect(metrics.unresolvedTextureReferences).toEqual(['Textures/texture-a.png'])
+  })
+
+  test('preserves the authored image reference on textures loaded from a converted GLB', () => {
+    const texture = new THREE.Texture()
+    const material = new THREE.MeshStandardMaterial({ map: texture })
+    const object = new THREE.Mesh(new THREE.BoxGeometry(), material)
+    const associations = new Map<unknown, { textures?: number }>([[texture, { textures: 0 }]])
+
+    annotateAuthoredGltfTextureNames(object, {
+      associations,
+      json: { textures: [{ source: 0 }], images: [{ uri: 'Textures\\base.png' }] },
+    })
+
+    expect(texture.name).toBe('Textures/base.png')
+    expect(calculateModelMetrics(object).textureReferences).toEqual(['Textures/base.png'])
+  })
+
+  test('keeps embedded animation clips inside the inspected logical asset', () => {
+    const clip = new THREE.AnimationClip('Walk', 1, [])
+    expect(calculateModelMetrics(new THREE.Group(), [], [clip]).components).toEqual([
+      expect.objectContaining({ id: 'animation:0', kind: 'animation-clip', name: 'Walk' }),
+    ])
   })
 
   test('preserves animation clips attached by loaders such as FBX', () => {
