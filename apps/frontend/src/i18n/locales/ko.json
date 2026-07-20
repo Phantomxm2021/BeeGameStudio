@@ -188,7 +188,6 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
-      "replanWithAgent": "Agent에게 리소스 탐색 요청",
       "acceptancePassed": "현재 리비전 검증 완료",
       "acceptanceFailed": "검증 실패",
       "acceptanceBlocked": "검증 차단됨",

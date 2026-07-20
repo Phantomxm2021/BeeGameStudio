@@ -489,11 +489,8 @@ describe('RightSidebar tabs', () => {
         expect(api.uploadProjectAsset).toHaveBeenCalledWith('proj_1', 'bgm_game', file);
         expect(onSendMessage).not.toHaveBeenCalled();
 
-        await user.click(screen.getByRole('button', { name: '让 Agent 探索资源' }));
-        expect(api.requestProjectAction).toHaveBeenCalledWith({
-            project_id: 'proj_1',
-            kind: 'asset_explore_library',
-        });
+        expect(screen.queryByRole('button', { name: '让 Agent 探索资源' })).not.toBeInTheDocument();
+        expect(api.requestProjectAction).not.toHaveBeenCalled();
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 

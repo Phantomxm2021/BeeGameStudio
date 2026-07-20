@@ -346,6 +346,49 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.currentTaskId).toBe('proj_1');
   });
 
+  it('does not carry an active turn lock into another project', async () => {
+    projectStoreState.projectStatus = {
+      project_id: 'proj_1',
+      phase: 'running',
+      blocked: false,
+    };
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useChat({ projectId }),
+      { initialProps: { projectId: 'proj_1' } },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+    expect(result.current.currentTaskId).toBe('proj_1');
+
+    projectStoreState.projectStatus = null;
+    rerender({ projectId: 'proj_2' });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.currentTaskId).toBeNull();
+  });
+
+  it('unlocks an interrupted turn when the recovered runtime is paused', async () => {
+    projectStoreState.projectStatus = {
+      project_id: 'proj_1',
+      phase: 'running',
+      blocked: false,
+    };
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    projectStoreState.projectStatus = {
+      project_id: 'proj_1',
+      phase: 'paused',
+      blocked: true,
+      blocked_reason: 'Previous turn was interrupted.',
+    };
+    rerender();
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.currentTaskId).toBeNull();
+  });
+
   it('keeps the composer locked across intermediate assistant messages and transport reconnects', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',

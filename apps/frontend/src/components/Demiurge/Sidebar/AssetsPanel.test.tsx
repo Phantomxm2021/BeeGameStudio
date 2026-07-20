@@ -72,15 +72,6 @@ describe('AssetsPanel', () => {
         expect(screen.queryByRole('button', { name: 'More asset actions' })).not.toBeInTheDocument();
     });
 
-    it('asks Claude Code to explore, import and author without sending selected requirement ids', async () => {
-        const user = userEvent.setup();
-        const onRequestSelectionPreparation = vi.fn();
-        render(<AssetsPanel manifest={{ version: 5, requirements: [{ id: 'level-art', purpose: 'Modular level art' }] }} isLoading={false} onRequestSelectionPreparation={onRequestSelectionPreparation} />);
-
-        await user.click(screen.getByRole('button', { name: 'Ask agent to explore resources' }));
-        expect(onRequestSelectionPreparation).toHaveBeenCalledWith();
-    });
-
     it('shows native current-revision acceptance separately from manifest completion claims', () => {
         const { rerender } = render(
             <AssetsPanel

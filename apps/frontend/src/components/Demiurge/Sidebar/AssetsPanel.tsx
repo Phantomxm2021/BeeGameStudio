@@ -2,7 +2,7 @@ import { memo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Sparkles, Upload } from 'lucide-react';
+import { Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Upload } from 'lucide-react';
 import type { BeeGameAssetImportPayload, BeeGameAssetManifestPayload, BeeGameAssetRequirementPayload } from '../../../services/api';
 import type { ProjectBaselineStatusPayload } from '../../../services/api';
 import type { Language } from '../AgentsConfig';
@@ -14,7 +14,6 @@ interface AssetsPanelProps {
     isLoading: boolean;
     isUploadingRequirementId?: string | null;
     onUpload?: (requirementId: string, file: File) => Promise<void>;
-    onRequestSelectionPreparation?: () => void;
     acceptance?: ProjectBaselineStatusPayload['acceptance'];
     lang?: Language;
 }
@@ -31,7 +30,6 @@ export const AssetsPanel = memo(({
     isLoading,
     isUploadingRequirementId = null,
     onUpload,
-    onRequestSelectionPreparation,
     acceptance,
     lang = 'en',
 }: AssetsPanelProps) => {
@@ -66,16 +64,6 @@ export const AssetsPanel = memo(({
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                     <AcceptancePill acceptance={acceptance} text={text} />
-                    {onRequestSelectionPreparation ? (
-                        <button
-                            type="button"
-                            onClick={() => onRequestSelectionPreparation()}
-                            className="type-button inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-3 py-2 text-amber-100 transition hover:bg-amber-400/[0.14]"
-                        >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            {text.replanWithAgent}
-                        </button>
-                    ) : null}
                 </div>
             </header>
 

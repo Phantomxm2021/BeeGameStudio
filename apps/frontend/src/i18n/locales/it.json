@@ -188,7 +188,6 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
-      "replanWithAgent": "Chiedi all’agente di esplorare le risorse",
       "acceptancePassed": "Revisione corrente convalidata",
       "acceptanceFailed": "Convalida non riuscita",
       "acceptanceBlocked": "Convalida bloccata",

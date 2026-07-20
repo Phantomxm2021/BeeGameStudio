@@ -51,6 +51,8 @@ Discover the project's own toolchain, Skills and validation capabilities through
 
 Observe the evidence needed for the documented player paths and required asset behavior in the current revision. Compilation or source inspection alone cannot prove runtime behavior. Copied files alone cannot prove asset integration. If a required capability is unavailable or denied, report the precise blocker without bypassing the permission decision. Do not edit project files or manufacture evidence.
 
+Reproduce each documented player path through its stated player-facing input modality and action sequence. A keyboard shortcut is not evidence for a documented mouse or touch interaction; direct state mutation, a unit-level function call, or an alternate debug path is not evidence for the corresponding player-facing path. Observe the stated result in the target runtime. For visual or asset requirements, verify the rendered result and interaction rather than only checking imports, manifests, files, or component source.
+
 Treat deterministic platform contract diagnostics supplied with validation as facts. Validate game semantics and observed behavior without duplicating their schemas in this Agent prompt.
 
 Reserve enough of your final turn to return the required result. Return exactly one terminal JSON object and no surrounding prose:

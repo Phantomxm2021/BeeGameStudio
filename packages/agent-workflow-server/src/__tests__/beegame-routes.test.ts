@@ -5516,6 +5516,73 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('does not mistake intermediate native results for an explicit recovered turn terminal', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-recovered-result-only-'))
+    const sessionId = 'beegame_recovered_result_only'
+    const turnId = `${sessionId}-turn-1`
+    const transcriptPath = getTestTranscriptPath(workspace, workspace, sessionId)
+    const app = createAgentWorkflowApp()
+    try {
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const now = new Date().toISOString()
+      await writeFile(
+        transcriptPath,
+        [
+          {
+            id: 1,
+            sessionId,
+            type: 'session.started',
+            text: 'Created BeeGame session',
+            createdAt: now,
+          },
+          {
+            id: 2,
+            sessionId,
+            turnId,
+            type: 'turn.started',
+            text: 'Turn started',
+            createdAt: now,
+          },
+          {
+            id: 3,
+            sessionId,
+            turnId,
+            type: 'result',
+            text: 'A native foreground response was emitted before background work resumed.',
+            createdAt: now,
+          },
+          {
+            id: 4,
+            sessionId,
+            turnId,
+            type: 'result',
+            text: 'A delayed native background result arrived without closing the turn.',
+            createdAt: now,
+          },
+        ].map(event => JSON.stringify(event)).join('\n') + '\n',
+        'utf8',
+      )
+
+      const transcriptRes = await app.request(
+        `/api/beegame-sessions/${sessionId}/transcript?workspacePath=${encodeURIComponent(workspace)}`,
+      )
+      const events = await transcriptRes.json()
+
+      expect(transcriptRes.status).toBe(200)
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 5,
+          sessionId,
+          turnId,
+          type: 'turn.failed',
+          text: expect.stringContaining('interrupted'),
+        }),
+      ]))
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('rejects browser-directed recovery of an interrupted turn', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-resume-interrupted-'))
     const sessionId = 'beegame_interrupted_resume'
@@ -7409,10 +7476,10 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('sends a player-visible art improvement objective for Resource Library authoring actions', async () => {
-    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-resource-authoring-action-'))
-    const workspace = join(projectsRoot, 'resource-authoring-game')
-    const fake = createFakeRunner([{ type: 'result', result: 'Resource authoring turn ended.' }])
+  test('does not create a BeeGame-owned Resource Library workflow beside the native chat turn', async () => {
+    const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-no-resource-action-'))
+    const workspace = join(projectsRoot, 'native-resource-game')
+    const fake = createFakeRunner([{ type: 'result', result: 'unused' }])
     const app = createAgentWorkflowApp({
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
@@ -7428,14 +7495,9 @@ describe('beegame session routes', () => {
         },
       )
 
-      expect(actionRes.status).toBe(200)
-      await waitFor(() => fake.runtimes[0]?.submits.length === 1)
-      const prompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
-      expect(prompt).toBe('在不改变已确认玩法和产品意图的前提下，自主使用资源库改善当前游戏的玩家可见美术表现，并如实说明实际结果与任何阻塞。')
-      expect(prompt).not.toContain('game-art-director-expert')
-      expect(prompt).not.toContain('Document Reviewer')
-      expect(prompt).not.toContain('acceptance Validator')
-      expect(prompt).not.toContain('"kind": "resource_library_exploration_request"')
+      expect(actionRes.status).toBe(400)
+      expect(await actionRes.json()).toEqual({ error: 'Unsupported project action' })
+      expect(fake.runtimes[0]?.submits ?? []).toHaveLength(0)
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }

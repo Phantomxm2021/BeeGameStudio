@@ -188,7 +188,6 @@
       "requestIntegration": "Ask BeeGame to integrate",
       "verifyIntegration": "Re-integrate / verify",
       "integrateAllPending": "Integrate all pending",
-      "replanWithAgent": "Agent にリソース探索を依頼",
       "acceptancePassed": "現在のリビジョンは検証済み",
       "acceptanceFailed": "検証に失敗",
       "acceptanceBlocked": "検証がブロック中",

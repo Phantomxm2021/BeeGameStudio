@@ -294,7 +294,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
     const canManageDeployment = hasPermission('deployment.manage') && !isProjectInteractionLocked;
     const canUploadAssets = hasPermission('assets.upload') && !isProjectInteractionLocked;
-    const canIntegrateAssets = hasPermission('assets.integrate') && !isProjectInteractionLocked;
     const canExportProject = hasPermission('project.export');
     const projectTargetLabel = String(
         projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || projectStatus?.project_target?.engine || projectStatus?.project_target?.kind || '',
@@ -708,7 +707,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
                 canSendMessage={canSendMessage}
                 canApproveTool={canApproveTool}
                 canUploadAssets={canUploadAssets}
-                canIntegrateAssets={canIntegrateAssets}
                 canExportProject={canExportProject}
                 variant={isBeeGameMode ? 'beegame' : 'legacy'}
                 currentUserDisplayName={currentUser?.displayName}

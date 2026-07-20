@@ -865,7 +865,7 @@ export const api = {
 
   requestProjectAction: (data: {
     project_id: string;
-    kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair';
+    kind: 'build_error_repair' | 'deployment_failure_repair';
   }) => {
     if (isBeeGameAdapterEnabled()) return beeGameAdapter.requestProjectAction(data);
     throw new Error('Structured project actions are only available for BeeGame projects');

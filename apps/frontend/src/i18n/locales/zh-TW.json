@@ -678,7 +678,6 @@
       "unbindDescription": "這只會移除資源庫關聯，已複製到專案中的檔案將保持不變。",
       "cancel": "取消",
       "integrateAllPending": "整合所有待處理",
-      "replanWithAgent": "讓 Agent 探索資源",
       "acceptancePassed": "目前版本已驗收",
       "acceptanceFailed": "驗收未通過",
       "acceptanceBlocked": "驗收受阻",

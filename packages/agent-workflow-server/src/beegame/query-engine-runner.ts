@@ -133,6 +133,17 @@ export function getBeeGameResponseLanguageInstruction(
   return `Respond to the user in ${RESPONSE_LANGUAGE_NAMES[language]}. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.`
 }
 
+export function getBeeGameNativeCapabilityInstruction(
+  language?: BeeGameSessionLanguage,
+): string {
+  return [
+    getBeeGameResponseLanguageInstruction(language),
+    'Use Claude Code\'s native Skill tool before acting whenever an available Skill matches the request. Skill is a native tool, not a deferred capability: never search for Skill through SearchExtraTools or invoke it through ExecuteExtraTool. Choose the applicable Skill yourself; BeeGame does not select a Skill or control the task workflow for you.',
+    'When the current project defines acceptance requirements, do not claim a project change is complete until Claude Code\'s native acceptance Validator has observed the current revision. Dispatch Reviewers and Validators with the authoritative confirmed intent, language requirements, current workspace revision and deterministic contract diagnostics only; do not preload claimed test outcomes, checklist completion or a desired verdict. During validation, treat the approved documents as fixed unless the user explicitly changes scope: repair the implementation rather than rewriting the requirements to match it. If validation was not run, could not observe a required player path, or is blocked, report the work as incomplete or blocked instead of complete. BeeGame only transports the native result and does not decide or repair the task.',
+    'When a native background Agent reports that it will notify this session on completion, rely on that native terminal notification. Do not poll its output file or TaskOutput, revive a completed Agent with SendMessage merely to ask for status, or launch duplicate validation for the same unchanged revision.',
+  ].filter(Boolean).join('\n\n')
+}
+
 export function assertRequiredBeeGameNativeAgents(
   activeAgents: Record<string, unknown>[],
 ): void {
@@ -749,13 +760,9 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
-      ...(getBeeGameResponseLanguageInstruction(this.input.language)
-        ? {
-            appendSystemPrompt: getBeeGameResponseLanguageInstruction(
-              this.input.language,
-            ),
-          }
-        : {}),
+      appendSystemPrompt: getBeeGameNativeCapabilityInstruction(
+        this.input.language,
+      ),
     })
 
     return this.engine

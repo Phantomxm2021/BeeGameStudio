@@ -130,12 +130,20 @@ For modular asset families:
 1. Open the normal player-facing path and capture the current baseline.
 2. Identify the three largest visible problems, prioritizing scene composition,
    framing, scale, material, lighting, and gameplay readability.
-3. Fix core world presentation before conditional VFX or decorative polish.
-4. Reopen the same player path at a comparable view after editing.
-5. Record what visibly changed and what remains unresolved.
+3. Exercise the core documented interaction on that baseline. If the player
+   cannot perform it, treat that as a blocking presentation/playability defect;
+   do not hide it behind decorative polish.
+4. Fix core world presentation before conditional VFX or decorative polish.
+5. Reopen the same player path at a comparable view after editing.
+6. Repeat the same player-facing input and confirm the visible response.
+7. Record what visibly changed and what remains unresolved.
 
 If either baseline or finished output cannot be observed, return `BLOCKED` and
 state the missing capability. Never claim that the art pass is complete.
+If observation fails specifically because the native sandbox cannot launch the
+target runtime or browser, request Claude Code's native unsandboxed Bash retry.
+Continue only when the user grants it; denial or an unavailable permission
+channel remains `BLOCKED`.
 
 ---
 

@@ -6,7 +6,6 @@ export const RESOURCE_LIBRARY_ACTIONS = [
   'browse_pack_elements',
   'import_elements',
   'refresh_import_metadata',
-  'verify_integration',
 ] as const
 
 export type ResourceLibraryAction = typeof RESOURCE_LIBRARY_ACTIONS[number]

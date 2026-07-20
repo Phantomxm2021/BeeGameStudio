@@ -226,6 +226,28 @@ export const useChat = ({
   const waitingApproval = getWaitingApprovalState(projectStatus, pendingReviews);
 
   useEffect(() => {
+    // These values describe one project's active turn. The hook remains
+    // mounted while Dashboard switches projects, so carrying them across the
+    // project boundary can make an idle project look permanently busy until
+    // another runtime event happens to arrive. Reset only client-side
+    // transients here; the authoritative runtime snapshot below will restore
+    // a genuine running turn for the newly selected project.
+    isStoppingRef.current = false;
+    setIsStopping(false);
+    setIsLoading(false);
+    setCurrentTaskId(null);
+    setCanContinue(false);
+    setApprovalState({
+      gateId: null,
+      action: null,
+      phase: 'idle',
+      message: '',
+    });
+    setCurrentSender(null);
+    setIsStreaming(false);
+  }, [projectId, setCurrentSender, setIsStreaming]);
+
+  useEffect(() => {
     if (!approvalState.gateId) {
       return;
     }
@@ -790,10 +812,13 @@ export const useChat = ({
       setCurrentTaskId((current) => current || projectId);
       return;
     }
-    if (phase === 'idle' || phase === 'finished' || phase === 'stopped') {
-      setIsLoading(false);
-      setCurrentTaskId(null);
-    }
+    // The backend snapshot is authoritative for whether a native turn is
+    // alive. In particular, a server restart recovers an unterminated turn as
+    // paused/failed. Leaving the previous local loading flag untouched for
+    // those phases permanently locks the composer even though no Claude Code
+    // worker exists. Approval state has its own explicit UI lock.
+    setIsLoading(false);
+    setCurrentTaskId(null);
   }, [projectId, projectStatus]);
 
 

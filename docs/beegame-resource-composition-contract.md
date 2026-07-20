@@ -54,16 +54,18 @@ The project can use either a complete logical root or a modular construction kit
 
 Missing skeleton compatibility is not retargetability: an independent animation remains unresolved until a verified signature/profile or explicit relation establishes compatibility. Animations embedded in one character root are not separately selected.
 
-Only after the Document Reviewer accepts the plan does Claude Code submit one explicit import batch. Each selection has its own stable import id and target-appropriate project-relative destination; it is never forced into a requirement slot. The resource service then resolves signed URLs, copies the exact selected roots and dependency closures, pins Pack versions, and returns project inventory. It never chooses replacements on failure.
+Claude Code may browse, import, author and observe iteratively whenever the current task requires it. An import call is an exact copy request, not an asset-plan checkpoint: each selection has its own stable import id and target-appropriate project-relative destination and is never forced into a requirement slot. The resource service resolves signed URLs, copies the exact selected roots and dependency closures, pins Pack versions, and returns project inventory. It never chooses replacements on failure or dictates how many import batches the creative process may need.
 
-## End-to-end authoring flow
+## Non-prescriptive capability flow
 
-1. The approved documents and `requirements` describe visual, audio and interaction responsibilities without pretending that a library element has already been chosen.
-2. Claude Code calls `browse_packs` to inspect the paginated published catalog and its available facets, establishes the shared art-direction baseline, then inspects any promising Packs with `inspect_pack` and `browse_pack_elements`; no catalog response mutates the project or binds an element to a requirement.
-3. Claude Code chooses any number of logical roots. A single requirement may need many imports, and one import may support several requirements or compositions.
-4. After the Document Reviewer accepts the plan, Claude Code calls `import_elements` once for the explicit batch. BeeGame copies only those roots and their exact dependency closures, retaining their objective `technical_facts` in the project manifest.
-5. Claude Code authors target-native files: scene/prefab/node/blueprint data, source code, atlas or animation configuration, tile layers, UI layout, audio cues, physics and gameplay wiring.
-6. Claude Code records `compositions`, import `usage_evidence`, and requirement `satisfied_by` references. `verify_integration` checks structural truth; the native Validator observes runtime behavior.
+These are capability boundaries, not a BeeGame-owned state machine or mandatory invocation order:
+
+- Approved documents may describe visual, audio and interaction responsibilities without pretending that a library element has already been chosen.
+- Catalog calls expose paginated Pack and element facts without mutating the project, binding an element to a requirement, or choosing a result.
+- Claude Code may choose any number of logical roots and may revisit discovery after observing the target runtime. One responsibility may need many imports, and one import may support several parts of the authored game.
+- `import_elements` copies only roots explicitly chosen by Claude Code and their exact dependency closures. It records immutable provenance and copied-file facts atomically; Claude Code should not hand-author or repeatedly rewrite those inventory records.
+- Claude Code authors target-native files: scene/prefab/node/blueprint data, source code, atlas or animation configuration, tile layers, UI layout, audio cues, physics and gameplay wiring.
+- Project-facing traceability is descriptive, not a scene authoring language and not a completion mechanism. The target runtime, native art Skill and native Validator observe the result; ResourceLibrary cannot certify integration.
 
 If an existing project imported elements before a Pack's latest deterministic analysis, Claude Code may call `refresh_import_metadata`. The operation resolves only the exact pinned Pack version and element identities already recorded in the project. It updates objective catalog facts while preserving local files, status, usage evidence, compositions and target-native code; it does not reselect, redownload or rebuild the scene.
 
@@ -110,7 +112,7 @@ Existing Packs without typed metadata remain readable and manual-only for constr
 - Import resolution is exact by Pack and element ID, version-pinned, dependency-complete, path-safe, and format-safe.
 - Valid authored parent-directory references are preserved, but neither Pack resolution nor project copying may escape its root.
 - A copied file is never represented as runtime integration.
-- `verify_integration` reports only structural validity. It cannot certify visibility, framing, visual coherence, audio playback, interaction, or current-revision runtime acceptance.
+- ResourceLibrary reports catalog, provenance, copied-file and dependency facts only. It has no integration-verification or completion action; visibility, framing, visual coherence, audio playback, interaction and current-revision runtime acceptance require native observation.
 - Existing import metadata may be refreshed only from the exact pinned provenance. Metadata refresh never changes project-authored files or claims that the rendered result improved.
 - Reviewer evidence becomes stale when requirement, import provenance, or composition design changes. Runtime-only status/evidence updates do not rewrite the reviewed design revision.
 - Validator acceptance requires project references and runtime evidence; BeeGame does not author, repair, or operate the generated scene on Claude Code's behalf.

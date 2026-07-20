@@ -483,7 +483,7 @@ export const beeGameAdapter = {
 
   async requestProjectAction(data: {
     project_id: string;
-    kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair';
+    kind: 'build_error_repair' | 'deployment_failure_repair';
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id);
     const language = resolveProjectSessionLanguage(data.project_id, '');

@@ -4755,21 +4755,6 @@ function registerBeeGameSessionRoutes(
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
       const kind = typeof body.kind === 'string' ? body.kind : ''
       const language = isBeeGameSessionLanguage(body.language) ? body.language : 'en'
-      if (kind === 'asset_explore_library') {
-        const session = beeGameSessions.get(c.req.param('id'))
-        if (!session) return c.json({ error: 'Session not found' }, 404)
-        return c.json(await beeGameSessions.sendWithDisplay(
-          c.req.param('id'),
-          getServerOwnedResourceAuthoringPrompt(language),
-          {
-            displayText: getServerOwnedProjectActionLabel(kind, language),
-            displayKind: 'asset_integration',
-            taskType: 'asset_integration',
-            language,
-            ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
-          },
-        ))
-      }
       if (kind === 'build_error_repair') {
         const session = beeGameSessions.get(c.req.param('id'))
         if (!session) return c.json({ error: 'Session not found' }, 404)
@@ -5073,7 +5058,6 @@ function hasTranscriptTurnEnded(
       event.type === 'turn.completed' ||
       event.type === 'turn.empty' ||
       event.type === 'turn.failed' ||
-      event.type === 'result' ||
       event.type === 'session.stopped' ||
       event.type === 'session.failed'
     )
@@ -5371,19 +5355,11 @@ function getServerOwnedContinuePrompt(language: BeeGameSessionLanguage): string 
   return 'Continue the task.'
 }
 
-function getServerOwnedResourceAuthoringPrompt(language: BeeGameSessionLanguage): string {
-  if (language === 'zh' || language === 'zh-TW') {
-    return '在不改变已确认玩法和产品意图的前提下，自主使用资源库改善当前游戏的玩家可见美术表现，并如实说明实际结果与任何阻塞。'
-  }
-  return 'Autonomously use the Resource Library to improve the current game\'s player-visible art presentation without changing confirmed gameplay or product intent, and report the actual result and any blocker truthfully.'
-}
-
 function getServerOwnedProjectActionLabel(
-  kind: 'asset_explore_library' | 'build_error_repair' | 'deployment_failure_repair',
+  kind: 'build_error_repair' | 'deployment_failure_repair',
   language: BeeGameSessionLanguage,
 ): string {
   const isChinese = language === 'zh' || language === 'zh-TW'
-  if (kind === 'asset_explore_library') return isChinese ? '让 Agent 探索资源库' : 'Ask agent to explore Resource Library'
   if (kind === 'deployment_failure_repair') return isChinese ? '修复发布验收' : 'Repair deployment acceptance'
   return isChinese ? '修复构建错误' : 'Repair build errors'
 }

@@ -7,6 +7,7 @@ import type { ProjectResourceSelectionClient } from './project-resource-applicat
 
 type ToolDefinition = {
   alwaysLoad: boolean
+  inputSchema: { parse(input: unknown): unknown }
   prompt(): Promise<string>
   checkPermissions(input: Record<string, unknown>): Promise<Record<string, unknown>>
   call(input: Record<string, unknown>): Promise<{ data: unknown }>
@@ -248,104 +249,18 @@ describe('native Resource Library tool', () => {
     expect(JSON.stringify(result)).not.toContain('resource_requirement')
   })
 
-  test('reports deterministic manifest contract failures during integration verification', async () => {
+  test('does not expose a structural self-certification action', async () => {
     workspace = await createWorkspace()
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: {
-        integration_mode: 'filesystem',
-        asset_format_capabilities: ['glb'],
-        resource_library_usage: 'preferred',
-      },
-      requirements: [{ id: 'environment', required: true, status: 'planned' }],
-      imports: [],
-      compositions: [{
-        id: 'scene',
-        kind: 'scene',
-        status: 'assembled',
-        assembly_mode: 'enhanced',
-        members: [{ requirement_id: 'environment', role: 'environment' }],
-        recipe: { path: 'src/scene.ts' },
-      }],
-    }))
-
     const tool = createNativeResourceLibraryTool({
       buildTool: definition => definition,
       workspacePath: workspace,
       client: client(),
     }) as ToolDefinition
-    const result = await tool.call({ action: 'verify_integration' })
 
-    expect(result).toEqual({ data: expect.objectContaining({
-      result: 'structurally_invalid',
-      runtime_acceptance: expect.objectContaining({ observed: false, required: true }),
-      imports: { total: 0, by_status: {}, invalid_ids: [] },
-      coverage: expect.objectContaining({
-        required_total: 1,
-        required_satisfied: 0,
-        unresolved_required_ids: ['environment'],
-        compositions: expect.objectContaining({ unresolved: ['scene'] }),
-      }),
-      contract: expect.objectContaining({
-        valid: false,
-        rules: expect.objectContaining({
-          import_source_types: ['resource-library', 'user-upload', 'project-authored'],
-          composition_assembly_modes: ['direct', 'composed'],
-        }),
-        compositions: [expect.objectContaining({
-          composition_id: 'scene',
-          issues: expect.arrayContaining(['assembly_mode must be direct or composed.']),
-        })],
-      }),
-    }) })
-    expect((result as { data: Record<string, unknown> }).data).not.toHaveProperty('requirements')
-    await expect(tool.prompt()).resolves.not.toContain('never fabricate Pack ids')
-    await expect(tool.prompt()).resolves.toContain('objective technical facts')
-  })
-
-  test('reports facts for every imported Pack without deciding cross-Pack coherence', async () => {
-    workspace = await createWorkspace()
-    await writeFile(join(workspace, 'assets', 'asset-manifest.json'), JSON.stringify({
-      version: 5,
-      project_target: { integration_mode: 'filesystem', asset_format_capabilities: ['glb'], resource_library_usage: 'preferred' },
-      requirements: [{ id: 'scene', required: true, status: 'planned' }],
-      imports: [{
-        id: 'asset-a',
-        source: { type: 'resource-library', pack_id: 'pack-a', pack_version: '1.0.0', element_id: 'asset-a', element_path: 'asset-a.glb' },
-        status: 'available',
-        root_path: 'assets/asset-a.glb',
-        local_files: ['assets/asset-a.glb'],
-        selected_at: '2026-01-01T00:00:00.000Z',
-        selection_reason: ['Fits the approved art direction'],
-      }, {
-        id: 'asset-b',
-        source: { type: 'resource-library', pack_id: 'pack-b', pack_version: '1.0.0', element_id: 'asset-b', element_path: 'asset-b.glb' },
-        status: 'available',
-        root_path: 'assets/asset-b.glb',
-        local_files: ['assets/asset-b.glb'],
-        selected_at: '2026-01-01T00:00:00.000Z',
-        selection_reason: ['Completes the approved composition coherently'],
-      }],
-      compositions: [],
-    }))
-    await writeFile(join(workspace, 'assets', 'asset-a.glb'), 'asset')
-    await writeFile(join(workspace, 'assets', 'asset-b.glb'), 'asset')
-    const tool = createNativeResourceLibraryTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      client: client({ inspectPack: async packId => ({ pack: { id: packId, name: packId, styles: ['Shared Style'], dimension: '3D', gameTypes: ['Example'] }, folders: [] }) }),
-    }) as ToolDefinition
-
-    const result = await tool.call({ action: 'verify_integration' })
-
-    expect(result).toEqual({ data: expect.objectContaining({
-      coverage: expect.objectContaining({
-        imported_packs: [
-          { pack_id: 'pack-a', available: true, name: 'pack-a', styles: ['Shared Style'], dimension: '3D', game_types: ['Example'] },
-          { pack_id: 'pack-b', available: true, name: 'pack-b', styles: ['Shared Style'], dimension: '3D', game_types: ['Example'] },
-        ],
-      }),
-    }) })
+    await expect(tool.prompt()).resolves.toContain('cannot mark a target-runtime composition complete')
+    await expect(tool.prompt()).resolves.toContain('native Validator')
+    await expect(tool.prompt()).resolves.toContain('do not hand-author or repeatedly rewrite them')
+    expect(() => tool.inputSchema.parse({ action: 'verify_integration' })).toThrow()
   })
 })
 

@@ -890,7 +890,6 @@
       "removingIntegration": "Removing…",
       "removeIntegrationTitle": "Remove project integration?",
       "removeIntegrationDescription": "This removes the copied project files for this slot. The library binding remains, so you can re-integrate the pinned resource later.",
-      "replanWithAgent": "Ask agent to explore resources",
       "acceptancePassed": "Current revision accepted",
       "acceptanceFailed": "Acceptance failed",
       "acceptanceBlocked": "Acceptance blocked",

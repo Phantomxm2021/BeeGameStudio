@@ -8,7 +8,6 @@ import {
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
 import { readBeeGameAssetManifest } from './asset-contracts'
-import { auditAssetContract } from './asset-contract-audit'
 import {
   ProjectResourceApplication,
   type ProjectResourceSelectionClient,
@@ -74,7 +73,6 @@ const resourceLibraryInputSchema = z.discriminatedUnion('action', [
     selections: z.array(explicitImportSelectionSchema).min(1).max(64),
   }),
   z.object({ action: z.literal('refresh_import_metadata') }),
-  z.object({ action: z.literal('verify_integration') }),
 ])
 
 type ResourceLibraryInput = z.infer<typeof resourceLibraryInputSchema>
@@ -96,13 +94,14 @@ export function createNativeResourceLibraryTool(options: {
     isConcurrencySafe: () => false,
     isReadOnly: (input: ResourceLibraryInput) => input.action !== 'import_elements' && input.action !== 'refresh_import_metadata',
     async description() {
-      return 'Explore Resource Packs and elements, import the exact reusable material you choose, and verify project usage. BeeGame never chooses a candidate or assembles a scene for you.'
+      return 'Explore Resource Packs and elements, then import the exact reusable material you choose. BeeGame never chooses a candidate, assembles a scene, or certifies runtime integration for you.'
     },
     async prompt() {
       return [
         'ResourceLibrary is an exact catalog and import capability. BeeGame does not select resources, infer intent, rank artistic compatibility, or author target-runtime compositions.',
         'Catalog results are paginated. Pack and element records expose authored metadata, preview descriptors, dependency information, semantic relations and objective technical facts when available.',
-        'Read actions do not modify the project. import_elements copies only the exact elements supplied by Claude Code, pins their Pack versions and includes their declared dependency closures. refresh_import_metadata updates objective facts for existing pinned imports. verify_integration reports structural contract consistency and does not claim runtime or visual success.',
+        'Read actions do not modify the project. import_elements copies only the exact elements supplied by Claude Code, pins their Pack versions and includes their declared dependency closures. It owns those provenance and copied-file inventory records atomically; do not hand-author or repeatedly rewrite them. refresh_import_metadata updates objective facts for existing pinned imports.',
+        'This tool reports catalog, provenance, copied-file and dependency facts only. It cannot mark a target-runtime composition complete or certify rendering, loading, visual quality, interaction, audio playback, gameplay, or player paths. Use the target runtime, native Skills and native Validator for those observations.',
         'Choose how and when to use these actions from the confirmed project context and the native capabilities available in the current session.',
       ].join(' ')
     },
@@ -159,87 +158,8 @@ export function createNativeResourceLibraryTool(options: {
           unresolved_import_ids: refreshed.unresolvedImportIds,
         } }
       }
-      const manifest = await readBeeGameAssetManifest(options.workspacePath)
-      const contract = auditAssetContract(options.workspacePath)
-      const requiredRequirements = manifest.requirements.filter(requirement => requirement.required !== false)
-      // Canonical requirement states are normalized to the long-standing
-      // internal slot states by asset-contracts: satisfied -> integrated and
-      // blocked -> failed/missing. Keep this reporting boundary read-only
-      // rather than introducing a second manifest parser here.
-      const unresolvedRequired = requiredRequirements.filter(requirement => requirement.status !== 'integrated')
-      const resourcePackIds = [...new Set((manifest.imports ?? [])
-        .filter(resourceImport => resourceImport.source.type === 'resource-library')
-        .map(resourceImport => resourceImport.source.pack_id)
-        .filter((packId): packId is string => Boolean(packId)))]
-      const importedPacks = await Promise.all(resourcePackIds.map(async packId => {
-        try {
-          const inspected = await application.inspectPack(packId)
-          const pack = inspected.pack
-          return {
-            pack_id: packId,
-            available: true,
-            ...(typeof pack.name === 'string' ? { name: pack.name } : {}),
-            ...(Array.isArray(pack.styles) ? { styles: pack.styles.filter(value => typeof value === 'string') } : typeof pack.style === 'string' ? { styles: [pack.style] } : {}),
-            ...(typeof pack.dimension === 'string' ? { dimension: pack.dimension } : {}),
-            ...(Array.isArray(pack.gameTypes) ? { game_types: pack.gameTypes.filter(value => typeof value === 'string') } : Array.isArray(pack.game_types) ? { game_types: pack.game_types.filter(value => typeof value === 'string') } : {}),
-          }
-        } catch (error) {
-          return { pack_id: packId, available: false, error: error instanceof Error ? error.message : 'Pack inspection failed' }
-        }
-      }))
-      const unavailablePackIds = importedPacks.filter(pack => !pack.available).map(pack => pack.pack_id)
-      const importStatusCounts = countBy((manifest.imports ?? []).map(resourceImport => resourceImport.status))
-      const invalidImportIds = (contract.imports ?? [])
-        .filter(resourceImport => resourceImport.issues.length > 0)
-        .map(resourceImport => resourceImport.id)
-      const passed = contract.valid && unresolvedRequired.length === 0 && unavailablePackIds.length === 0
-      return {
-        data: {
-          result: passed ? 'structurally_valid' : 'structurally_invalid',
-          runtime_acceptance: {
-            observed: false,
-            required: true,
-            scope: 'This result covers structural contract consistency only; it does not observe rendering, loading, visual quality, gameplay, or player paths.',
-          },
-          imports: {
-            total: (manifest.imports ?? []).length,
-            by_status: importStatusCounts,
-            invalid_ids: invalidImportIds,
-          },
-          coverage: {
-            required_total: requiredRequirements.length,
-            required_satisfied: requiredRequirements.length - unresolvedRequired.length,
-            unresolved_required_ids: unresolvedRequired.map(requirement => requirement.id),
-            blocked_required_ids: unresolvedRequired.filter(requirement => requirement.status === 'failed' || requirement.status === 'missing').map(requirement => requirement.id),
-            compositions: {
-              total: (manifest.compositions ?? []).length,
-              integrated: (manifest.compositions ?? []).filter(composition => composition.status === 'integrated').map(composition => composition.id),
-              unresolved: (manifest.compositions ?? []).filter(composition => composition.required !== false && composition.status !== 'integrated').map(composition => composition.id),
-            },
-            imported_packs: importedPacks,
-          },
-          contract: {
-            present: contract.present,
-            valid: contract.valid,
-            rules: {
-              import_source_types: ['resource-library', 'user-upload', 'project-authored'],
-              import_statuses: ['available', 'referenced', 'failed'],
-              usage_evidence_shape: { references: ['project/relative/path'], runtime_event_ids: ['runtime.event.id'] },
-              composition_assembly_modes: ['direct', 'composed'],
-              composition_statuses: ['planned', 'assembled', 'integrated', 'failed'],
-            },
-            issues: contract.issues,
-            imports: (contract.imports ?? []).filter(resourceImport => resourceImport.issues.length).map(resourceImport => ({
-              import_id: resourceImport.id,
-              issues: resourceImport.issues,
-            })),
-            compositions: contract.compositions.filter(composition => composition.issues.length).map(composition => ({
-              composition_id: composition.id,
-              issues: composition.issues,
-            })),
-          },
-        },
-      }
+      const unsupported: never = input
+      throw new Error(`Unsupported ResourceLibrary input: ${JSON.stringify(unsupported)}`)
     },
     renderToolUseMessage(input: Partial<ResourceLibraryInput>) {
       return input.action ? `Resource Library · ${input.action}` : 'Resource Library'
@@ -248,13 +168,6 @@ export function createNativeResourceLibraryTool(options: {
       return { tool_use_id: toolUseID, type: 'tool_result', content: JSON.stringify(output) }
     },
   })
-}
-
-function countBy(values: string[]): Record<string, number> {
-  return values.reduce<Record<string, number>>((counts, value) => {
-    counts[value] = (counts[value] ?? 0) + 1
-    return counts
-  }, {})
 }
 
 function toCatalogInput(input: Extract<ResourceLibraryInput, { action: 'browse_packs' | 'browse_pack_elements' | 'index_pack_elements' }>): ResourceCatalogInput {

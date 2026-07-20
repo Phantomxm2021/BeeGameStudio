@@ -890,7 +890,6 @@
       "removingIntegration": "正在移除…",
       "removeIntegrationTitle": "移除项目集成？",
       "removeIntegrationDescription": "这会移除该资源槽已复制到项目中的文件，但保留资源库绑定；之后仍可重新接入已锁定的资源。",
-      "replanWithAgent": "让 Agent 探索资源",
       "acceptancePassed": "当前版本已验收",
       "acceptanceFailed": "验收未通过",
       "acceptanceBlocked": "验收受阻",

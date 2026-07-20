@@ -13,6 +13,7 @@ import {
   ensureBeeGameMacroGlobals,
   drainNativeBackgroundNotifications,
   getCompletedNativeTaskOutputTaskId,
+  getBeeGameNativeCapabilityInstruction,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
@@ -149,7 +150,7 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       toolUseID: 'invalid-resource-action',
     })).toEqual(expect.objectContaining({
       behavior: 'deny',
-      message: 'Unsupported ResourceLibrary action "match". Allowed actions: inspect_project, browse_packs, inspect_pack, index_pack_elements, browse_pack_elements, import_elements, refresh_import_metadata, verify_integration.',
+      message: 'Unsupported ResourceLibrary action "match". Allowed actions: inspect_project, browse_packs, inspect_pack, index_pack_elements, browse_pack_elements, import_elements, refresh_import_metadata.',
     }))
     expect(requests).toEqual([])
   })
@@ -222,6 +223,22 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     )
     expect(getBeeGameResponseLanguageInstruction('fr')).toContain('French')
     expect(getBeeGameResponseLanguageInstruction()).toBeUndefined()
+  })
+
+  test('routes available Skills through Claude Code native Skill without choosing one for the Agent', () => {
+    const instruction = getBeeGameNativeCapabilityInstruction('zh')
+
+    expect(instruction).toContain('Respond to the user in Simplified Chinese')
+    expect(instruction).toContain("native Skill tool before acting")
+    expect(instruction).toContain('not a deferred capability')
+    expect(instruction).toContain('BeeGame does not select a Skill')
+    expect(instruction).toContain("native acceptance Validator has observed the current revision")
+    expect(instruction).toContain('do not preload claimed test outcomes')
+    expect(instruction).toContain('repair the implementation rather than rewriting the requirements')
+    expect(instruction).toContain('rely on that native terminal notification')
+    expect(instruction).toContain('Do not poll its output file or TaskOutput')
+    expect(instruction).toContain('BeeGame only transports the native result')
+    expect(instruction).not.toContain('game-art-director-expert')
   })
 
   test('drains only main-session native task notifications without interpreting their result', () => {

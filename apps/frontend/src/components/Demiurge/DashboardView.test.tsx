@@ -419,7 +419,7 @@ describe('DashboardView runtime loading', () => {
         expect(capturedRightSidebarProps?.canSendMessage).toBe(true);
         expect(capturedRightSidebarProps?.canApproveTool).toBe(false);
         expect(capturedRightSidebarProps?.canUploadAssets).toBe(true);
-        expect(capturedRightSidebarProps?.canIntegrateAssets).toBe(false);
+        expect(capturedRightSidebarProps).not.toHaveProperty('canIntegrateAssets');
         expect(capturedRightSidebarProps?.canExportProject).toBe(false);
     });
 

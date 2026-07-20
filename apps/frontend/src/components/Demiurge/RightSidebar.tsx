@@ -62,7 +62,6 @@ interface RightSidebarProps {
     canSendMessage?: boolean;
     canApproveTool?: boolean;
     canUploadAssets?: boolean;
-    canIntegrateAssets?: boolean;
     canExportProject?: boolean;
     variant?: 'legacy' | 'beegame';
     currentUserDisplayName?: string;
@@ -89,7 +88,6 @@ export function RightSidebar({
     canSendMessage = true,
     canApproveTool = true,
     canUploadAssets = true,
-    canIntegrateAssets = true,
     canExportProject = true,
     variant = 'legacy',
     currentUserDisplayName,
@@ -244,14 +242,6 @@ export function RightSidebar({
         } finally {
             setUploadingAssetRequirementId(null);
         }
-    };
-
-    const handleRequestSelectionPreparation = () => {
-        if (!canSendMessage || !canIntegrateAssets || isRuntimeBusy) return;
-        void api.requestProjectAction({
-            project_id: projectId,
-            kind: 'asset_explore_library',
-        });
     };
 
     // Auto-resize search input
@@ -472,7 +462,6 @@ export function RightSidebar({
                                 isLoading={isAssetsLoading}
                                 isUploadingRequirementId={uploadingAssetRequirementId}
                                 onUpload={canMutateAssets ? handleUploadAsset : undefined}
-                                onRequestSelectionPreparation={canSendMessage && canIntegrateAssets ? handleRequestSelectionPreparation : undefined}
                                 acceptance={projectStatus?.acceptance}
                                 lang={lang}
                             />

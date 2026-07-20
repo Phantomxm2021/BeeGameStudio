@@ -183,7 +183,7 @@ describe('runtime settings store', () => {
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
-          allowUnsandboxedCommands: false,
+          allowUnsandboxedCommands: true,
           failIfUnavailable: true,
           network: {
             allowLocalBinding: true,
@@ -220,7 +220,7 @@ describe('runtime settings store', () => {
         sandbox: {
           enabled: false,
           autoAllowBashIfSandboxed: false,
-          allowUnsandboxedCommands: false,
+          allowUnsandboxedCommands: true,
           failIfUnavailable: false,
           network: {
             allowLocalBinding: false,

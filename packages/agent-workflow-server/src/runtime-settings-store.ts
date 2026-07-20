@@ -152,7 +152,12 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
       ...previousSandbox,
       enabled: sandboxEnabled,
       autoAllowBashIfSandboxed: sandboxEnabled,
-      allowUnsandboxedCommands: false,
+      // Keep sandboxing as the default execution path. When a native runtime
+      // capability (for example a browser process) cannot run inside it,
+      // Claude Code may request the user's normal Bash permission to retry
+      // outside the sandbox. This enables the same explicit fallback as the
+      // TUI; it does not auto-approve or bypass that permission decision.
+      allowUnsandboxedCommands: true,
       failIfUnavailable: sandboxEnabled && sandboxFailIfUnavailable,
       // Native localhost binding is required for project-owned preview and
       // runtime acceptance. Local development enables it by default. A
