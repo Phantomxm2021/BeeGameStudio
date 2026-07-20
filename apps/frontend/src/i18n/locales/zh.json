@@ -624,6 +624,8 @@
     "documentFailed": "失败",
     "otherArtifacts": "其他交付物",
     "noMessages": "暂无消息",
+    "loadEarlierMessages": "加载更早消息",
+    "loadingEarlierMessages": "正在加载更早消息…",
     "generatedOnDownload": "下载时生成",
     "artifactName": "名称",
     "actions": "操作",

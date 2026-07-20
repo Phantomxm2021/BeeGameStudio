@@ -522,6 +522,8 @@
     "documentFailed": "失敗",
     "otherArtifacts": "其他交付物",
     "noMessages": "尚無訊息",
+    "loadEarlierMessages": "載入較早訊息",
+    "loadingEarlierMessages": "正在載入較早訊息…",
     "generatedOnDownload": "下載時產生",
     "byUnknown": "未知",
     "review": "審查",

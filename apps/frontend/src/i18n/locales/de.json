@@ -53,6 +53,8 @@
     "loadingArtifacts": "Ergebnisse werden geladen...",
     "noArtifacts": "Noch keine Ergebnisse",
     "noMessages": "Noch keine Nachrichten",
+    "loadEarlierMessages": "Frühere Nachrichten laden",
+    "loadingEarlierMessages": "Frühere Nachrichten werden geladen…",
     "generatedOnDownload": "Beim Download generiert",
     "byUnknown": "unbekannt",
     "review": "Review",

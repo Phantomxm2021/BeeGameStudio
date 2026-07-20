@@ -1,13 +1,16 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Message, MessageType } from '../types/message';
-import { getSupabaseAccessToken } from '../services/supabaseAuthApi';
+import {
+  getSupabaseSessionUser,
+  isHttpOnlySessionsEnabled,
+} from '../services/supabaseAuthApi';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
 
-const MAX_MESSAGES = 500;
+const MAX_MESSAGES = 2000;
 
 function hasCloudSession(): boolean {
-  return Boolean(getSupabaseAccessToken());
+  return isHttpOnlySessionsEnabled() || Boolean(getSupabaseSessionUser()?.id?.trim());
 }
 
 interface ChatMessageSemantic {

@@ -95,6 +95,18 @@ type ProjectSessionBinding = {
   language?: BeeGameLanguage;
 };
 
+type BeeGameTranscriptPage = {
+  events: BeeGameEvent[];
+  page: {
+    hasMore: boolean;
+    nextBeforeId: number | null;
+  };
+};
+
+const CHAT_HISTORY_PAGE_SIZE = 300;
+type ChatHistoryCursorState = BeeGameTranscriptPage['page'] & { latestEventId: number };
+const chatHistoryCursorByProject = new Map<string, ChatHistoryCursorState>();
+
 type BeeGameDiscoveredArtifact = {
   path: string;
   name?: string;
@@ -471,12 +483,66 @@ export const beeGameAdapter = {
   async getChatHistory(projectId: string): Promise<unknown[]> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return [];
+    const transcriptPage = await fetchBeeGameTranscriptPageIfAvailable(binding);
+    if (transcriptPage) {
+      chatHistoryCursorByProject.set(projectId, {
+        ...transcriptPage.page,
+        latestEventId: getLatestBeeGameEventId(transcriptPage.events),
+      });
+      return eventsToHistory(projectId, transcriptPage.events, binding.workspacePath);
+    }
     const transcript = await fetchBeeGameTranscriptIfAvailable(binding);
     if (transcript.length > 0) {
+      chatHistoryCursorByProject.set(projectId, {
+        hasMore: false,
+        nextBeforeId: null,
+        latestEventId: getLatestBeeGameEventId(transcript),
+      });
       return eventsToHistory(projectId, transcript, binding.workspacePath);
     }
     const events = await fetchBeeGameEvents(binding.sessionId, 0, binding.workspacePath);
+    chatHistoryCursorByProject.set(projectId, {
+      hasMore: false,
+      nextBeforeId: null,
+      latestEventId: getLatestBeeGameEventId(events),
+    });
     return eventsToHistory(projectId, events, binding.workspacePath);
+  },
+
+  async getOlderChatHistory(projectId: string): Promise<{
+    messages: unknown[];
+    hasMore: boolean;
+  }> {
+    const cursor = chatHistoryCursorByProject.get(projectId);
+    if (!cursor?.hasMore || cursor.nextBeforeId === null) {
+      return { messages: [], hasMore: false };
+    }
+    const binding = await ensureProjectBinding(projectId);
+    if (!binding) return { messages: [], hasMore: false };
+    const transcriptPage = await fetchBeeGameTranscriptPage(
+      binding.sessionId,
+      binding.workspacePath,
+      cursor.nextBeforeId,
+    );
+    chatHistoryCursorByProject.set(projectId, {
+      ...transcriptPage.page,
+      latestEventId: cursor.latestEventId,
+    });
+    return {
+      messages: eventsToHistory(projectId, transcriptPage.events, binding.workspacePath),
+      hasMore: transcriptPage.page.hasMore,
+    };
+  },
+
+  getChatHistoryPaginationState(projectId: string): {
+    initialized: boolean;
+    hasMore: boolean;
+  } {
+    const cursor = chatHistoryCursorByProject.get(projectId);
+    return {
+      initialized: Boolean(cursor),
+      hasMore: cursor?.hasMore === true,
+    };
   },
 
   async pollMessages(projectId: string, afterEventId: number): Promise<{
@@ -485,11 +551,15 @@ export const beeGameAdapter = {
   }> {
     const binding = await ensureProjectBinding(projectId);
     if (!binding) return { lastEventId: afterEventId, messages: [] };
-    const eventResult = await fetchBeeGameEventsResultForBinding(binding, afterEventId);
+    const historyCursor = chatHistoryCursorByProject.get(projectId);
+    const effectiveAfterEventId = afterEventId === 0
+      ? historyCursor?.latestEventId ?? 0
+      : afterEventId;
+    const eventResult = await fetchBeeGameEventsResultForBinding(binding, effectiveAfterEventId);
     const events = eventResult.events;
-    const lastEventId = events.length > 0 ? events[events.length - 1].id : afterEventId;
+    const lastEventId = events.length > 0 ? events[events.length - 1].id : effectiveAfterEventId;
     const normalizedEvents = normalizeLiveEvents(projectId, events);
-    const isInitialHistorySync = afterEventId === 0;
+    const isInitialHistorySync = effectiveAfterEventId === 0;
     return {
       lastEventId,
       messages: normalizedEvents
@@ -693,6 +763,10 @@ function createLocalProject(name: string, rootPath?: string, id = newProjectId()
   };
 }
 
+function getLatestBeeGameEventId(events: BeeGameEvent[]): number {
+  return events.reduce((latest, event) => Math.max(latest, event.id), 0);
+}
+
 function getBriefDisplayTitle(brief: BeeGameBuildBrief): string {
   return (brief.title || brief.option.title || summarizeTitle(brief.idea)).trim() || 'BeeGame Project';
 }
@@ -775,11 +849,15 @@ function saveBinding(binding: ProjectSessionBinding): void {
     ...binding,
     ...(binding.language || !existing?.language ? {} : { language: existing.language }),
   };
+  if (existing?.sessionId && existing.sessionId !== binding.sessionId) {
+    chatHistoryCursorByProject.delete(binding.projectId);
+  }
   const bindings = [normalized, ...existingBindings.filter(item => item.projectId !== binding.projectId)];
   writeJson(scopedAdapterCacheKey(BINDINGS_KEY), bindings);
 }
 
 function deleteBinding(projectId: string): void {
+  chatHistoryCursorByProject.delete(projectId);
   writeJson(scopedAdapterCacheKey(BINDINGS_KEY), readBindings().filter(item => item.projectId !== projectId));
 }
 
@@ -1039,6 +1117,38 @@ async function fetchBeeGameTranscript(sessionId: string, workspacePath: string):
     { headers: { 'x-beegame-transcript-view': 'chat' } },
   );
   return readResponse<BeeGameEvent[]>(response);
+}
+
+async function fetchBeeGameTranscriptPage(
+  sessionId: string,
+  workspacePath: string,
+  beforeId?: number,
+): Promise<BeeGameTranscriptPage> {
+  const params = new URLSearchParams({
+    workspacePath,
+    limit: String(CHAT_HISTORY_PAGE_SIZE),
+  });
+  if (beforeId !== undefined) params.set('before', String(beforeId));
+  const response = await authenticatedFetch(
+    `/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?${params.toString()}`,
+    {
+      headers: {
+        'x-beegame-transcript-view': 'chat',
+        'x-beegame-transcript-pagination': 'cursor',
+      },
+    },
+  );
+  return readResponse<BeeGameTranscriptPage>(response);
+}
+
+async function fetchBeeGameTranscriptPageIfAvailable(
+  binding: ProjectSessionBinding,
+): Promise<BeeGameTranscriptPage | undefined> {
+  try {
+    return await fetchBeeGameTranscriptPage(binding.sessionId, binding.workspacePath);
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchBeeGameEventsForBinding(

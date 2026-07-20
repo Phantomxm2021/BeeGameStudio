@@ -4272,6 +4272,68 @@ describe('beegame session routes', () => {
     }
   })
 
+  test('paginates compact chat history backwards without overlapping events', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-paged-history-'))
+    const messages: DashboardSDKMessage[] = Array.from({ length: 80 }, (_, index) => ({
+      type: 'assistant' as const,
+      message: {
+        id: `history-message-${index + 1}`,
+        content: [{ type: 'text' as const, text: `History message ${index + 1}` }],
+      },
+    }))
+    messages.push({ type: 'result', result: 'Paged history complete.' })
+    const app = createAgentWorkflowApp({
+      sessionRunner: createFakeRunner(messages).runner,
+    })
+    try {
+      const sessionRes = await app.request('/api/beegame-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: workspace }),
+      })
+      const session = await sessionRes.json()
+      await app.request(`/api/beegame-sessions/${session.id}/input`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Build paged history.' }),
+      })
+      await waitFor(async () => {
+        const events = await (await app.request(`/api/beegame-sessions/${session.id}/events`)).json()
+        return events.some((event: { type: string }) => event.type === 'turn.completed')
+      })
+
+      const headers = {
+        'x-beegame-transcript-view': 'chat',
+        'x-beegame-transcript-pagination': 'cursor',
+      }
+      const firstRes = await app.request(
+        `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}&limit=50`,
+        { headers },
+      )
+      expect(firstRes.status).toBe(200)
+      const first = await firstRes.json()
+      expect(first.events).toHaveLength(50)
+      expect(first.page.hasMore).toBe(true)
+      expect(typeof first.page.nextBeforeId).toBe('number')
+
+      const olderRes = await app.request(
+        `/api/beegame-sessions/${session.id}/transcript?workspacePath=${encodeURIComponent(workspace)}&limit=50&before=${first.page.nextBeforeId}`,
+        { headers },
+      )
+      expect(olderRes.status).toBe(200)
+      const older = await olderRes.json()
+      expect(older.events.length).toBeGreaterThan(0)
+      expect(Math.max(...older.events.map((event: { id: number }) => event.id)))
+        .toBeLessThan(first.page.nextBeforeId)
+      expect(new Set([
+        ...first.events.map((event: { id: number }) => event.id),
+        ...older.events.map((event: { id: number }) => event.id),
+      ]).size).toBe(first.events.length + older.events.length)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('does not emit duplicate tool.started events for the same tool use id', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-'))
     const fake = createFakeRunner([

@@ -69,6 +69,9 @@ interface ChatPanelProps {
     currentUserDisplayName?: string;
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
+    hasOlderHistory?: boolean;
+    isLoadingOlderHistory?: boolean;
+    onLoadOlderHistory?: () => void | Promise<void>;
 }
 
 const toApprovalPayload = (review: ReviewDisplayModel): ReviewBindingPayload & { gate_id: string } => {
@@ -264,6 +267,9 @@ export const ChatPanel = memo(({
     currentUserDisplayName,
     currentUserEmail,
     currentUserAvatarUrl,
+    hasOlderHistory = false,
+    isLoadingOlderHistory = false,
+    onLoadOlderHistory,
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
     const composerPlaceholder = text.chatPlaceholder || waitingApproval.placeholder;
@@ -365,10 +371,31 @@ export const ChatPanel = memo(({
                         <MessageScrollerViewport
                             ref={scrollContainerRef}
                             data-testid="beegame-message-scroller-viewport"
+                            onScroll={(event) => {
+                                if (
+                                    event.currentTarget.scrollTop <= 48 &&
+                                    hasOlderHistory &&
+                                    !isLoadingOlderHistory
+                                ) {
+                                    void onLoadOlderHistory?.();
+                                }
+                            }}
                         >
                             <MessageScrollerContent
                                 data-testid="beegame-message-scroller-content"
                             >
+                                {hasOlderHistory ? (
+                                    <div className="flex justify-center pb-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => void onLoadOlderHistory?.()}
+                                            disabled={isLoadingOlderHistory}
+                                            className="type-caption-1 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-200 disabled:cursor-wait disabled:opacity-60"
+                                        >
+                                            {isLoadingOlderHistory ? text.loadingEarlierMessages : text.loadEarlierMessages}
+                                        </button>
+                                    </div>
+                                ) : null}
                                 <BeeGameCollaborationFeed
                                     messages={messages}
                                     projectStatus={projectStatus}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Minus, MessageSquare } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
@@ -10,6 +10,8 @@ import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/docu
 import { isBeeGamePermissionReview, isReviewAwaitingUserAction, isStructuredDocumentApprovalReview } from './Sidebar/SidebarUtils';
 import type { WaitingApprovalState } from '../../utils/waitingApproval';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, ReviewDisplayModel } from '../../viewModels/displayModels';
+import { useChatStore } from '../../store/chatStore';
+import { normalizeChatHistory } from '../../utils/chatHistory';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
@@ -111,6 +113,9 @@ export function RightSidebar({
     const [previewContent, setPreviewContent] = useState('');
     const [previewTitle, setPreviewTitle] = useState('');
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+    const [hasOlderHistory, setHasOlderHistory] = useState(false);
+    const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
+    const loadHistory = useChatStore(state => state.loadHistory);
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -118,6 +123,40 @@ export function RightSidebar({
 
     const t = useCommonText(lang);
     const uiText = useBeeGameText(lang);
+
+    useEffect(() => {
+        setHasOlderHistory(false);
+        setIsLoadingOlderHistory(false);
+    }, [projectId, variant]);
+
+    useEffect(() => {
+        if (variant !== 'beegame' || messages.length === 0) return;
+        const pagination = api.getChatHistoryPaginationState(projectId);
+        if (pagination.initialized) setHasOlderHistory(pagination.hasMore);
+    }, [messages, projectId, variant]);
+
+    const handleLoadOlderHistory = useCallback(async () => {
+        if (variant !== 'beegame' || isLoadingOlderHistory || !hasOlderHistory || messages.length === 0) return;
+        const viewport = scrollContainerRef.current;
+        const previousHeight = viewport?.scrollHeight ?? 0;
+        const previousTop = viewport?.scrollTop ?? 0;
+        setIsLoadingOlderHistory(true);
+        try {
+            const page = await api.getOlderChatHistory(projectId);
+            const olderMessages = normalizeChatHistory(page.messages);
+            if (olderMessages.length > 0) loadHistory(olderMessages);
+            setHasOlderHistory(page.hasMore);
+            if (viewport && olderMessages.length > 0) {
+                requestAnimationFrame(() => {
+                    viewport.scrollTop = previousTop + Math.max(0, viewport.scrollHeight - previousHeight);
+                });
+            }
+        } catch (error) {
+            console.error('[RightSidebar] Failed to load older chat history:', error);
+        } finally {
+            setIsLoadingOlderHistory(false);
+        }
+    }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId, variant]);
     const isComposerLocked = isLoading || isRuntimeBusy;
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const documentProgress = useMemo(
@@ -444,6 +483,9 @@ export function RightSidebar({
                                 currentUserDisplayName={currentUserDisplayName}
                                 currentUserEmail={currentUserEmail}
                                 currentUserAvatarUrl={currentUserAvatarUrl}
+                                hasOlderHistory={hasOlderHistory}
+                                isLoadingOlderHistory={isLoadingOlderHistory}
+                                onLoadOlderHistory={handleLoadOlderHistory}
                             />
                         ) : activeTab === 'artifacts' ? (
                             <ArtifactsPanel 

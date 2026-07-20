@@ -53,6 +53,8 @@
     "loadingArtifacts": "成果物を読み込み中...",
     "noArtifacts": "成果物はまだありません",
     "noMessages": "メッセージはまだありません",
+    "loadEarlierMessages": "以前のメッセージを読み込む",
+    "loadingEarlierMessages": "以前のメッセージを読み込み中…",
     "generatedOnDownload": "ダウンロード時に生成",
     "byUnknown": "不明",
     "review": "レビュー",

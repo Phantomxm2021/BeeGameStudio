@@ -53,6 +53,8 @@
     "loadingArtifacts": "Chargement des livrables...",
     "noArtifacts": "Aucun livrable",
     "noMessages": "Aucun message",
+    "loadEarlierMessages": "Charger les messages précédents",
+    "loadingEarlierMessages": "Chargement des messages précédents…",
     "generatedOnDownload": "Généré au téléchargement",
     "byUnknown": "inconnu",
     "review": "Revue",

@@ -937,6 +937,77 @@ describe('beeGameAdapter prompt rules', () => {
     ))).toBe(false);
   });
 
+  it('loads compact chat history from newest to oldest with a stable cursor', async () => {
+    const workspacePath = '/tmp/beegame-projects/paged-game';
+    const { project } = seedBoundProject('beegame_paged', workspacePath);
+    const pageRequest = `/api/beegame-sessions/beegame_paged/transcript?workspacePath=${encodeURIComponent(workspacePath)}&limit=300`;
+    const olderRequest = `${pageRequest}&before=501`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === pageRequest) {
+        return jsonResponse({
+          events: [{
+            id: 501,
+            sessionId: 'beegame_paged',
+            turnId: 'turn-new',
+            type: 'assistant.message',
+            text: 'Newest page.',
+            createdAt: '2026-06-21T00:00:02.000Z',
+          }],
+          page: { hasMore: true, nextBeforeId: 501 },
+        });
+      }
+      if (path === olderRequest) {
+        return jsonResponse({
+          events: [{
+            id: 201,
+            sessionId: 'beegame_paged',
+            turnId: 'turn-old',
+            type: 'assistant.message',
+            text: 'Older page.',
+            createdAt: '2026-06-20T00:00:02.000Z',
+          }],
+          page: { hasMore: false, nextBeforeId: 201 },
+        });
+      }
+      if (path === '/api/beegame-sessions/beegame_paged/events?after=501') {
+        return jsonResponse([{
+          id: 502,
+          sessionId: 'beegame_paged',
+          turnId: 'turn-live',
+          type: 'assistant.message',
+          text: 'Live continuation.',
+          createdAt: '2026-06-21T00:00:03.000Z',
+        }]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const latest = await beeGameAdapter.getChatHistory(project.id) as Array<{ content: string }>;
+    expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
+      initialized: true,
+      hasMore: true,
+    });
+    const live = await beeGameAdapter.pollMessages(project.id, 0);
+    const older = await beeGameAdapter.getOlderChatHistory(project.id);
+    const exhausted = await beeGameAdapter.getOlderChatHistory(project.id);
+
+    expect(latest.map(message => message.content)).toEqual(['Newest page.']);
+    expect(live.lastEventId).toBe(502);
+    expect(live.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: 'Live continuation.' }),
+    ]));
+    expect((older.messages as Array<{ content: string }>).map(message => message.content)).toEqual(['Older page.']);
+    expect(older.hasMore).toBe(false);
+    expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
+      initialized: true,
+      hasMore: false,
+    });
+    expect(exhausted).toEqual({ messages: [], hasMore: false });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('restores a cloud project binding from session metadata when local binding is missing', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',

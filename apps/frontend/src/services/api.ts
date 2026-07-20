@@ -905,6 +905,16 @@ export const api = {
       ? beeGameAdapter.getChatHistory(projectId)
       : apiClient.get(`/api/chat/history?project_id=${encodeURIComponent(projectId)}`),
 
+  getOlderChatHistory: (projectId: string) =>
+    isBeeGameAdapterEnabled()
+      ? beeGameAdapter.getOlderChatHistory(projectId)
+      : Promise.resolve({ messages: [], hasMore: false }),
+
+  getChatHistoryPaginationState: (projectId: string) =>
+    isBeeGameAdapterEnabled()
+      ? beeGameAdapter.getChatHistoryPaginationState(projectId)
+      : { initialized: true, hasMore: false },
+
   // ==================== 项目管理 API ====================
 
   /**

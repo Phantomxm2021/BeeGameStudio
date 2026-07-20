@@ -624,6 +624,8 @@
     "documentFailed": "Failed",
     "otherArtifacts": "Other deliverables",
     "noMessages": "No messages yet",
+    "loadEarlierMessages": "Load earlier messages",
+    "loadingEarlierMessages": "Loading earlier messages…",
     "generatedOnDownload": "Generated on download",
     "artifactName": "Name",
     "actions": "Actions",

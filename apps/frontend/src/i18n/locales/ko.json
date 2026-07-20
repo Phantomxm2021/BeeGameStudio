@@ -53,6 +53,8 @@
     "loadingArtifacts": "결과물 불러오는 중...",
     "noArtifacts": "아직 결과물이 없습니다",
     "noMessages": "아직 메시지가 없습니다",
+    "loadEarlierMessages": "이전 메시지 불러오기",
+    "loadingEarlierMessages": "이전 메시지 불러오는 중…",
     "generatedOnDownload": "다운로드 시 생성",
     "byUnknown": "알 수 없음",
     "review": "검토",

@@ -16,6 +16,7 @@ const { useChatStore } = await import('./chatStore');
 
 describe('chatStore Performance & Cap', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
     localStorage.clear();
     useChatStore.getState().clearMessages();
   });
@@ -31,11 +32,11 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messageIndexMap['msg-2']).toBe(1);
   });
 
-  it('should cap messages at MAX_MESSAGES (500)', () => {
+  it('should cap messages at the paginated history limit (2000)', () => {
     const { addMessage } = useChatStore.getState();
     
-    // Add 510 messages
-    for (let i = 0; i < 510; i++) {
+    // Add 2010 messages
+    for (let i = 0; i < 2010; i++) {
       addMessage({
         id: `msg-${i}`,
         sender: 'system',
@@ -45,14 +46,14 @@ describe('chatStore Performance & Cap', () => {
     }
 
     const state = useChatStore.getState();
-    expect(state.messages.length).toBe(500);
+    expect(state.messages.length).toBe(2000);
     // Oldest messages should be removed (msg-0 to msg-9)
     expect(state.messages[0].id).toBe('msg-10');
-    expect(state.messages[499].id).toBe('msg-509');
+    expect(state.messages[1999].id).toBe('msg-2009');
     
     // Index map should be rebuilt correctly
     expect(state.messageIndexMap['msg-10']).toBe(0);
-    expect(state.messageIndexMap['msg-509']).toBe(499);
+    expect(state.messageIndexMap['msg-2009']).toBe(1999);
     expect(state.messageIndexMap['msg-0']).toBeUndefined();
   });
 
@@ -228,6 +229,23 @@ describe('chatStore Performance & Cap', () => {
       id: 'cloud-msg-1',
       sender: 'user',
       content: 'cloud message should come from transcript',
+      timestamp: 1000,
+    });
+
+    const raw = localStorage.getItem('chat-storage');
+    if (raw) {
+      const persisted = JSON.parse(raw);
+      expect(persisted.state?.messages ?? []).toEqual([]);
+    }
+  });
+
+  it('does not persist chat messages before an HttpOnly session has hydrated', () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+
+    useChatStore.getState().addMessage({
+      id: 'secure-cookie-msg-1',
+      sender: 'user',
+      content: 'secure history must come from the authenticated transcript',
       timestamp: 1000,
     });
 

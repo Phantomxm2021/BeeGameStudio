@@ -53,6 +53,8 @@
     "loadingArtifacts": "Cargando entregables...",
     "noArtifacts": "Aún no hay entregables",
     "noMessages": "Aún no hay mensajes",
+    "loadEarlierMessages": "Cargar mensajes anteriores",
+    "loadingEarlierMessages": "Cargando mensajes anteriores…",
     "generatedOnDownload": "Generado al descargar",
     "byUnknown": "desconocido",
     "review": "Revisión",

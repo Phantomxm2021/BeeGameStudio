@@ -4256,6 +4256,12 @@ function registerBeeGameSessionRoutes(
     if (forbidden) return c.json(forbidden, 403)
     const chatHistoryView = c.req.header('x-beegame-transcript-view') === 'chat' ||
       c.req.query('view') === 'chat'
+    const pagination = c.req.header('x-beegame-transcript-pagination') === 'cursor'
+      ? {
+          limit: parseTranscriptPageLimit(c.req.query('limit')),
+          beforeId: parsePositiveInteger(c.req.query('before')),
+        }
+      : undefined
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) {
       const legacyWorkspacePath = getWorkspacePathHint(
@@ -4276,6 +4282,7 @@ function registerBeeGameSessionRoutes(
             getDashboardDataRoot(defaultWorkspacePath),
             0,
             chatHistoryView,
+            pagination,
           )
         } catch {
           // Keep the session/workspace relationship opaque when ownership or
@@ -4286,7 +4293,12 @@ function registerBeeGameSessionRoutes(
     }
     try {
       const transcript = beeGameSessions.transcript(c.req.param('id'))
-      return c.json(chatHistoryView ? compactTranscriptForChatHistory(transcript) : transcript)
+      const visibleTranscript = chatHistoryView
+        ? compactTranscriptForChatHistory(transcript)
+        : transcript
+      return c.json(pagination
+        ? paginateTranscriptEvents(visibleTranscript, pagination)
+        : visibleTranscript)
     } catch (err) {
       const workspacePath = c.req.query('workspacePath')
       if (toErrorMessage(err) === 'Session not found' && workspacePath) {
@@ -4297,6 +4309,7 @@ function registerBeeGameSessionRoutes(
           getDashboardDataRoot(defaultWorkspacePath),
           0,
           chatHistoryView,
+          pagination,
         )
       }
       return publicSessionRouteError(
@@ -5039,6 +5052,7 @@ async function readTranscriptFromWorkspace(
   dashboardDataRoot?: string,
   after = 0,
   chatHistoryView = false,
+  pagination?: { limit: number; beforeId?: number },
 ): Promise<Response> {
   try {
     const resolvedWorkspace = await resolveSessionWorkspacePath(
@@ -5061,10 +5075,13 @@ async function readTranscriptFromWorkspace(
     const filteredEvents = after > 0
       ? recoveredEvents.filter(event => event.id > after)
       : recoveredEvents
+    const visibleEvents = chatHistoryView
+      ? compactTranscriptForChatHistory(filteredEvents)
+      : filteredEvents
     return Response.json(
-      chatHistoryView
-        ? compactTranscriptForChatHistory(filteredEvents)
-        : filteredEvents,
+      pagination
+        ? paginateTranscriptEvents(visibleEvents, pagination)
+        : visibleEvents,
     )
   } catch (err) {
     return tracedRouteResponse(
@@ -5073,6 +5090,37 @@ async function readTranscriptFromWorkspace(
       404,
     )
   }
+}
+
+function paginateTranscriptEvents<T extends { id: number }>(
+  events: T[],
+  options: { limit: number; beforeId?: number },
+): {
+  events: T[]
+  page: { hasMore: boolean; nextBeforeId: number | null }
+} {
+  const eligible = options.beforeId === undefined
+    ? events
+    : events.filter(event => event.id < options.beforeId!)
+  const pageEvents = eligible.slice(Math.max(0, eligible.length - options.limit))
+  return {
+    events: pageEvents,
+    page: {
+      hasMore: eligible.length > pageEvents.length,
+      nextBeforeId: pageEvents[0]?.id ?? null,
+    },
+  }
+}
+
+function parseTranscriptPageLimit(value: string | undefined): number {
+  const parsed = parsePositiveInteger(value) ?? 300
+  return Math.min(500, Math.max(50, parsed))
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
 function compactTranscriptForChatHistory<T extends {

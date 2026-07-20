@@ -637,6 +637,34 @@ describe('ChatPanel approval bar', () => {
         });
     });
 
+    it('requests an older history page when the BeeGame transcript reaches the top', () => {
+        const onLoadOlderHistory = vi.fn();
+        renderChatPanel({
+            variant: 'beegame',
+            actionReview: undefined,
+            pendingReviews: [],
+            hasOlderHistory: true,
+            onLoadOlderHistory,
+            messages: [{
+                id: 'm_history_current',
+                sender: 'beegame',
+                content: 'Current history page',
+                timestamp: 2,
+            }],
+        });
+
+        const viewport = screen.getByTestId('beegame-message-scroller-viewport');
+        Object.defineProperty(viewport, 'scrollTop', {
+            configurable: true,
+            writable: true,
+            value: 0,
+        });
+        fireEvent.scroll(viewport);
+
+        expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeInTheDocument();
+    });
+
     it('collapses multiple BeeGame tool calls by default and expands to show all tools', async () => {
         const user = userEvent.setup();
         renderChatPanel({
