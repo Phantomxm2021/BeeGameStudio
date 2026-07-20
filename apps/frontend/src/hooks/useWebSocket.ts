@@ -301,16 +301,15 @@ export const useWebSocket = ({
             void recordAgentMessagePayload(projectId, rawMessage);
           }
 
-          // Validate message using MessageValidator
-          // Requirements: 1.3, 1.4, 7.3
+          // Validate only the transport envelope. Native Claude Code content
+          // is forwarded unchanged and is never repaired or rewritten here.
           const validationResult = messageValidator.validateMessage(rawMessage);
 
           // Log validation warnings
           if (validationResult.warnings.length > 0) {
             console.warn('[WebSocket] Message validation warnings:', {
               taskId: rawMessage.task_id,
-              warnings: validationResult.warnings,
-              corruptionDetected: validationResult.corruptionDetected
+              warnings: validationResult.warnings
             });
           }
 
@@ -321,24 +320,6 @@ export const useWebSocket = ({
               errors: validationResult.errors,
               rawMessage: rawMessage
             });
-
-            // Attempt to repair corrupted content if corruption was detected
-            if (validationResult.corruptionDetected && rawMessage.content) {
-              console.log('[WebSocket] Attempting to repair corrupted content...');
-              const repairedContent = messageValidator.repairContent(rawMessage.content);
-
-              // Re-validate repaired message
-              const repairedMessage = { ...rawMessage, content: repairedContent };
-              const revalidationResult = messageValidator.validateMessage(repairedMessage);
-
-              if (revalidationResult.isValid) {
-                console.log('[WebSocket] Content repair successful');
-                callbacksRef.current.onMessage(revalidationResult.sanitizedMessage!);
-                return;
-              } else {
-                console.error('[WebSocket] Content repair failed, validation still failing');
-              }
-            }
 
             // Request retransmission for invalid messages
             // Requirements: 1.4

@@ -2380,6 +2380,11 @@ describe('beegame session routes', () => {
       sessionRunner: fake.runner,
       defaultWorkspacePath: projectsRoot,
       currentUser: { id: DEFAULT_LOCAL_USER_ID, role: 'owner' },
+      resourceSelectionClient: createEmptyResourceSelectionClient(),
+      resourceSelectionRuntimeConfig: {
+        baseUrl: 'https://resources.runtime.test',
+        serviceToken: 'resource-service-secret',
+      },
     })
     const model = createModelConfig(DEFAULT_LOCAL_USER_ID, {
       name: 'Boundary model',
@@ -2450,17 +2455,38 @@ describe('beegame session routes', () => {
       expect(submitted).toContain('"document_language": "zh"')
       expect(submitted).toContain('"game_user_visible_language": "en"')
       expect(submitted).toContain('"resource_library_usage": "preferred"')
-      expect(submitted).toContain('Resource Library is an available capability, not a BeeGame-authored selection plan')
       expect(submitted).toContain('Simplified Chinese')
       expect(submitted).toContain('Write all player-visible game text in English.')
       expect(submitted).toContain('Treat document language and player-visible game language as separate confirmed requirements')
-      expect(submitted).toContain('BeeGame does not prescribe their names, invocation order, implementation strategy, or repair loop')
+      expect(submitted).not.toContain('Use native Claude Code Skills')
+      expect(submitted).not.toContain('observable evidence')
+      expect(submitted).not.toContain('repair loop')
+      expect(submitted).not.toContain('decide autonomously')
       expect(submitted).not.toContain('beegame-document-reviewer')
       expect(submitted).not.toContain('beegame-acceptance-validator')
       expect(submitted).not.toContain('ResourceLibrary import_elements')
       expect(submitted).not.toContain('Follow the document dependency order')
       expect(submitted).not.toContain('coreGameplayHypothesis')
       expect(submitted).not.toContain('Confirmed build request:')
+
+      const withoutResourcePreference = await app.request(
+        `/api/beegame-sessions/${session.id}/confirmed-brief`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            language: 'zh',
+            brief: {
+              idea: 'A second confirmed product idea',
+              option: { id: 'second-mode', title: 'Second mode' },
+            },
+          }),
+        },
+      )
+      expect(withoutResourcePreference.status).toBe(200)
+      await waitFor(() => fake.runtimes[0]?.submits.length === 2)
+      const secondSubmitted = String(fake.runtimes[0]?.submits[1]?.prompt ?? '')
+      expect(secondSubmitted).toContain('"resource_library_usage": "optional"')
     } finally {
       await rm(projectsRoot, { recursive: true, force: true })
     }
@@ -7503,7 +7529,7 @@ describe('beegame session routes', () => {
     }
   })
 
-  test('returns a failed deployment to the same native session for acceptance repair', async () => {
+  test('returns failed deployment diagnostics without prescribing a repair workflow', async () => {
     const projectsRoot = await mkdtemp(join(tmpdir(), 'beegame-deployment-repair-route-'))
     const workspace = join(projectsRoot, 'deployment-repair-game')
     const fake = createFakeRunner([{ type: 'result', result: 'Repair requested.' }])
@@ -7540,8 +7566,8 @@ describe('beegame session routes', () => {
       const repairPrompt = String(fake.runtimes[0]?.submits[0]?.prompt ?? '')
       expect(repairPrompt).toContain('"kind": "deployment_failure_repair_request"')
       expect(repairPrompt).toContain('"reason": "document_review_missing"')
-      expect(repairPrompt).toContain('without weakening the deployment gate')
-      expect(repairPrompt).toContain('Use the available native capabilities autonomously')
+      expect(repairPrompt).not.toContain('without weakening the deployment gate')
+      expect(repairPrompt).not.toContain('Use the available native capabilities autonomously')
       expect(repairPrompt).not.toContain('beegame-document-reviewer')
       expect(repairPrompt).not.toContain('beegame-acceptance-validator')
       expect(repairPrompt).not.toContain('Every fresh Reviewer dispatch')

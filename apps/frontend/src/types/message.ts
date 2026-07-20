@@ -85,18 +85,6 @@ export interface Message {
   /** Additional error details (optional) */
   errorDetails?: string;
 
-  /** Whether this message has a rendering error (optional) */
-  renderingError?: boolean;
-
-  /** Whether corruption was detected in this message (optional) */
-  corruptionDetected?: boolean;
-
-  /** Timestamp of the last render attempt (optional) */
-  lastRenderAttempt?: number;
-
-  /** Number of render attempts for this message (optional) */
-  renderAttempts?: number;
-
   /** reasoning/thought content (optional) */
   thought?: string;
 

@@ -22,6 +22,7 @@ const { post, resolveAuthToken, beeGameAdapterMock, beeGameAdapterState } = vi.h
 
 vi.mock('../services/apiClient', () => ({
   API_BASE_URL: 'http://localhost:8000',
+  isAuthenticationServiceUnavailable: () => false,
   default: {
     post,
   },
@@ -213,7 +214,7 @@ describe('useWebSocket with MessageValidator integration', () => {
         expect(onMessage).toHaveBeenCalledTimes(1);
       });
 
-      // Verify the message was sanitized and passed through
+      // Verify the native payload was passed through unchanged.
       const receivedMessage = onMessage.mock.calls[0][0];
       expect(receivedMessage.type).toBe('token');
       expect(receivedMessage.task_id).toBe('task-123');
@@ -263,7 +264,7 @@ describe('useWebSocket with MessageValidator integration', () => {
       );
     });
 
-    it('should sanitize messages with script tags', async () => {
+    it('should preserve native message content verbatim', async () => {
       const onMessage = vi.fn();
       const messageWithScript: WebSocketMessage = {
         type: 'token',
@@ -289,10 +290,8 @@ describe('useWebSocket with MessageValidator integration', () => {
         expect(onMessage).toHaveBeenCalledTimes(1);
       });
 
-      // Verify script tags were removed
       const receivedMessage = onMessage.mock.calls[0][0];
-      expect(receivedMessage.content).not.toContain('<script>');
-      expect(receivedMessage.content).toContain('Hello, world!');
+      expect(receivedMessage.content).toBe(messageWithScript.content);
     });
 
     it('should reject messages with missing required fields', async () => {
@@ -427,7 +426,7 @@ describe('useWebSocket with MessageValidator integration', () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it('should detect and log corruption warnings', async () => {
+    it('should not interpret incomplete markdown as transport corruption', async () => {
       const onMessage = vi.fn();
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
 
@@ -451,99 +450,13 @@ describe('useWebSocket with MessageValidator integration', () => {
 
       mockWebSocket.simulateMessage(corruptedMessage);
 
-      await waitFor(() => {
-        expect(consoleWarnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('[WebSocket] Message validation warnings:'),
-          expect.objectContaining({
-            corruptionDetected: true
-          })
-        );
-      });
-
-      consoleWarnSpy.mockRestore();
-    });
-  });
-
-  describe('Content Repair', () => {
-    it('should attempt to repair corrupted content', async () => {
-      const onMessage = vi.fn();
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
-
-      const corruptedMessage: WebSocketMessage = {
-        type: 'token',
-        task_id: 'task-123',
-        sender: 'agent',
-        content: '```\nunclosed code block' // Missing closing ```
-      };
-
-      renderHook(() =>
-        useWebSocket({
-          projectId: 'test-project',
-          onMessage
-        })
-      );
-
-      await waitFor(() => {
-        expect(mockWebSocket.readyState).toBe(MockWebSocket.OPEN);
-      });
-
-      mockWebSocket.simulateMessage(corruptedMessage);
-
-      // Wait for message to be processed
-      await waitFor(() => {
-        expect(onMessage).toHaveBeenCalledTimes(1);
-      });
-
-      // Verify corruption warning was logged
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
+      await waitFor(() => expect(onMessage).toHaveBeenCalledWith(corruptedMessage));
+      expect(consoleWarnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[WebSocket] Message validation warnings:'),
-        expect.objectContaining({
-          corruptionDetected: true
-        })
+        expect.anything(),
       );
-
-      // Verify message was still processed (corruption is a warning, not an error)
-      const receivedMessage = onMessage.mock.calls[0][0];
-      expect(receivedMessage.content).toContain('unclosed code block');
 
       consoleWarnSpy.mockRestore();
-    });
-
-    it('should handle repair failures gracefully', async () => {
-      const onMessage = vi.fn();
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
-
-      // Create a message that will fail validation even after repair
-      const invalidMessage = {
-        type: 'invalid_type', // Invalid type that won't be fixed by repair
-        task_id: 'task-123',
-        content: '```\nunclosed code block'
-      };
-
-      renderHook(() =>
-        useWebSocket({
-          projectId: 'test-project',
-          onMessage
-        })
-      );
-
-      await waitFor(() => {
-        expect(mockWebSocket.readyState).toBe(MockWebSocket.OPEN);
-      });
-
-      mockWebSocket.simulateMessage(invalidMessage);
-
-      // Wait for processing
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      // Verify message was rejected
-      expect(onMessage).not.toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[WebSocket] Invalid message received:'),
-        expect.any(Object)
-      );
-
-      consoleErrorSpy.mockRestore();
     });
   });
 

@@ -1,19 +1,15 @@
 /**
  * Message Validator
  * 
- * Validates and sanitizes incoming WebSocket messages before storing.
- * Detects data corruption patterns and attempts content repair.
+ * Validates the transport shape of incoming WebSocket messages before storing.
  * 
  * This module is a critical part of the error handling pipeline, ensuring that
  * all messages received from the WebSocket connection are properly validated
- * before being stored in the chat store. It prevents corrupted or malicious
- * data from breaking the rendering pipeline.
+ * before being stored in the chat store. Message content remains byte-for-byte
+ * unchanged; rendering safety belongs to the renderer, not the transport.
  * 
  * Key Features:
  * - Schema validation for all message types
- * - Content sanitization to remove harmful scripts
- * - Data corruption detection (broken tables, unclosed code blocks, etc.)
- * - Automatic content repair for common corruption patterns
  * - Comprehensive error logging for debugging
  * 
  * Requirements: 1.3, 6.1, 6.2, 6.3, 6.4
@@ -43,8 +39,8 @@ export interface ValidationError {
 /**
  * Result of message validation
  * 
- * Contains the validation status, any errors/warnings found, the sanitized message
- * (if validation passed), and whether data corruption was detected.
+ * Contains the validation status, any errors/warnings found, and the original
+ * message when its transport shape is valid.
  */
 export interface ValidationResult {
   /** Whether the message passed validation */
@@ -53,16 +49,14 @@ export interface ValidationResult {
   errors: ValidationError[];
   /** Array of validation warnings (allows processing) */
   warnings: ValidationError[];
-  /** Sanitized version of the message (only if isValid is true) */
+  /** Original message (only if isValid is true) */
   sanitizedMessage?: WebSocketMessage;
-  /** Whether data corruption patterns were detected in the content */
-  corruptionDetected: boolean;
 }
 
 /**
  * MessageValidator class
  * 
- * Provides validation, sanitization, and repair functionality for WebSocket messages.
+ * Provides structural validation for WebSocket messages.
  * This is the primary entry point for validating all incoming WebSocket messages
  * before they are stored in the application state.
  * 
@@ -77,8 +71,6 @@ export interface ValidationResult {
  * }
  * ```
  */
-console.log("[MessageValidator] VERSION 1.4.1 (Phase 2 Hotfix) LOADED");
-
 export class MessageValidator {
   /** List of valid message types accepted by the system */
   private readonly VALID_MESSAGE_TYPES: WebSocketMessageType[] = [
@@ -104,23 +96,18 @@ export class MessageValidator {
   private readonly VALID_STATUS_VALUES = ['queued', 'running', 'resuming', 'paused', 'idle', 'finished', 'failed', 'stopped'] as const;
 
   /**
-   * Validates a WebSocket message structure and content
+   * Validates a WebSocket message structure without interpreting its content.
    * 
    * Performs comprehensive validation including:
    * - Type checking for all fields
    * - Required field validation
-   * - Content sanitization
-   * - Corruption detection
-   * 
    * @param message - The WebSocket message to validate (can be any type)
-   * @returns ValidationResult with validation status, errors, warnings, and sanitized message
+   * @returns ValidationResult with validation status, errors, warnings, and original message
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   validateMessage(message: any): ValidationResult {
     const errors: ValidationError[] = [];
     const warnings: ValidationError[] = [];
-    let corruptionDetected = false;
-
     // Check if message is an object
     if (!message || typeof message !== 'object') {
       const error = {
@@ -139,8 +126,7 @@ export class MessageValidator {
       return {
         isValid: false,
         errors,
-        warnings,
-        corruptionDetected: false
+        warnings
       };
     }
 
@@ -190,17 +176,6 @@ export class MessageValidator {
           message: 'Content must be a string',
           severity: 'error'
         });
-      } else {
-        // Check for corruption in content
-        if (this.detectCorruption(message.content)) {
-          corruptionDetected = true;
-          warnings.push({
-            field: 'content',
-            message: 'Potential data corruption detected in content',
-            severity: 'warning',
-            suggestedFix: 'Content may need repair'
-          });
-        }
       }
     }
 
@@ -320,20 +295,13 @@ export class MessageValidator {
       }
     }
 
-    // If validation passed, sanitize the message
+    // Preserve native content exactly. React/Markdown rendering owns output
+    // safety; transport code must never rewrite Claude Code events.
     const isValid = errors.length === 0;
-    let sanitizedMessage: WebSocketMessage | undefined;
+    const sanitizedMessage = isValid ? message as WebSocketMessage : undefined;
 
     if (isValid) {
-      sanitizedMessage = {
-        ...message,
-        content: message.content ? this.sanitizeContent(message.content) : undefined,
-        error: message.error ? this.sanitizeContent(message.error) : undefined,
-        output: message.output ? this.sanitizeContent(message.output) : undefined
-      };
-
-      // Log warnings if corruption was detected
-      if (corruptionDetected || warnings.length > 0) {
+      if (warnings.length > 0) {
         errorLogger.warn('validation', 'Message validation warnings occurred', {
           taskId: message.task_id,
           messageType: message.type,
@@ -357,154 +325,8 @@ export class MessageValidator {
       isValid,
       errors,
       warnings,
-      sanitizedMessage,
-      corruptionDetected
+      sanitizedMessage
     };
-  }
-
-  /**
-   * Sanitizes content to remove potentially harmful scripts
-   * 
-   * Removes dangerous HTML/JavaScript while preserving markdown syntax.
-   * This prevents XSS attacks and other security vulnerabilities.
-   * 
-   * Removes:
-   * - <script> tags and their content
-   * - Inline event handlers (onclick, onerror, etc.)
-   * - javascript: protocol in links
-   * - data: URIs (except data:image)
-   * - <iframe>, <object>, and <embed> tags
-   * 
-   * @param content - The content to sanitize
-   * @returns Sanitized content safe for rendering
-   */
-  sanitizeContent(content: string): string {
-    if (!content) return content;
-
-    let sanitized = content;
-
-    // Remove script tags and their content
-    sanitized = sanitized.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-
-    // Remove inline event handlers (onclick, onerror, etc.)
-    sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
-    sanitized = sanitized.replace(/\s*on\w+\s*=\s*[^\s>]*/gi, '');
-
-    // Remove javascript: protocol in links
-    sanitized = sanitized.replace(/javascript:/gi, '');
-
-    // Remove data: URIs that could contain scripts (but allow data:image)
-    sanitized = sanitized.replace(/data:(?!image)[^,]*,/gi, '');
-
-    // Remove iframe tags
-    sanitized = sanitized.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
-
-    // Remove object and embed tags
-    sanitized = sanitized.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
-    sanitized = sanitized.replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '');
-
-    return sanitized;
-  }
-
-  /**
-   * Detects common data corruption patterns in content
-   * 
-   * Checks for various corruption indicators including:
-   * - Excessive escape sequences (\\\\\\)
-   * - Malformed JSON escape sequences
-   * - Broken table syntax (pipes without proper structure)
-   * - Unclosed code blocks (odd number of ```)
-   * - Excessive repeated characters (potential corruption)
-   * 
-   * @param content - The content to check for corruption
-   * @returns true if corruption is detected, false otherwise
-   */
-  detectCorruption(content: string): boolean {
-    if (!content) return false;
-
-    // Check for excessive escape sequences (e.g., \\\\\\)
-    if (/\\{4,}/.test(content)) {
-      return true;
-    }
-
-    // Check for malformed JSON escape sequences in markdown
-    if (/\\[^\\nrt"'bfuv/]/.test(content)) {
-      return true;
-    }
-
-    // Check for broken table syntax (pipes without proper structure)
-    const lines = content.split('\n');
-    for (const line of lines) {
-      // If line has pipes but doesn't look like a valid table row
-      if (line.includes('|')) {
-        const trimmed = line.trim();
-        // Check if it's a table separator line (e.g., |---|---|)
-        const isSeparator = /^\|[\s\-:]+\|[\s\-:|]*$/.test(trimmed);
-        // Check if it's a table row (starts and ends with |)
-        const isTableRow = /^\|.*\|$/.test(trimmed);
-
-        if (!isSeparator && !isTableRow && trimmed.startsWith('|')) {
-          return true;
-        }
-      }
-    }
-
-    // Check for unclosed code blocks
-    const codeBlockMatches = content.match(/```/g);
-    if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
-      return true;
-    }
-
-    // Check for excessive repeated characters (potential corruption)
-    if (/(.)\1{20,}/.test(content)) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Attempts to repair corrupted content
-   * 
-   * Applies automatic fixes for common corruption patterns:
-   * - Reduces excessive escape sequences to single backslash
-   * - Adds missing closing pipes to table rows
-   * - Closes unclosed code blocks
-   * - Limits excessive character repetition
-   * 
-   * Note: This is a best-effort repair. Complex corruption may not be fixable.
-   * 
-   * @param content - The corrupted content to repair
-   * @returns Repaired content, or original if repair is not possible
-   */
-  repairContent(content: string): string {
-    if (!content) return content;
-
-    let repaired = content;
-
-    // Fix excessive escape sequences
-    repaired = repaired.replace(/\\{3,}/g, '\\');
-
-    // Fix broken table rows (add closing pipe if missing)
-    const lines = repaired.split('\n');
-    const repairedLines = lines.map(line => {
-      if (line.includes('|') && line.trim().startsWith('|') && !line.trim().endsWith('|')) {
-        return line + '|';
-      }
-      return line;
-    });
-    repaired = repairedLines.join('\n');
-
-    // Fix unclosed code blocks (add closing ``` if missing)
-    const codeBlockMatches = repaired.match(/```/g);
-    if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
-      repaired += '\n```';
-    }
-
-    // Remove excessive repeated characters (keep max 10 repetitions)
-    repaired = repaired.replace(/(.)\1{20,}/g, (_match, char) => char.repeat(10));
-
-    return repaired;
   }
 }
 

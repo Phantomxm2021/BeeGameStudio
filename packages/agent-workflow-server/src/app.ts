@@ -1259,10 +1259,7 @@ export function createAgentWorkflowApp(
 
       const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
         brief,
-        options.resourceSelectionRuntimeConfig &&
-            (await dashboardRepository.loadRuntimeSettings(c.req.raw, user)).resourceLibraryEnabled !== false
-          ? 'preferred'
-          : 'optional',
+        'optional',
       )
       void beeGameSessions.sendWithDisplay(
         session.id,
@@ -4703,9 +4700,7 @@ function registerBeeGameSessionRoutes(
       const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
       const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(
         brief,
-        await options.isResourceLibraryEnabled(c.req.raw)
-          ? 'preferred'
-          : 'optional',
+        'optional',
       )
       const prompt = buildConfirmedBriefPrompt(
         brief,
@@ -4811,7 +4806,6 @@ function registerBeeGameSessionRoutes(
               build_log: latestFailure.buildLog ?? '',
             },
             delivery_state: deliveryState,
-            objective: 'Resolve the observed failure in this existing native task without weakening the deployment gate. Use the available native capabilities autonomously and report the actual result.',
           }, null, 2),
           {
             displayText: getServerOwnedProjectActionLabel(kind, language),
@@ -5115,10 +5109,7 @@ function buildConfirmedBriefPrompt(
       : 'Write player-visible game text in the language used by the confirmed user brief.',
     'Treat document language and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
-    'Use the confirmed brief as the source of truth. Preserve its explicit choices and constraints, produce the project documentation and asset contract required to explain the delivered game, implement a playable result, and verify the current revision with observable evidence.',
-    `The confirmed Resource Library preference is ${resourceLibraryUsage}. The Resource Library is an available capability, not a BeeGame-authored selection plan; decide autonomously how to use it while respecting the confirmed brief.`,
-    'Use native Claude Code Skills, tools and agents according to their own discovery and execution behavior. BeeGame does not prescribe their names, invocation order, implementation strategy, or repair loop.',
-    'A complete result must truthfully distinguish delivered behavior, unresolved findings and external blockers. Do not present compilation, source inspection or a prior summary as proof of playability.',
+    'Use the confirmed brief as the source of truth. Preserve its explicit choices and constraints, create the agreed project documentation, and implement the playable game.',
     '',
     'Confirmed brief:',
     confirmedBrief,

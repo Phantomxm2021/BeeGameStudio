@@ -9,11 +9,9 @@ import {
   createNativeSdkEventQueue,
   createBeeGameToolPermissionContext,
   createBeeGamePinnedFetch,
-  assertRequiredBeeGameNativeAgents,
   ensureBeeGameMacroGlobals,
   drainNativeBackgroundNotifications,
   getCompletedNativeTaskOutputTaskId,
-  getBeeGameNativeCapabilityInstruction,
   getBeeGameResponseLanguageInstruction,
   hasRunningNativeBackgroundTasks,
   initializeBeeGameNativeSandbox,
@@ -223,22 +221,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
     )
     expect(getBeeGameResponseLanguageInstruction('fr')).toContain('French')
     expect(getBeeGameResponseLanguageInstruction()).toBeUndefined()
-  })
-
-  test('routes available Skills through Claude Code native Skill without choosing one for the Agent', () => {
-    const instruction = getBeeGameNativeCapabilityInstruction('zh')
-
-    expect(instruction).toContain('Respond to the user in Simplified Chinese')
-    expect(instruction).toContain("native Skill tool before acting")
-    expect(instruction).toContain('not a deferred capability')
-    expect(instruction).toContain('BeeGame does not select a Skill')
-    expect(instruction).toContain("native acceptance Validator has observed the current revision")
-    expect(instruction).toContain('do not preload claimed test outcomes')
-    expect(instruction).toContain('repair the implementation rather than rewriting the requirements')
-    expect(instruction).toContain('rely on that native terminal notification')
-    expect(instruction).toContain('Do not poll its output file or TaskOutput')
-    expect(instruction).toContain('BeeGame only transports the native result')
-    expect(instruction).not.toContain('game-art-director-expert')
   })
 
   test('drains only main-session native task notifications without interpreting their result', () => {
@@ -503,20 +485,6 @@ describe('QueryEngineSessionRuntime shell cleanup', () => {
       value: '<task-notification><task-id>b</task-id><status>completed</status><result>{"detail":"literal </result> text"}</result></task-notification>',
       mode: 'task-notification',
     })?.result).toBe('{"detail":"literal </result> text"}')
-  })
-
-  test('fails before a Claude turn when required native delivery agents were not discovered', () => {
-    expect(() => assertRequiredBeeGameNativeAgents([
-      { agentType: 'general-purpose' },
-      { agentType: 'beegame-document-reviewer' },
-    ])).toThrow(
-      'BeeGame native runtime capability is unavailable: beegame-acceptance-validator',
-    )
-
-    expect(() => assertRequiredBeeGameNativeAgents([
-      { agentType: 'beegame-document-reviewer' },
-      { agentType: 'beegame-acceptance-validator' },
-    ])).not.toThrow()
   })
 
   test('uses native acceptEdits mode without enabling permission bypass', () => {

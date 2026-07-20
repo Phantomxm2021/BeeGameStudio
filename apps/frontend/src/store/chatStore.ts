@@ -4,23 +4,6 @@ import type { Message, MessageType } from '../types/message';
 import { getSupabaseAccessToken } from '../services/supabaseAuthApi';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
 
-function detectCorruption(content: string): boolean {
-  if (!content || typeof content !== 'string') {
-    return true;
-  }
-
-  const corruptionPatterns = [
-    /\\[`*_[\]()]/g,
-    /\|\|+/,
-    /```[^`]*$/,
-    /\s{10,}/,
-    // eslint-disable-next-line no-control-regex
-    /[\x00-\x08\x0B-\x0C\x0E-\x1F]/,
-  ];
-
-  return corruptionPatterns.some((pattern) => pattern.test(content));
-}
-
 const MAX_MESSAGES = 500;
 
 function hasCloudSession(): boolean {
@@ -77,8 +60,6 @@ interface ChatState {
   loadHistory: (messages: Message[]) => void;
   setDocumentExpanded: (messageId: string, expanded: boolean) => void;
   isDocumentExpanded: (messageId: string) => boolean;
-  retryRenderMessage: (messageId: string) => void;
-  markMessageAsCorrupted: (messageId: string) => void;
 }
 
 function rebuildIndexMap(messages: Message[]): Record<string, number> {
@@ -395,31 +376,6 @@ export const useChatStore = create<ChatState>()(
 
       isDocumentExpanded: (messageId) => get().expandedDocuments.has(messageId),
 
-      retryRenderMessage: (messageId) => set((state) => {
-        const index = state.messageIndexMap[messageId];
-        if (index === undefined || index === -1) return state;
-        const updatedMessages = [...state.messages];
-        updatedMessages[index] = {
-          ...updatedMessages[index],
-          renderingError: false,
-          lastRenderAttempt: Date.now(),
-          renderAttempts: (updatedMessages[index].renderAttempts || 0) + 1,
-        };
-        return { messages: updatedMessages };
-      }),
-
-      markMessageAsCorrupted: (messageId) => set((state) => {
-        const index = state.messageIndexMap[messageId];
-        if (index === undefined || index === -1) return state;
-        const updatedMessages = [...state.messages];
-        updatedMessages[index] = {
-          ...updatedMessages[index],
-          corruptionDetected: detectCorruption(updatedMessages[index].content),
-          renderingError: true,
-          lastRenderAttempt: Date.now(),
-        };
-        return { messages: updatedMessages };
-      }),
     }),
     {
       name: 'chat-storage',

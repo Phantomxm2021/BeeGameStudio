@@ -8,10 +8,6 @@ import {
   type ApprovedOutboundTarget,
 } from '@bee-game-studio/security-core'
 import { getDefaultBeeGameBuiltinSkillsDir } from '@bee-game-studio/beegame-skills-core/store'
-import {
-  DELIVERY_VALIDATOR_AGENT_TYPE,
-  DOCUMENT_REVIEWER_AGENT_TYPE,
-} from './delivery-validation-agents'
 import type {
   BeeGameApprovedOutboundTargets,
   BeeGamePromptInput,
@@ -108,11 +104,6 @@ type PermissionDecision = {
   updatedInput?: Record<string, unknown>
 }
 
-export const REQUIRED_BEEGAME_NATIVE_AGENT_TYPES = [
-  DOCUMENT_REVIEWER_AGENT_TYPE,
-  DELIVERY_VALIDATOR_AGENT_TYPE,
-] as const
-
 const RESPONSE_LANGUAGE_NAMES: Record<BeeGameSessionLanguage, string> = {
   en: 'English',
   zh: 'Simplified Chinese',
@@ -131,36 +122,6 @@ export function getBeeGameResponseLanguageInstruction(
 ): string | undefined {
   if (!language) return undefined
   return `Respond to the user in ${RESPONSE_LANGUAGE_NAMES[language]}. Keep code, commands, file paths, package names, API identifiers, and raw errors unchanged.`
-}
-
-export function getBeeGameNativeCapabilityInstruction(
-  language?: BeeGameSessionLanguage,
-): string {
-  return [
-    getBeeGameResponseLanguageInstruction(language),
-    'Use Claude Code\'s native Skill tool before acting whenever an available Skill matches the request. Skill is a native tool, not a deferred capability: never search for Skill through SearchExtraTools or invoke it through ExecuteExtraTool. Choose the applicable Skill yourself; BeeGame does not select a Skill or control the task workflow for you.',
-    'When the current project defines acceptance requirements, do not claim a project change is complete until Claude Code\'s native acceptance Validator has observed the current revision. Dispatch Reviewers and Validators with the authoritative confirmed intent, language requirements, current workspace revision and deterministic contract diagnostics only; do not preload claimed test outcomes, checklist completion or a desired verdict. During validation, treat the approved documents as fixed unless the user explicitly changes scope: repair the implementation rather than rewriting the requirements to match it. If validation was not run, could not observe a required player path, or is blocked, report the work as incomplete or blocked instead of complete. BeeGame only transports the native result and does not decide or repair the task.',
-    'When a native background Agent reports that it will notify this session on completion, rely on that native terminal notification. Do not poll its output file or TaskOutput, revive a completed Agent with SendMessage merely to ask for status, or launch duplicate validation for the same unchanged revision.',
-  ].filter(Boolean).join('\n\n')
-}
-
-export function assertRequiredBeeGameNativeAgents(
-  activeAgents: Record<string, unknown>[],
-): void {
-  const discovered = new Set(activeAgents.flatMap(agent => {
-    const agentType = agent.agentType
-    return typeof agentType === 'string' && agentType.trim()
-      ? [agentType.trim()]
-      : []
-  }))
-  const missing = REQUIRED_BEEGAME_NATIVE_AGENT_TYPES.filter(
-    agentType => !discovered.has(agentType),
-  )
-  if (missing.length > 0) {
-    throw new Error(
-      `BeeGame native runtime capability is unavailable: ${missing.join(', ')}`,
-    )
-  }
 }
 
 const DEFAULT_BEEGAME_AUTO_COMPACT_WINDOW = '120000'
@@ -728,7 +689,6 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
       'activeAgents',
       [],
     )
-    assertRequiredBeeGameNativeAgents(activeAgents)
     const resumedConversation = await loadInitialMessagesForResume(
       conversationRecoveryModule,
       this.input.resumeSessionId,
@@ -760,9 +720,13 @@ class QueryEngineSessionRuntime implements BeeGameSessionRuntime {
         : {}),
       includePartialMessages: true,
       replayUserMessages: true,
-      appendSystemPrompt: getBeeGameNativeCapabilityInstruction(
-        this.input.language,
-      ),
+      ...(getBeeGameResponseLanguageInstruction(this.input.language)
+        ? {
+            appendSystemPrompt: getBeeGameResponseLanguageInstruction(
+              this.input.language,
+            ),
+          }
+        : {}),
     })
 
     return this.engine
