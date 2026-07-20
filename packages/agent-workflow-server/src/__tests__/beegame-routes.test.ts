@@ -4810,6 +4810,16 @@ describe('beegame session routes', () => {
         body: JSON.stringify({ text: 'Build the project.' }),
       })
 
+      const latestSessionRes = await app.request(
+        `/api/projects/${projectId}/sessions/latest`,
+      )
+      expect(latestSessionRes.status).toBe(200)
+      const latestSession = await latestSessionRes.json()
+      expect(latestSession.id).toBe(ensured.session.id)
+      expect(latestSession.projectId).toBe(projectId)
+      expect(latestSession.workspacePath).toBe(await realpath(workspace))
+      expect(latestSession.transcriptPath.endsWith('.jsonl')).toBe(true)
+
       await waitFor(async () => {
         const stateRes = await app.request(`/api/projects/${projectId}/runtime-state`)
         const state = await stateRes.json()

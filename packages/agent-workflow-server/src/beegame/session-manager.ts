@@ -1733,6 +1733,88 @@ export async function readSessionTranscriptFromDisk(
   return events
 }
 
+export type RecoveredProjectSessionMetadata = {
+  id: string
+  workspacePath: string
+  status: 'running' | 'stopped' | 'failed'
+  transcriptPath: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+/**
+ * Recover the latest durable session reference from an owned project workspace.
+ *
+ * The project log index is a persistence fallback, not an authorization source:
+ * callers must establish workspace ownership before invoking this function.
+ */
+export async function recoverLatestProjectSessionFromDisk(
+  workspacePath: string,
+): Promise<RecoveredProjectSessionMetadata | undefined> {
+  let index: ProjectLogIndex
+  try {
+    const raw = await readFile(getProjectLogIndexPath(workspacePath), 'utf8')
+    const parsed = JSON.parse(raw) as Partial<ProjectLogIndex>
+    if (parsed.version !== 1 || !parsed.sessions || typeof parsed.sessions !== 'object') {
+      return undefined
+    }
+    index = {
+      version: 1,
+      project: typeof parsed.project === 'string' ? parsed.project : basename(workspacePath),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString(),
+      sessions: parsed.sessions as Record<string, ProjectLogIndexSession>,
+    }
+  } catch {
+    return undefined
+  }
+
+  const candidates = Object.entries(index.sessions)
+    .filter(([sessionId, entry]) => (
+      Boolean(sessionId) &&
+      entry?.sessionId === sessionId &&
+      typeof entry.transcript === 'string' &&
+      typeof entry.updatedAt === 'string'
+    ))
+    .sort(([, left], [, right]) => right.updatedAt.localeCompare(left.updatedAt))
+
+  for (const [sessionId, entry] of candidates) {
+    const indexedTranscriptPath = resolve(workspacePath, entry.transcript)
+    const expectedTranscriptPath = getSessionTranscriptPath(sessionId, workspacePath)
+    if (
+      relative(workspacePath, indexedTranscriptPath).startsWith('..') ||
+      indexedTranscriptPath !== expectedTranscriptPath
+    ) {
+      continue
+    }
+    try {
+      const events = await readSessionTranscriptFromDisk(sessionId, workspacePath)
+      if (
+        events.length === 0 ||
+        events.some(event => event.sessionId && event.sessionId !== sessionId)
+      ) {
+        continue
+      }
+      const terminalType = events.at(-1)?.type
+      const status = terminalType === 'session.failed'
+        ? 'failed'
+        : terminalType === 'session.stopped'
+          ? 'stopped'
+          : 'running'
+      return {
+        id: sessionId,
+        workspacePath,
+        status,
+        transcriptPath: entry.transcript,
+        createdAt: new Date(events[0]?.createdAt || entry.updatedAt),
+        updatedAt: new Date(events.at(-1)?.createdAt || entry.updatedAt),
+      }
+    } catch {
+      // A stale index entry must not prevent trying an older valid session.
+    }
+  }
+  return undefined
+}
+
 async function resolveReadableTranscriptPath(
   sessionId: string,
   cwd: string,

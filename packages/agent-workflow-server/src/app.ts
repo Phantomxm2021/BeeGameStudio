@@ -18,6 +18,7 @@ import {
   deleteSessionArtifactsFromTranscript,
   getLatestRuntimeUsage,
   readSessionTranscriptFromDisk,
+  recoverLatestProjectSessionFromDisk,
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
   type BeeGameSession,
@@ -1336,15 +1337,27 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
-    const sessions = await dashboardRepository.listProjectSessions(
-      c.req.raw,
-      user,
-      c.req.param('id'),
-    )
-    const latest = sessions[0]
-    return latest
-      ? c.json(latest)
-      : c.json({ error: 'Session not found' }, 404)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const latest = await getLatestProjectSessionMetadata({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        dashboardRepository,
+      })
+      return latest
+        ? c.json(latest)
+        : c.json({ error: 'Session not found' }, 404)
+    } catch (err) {
+      return tracedRouteError(c, 'project.session.latest', err)
+    }
   })
 
   app.post('/api/projects/:id/session/ensure', async c => {
@@ -3351,13 +3364,37 @@ async function getLatestProjectSessionMetadata(input: {
   request: Request
   user: BeeGameUserContext
   project: BeeGameProjectMetadata
+  defaultWorkspacePath?: string
   dashboardRepository: DashboardRepository
 }): Promise<Awaited<ReturnType<DashboardRepository['listProjectSessions']>>[number] | undefined> {
-  return (await input.dashboardRepository.listProjectSessions(
+  const latest = (await input.dashboardRepository.listProjectSessions(
     input.request,
     input.user,
     input.project.id,
   ))[0]
+  if (latest) return latest
+  if (!input.project.root_path) return undefined
+  const workspacePath = await resolveSessionWorkspacePath(
+    input.project.root_path,
+    input.defaultWorkspacePath,
+  )
+  if (
+    input.user.id !== DEFAULT_LOCAL_USER_ID &&
+    !(await input.dashboardRepository.ownsProjectWorkspacePath(
+      input.request,
+      input.user,
+      workspacePath,
+    ))
+  ) {
+    return undefined
+  }
+  const recovered = await recoverLatestProjectSessionFromDisk(workspacePath)
+  return recovered
+    ? {
+        ...recovered,
+        projectId: input.project.id,
+      }
+    : undefined
 }
 
 function findLiveProjectSession(

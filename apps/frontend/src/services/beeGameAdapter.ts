@@ -15,7 +15,7 @@ import type {
 import type { Project } from '../types/project';
 import type { WebSocketMessage } from '../types/message';
 import { authenticatedFetch } from './apiClient';
-import { getSupabaseAccessToken, getSupabaseSessionUser } from './supabaseAuthApi';
+import { getSupabaseSessionUser } from './supabaseAuthApi';
 import { normalizeAttachmentBuildAnalysis, type AttachmentBuildAnalysis } from './attachmentBuild';
 
 type BeeGameSession = {
@@ -748,7 +748,10 @@ async function deleteProjectMetadata(projectId: string): Promise<void> {
 }
 
 function hasCloudSession(): boolean {
-  return Boolean(getSupabaseAccessToken());
+  // HttpOnly sessions intentionally expose no access token to browser code.
+  // The hydrated session user is the authentication authority for both
+  // cookie-backed and legacy browser-token sessions.
+  return Boolean(getSupabaseSessionUser()?.id?.trim());
 }
 
 function scopedAdapterCacheKey(baseKey: string): string {
@@ -785,8 +788,13 @@ function getBinding(projectId: string): ProjectSessionBinding | undefined {
 }
 
 function reconcileProjectBindings(projects: Project[]): void {
-  const projectIds = new Set(projects.map(project => project.id));
   const current = readBindings();
+  // An empty list can be observed briefly while secure authentication and the
+  // account project list settle. Explicit project deletion already removes its
+  // binding, so preserving the cache here is safer than making durable chat
+  // history unreachable after a transient empty response.
+  if (projects.length === 0 && current.length > 0) return;
+  const projectIds = new Set(projects.map(project => project.id));
   const retained = current.filter(binding => projectIds.has(binding.projectId));
   if (retained.length === current.length) return;
   for (const binding of current) {

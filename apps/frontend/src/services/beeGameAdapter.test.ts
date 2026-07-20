@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   beeGameAdapter,
   getBeeGameWorkspaceSettings,
   setBeeGameWorkspaceRoot,
 } from './beeGameAdapter';
+import { clearSupabaseSession, hydrateSupabaseSessionUser } from './supabaseAuthApi';
 
 const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
   id: 'mode_from_llm',
@@ -93,6 +94,13 @@ describe('beeGameAdapter prompt rules', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '0');
+    clearSupabaseSession();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it('analyzes uploaded attachments without converting them into intake options', async () => {
@@ -185,6 +193,20 @@ describe('beeGameAdapter prompt rules', () => {
     expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([
       { projectId: 'project_kept', sessionId: 'beegame_kept', workspacePath: '/tmp/kept' },
     ]);
+  });
+
+  it('does not erase recoverable bindings on a transient empty project response', async () => {
+    const binding = {
+      projectId: 'project_recoverable',
+      sessionId: 'beegame_recoverable',
+      workspacePath: '/tmp/recoverable',
+    };
+    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([binding]));
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
+
+    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
+
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([binding]);
   });
 
   it('stops a BeeGame session by resolving the current project binding', async () => {
@@ -966,6 +988,60 @@ describe('beeGameAdapter prompt rules', () => {
         workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
       },
     ]);
+  });
+
+  it('restores a cookie-authenticated project binding without a browser-readable token', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const workspacePath = '/tmp/beegame-projects/users/cookie-user/cookie-game';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/auth/session') {
+        return jsonResponse({
+          authenticated: true,
+          expires_at: Date.now() + 3_600_000,
+          user: { id: 'cookie-user' },
+        });
+      }
+      if (path === '/api/projects/project_cookie/sessions/latest') {
+        return jsonResponse({
+          id: 'beegame_cookie_restore',
+          projectId: 'project_cookie',
+          workspacePath,
+          status: 'running',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:02.000Z',
+        });
+      }
+      if (path === `/api/beegame-sessions/beegame_cookie_restore/transcript?workspacePath=${encodeURIComponent(workspacePath)}`) {
+        return jsonResponse([{
+          id: 1,
+          sessionId: 'beegame_cookie_restore',
+          turnId: 'turn-1',
+          type: 'assistant.message',
+          text: 'Cookie transcript restored.',
+          payload: { type: 'assistant.message' },
+          createdAt: '2026-06-21T00:00:02.000Z',
+        }]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await hydrateSupabaseSessionUser();
+    const history = await beeGameAdapter.getChatHistory('project_cookie');
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sender: 'beegame',
+        content: 'Cookie transcript restored.',
+      }),
+    ]));
+    expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings:cookie-user') || '[]')).toEqual([{
+      projectId: 'project_cookie',
+      sessionId: 'beegame_cookie_restore',
+      workspacePath,
+    }]);
   });
 
   it('uses project root_path instead of stale cloud session workspace when restoring migrated projects', async () => {
