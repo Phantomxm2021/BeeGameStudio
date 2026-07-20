@@ -865,11 +865,11 @@ describe('LandingView bootstrap submission', () => {
         expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
     });
 
-    it('opens credit audit settings only when the owner has audit permission', async () => {
+    it('opens credit administration only when the owner has credit administration permission', async () => {
         mockCurrentUser = {
             id: 'owner-user',
             role: 'owner',
-            permissions: ['project.create', 'project.delete', 'audit.read'],
+            permissions: ['project.create', 'project.delete', 'credits.admin'],
         };
         renderLanding();
 
@@ -886,7 +886,7 @@ describe('LandingView bootstrap submission', () => {
         mockCurrentUser = {
             id: 'owner-user',
             role: 'owner',
-            permissions: ['project.create', 'project.delete', 'audit.read'],
+            permissions: ['project.create', 'project.delete', 'credits.admin'],
         };
         renderLanding();
 
@@ -924,11 +924,11 @@ describe('LandingView bootstrap submission', () => {
         expect(await screen.findByText('1,200 credits')).toBeInTheDocument();
     });
 
-    it('opens project lifecycle settings only when the owner has audit permission', async () => {
+    it('opens project lifecycle settings only when the owner has lifecycle administration permission', async () => {
         mockCurrentUser = {
             id: 'owner-user',
             role: 'owner',
-            permissions: ['project.create', 'project.delete', 'audit.read'],
+            permissions: ['project.create', 'project.delete', 'lifecycle.admin'],
         };
         renderLanding();
 
